@@ -1,0 +1,18 @@
+# F-GTE-001 게이트 룰셋 (선언적, 버전 관리). 소유: 강희진 — 룰 변경 = PR 필수(감사 대상)
+version: 1
+rules:
+  - id: R-01
+    if: "anyGrade == 'U4'"
+    then: RED
+  - id: R-02
+    if: "suitabilityMismatch == true"
+    then: RED
+  - id: R-03
+    if: "reverifyFailed >= 2"
+    then: RED
+  - id: R-04
+    if: "anyGrade in ['U2','U3']"
+    then: YELLOW
+  - id: R-05
+    if: "allGrade == 'U1'"
+    then: GREEN

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Judgment",
+  "description": "F-SCR-001: 항목별 이해도 판정. 근거 없는 판정은 무효 (P4)",
+  "type": "object",
+  "required": [
+    "item_id",
+    "grade",
+    "confidence",
+    "evidence",
+    "reason"
+  ],
+  "properties": {
+    "item_id": {
+      "type": "string"
+    },
+    "grade": {
+      "enum": [
+        "U1",
+        "U2",
+        "U3",
+        "U4"
+      ],
+      "description": "이해/부분이해/미이해/오해"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "utterance_quote",
+        "rubric_clause"
+      ],
+      "properties": {
+        "utterance_quote": {
+          "type": "string"
+        },
+        "rubric_clause": {
+          "type": "string"
+        }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "판정 사유 1문장"
+    },
+    "misconception_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "F-DET-001 매칭 시 유형ID (예: M08-TYING)"
+    }
+  }
+}

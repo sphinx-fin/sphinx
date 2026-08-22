@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info: {title: SphinX API, version: 0.1.0}
+paths:
+  /products/documents:      {post: {summary: "문서 업로드 (F-EXT-001)"}}
+  /products/{id}/extract:   {post: {summary: "위험요소 추출 (F-EXT-002)"}}
+  /products/{id}/risk-items: {get: {summary: "추출 항목 조회"}}
+  /sessions:                {post: {summary: "세션 생성 (F-INT-001)"}}
+  /sessions/{id}/questions/next: {post: {summary: "다음 질문 (F-INT-002)"}}
+  /sessions/{id}/answers:   {post: {summary: "텍스트 응답 제출 (F-INT-003) → Judgment 반환"}}
+  /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
+  /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
+  /sessions/{id}/judge:     {post: {summary: "게이트 판정 (F-GTE-001)"}}
+  /sessions/{id}/override:  {post: {summary: "적색 진행 요청 (F-GTE-002)"}}
+  /sessions/{id}/override/approve: {post: {summary: "관리자 승인/반려"}}
+  /sessions/{id}/report:    {get: {summary: "이해 기록 (F-GTE-004)"}}
+  /dashboard/heatmap:       {get: {summary: "오해 지도 (F-DSH-001)"}}
+# TODO(강희진): request/response 스키마를 contracts/*.schema.json 참조로 채울 것

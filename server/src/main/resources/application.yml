@@ -1,0 +1,13 @@
+server:
+  port: 8000
+
+sphinx:
+  ai-service:
+    base-url: http://localhost:8100      # ai-service (FastAPI, 윤지석)
+  gate:
+    rules-path: classpath:gate_rules.yaml
+  scoring:
+    confidence-threshold: 0.7            # F-SCR-001: 미만 시 황색 강등 (U4 제외)
+    max-reverify: 2                      # F-INT-004
+  retention:
+    raw-answer-months: 6                 # 원문 응답 보존 기간 (팀 결정 후 조정)

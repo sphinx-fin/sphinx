@@ -1,0 +1,8 @@
+# 채점 루브릭 예시 (소유: 윤지석) — 공개 의무
+item_id: ELS-PRINCIPAL-LOSS
+required_elements:
+  - 낙인(배리어) 하회 시 원금 손실 발생
+  - 손실 규모는 기초자산 하락률에 연동
+misconception_conditions:
+  - 원금이 보장된다
+  - 은행 판매 = 안전하다

@@ -1,0 +1,45 @@
+# 오해 패턴 라이브러리 v0 (소유: 정세현 / 매칭 엔진: 윤지석)
+# 근거: 금감원 분쟁조정례·검사결과. 각 항목에 source 필수.
+version: 0
+types:
+  - id: M01-PRINCIPAL-GUARANTEE
+    label: 원금보장 오인
+    patterns: ["은행에서 파니까 원금은 보장", "원금은 지켜지는"]
+    products: [ELS, VARIABLE_INS]
+    source: "TODO 분쟁조정례 번호"
+  - id: M02-DEPOSIT-INSURANCE
+    label: 예금자보호 오인
+    patterns: ["예금자보호 되는 줄"]
+    products: [ELS, VARIABLE_INS]
+    source: "TODO"
+  - id: M03-PROBABILITY
+    label: 확률 오인
+    patterns: ["반토막 날 리가"]
+    products: [ELS]
+    source: "TODO"
+  - id: M04-EARLY-REDEMPTION
+    label: 조기상환 구조 오인
+    patterns: ["만기 3년이면 3년 뒤에 원금과 이자"]
+    products: [ELS]
+    source: "TODO"
+  - id: M05-SAVINGS
+    label: 저축성 오인
+    patterns: ["저축인 줄"]
+    products: [VARIABLE_INS]
+    source: "TODO"
+  - id: M06-SURRENDER-VALUE
+    label: 해지환급금 오인
+    patterns: ["낸 돈은 다 돌려받는"]
+    products: [VARIABLE_INS]
+    source: "TODO"
+  - id: M07-YIELD-OVERCONFIDENCE
+    label: 수익률 과신
+    patterns: ["제시 수익률이 확정"]
+    products: [ELS, VARIABLE_INS]
+    source: "TODO"
+  - id: M08-TYING
+    label: 꺾기(불공정영업) 신호
+    patterns: ["대출받으려면 이것도 들어야"]
+    products: [ALL]
+    escalate: compliance      # F-GTE-003 즉시 알림, 판매자 화면 비노출
+    source: "TODO"

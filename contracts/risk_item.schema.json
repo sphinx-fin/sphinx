@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskItem",
+  "description": "F-EXT-002: 상품문서에서 추출된 필수 이해항목",
+  "type": "object",
+  "required": [
+    "item_id",
+    "product_id",
+    "name",
+    "importance",
+    "condition",
+    "status"
+  ],
+  "properties": {
+    "item_id": {
+      "type": "string",
+      "description": "예: ELS-PRINCIPAL-LOSS"
+    },
+    "product_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "예: 원금손실 조건"
+    },
+    "importance": {
+      "enum": [
+        "required",
+        "recommended"
+      ]
+    },
+    "condition": {
+      "type": "object",
+      "required": [
+        "value_text",
+        "source_span"
+      ],
+      "properties": {
+        "value_text": {
+          "type": "string",
+          "description": "원문 인용만 허용 (P6)"
+        },
+        "source_span": {
+          "type": "object",
+          "required": [
+            "page",
+            "start",
+            "end"
+          ],
+          "properties": {
+            "page": {
+              "type": "integer"
+            },
+            "start": {
+              "type": "integer"
+            },
+            "end": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "extracted",
+        "extraction_failed"
+      ],
+      "description": "실패는 은폐하지 않고 노출 (E-EXT-03)"
+    }
+  }
+}
