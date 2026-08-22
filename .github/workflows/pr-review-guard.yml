@@ -1,0 +1,64 @@
+name: PR 리뷰 확인
+
+# 현재 org 플랜(free + private)에서는 브랜치 보호를 쓸 수 없어 머지를 강제로 막지 못한다.
+# 이 워크플로는 승인 없는 PR에 빨간 X를 띄워 실수 머지를 눈에 보이게 만드는 용도다.
+# Team 플랜으로 올리면 이 체크를 required status check으로 걸어 실제 차단이 된다.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  require-approval:
+    name: 소유자 승인 여부
+    runs-on: ubuntu-latest
+    steps:
+      - name: 승인 집계
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # 사용자별 최신 리뷰 상태만 본다. COMMENTED는 승인을 취소하지 않으므로 제외하고,
+          # APPROVED / CHANGES_REQUESTED / DISMISSED 중 가장 최근 것으로 판단한다.
+          approvers=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '
+            [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
+            | group_by(.user.login)[]
+            | max_by(.submitted_at)
+            | select(.state == "APPROVED")
+            | .user.login
+          ' | sort -u | paste -sd ", " -)
+
+          changes=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '
+            [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
+            | group_by(.user.login)[]
+            | max_by(.submitted_at)
+            | select(.state == "CHANGES_REQUESTED")
+            | .user.login
+          ' | sort -u | paste -sd ", " -)
+
+          pending=$(gh pr view "$PR" --repo "$REPO" \
+            --json reviewRequests --jq '[.reviewRequests[].login] | join(", ")')
+
+          echo "승인: ${approvers:-(없음)}"
+          echo "변경 요청: ${changes:-(없음)}"
+          echo "리뷰 대기: ${pending:-(없음)}"
+
+          if [ -n "$changes" ]; then
+            echo "::error::변경 요청이 해소되지 않았습니다 ($changes). 머지하지 마세요."
+            exit 1
+          fi
+
+          if [ -z "$approvers" ]; then
+            echo "::error::승인이 0건입니다. .github/CODEOWNERS 기준 소유자 리뷰 후 머지하세요 (README 개발 규칙 1)."
+            exit 1
+          fi
+
+          echo "::notice::승인 확인 — $approvers"
