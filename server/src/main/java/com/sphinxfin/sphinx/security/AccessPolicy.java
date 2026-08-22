@@ -16,7 +16,7 @@ package com.sphinxfin.sphinx.security;
  * ────────────────────────────────────────────────────────────────────
  *
  * 역할 확인만으로는 역이용을 막지 못한다. 범위(scope)까지 함께 봐야 SELLER 권한으로
- * 집계가 열리는 구멍이 닫힌다 — 명세서 0.4 / 기획서 7-4, ADR-0001 참고.
+ * 집계가 열리는 구멍이 닫힌다 — 명세서 0.4 / 기획서 7-4, ADR-001 참고.
  */
 public class AccessPolicy {
 
@@ -38,12 +38,13 @@ public class AccessPolicy {
      */
     public boolean permits(Actor actor, String action, Target target) {
         // TODO(정세현): rbac_policy.yaml 로드 (gate_rules.yaml과 동일한 방식)
-        //   1) permissions[action].roles 에 actor.role 포함 여부
-        //   2) permissions[action].scope 검사:
+        //   1) permissions[action]의 그랜트 목록에서 actor.role을 포함하는 것을 찾는다.
+        //      역할별로 scope가 다르다 (예: 집계는 COMPL=org, MGR=branch)
+        //   2) 찾은 그랜트의 scope 검사:
         //      own_session → target.ownerId == actor.actorId
         //      branch      → target.branchId == actor.branchId
-        //      org         → 통과 (집계는 개인 식별자 미포함이어야 한다)
-        //   3) action이 정의돼 있지 않으면 거부 — 기본값은 항상 deny
+        //      org         → 통과 (집계는 개인 식별자 미포함, n<30 마스킹 전제)
+        //   3) action 미정의 또는 매칭 그랜트 없음 → 거부. 기본값은 항상 deny
         throw new UnsupportedOperationException("not implemented");
     }
 }
