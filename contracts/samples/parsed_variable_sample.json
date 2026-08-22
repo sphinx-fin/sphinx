@@ -1,0 +1,55 @@
+{
+  "document_id": "doc-var-demo-001",
+  "product_type": "VARIABLE_INSURANCE",
+  "source_file": "variable_insurance_demo.pdf",
+  "parser_version": "manual-0",
+  "parsed_at": "2026-08-22T00:00:00Z",
+  "page_count": 1,
+  "pages": [
+    {
+      "page": 1,
+      "text": "[변액보험 상품설명서]\n\n1. 상품의 성격\n이 계약은 실적배당형 상품으로 투자 결과에 따라 해지환급금이 원금보다 적을 수 있습니다.\n납입한 보험료 중 일부는 사업비로 차감되며, 특별계정에 투입되는 금액은 납입 보험료보다 적습니다.\n계약을 조기에 해지하는 경우 해지환급금이 납입 보험료를 크게 밑돌 수 있습니다.",
+      "char_count": 173
+    }
+  ],
+  "tables": [],
+  "parse_warnings": [
+    {
+      "code": "MANUAL_OVERRIDE",
+      "page": null,
+      "message": "파서 미구현 구간의 수동 샘플. 윤지석 F-EXT-002 프롬프트 착수용 — 파서 완성 시 대체한다."
+    }
+  ],
+  "_expected_risk_items": [
+    {
+      "item_id": "VAR-PRINCIPAL-LOSS",
+      "name": "원금손실 가능성",
+      "value_text": "이 계약은 실적배당형 상품으로 투자 결과에 따라 해지환급금이 원금보다 적을 수 있습니다.",
+      "source_span": {
+        "page": 1,
+        "start": 24,
+        "end": 73
+      }
+    },
+    {
+      "item_id": "VAR-FEE-DEDUCTION",
+      "name": "사업비 차감",
+      "value_text": "납입한 보험료 중 일부는 사업비로 차감되며, 특별계정에 투입되는 금액은 납입 보험료보다 적습니다.",
+      "source_span": {
+        "page": 1,
+        "start": 74,
+        "end": 128
+      }
+    },
+    {
+      "item_id": "VAR-EARLY-SURRENDER",
+      "name": "조기해지 불이익",
+      "value_text": "계약을 조기에 해지하는 경우 해지환급금이 납입 보험료를 크게 밑돌 수 있습니다.",
+      "source_span": {
+        "page": 1,
+        "start": 129,
+        "end": 173
+      }
+    }
+  ]
+}
