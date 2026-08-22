@@ -1,28 +1,53 @@
 # F-CMN-002 접근 정책 (선언적, 버전 관리). 소유: 정세현 — 정책 변경 = PR 필수(감사 대상)
 #
-# 이 파일이 역할·권한의 유일한 근거다. Java 상수로 중복 정의하지 않는다.
-# 컨트롤러의 @PreAuthorize(강희진)는 여기 정의된 role 이름만 참조한다.
+# 이 파일이 역할·권한·데이터 범위의 유일한 근거다. Java 상수로 중복 정의하지 않는다.
+# 컨트롤러의 @PreAuthorize(강희진)는 여기 정의된 action 이름만 참조한다.
 # role 이름 변경은 security/Role.java와 동시에 — 강희진 멘션 필수.
-version: 1
+#
+# 역이용 방지(기획서 7-4)는 두 층으로 구현된다:
+#   ① 역할 부재 — 본부 영업·마케팅에 대응하는 역할이 존재하지 않는다 (명세서 0.4, ADR-0001)
+#   ② 범위 분리 — 역할이 있어도 집계 데이터에 닿지 못한다 (아래 scope)
+# ①만으로는 부족하다. SELLER 권한으로 대시보드가 열리면 같은 구멍이 난다.
+version: 2
 
-roles: [FC, MGR, COMPL, AUDITOR]
+roles: [SELLER, MGR, COMPL, AUDITOR]
 
-# action → 허용 역할. action 이름은 컨트롤러 어노테이션과 1:1로 맞춘다.
+# 의도적으로 만들지 않은 역할. 추가 요청이 오면 이 항목을 근거로 거절하고,
+# 그래도 필요하면 Role.java 수정 → PR → 기획서 7-4 재검토 순서를 밟는다.
+absent_by_design:
+  - name: 본부 영업·마케팅
+    reason: 이해도 집계를 받아 타겟팅에 쓸 수 있는 유일한 주체. 명세서 0.4 원칙에 따라 역할 자체를 만들지 않는다.
+
+# 데이터 범위. action마다 어디까지 보이는지를 고정한다 — 이 경계가 7-4의 실물이다.
+scopes:
+  own_session: 본인이 진행한 개별 세션에 한정
+  branch:      소속 지점에 한정
+  org:         전사 (집계 전용 — 개인 식별자 미포함, n<30 마스킹)
+
+# action → 허용 역할 + 데이터 범위. scope 없는 action은 만들지 않는다.
 permissions:
-  session:create:        [FC]
-  session:interview:     [FC]
-  session:judge:         [FC]
-  override:request:      [FC]
-  override:approve:      [MGR]          # 요청자와 승인자는 반드시 다른 사람 (F-GTE-002)
-  report:read:           [FC, MGR, COMPL, AUDITOR]
-  dashboard:read:        [MGR, COMPL]   # 집계만 — 개인 식별자 미전달, n<30 마스킹
-  audit:read:            [COMPL, AUDITOR]
-  audit:verify:          [AUDITOR]      # 해시 체인 재계산 검증
+  session:create:        { roles: [SELLER],           scope: own_session }
+  session:interview:     { roles: [SELLER],           scope: own_session }
+  session:judge:         { roles: [SELLER],           scope: own_session }
+  session:judgment:read: { roles: [SELLER],           scope: own_session }   # S-05 판정 결과
+  report:read:           { roles: [SELLER],           scope: own_session }
+  report:read:branch:    { roles: [MGR],              scope: branch }
+  report:read:all:       { roles: [COMPL, AUDITOR],   scope: org }
+  override:request:      { roles: [SELLER],           scope: own_session }
+  override:approve:      { roles: [MGR],              scope: branch }        # 요청자 ≠ 승인자. 한계는 ADR-0002
+  audit:read:            { roles: [COMPL, AUDITOR],   scope: org }
+  audit:verify:          { roles: [AUDITOR],          scope: org }           # 해시 체인 재계산
+
+  # 집계 — SELLER·MGR 부재가 핵심이다. 여기에 역할을 추가하면 역이용 경로가 열린다.
+  aggregate:heatmap:read:   { roles: [COMPL], scope: org }   # 오해 지도 (F-DSH-001)
+  aggregate:indicator:read: { roles: [COMPL], scope: org }   # 선행지표 (F-DSH-002)
 
 # AuditInterceptor가 기록할 대상. 여기 없는 요청은 로그를 남기지 않는다.
 audited:
   - override:request
   - override:approve
-  - report:read
-  - dashboard:read
+  - report:read:branch
+  - report:read:all
   - audit:read
+  - aggregate:heatmap:read
+  - aggregate:indicator:read
