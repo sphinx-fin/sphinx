@@ -1,0 +1,136 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 프로젝트
+
+SphinX(스FIN크스) — 금융상품 계약 직전에 고객 이해도를 검증하는 판매 게이트. 2026 금융 AI
+Challenge 공모전 MVP. 4인 팀(윤지석·강희진·정세현·오준서)이 3주 일정으로 개발한다.
+
+레포 전체가 **스캐폴드 단계**다. 대부분의 클래스는 `// TODO(담당자)` 스텁이고, Spring
+컨트롤러는 `api/MockData.java`의 목 응답을 반환한다. 이건 의도된 것으로, 프론트가 첫날부터
+실제 엔드포인트로 개발할 수 있게 하려는 구조다. 구현을 붙일 때 목 응답을 지우는 것이 각
+모듈의 완료 조건이다.
+
+## 명령어
+
+```bash
+# server (Spring Boot, :8000)
+cd server && ./gradlew bootRun
+cd server && ./gradlew test
+cd server && ./gradlew test --tests 'com.sphinxfin.sphinx.core.GateEngineTest'   # 단일 테스트
+cd server && ./gradlew compileJava
+
+# ai-service (FastAPI, :8100 — 내부망 전용, 브라우저에 노출 금지)
+cd ai-service && pip install -r requirements.txt && uvicorn app.main:app --port 8100 --reload
+
+# web (Vite, :5173 → /api 프록시 → :8000)
+cd web && npm install && npm run dev
+cd web && npm run build
+
+# eval (F-CMN-003 채점 성능 평가)
+python eval/run_eval.py
+```
+
+**주의**: `server/`에 Gradle 래퍼(`gradlew`)가 아직 없다. `./gradlew`를 쓰려면 먼저 생성해야
+한다(`gradle wrapper`). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
+테스트 러너도 없다 — 테스트는 현재 `server/src/test`의 JUnit 뿐이다.
+
+## 아키텍처
+
+3개 서비스로 나뉘고, 데이터가 흐르는 방향이 곧 보안 경계다.
+
+```
+web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai-service(:8100, FastAPI)
+                                     │                        └ 내부망 전용
+                                     └ H2 (MVP)
+```
+
+`ai-service`는 브라우저에서 직접 호출하지 않는다. Spring만 호출한다.
+
+### 핵심 불변식
+
+명세서의 원칙들로, 코드 여러 곳에 걸쳐 강제된다. 이걸 어기는 변경은 리뷰에서 막힌다.
+
+1. **P1 — AI는 측정, 룰은 결정.** `ai-service`의 LLM 출력은 `domain/Judgment`(등급·근거
+   스팬·신뢰도)라는 *측정값*이다. 게이트 판정은 `core/GateEngine`이 선언적
+   `resources/gate_rules.yaml`을 적용해서 만든다. LLM 원문이 판정이나 금액 계산에 직접
+   들어가는 경로를 만들면 안 된다.
+2. **P2 — 시뮬레이터·게이트는 결정론적 순수 함수.** `data/timeseries/VERSION`으로 지수
+   스냅샷을 고정해 재현성을 보장한다. 단위 테스트 필수.
+3. **P3 — 고객 텍스트가 `ai-service`로 나가는 유일한 경로**는
+   `core/PiiGateway.mask()` → `core/AiServiceClient`. 다른 경로로 ai-service를 부르면 안 된다.
+   세션 생성 입력 스키마에 성명·주민번호 필드는 애초에 존재하지 않는다.
+   `ai-service`도 방어적으로 입구에서 PII 패턴을 재검사한다.
+4. **P4 — 근거 없는 판정은 무효.** `Judgment.Evidence`(발화 인용 + 루브릭 조항)가 비면 안 된다.
+
+### `evidence/` — 리포트와 감사 로그의 공통 기반
+
+`ReportService`(F-GTE-004)와 `AuditLog`(F-CMN-002)는 저장 요구가 동일하다: append-only,
+해시 체인, 정규화 직렬화. 그래서 한 사람이 소유하고 기반을 한 벌만 만든다([ADR-003](docs/adr/003-evidence-ownership.md)).
+
+**해시·직렬화는 `CanonicalJson`·`HashChain`·`ImmutableStore`만 쓴다.** 두 곳에서 따로
+정규화하면 미묘하게 다른 두 정규화가 생기고, 리포트 해시와 감사 로그 해시를 교차 검증할 수
+없게 된다. 이 결함은 감사 시점까지 드러나지 않는다.
+
+### `security/` — 역이용 방지가 코드로 구현된 곳
+
+기획서 7-4(역이용 방지)의 실물 근거이므로 **범위 축소 대상이 아니다.**
+
+- **역할 부재 원칙** ([ADR-001](docs/adr/001-no-sales-role.md), 명세서 0.4절):
+  `Role` enum은 `CUST`·`SELLER`·`MGR`·`COMPL`·`ADMIN` 5개뿐이고, 본부 영업·마케팅 조직에
+  대응하는 역할은 **의도적으로 없다.** 권한을 안 주는 것과 줄 수 있는 대상이 없는 것은
+  운영 압박이 들어왔을 때 다르게 작동한다 — 역할이 없으면 부여하려면 코드를 고쳐야 하고
+  PR에 남는다. `Role`에 값을 추가하거나 `aggregate:*`에 역할을 붙이는 변경은 ADR-001 재검토 대상.
+  참고: `SELLER`(창구 판매 직원)와 영업 조직은 다르다. SELLER는 유지한다.
+- **범위 분리**: 역할만으로는 부족하다. `resources/rbac_policy.yaml`이 action마다 데이터
+  범위(`own_session`/`branch`/`org`)를 고정한다. SELLER는 집계 접근 불가, 집계는
+  COMPL(전체)·MGR(자기 지점)만.
+- **`rbac_policy.yaml`이 권한의 유일한 근거다.** Java 상수로 중복 정의하지 않는다.
+  컨트롤러 어노테이션은 action 이름만 참조한다.
+- **감사 로그는 `AuditInterceptor` 단일 통로로 기록한다.** 컨트롤러마다 `AuditLog`를 부르면
+  감사 관심사가 `api/`에 흩어진다.
+- 현재 `SecurityConfig`는 `permitAll()`이다(목 개발용). 데모에서는 권한 차단과 로그 기록을
+  실제로 시연해야 하므로 이 상태를 그대로 둘 수 없다.
+
+### `contracts/` — 팀 간 단일 진실
+
+`risk_item.schema.json`, `judgment.schema.json`, `openapi.yaml`이 모듈 간 계약이다. Java
+`domain/` 레코드는 이 스키마와 1:1로 유지한다. **변경은 강희진 승인 + 수요자 전원 멘션**이
+필요하다(오너 승인 없이 변경 금지).
+
+## 소유권과 기여 규칙
+
+이 레포는 디렉토리·파일 단위로 소유자가 정해져 있고, PR은 **해당 소유자 리뷰**를 거친다.
+코드를 고칠 때 누구 영역인지 먼저 확인해야 한다. 전체 매핑은
+[`docs/role-assignment-v1.2.md`](docs/role-assignment-v1.2.md).
+
+`server/` 안에서 특히 헷갈리는 경계:
+
+| 경로 | 소유 |
+|---|---|
+| `api/`, `core/` | 강희진 (API·상태머신·게이트·PII) |
+| `evidence/`, `security/Role·AccessPolicy`, `resources/rbac_policy.yaml` | 정세현 |
+| `security/SecurityConfig`, 컨트롤러 `@PreAuthorize`, `AuditInterceptor` 등록 | 강희진 |
+| `simulator/`, `aggregate/` | 정세현 |
+
+`F-CMN-002`는 한 기능이 두 사람에게 갈린 유일한 케이스다 — 정책·역할·감사 로그는 정세현,
+필터·어노테이션 부착은 강희진. 파일 단위로 나눠 뒀으니 상대 파일을 건드리지 않는다.
+
+작업 브랜치: `feat/<기능ID>-설명`.
+
+## 설계 결정 기록
+
+`docs/adr/`에 있다. 코드가 왜 이런지의 근거이므로, 관련 코드를 고치기 전에 해당 ADR을 읽는다.
+**결정이 바뀌면 새 ADR을 추가하고 기존 문서는 상태만 갱신한다 — 삭제·수정하지 않는다.**
+
+## 알려진 문서 불일치
+
+스캐폴드가 Python(FastAPI) 서버에서 Spring으로 전환되며 남은 흔적들이다. 이 값을 신뢰하지 말 것.
+
+- `contracts/README.md`가 `server/app/models/`의 pydantic 모델을 언급한다 — 실제로는 Java
+  `domain/` 레코드다.
+- `.env.example`의 `DB_URL=sqlite://...` — 실제 서버는 H2를 쓴다(`build.gradle`).
+- `.env.example`의 `AUDIO_RETENTION_MONTHS` — 기능 명세서 v1.1은 음성 입력을 범위에서 제외했다.
+- `docs/functional-spec-v1.1.md`는 본문 전사가 안 된 색인 상태다. 조항 단위 근거가 필요하면
+  원본 문서를 봐야 한다.
