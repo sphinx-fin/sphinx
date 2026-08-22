@@ -1,0 +1,28 @@
+# F-CMN-002 접근 정책 (선언적, 버전 관리). 소유: 정세현 — 정책 변경 = PR 필수(감사 대상)
+#
+# 이 파일이 역할·권한의 유일한 근거다. Java 상수로 중복 정의하지 않는다.
+# 컨트롤러의 @PreAuthorize(강희진)는 여기 정의된 role 이름만 참조한다.
+# role 이름 변경은 security/Role.java와 동시에 — 강희진 멘션 필수.
+version: 1
+
+roles: [FC, MGR, COMPL, AUDITOR]
+
+# action → 허용 역할. action 이름은 컨트롤러 어노테이션과 1:1로 맞춘다.
+permissions:
+  session:create:        [FC]
+  session:interview:     [FC]
+  session:judge:         [FC]
+  override:request:      [FC]
+  override:approve:      [MGR]          # 요청자와 승인자는 반드시 다른 사람 (F-GTE-002)
+  report:read:           [FC, MGR, COMPL, AUDITOR]
+  dashboard:read:        [MGR, COMPL]   # 집계만 — 개인 식별자 미전달, n<30 마스킹
+  audit:read:            [COMPL, AUDITOR]
+  audit:verify:          [AUDITOR]      # 해시 체인 재계산 검증
+
+# AuditInterceptor가 기록할 대상. 여기 없는 요청은 로그를 남기지 않는다.
+audited:
+  - override:request
+  - override:approve
+  - report:read
+  - dashboard:read
+  - audit:read

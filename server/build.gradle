@@ -13,6 +13,7 @@ repositories { mavenCentral() }
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'   // F-CMN-002 RBAC
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'com.h2database:h2'                       // MVP: H2 → 필요 시 교체
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml' // gate_rules.yaml 로드
