@@ -20,6 +20,7 @@ LLM 키는 ai-service만 쓰므로 서비스 디렉토리에 두는 것을 권�
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -27,11 +28,20 @@ from pathlib import Path
 
 # Gemini OpenAI 호환 엔드포인트 (끝의 슬래시 필수)
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-# 팀 결정: 채점 실행은 flash-lite 계열로 한다(무료 티어 한도·비용).
-# gemini-2.5-flash-lite는 신규 키에 제공되지 않는다(404) — API가 안내하는 대체가
-# gemini-3.5-flash-lite다. gemini-3.1-flash-lite가 약간 더 저렴하다.
-# .env의 LLM_MODEL로 언제든 덮어쓸 수 있다.
+# ── 모델 정책 ────────────────────────────────────────────────────────────────
+# 팀 결정: **모든 LLM 호출은 flash-lite 계열로 한다.** 기능별로 모델을 나누지 않는다.
+# 근거: 무료 티어 한도와 비용. 채점·추출·질문생성·재설명 전부 같은 모델을 쓴다.
+#
+# gemini-2.5-flash-lite는 신규 키에 제공되지 않는다(404). API가 안내하는 대체가
+# gemini-3.5-flash-lite이므로 그것을 기본값으로 둔다.
+# gemini-3.1-flash-lite가 약간 더 저렴하고 역시 동작한다.
+#
+# .env의 LLM_MODEL로 덮어쓸 수 있지만, flash-lite가 아니면 경고를 남긴다 —
+# 정책에서 벗어난 실행이 조용히 지나가면 성능 수치의 출처를 알 수 없게 된다.
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
+MODEL_POLICY_SUBSTRING = "flash-lite"
+
+log = logging.getLogger(__name__)
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]   # ai-service/
 REPO_ROOT = SERVICE_ROOT.parent
@@ -71,10 +81,16 @@ class Settings:
 @lru_cache(maxsize=1)
 def settings() -> Settings:
     loaded = _load_env_files()
+    model = os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    if MODEL_POLICY_SUBSTRING not in model:
+        log.warning(
+            "모델 정책 위반: LLM_MODEL=%s — 팀 결정은 flash-lite 계열이다. "
+            "이 실행의 결과를 성능 수치로 인용하지 말 것.", model,
+        )
     return Settings(
         llm_base_url=os.getenv("LLM_API_BASE") or DEFAULT_BASE_URL,
         llm_api_key=os.getenv("LLM_API_KEY", ""),
-        llm_model=os.getenv("LLM_MODEL") or DEFAULT_MODEL,
+        llm_model=model,
         llm_timeout_sec=float(os.getenv("LLM_TIMEOUT_SEC", "60")),
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),
     )

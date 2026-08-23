@@ -66,10 +66,15 @@ F-DET-002(적합성 모순)는 이 목록에 엔드포인트가 없다. 세션 �
 OpenAI 호환 엔드포인트로 붙는다(기본값: Gemini). `.env` 3개 변수만 갈아끼우면 다른 모델·
 온프레미스로 이동한다 — 호출부는 프로바이더를 모른다.
 
+**모델 정책: 모든 LLM 호출은 flash-lite 계열을 쓴다.** 기능별로 모델을 나누지 않는다.
+`gemini-2.5-flash-lite`는 신규 키에 제공되지 않으므로(404) API가 안내하는
+`gemini-3.5-flash-lite`가 기본값이다. 정책에서 벗어난 모델을 넣으면 경고가 남는다 —
+성능 수치의 출처를 추적할 수 있어야 한다.
+
 ```
 LLM_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=...
-LLM_MODEL=gemini-3.7-flash
+LLM_MODEL=gemini-3.5-flash-lite   # 생략 가능 — 코드 기본값과 같다
 ```
 
 ### .env 위치
