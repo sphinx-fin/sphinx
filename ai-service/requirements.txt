@@ -5,3 +5,4 @@ pdfplumber
 httpx
 pyyaml
 openai
+python-dotenv
