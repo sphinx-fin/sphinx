@@ -115,7 +115,8 @@ class MisconceptionMatch(Strict):
     label: str
     score: float = Field(ge=0.0, le=1.0)
     matched_pattern: str
-    stage: Literal["pattern", "embedding", "llm"]
+    stage: Literal["pattern", "ngram", "embedding", "llm"]
+    """pattern/ngram = 결정론적, embedding/llm = 변형 표현 커버 (기획서 5절)"""
 
 
 class MisconceptionRequest(Strict):

@@ -1,0 +1,45 @@
+"""테스트 공용. 소유: 윤지석"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from app.llm_client import LlmClient
+from app.schemas import Evidence, Grade, Judgment
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+class FakeLlm(LlmClient):
+    """LLM 없이 후처리 로직을 검증한다.
+
+    후처리(근거 대조·오해 상향·신뢰도 강등)가 채점 품질의 실질이므로, API 키 없이
+    돌아가야 한다. 그래야 CI에서도 회귀를 잡는다.
+    """
+
+    def __init__(self, judgment: Judgment) -> None:  # super().__init__ 호출하지 않는다
+        self.judgment = judgment
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_json(self, **kwargs: Any) -> Judgment:  # type: ignore[override]
+        self.calls.append(kwargs)
+        return self.judgment
+
+
+def make_judgment(
+    grade: Grade = Grade.U1,
+    confidence: float = 0.9,
+    quote: str = "원금은 지켜지는 거죠",
+    item_id: str = "ELS-PRINCIPAL-LOSS",
+    reason: str = "판정 사유",
+    misconception_type: str | None = None,
+) -> Judgment:
+    return Judgment(
+        item_id=item_id,
+        grade=grade,
+        confidence=confidence,
+        evidence=Evidence(utterance_quote=quote,
+                          rubric_clause="낙인(배리어) 하회 시 원금 손실 발생"),
+        reason=reason,
+        misconception_type=misconception_type,
+    )

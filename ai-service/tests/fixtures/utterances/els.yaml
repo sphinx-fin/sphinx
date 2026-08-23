@@ -1,0 +1,47 @@
+# ELS dev set. 라벨 출처는 각 케이스의 source 필드.
+product_type: ELS
+cases:
+  - id: DEMO-MAIN-PRINCIPAL
+    source: 기획서 7-2 데모 메인 ③④ (적색 3건 중 원금손실 오해)
+    item_id: ELS-PRINCIPAL-LOSS
+    question: 이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?
+    answer: 은행에서 파는 거니까 원금은 지켜지는 거죠?
+    expected_grade: U4
+    expected_misconception: M01-PRINCIPAL-GUARANTEE
+    deterministic: true   # 오해 라이브러리 pattern 단계에서 잡힌다
+
+  - id: DEMO-MAIN-DEPOSIT
+    source: 기획서 7-2 데모 메인 ④ (적색 3건 중 예금자보호 오해)
+    item_id: ELS-NO-DEPOSIT-INSURANCE
+    question: 이 상품이 예금자보호를 받는지 어떻게 이해하고 계신가요?
+    answer: 은행에서 파는 거니까 원금은 지켜지는 거죠?
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ 라이브러리 미매칭 — LLM+루브릭 판정에 의존. 데모 리스크.
+
+  - id: SPEC-DIALOGUE-EARLY
+    source: 기획서 4절 [핵심 엔진] 대화 예시 (조기상환 구조 오해)
+    item_id: ELS-EARLY-REDEMPTION
+    question: 만기까지 어떻게 진행되는지 말씀해 주시겠어요?
+    answer: 은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠.
+    expected_grade: U4
+    expected_misconception: M04-EARLY-REDEMPTION
+    deterministic: false  # ★ 라이브러리 패턴과 표현 차이가 커서 미매칭(0.31) → 후보 큐
+
+  - id: TYING-SIGNAL
+    source: 기획서 7-2 [기능 2] 판매자 위반 신호
+    item_id: ELS-PRINCIPAL-LOSS
+    question: 이 상품에 가입하시게 된 경위를 말씀해 주시겠어요?
+    answer: 대출받으려면 이것도 들어야 한다고 하셔서요
+    expected_grade: null   # 이 항목의 이해도 판정 대상이 아니다
+    expected_escalate: true
+    deterministic: true
+
+  - id: UNDERSTOOD-BASELINE
+    source: 합성 — 정상 이해 대조군(이해→오해 오판 감시용)
+    item_id: ELS-PRINCIPAL-LOSS
+    question: 이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?
+    answer: 기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나온다고 들었어요.
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false

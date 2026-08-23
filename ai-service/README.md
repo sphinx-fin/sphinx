@@ -22,6 +22,7 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 | `app/routes.py` | `/internal/*` 라우트. 얇게 유지 — 기능 로직은 각 모듈의 순수 함수 |
 | `app/schemas.py` | `contracts/*.schema.json`의 pydantic 미러 (계약의 진실은 `contracts/`) |
 | `app/pii.py` | P3 입구 재검사 |
+| `app/rubrics.py` | 루브릭 로더 (`status: draft`는 핵심설명서 대조 전) |
 | `app/llm_client.py` | LLM 어댑터 (OpenAI 호환 엔드포인트) |
 | `app/config.py` | `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` |
 | `app/rubrics/` | 채점 루브릭 YAML (공개 의무) |
@@ -37,8 +38,8 @@ Spring `core/AiServiceClient`가 호출하는 6개. 미구현 기능은 **501**�
 | `POST /internal/parse` | F-EXT-001 (정세현) | 501 |
 | `POST /internal/extract` | F-EXT-002 | 501 |
 | `POST /internal/question` | F-INT-002 | 501 |
-| `POST /internal/score` | F-SCR-001 | 501 |
-| `POST /internal/misconception` | F-DET-001 | 501 |
+| `POST /internal/score` | F-SCR-001 | 구현 — LLM 키 필요 |
+| `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
 | `POST /internal/reexplain` | F-INT-004 | 501 |
 
 F-DET-002(적합성 모순)는 이 목록에 엔드포인트가 없다. `/internal/score`에 태울지
@@ -82,5 +83,26 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-`tests/test_skeleton.py`는 기능이 아니라 **골격의 계약**을 검증한다: 6개 엔드포인트 존재,
-미구현은 501, PII 거부, 황색 강등이 U4를 건드리지 않음(P5).
+- `tests/test_skeleton.py` — 골격의 계약: 6개 엔드포인트 존재, 미구현 501, 키 없으면 503,
+  PII 거부.
+- `tests/test_misconception.py` — 라이브러리 재현성. 데모 발화가 결정론적으로 잡히는지.
+- `tests/test_scoring.py` — 후처리 비대칭. 지어낸 인용 거부, 오해 상향, U4 불완화.
+
+**API 키 없이 전부 돌아간다.** 후처리가 채점 품질의 실질이므로 CI에서 회귀를 잡아야 한다.
+
+## 채점 후처리 순서 (F-SCR-001)
+
+기획서 5절 [채점 성능 목표와 오판 처리]의 비대칭 — 오해→이해 오판 상한 1%,
+이해→오해는 관리 지표 10% — 때문에 후처리는 **전부 안전한 방향으로만** 움직인다.
+
+1. `_pin_item_id` — 호출자가 지정한 항목이 진실이다
+2. `verify_quote_is_verbatim` — 근거 인용이 실제 발화에 있는지 대조 (P4).
+   지어낸 인용은 근거 없는 것보다 나쁘다
+3. `apply_misconception_floor` — 루브릭이 관련 유형으로 선언한 오해가 라이브러리에서
+   잡히면 U4 아래로 내려가지 않는다. 데모 임계 경로가 LLM 응답에 의존하지 않게 한다
+4. `downgrade_low_confidence` — 신뢰도 미달 U1 → U2. **U4는 건드리지 않는다**
+
+## dev set
+
+`tests/fixtures/`는 프롬프트 튜닝용이며 **F-CMN-003 공식 평가셋과 무관하다**
+(윤지석은 프롬프트 당사자로 라벨링 제외). 자세한 내용은 그 디렉토리의 README.

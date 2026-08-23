@@ -57,13 +57,32 @@ def test_all_six_internal_endpoints_are_registered():
 
 def test_unimplemented_features_return_501_not_500():
     """강희진이 연결할 때 '아직 없음'과 '터짐'이 구분돼야 한다."""
+    resp = client.post("/internal/extract", json={
+        "product_id": "mock-els-001", "parsed_document": {},
+    })
+    assert resp.status_code == 501, resp.text
+
+
+def test_score_without_api_key_is_503_not_500():
+    """구현은 됐지만 LLM 키가 없는 상태. 우리 버그가 아님을 구분해야 한다."""
     resp = client.post("/internal/score", json={
         "item_id": "ELS-PRINCIPAL-LOSS",
         "question": "원금 손실이 나는 상황을 설명해 주시겠어요?",
         "answer_text": "은행에서 파는 거니까 원금은 지켜지는 거죠",
         "risk_item": RISK_ITEM,
     })
-    assert resp.status_code == 501, resp.text
+    assert resp.status_code == 503, resp.text
+
+
+def test_score_with_unknown_item_is_422():
+    resp = client.post("/internal/score", json={
+        "item_id": "NO-SUCH-ITEM",
+        "question": "질문",
+        "answer_text": "답변",
+        "risk_item": RISK_ITEM,
+    })
+    assert resp.status_code == 422
+    assert "루브릭 없음" in resp.json()["detail"]
 
 
 def test_parse_is_owned_by_someone_else():
@@ -97,9 +116,10 @@ def test_pii_is_caught_in_any_nested_field():
 def test_masked_placeholders_pass_through():
     """PiiGateway가 치환한 [PHONE] 같은 자리표시자는 막지 않는다."""
     resp = client.post("/internal/misconception", json={
-        "text": "연락처는 [PHONE] 이고 원금은 보장되는 거죠",
+        "text": "연락처는 [PHONE] 이고 원금은 지켜지는 거죠",
     })
-    assert resp.status_code == 501  # PII 통과 → 미구현 도달
+    assert resp.status_code == 200  # PII 통과 → 실제 매칭 도달
+    assert resp.json()["matches"][0]["type_id"] == "M01-PRINCIPAL-GUARANTEE"
 
 
 # ── P5 미탐 방지 ──────────────────────────────────────────────────────────────

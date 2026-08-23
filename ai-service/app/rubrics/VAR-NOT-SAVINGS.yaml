@@ -1,0 +1,15 @@
+# 소유: 윤지석 — 공개 의무. status: draft (위 VAR-SURRENDER-VALUE와 동일 사유)
+item_id: VAR-NOT-SAVINGS
+product_type: VARIABLE_INS
+name: 투자성 상품 (저축 아님)
+status: draft
+required_elements:
+  - 납입금이 펀드에 투자되어 실적에 따라 변동
+  - 원금 손실이 발생할 수 있음
+misconception_conditions:
+  - 저축이다
+  - 이자가 붙는다
+  - 예금과 같다
+related_misconceptions:
+  - M05-SAVINGS
+  - M07-YIELD-OVERCONFIDENCE

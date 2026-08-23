@@ -16,7 +16,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from . import extraction, misconception, question_gen, reexplain, scoring
+from . import extraction, misconception, question_gen, reexplain, rubrics, scoring
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
@@ -94,6 +94,9 @@ def score(body: ScoreRequest) -> Judgment:
         return scoring.score(
             body.item_id, body.question, body.answer_text, body.risk_item, body.product_type
         )
+    except rubrics.RubricNotFound as exc:
+        # 루브릭이 없는 항목은 채점하지 않는다 — 근거 없는 판정은 무효다 (P4)
+        raise HTTPException(status_code=422, detail=f"루브릭 없음: {body.item_id}") from exc
     except NotImplementedError:
         raise _not_implemented("F-SCR-001 채점")
     except LlmError as exc:
