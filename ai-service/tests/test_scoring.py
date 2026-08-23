@@ -94,6 +94,23 @@ def test_already_u4_keeps_its_reason_but_gains_type():
     assert judgment.misconception_type == "M01-PRINCIPAL-GUARANTEE"
 
 
+def test_llm_supplied_misconception_type_is_discarded():
+    """실측에서 모델이 존재하지 않는 유형ID(M-PRINCIPAL-GUARANTEE)를 지어냈다.
+    유형ID는 오해 지도 집계 키이므로 환각이 하나 섞이면 집계가 조용히 오염된다.
+    루브릭이 관련 유형을 선언하지 않은 항목에서는 반드시 None이어야 한다."""
+    judgment, _ = _score(
+        make_judgment(grade=Grade.U4, item_id="ELS-EARLY-REDEMPTION",
+                      misconception_type="M-존재하지-않는-유형"),
+        item_id="ELS-EARLY-REDEMPTION",
+    )
+    assert judgment.misconception_type is None
+
+
+def test_library_type_still_wins_over_discarded_llm_value():
+    judgment, _ = _score(make_judgment(grade=Grade.U4, misconception_type="M-엉터리"))
+    assert judgment.misconception_type == "M01-PRINCIPAL-GUARANTEE"
+
+
 # ── 신뢰도 강등 (기획서: 애매하면 부분이해) ────────────────────────────────────
 def test_low_confidence_u1_becomes_u2_with_audit_trail():
     judgment = scoring.downgrade_low_confidence(make_judgment(Grade.U1, 0.4))

@@ -1,0 +1,31 @@
+# dev set용 RiskItem. 소유: 윤지석
+#
+# ★ condition.value_text는 **실제 상품문서 원문이 아니다.** DART 간이투자설명서를
+#   아직 받지 않았으므로 조건 문면을 대표적인 형태로 적어 둔 자리표시자다.
+#   채점 프롬프트에 이 문면이 들어가므로 실제 원문으로 교체하면 결과가 달라질 수 있다.
+#   MockData.java의 2건과 같은 성격이며, 실제 문서 수령 후 교체한다.
+product_id: mock-els-001
+items:
+  - item_id: ELS-PRINCIPAL-LOSS
+    name: 원금손실 조건
+    importance: required
+    value_text: >-
+      만기평가일에 기초자산 중 어느 하나라도 최초기준가격의 50% 미만인 경우,
+      해당 기초자산의 하락률만큼 원금 손실이 발생합니다.
+    source_span: {page: 3, start: 120, end: 210}
+
+  - item_id: ELS-NO-DEPOSIT-INSURANCE
+    name: 예금자보호 비대상
+    importance: required
+    value_text: >-
+      이 금융투자상품은 예금자보호법에 따라 보호되지 않으며, 발행사의 신용위험을
+      투자자가 부담합니다.
+    source_span: {page: 1, start: 40, end: 88}
+
+  - item_id: ELS-EARLY-REDEMPTION
+    name: 조기상환 구조
+    importance: required
+    value_text: >-
+      6개월 단위 조기상환 평가일에 모든 기초자산이 조기상환 기준가격 이상인 경우에만
+      조기상환되며, 조건을 충족하지 못하면 다음 평가일 또는 만기까지 유지됩니다.
+    source_span: {page: 2, start: 210, end: 340}

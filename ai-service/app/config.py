@@ -27,7 +27,11 @@ from pathlib import Path
 
 # Gemini OpenAI 호환 엔드포인트 (끝의 슬래시 필수)
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-DEFAULT_MODEL = "gemini-3.7-flash"
+# 팀 결정: 채점 실행은 flash-lite 계열로 한다(무료 티어 한도·비용).
+# gemini-2.5-flash-lite는 신규 키에 제공되지 않는다(404) — API가 안내하는 대체가
+# gemini-3.5-flash-lite다. gemini-3.1-flash-lite가 약간 더 저렴하다.
+# .env의 LLM_MODEL로 언제든 덮어쓸 수 있다.
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]   # ai-service/
 REPO_ROOT = SERVICE_ROOT.parent

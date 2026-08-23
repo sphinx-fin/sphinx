@@ -48,6 +48,7 @@ def score(
     )
 
     judgment = _pin_item_id(judgment, item_id)
+    judgment = _drop_llm_misconception_type(judgment)
     verify_quote_is_verbatim(judgment, answer_text)
     judgment = apply_misconception_floor(judgment, matched, rubric)
     return downgrade_low_confidence(judgment)
@@ -87,6 +88,19 @@ def _pin_item_id(judgment: Judgment, item_id: str) -> Judgment:
     if judgment.item_id == item_id:
         return judgment
     return judgment.model_copy(update={"item_id": item_id})
+
+
+def _drop_llm_misconception_type(judgment: Judgment) -> Judgment:
+    """LLM이 채운 misconception_type을 버린다. 유형ID는 라이브러리에서만 온다.
+
+    실측에서 모델이 `M-PRINCIPAL-GUARANTEE`처럼 **존재하지 않는 유형ID를 지어냈다.**
+    유형ID는 오해 지도 대시보드 집계 키이고 분쟁조정례 근거와 1:1로 묶여야 하므로,
+    환각된 ID가 하나 섞이면 집계가 조용히 오염된다. 기획서 5절의 "라이브러리 기반이라
+    재현성이 확보되고 LLM은 변형된 표현을 커버하는 역할만" 을 그대로 적용한다.
+    """
+    if judgment.misconception_type is None:
+        return judgment
+    return judgment.model_copy(update={"misconception_type": None})
 
 
 def verify_quote_is_verbatim(judgment: Judgment, answer_text: str) -> None:

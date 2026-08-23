@@ -63,15 +63,26 @@ def test_unimplemented_features_return_501_not_500():
     assert resp.status_code == 501, resp.text
 
 
-def test_score_without_api_key_is_503_not_500():
-    """구현은 됐지만 LLM 키가 없는 상태. 우리 버그가 아님을 구분해야 한다."""
-    resp = client.post("/internal/score", json={
-        "item_id": "ELS-PRINCIPAL-LOSS",
-        "question": "원금 손실이 나는 상황을 설명해 주시겠어요?",
-        "answer_text": "은행에서 파는 거니까 원금은 지켜지는 거죠",
-        "risk_item": RISK_ITEM,
-    })
-    assert resp.status_code == 503, resp.text
+def test_llm_not_configured_maps_to_503(monkeypatch):
+    """키가 없는 상태는 우리 버그가 아니다. 502(호출 실패)와도 구분한다.
+
+    실제 .env 유무에 결과가 달라지면 안 되므로 매핑만 검증한다."""
+    from app import routes
+    from app.llm_client import LlmError, LlmNotConfigured
+
+    def _raise(*_a, **_k):
+        raise LlmNotConfigured("LLM_API_KEY 미설정")
+
+    monkeypatch.setattr(routes.scoring, "score", _raise)
+    body = {"item_id": "ELS-PRINCIPAL-LOSS", "question": "q",
+            "answer_text": "은행에서 파는 거니까 원금은 지켜지는 거죠", "risk_item": RISK_ITEM}
+    assert client.post("/internal/score", json=body).status_code == 503
+
+    def _fail(*_a, **_k):
+        raise LlmError("upstream 5xx")
+
+    monkeypatch.setattr(routes.scoring, "score", _fail)
+    assert client.post("/internal/score", json=body).status_code == 502
 
 
 def test_score_with_unknown_item_is_422():
