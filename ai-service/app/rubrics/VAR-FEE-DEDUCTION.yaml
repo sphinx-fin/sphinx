@@ -1,0 +1,14 @@
+# 소유: 윤지석 — 공개 의무. item_id 근거·status 사유는 VAR-PRINCIPAL-LOSS.yaml 참고.
+item_id: VAR-FEE-DEDUCTION
+product_type: VARIABLE_INSURANCE
+name: 사업비 차감
+status: draft
+required_elements:
+  - 납입 보험료 중 일부가 사업비로 차감됨
+  - 특별계정 투입액이 납입 보험료보다 적음
+misconception_conditions:
+  - 낸 돈이 전부 투자된다
+  - 낸 돈은 다 돌려받는다
+related_misconceptions:
+  - M05-SAVINGS
+  - M06-SURRENDER-VALUE

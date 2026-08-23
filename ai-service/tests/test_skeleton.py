@@ -58,9 +58,23 @@ def test_all_six_internal_endpoints_are_registered():
 def test_unimplemented_features_return_501_not_500():
     """강희진이 연결할 때 '아직 없음'과 '터짐'이 구분돼야 한다."""
     resp = client.post("/internal/extract", json={
-        "product_id": "mock-els-001", "parsed_document": {},
+        "product_id": "mock-els-001",
+        "parsed_document": {
+            "document_id": "doc-1", "product_type": "ELS", "parser_version": "manual-0",
+            "pages": [{"page": 1, "text": "원금 손실이 발생할 수 있습니다."}],
+        },
     })
     assert resp.status_code == 501, resp.text
+
+
+def test_extract_rejects_document_without_pages():
+    """pages는 스팬이 가리키는 대상이다 — 없으면 추출 자체가 성립하지 않는다."""
+    resp = client.post("/internal/extract", json={
+        "product_id": "mock-els-001",
+        "parsed_document": {"document_id": "d", "product_type": "ELS",
+                            "parser_version": "manual-0", "pages": []},
+    })
+    assert resp.status_code == 422
 
 
 def test_llm_not_configured_maps_to_503(monkeypatch):

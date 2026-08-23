@@ -22,7 +22,17 @@ from pathlib import Path
 
 import yaml
 
-from .schemas import MisconceptionMatch, MisconceptionResponse
+from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
+
+# 라이브러리(data/misconception_library)는 "VARIABLE_INS", 계약
+# (contracts/parsed_document.schema.json)은 "VARIABLE_INSURANCE"를 쓴다. 둘 다 정세현
+# 소유인데 값이 어긋나 있다. 정규화하지 않으면 **변액 오해가 조용히 하나도 안 잡힌다** —
+# 예외도 로그도 없이 매칭만 실패한다. 라이브러리가 정렬되면 이 표는 지운다.
+PRODUCT_ALIASES = {"VARIABLE_INS": "VARIABLE_INSURANCE"}
+
+
+def canonical_product(value: str) -> str:
+    return PRODUCT_ALIASES.get(value, value)
 
 LIBRARY_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "misconception_library" / "misconceptions.yaml"
@@ -47,7 +57,7 @@ class MisconceptionType:
     source: str
 
     def applies_to(self, product_type: str) -> bool:
-        return "ALL" in self.products or product_type in self.products
+        return "ALL" in self.products or canonical_product(product_type) in self.products
 
 
 def _normalize(text: str) -> str:
@@ -74,7 +84,7 @@ def library() -> tuple[MisconceptionType, ...]:
             type_id=entry["id"],
             label=entry.get("label", entry["id"]),
             patterns=tuple(entry.get("patterns") or ()),
-            products=tuple(entry.get("products") or ("ALL",)),
+            products=tuple(canonical_product(v) for v in (entry.get("products") or ("ALL",))),
             escalate=entry.get("escalate"),
             source=entry.get("source", ""),
         )

@@ -8,6 +8,7 @@ from __future__ import annotations
 import yaml
 
 from app import misconception
+from app.schemas import PRODUCT_TYPES
 from tests.conftest import FIXTURES
 
 
@@ -52,6 +53,22 @@ def test_product_scope_is_respected():
     """변액 전용 오해가 ELS 발화에 붙지 않는다."""
     result = misconception.match("낸 돈은 다 돌려받는 거죠", "ELS")
     assert [m.type_id for m in result.matches] == []
+    result = misconception.match("낸 돈은 다 돌려받는 거죠", "VARIABLE_INSURANCE")
+    assert [m.type_id for m in result.matches] == ["M06-SURRENDER-VALUE"]
+
+
+def test_library_product_values_are_normalized_to_contract():
+    """라이브러리는 "VARIABLE_INS", 계약은 "VARIABLE_INSURANCE"를 쓴다(둘 다 정세현 소유).
+    정규화가 빠지면 변액 오해가 예외도 로그도 없이 하나도 안 잡힌다.
+    라이브러리가 정렬되면 PRODUCT_ALIASES와 이 테스트를 지운다."""
+    allowed = set(PRODUCT_TYPES) | {"ALL"}
+    for mtype in misconception.library():
+        assert set(mtype.products) <= allowed, f"{mtype.type_id}: {mtype.products}"
+
+
+def test_alias_still_accepted_on_input():
+    """상류가 아직 단축형을 보내도 매칭이 죽지 않는다."""
+    assert misconception.canonical_product("VARIABLE_INS") == "VARIABLE_INSURANCE"
     result = misconception.match("낸 돈은 다 돌려받는 거죠", "VARIABLE_INS")
     assert [m.type_id for m in result.matches] == ["M06-SURRENDER-VALUE"]
 

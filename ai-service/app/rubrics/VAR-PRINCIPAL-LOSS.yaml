@@ -1,0 +1,22 @@
+# 소유: 윤지석 — 공개 의무.
+# item_id는 contracts/samples/parsed_variable_sample.json 의 _expected_risk_items 기준이다
+# (계약 소유: 정세현). 하위 공정인 추출·채점이 계약을 따른다.
+# status: draft — 기획서 5절이 핵심설명서를 정답지로 명시했으나 아직 미수령이다.
+#   계약 샘플은 parse_warnings=MANUAL_OVERRIDE(사람이 만든 것)이므로 정답지가 아니다.
+#   조항 문면을 실제 핵심설명서와 대조한 뒤 confirmed로 올린다.
+item_id: VAR-PRINCIPAL-LOSS
+product_type: VARIABLE_INSURANCE
+name: 원금손실 가능성
+status: draft
+required_elements:
+  - 실적배당형이므로 투자 결과에 따라 해지환급금이 변동
+  - 해지환급금이 납입 원금보다 적을 수 있음
+misconception_conditions:
+  - 원금이 보장된다
+  - 저축이다
+  - 이자가 붙는다
+  - 제시 수익률이 확정된다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE
+  - M05-SAVINGS
+  - M07-YIELD-OVERCONFIDENCE

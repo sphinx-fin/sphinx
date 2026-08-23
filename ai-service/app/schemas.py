@@ -26,6 +26,13 @@ class Grade(str, Enum):
     U4 = "U4"
 
 
+# contracts/parsed_document.schema.json 의 product_type enum과 동일해야 한다.
+# 주의: data/misconception_library/misconceptions.yaml 은 아직 "VARIABLE_INS"(단축형)를
+# 쓴다. 둘 다 정세현 소유이며 값이 어긋나 있다 — misconception.py 에서 정규화한다.
+ProductType = Literal["ELS", "VARIABLE_INSURANCE"]
+PRODUCT_TYPES: tuple[str, ...] = ("ELS", "VARIABLE_INSURANCE")
+
+
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,18 +77,82 @@ class Judgment(Strict):
     )
 
 
+# ── contracts/parsed_document.schema.json (계약 소유: 정세현) ──────────────────
+class ParsedPage(Strict):
+    page: int = Field(ge=1, description="1부터 시작 (0-base 아님)")
+    text: str = Field(description="유니코드 NFC. 공백·개행을 접지 않는다 — 오프셋이 무의미해진다")
+    char_count: int | None = None
+
+
+class ParsedTable(Strict):
+    """부가 뷰다. 여기 없는 텍스트는 없다 — pages[].text가 전량이므로
+    모든 스팬은 tables를 보지 않고 해소된다."""
+
+    page: int = Field(ge=1)
+    caption: str | None = None
+    rows: list[list[str]]
+
+
+class ParseWarning(Strict):
+    code: Literal["TABLE_STRUCTURE_LOST", "TEXT_LAYER_MISSING",
+                  "ENCODING_SUSPECT", "MANUAL_OVERRIDE"]
+    message: str
+    page: int | None = None
+
+
+class ParsedDocument(Strict):
+    """F-EXT-001 출력 → F-EXT-002 입력.
+
+    **source_span 규약** (계약 $comment): `RiskItem.condition.source_span`의 start/end는
+    해당 페이지의 `pages[].text`에 대한 **페이지 상대** 오프셋이며 반열린 구간 [start, end)다.
+    문서 전역 오프셋이 아니다. 따라서 아래 항등식이 성립해야 한다:
+
+        pages[page].text[start:end] == condition.value_text
+
+    F-EXT-002의 원문 스팬 검증 후처리가 이 등식으로 검사한다. 기준이 어긋나면 추출은
+    성공하는데 화면(S-01·S-05)에서 하이라이트가 밀린다.
+    """
+
+    document_id: str = Field(description="업로드 단위. product_id와 다르다")
+    product_type: ProductType
+    parser_version: str = Field(description="같은 문서를 다시 파싱해도 같은 출력이어야 한다 (P2)")
+    pages: list[ParsedPage] = Field(min_length=1)
+    source_file: str | None = None
+    parsed_at: str | None = None
+    page_count: int | None = Field(default=None, ge=1)
+    tables: list[ParsedTable] = Field(default_factory=list)
+    parse_warnings: list[ParseWarning] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="ignore")  # 계약 밖의 `_expected_risk_items` 등을 허용
+
+    def page_text(self, page: int) -> str | None:
+        for p in self.pages:
+            if p.page == page:
+                return p.text
+        return None
+
+    @property
+    def is_manual(self) -> bool:
+        """사람이 만든 샘플인지. 성능 수치를 인용할 때 구분해야 한다."""
+        return any(w.code == "MANUAL_OVERRIDE" for w in self.parse_warnings)
+
+
 # ── /internal/* 요청·응답 (엔드포인트 스펙 제안 — 강희진 확정 대기) ──────────────
 class ParseRequest(Strict):
-    """F-EXT-001 (정세현). `contracts/parsed_document.schema.json` 미정 — 확정 시 교체."""
+    """F-EXT-001 (정세현). 출력은 ParsedDocument."""
 
     document_path: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: ProductType = "ELS"
 
 
 class ExtractRequest(Strict):
     product_id: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
-    parsed_document: dict[str, Any] = Field(description="F-EXT-001 출력 (형식 미확정)")
+    parsed_document: ParsedDocument = Field(description="F-EXT-001 출력")
+
+    @property
+    def product_type(self) -> str:
+        """상품유형은 문서가 들고 있다 — 요청에서 따로 받으면 두 값이 어긋날 수 있다."""
+        return self.parsed_document.product_type
 
 
 class ExtractResponse(Strict):
@@ -107,7 +178,7 @@ class ScoreRequest(Strict):
     question: str
     answer_text: str
     risk_item: RiskItem
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: ProductType = "ELS"
 
 
 class MisconceptionMatch(Strict):
@@ -121,7 +192,7 @@ class MisconceptionMatch(Strict):
 
 class MisconceptionRequest(Strict):
     text: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: ProductType = "ELS"
 
 
 class MisconceptionResponse(Strict):
