@@ -14,7 +14,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Grade(str, Enum):
@@ -139,3 +139,70 @@ class ReexplainResponse(Strict):
     item_id: str
     content: str
     cited_spans: list[SourceSpan] = Field(description="P6 — 수치는 원문 인용만, 생성 후 대조 검증")
+
+
+# ── F-DET-002 적합성 모순 (초안 — proposals/suitability_mismatch.schema.json) ──
+# contracts/ 미반영. 강희진 확인 후 이동한다 (proposals/F-DET-002-mismatch.md 참고).
+class SurveyRef(Strict):
+    question_id: str
+    question_text: str | None = None
+    recorded_answer: str = Field(min_length=1, description="고객이 설문에 기재한 값. 원문 그대로")
+
+
+class Contradiction(Strict):
+    axis: Literal[
+        "risk_tolerance", "principal_preservation", "loss_capacity",
+        "investment_horizon", "product_understanding", "purpose",
+    ]
+    direction: Literal["survey_overstates_tolerance", "survey_understates_tolerance"]
+    """survey_overstates_tolerance = 설문이 실제 발화보다 위험 감수적.
+    기획서 3절 판결 동향의 '스스로 기재한 투자성향'이 문제되는 방향.
+    어느 방향을 게이트에 걸지는 룰의 결정이다 (P1) — 여기서는 라벨링만 한다."""
+
+    survey_ref: SurveyRef
+    utterance_quote: str = Field(min_length=1, description="발화 그대로. 요약·재구성 금지")
+    item_id: str | None = None
+    reason: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class SuitabilityMismatch(Strict):
+    """세션 단위 판정. gate_rules.yaml R-02의 suitabilityMismatch로 들어간다.
+
+    취약 요인 가중(연령·총자산 대비 비중·투자경험·손실경험)은 여기 없다 — 강희진 소유다.
+    이 타입은 가중 전의 모순 사실만 담는다.
+    """
+
+    session_id: str
+    status: Literal["evaluated", "insufficient_input"]
+    mismatch: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    contradictions: list[Contradiction] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    survey_schema_version: str | None = None
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> "SuitabilityMismatch":
+        # P4 — 근거 없는 판정은 무효
+        if self.mismatch and not self.contradictions:
+            raise ValueError("mismatch=true인데 contradictions가 비었다 (P4 위반)")
+        # 판정 못 한 것을 '적합'으로 읽히게 두지 않는다
+        if self.status == "insufficient_input" and (self.mismatch or self.contradictions):
+            raise ValueError("insufficient_input은 mismatch=false이고 근거가 없어야 한다")
+        # confidence는 확인된 모순 중 최고값
+        if self.contradictions:
+            top = max(c.confidence for c in self.contradictions)
+            if abs(self.confidence - top) > 1e-9:
+                raise ValueError(f"confidence({self.confidence})가 최고 모순 확신도({top})와 다르다")
+        return self
+
+
+class MismatchRequest(Strict):
+    """제안: POST /internal/mismatch. AiServiceClient의 6개 목록에 없으므로 강희진 확인 대기."""
+
+    session_id: str
+    survey_result: list[SurveyRef]
+    utterances: list[dict[str, Any]] = Field(
+        description="[{item_id, text}] — 세션 내 발화. Spring PiiGateway 통과분만 (P3)"
+    )
+    survey_schema_version: str | None = None

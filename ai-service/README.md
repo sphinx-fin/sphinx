@@ -11,7 +11,7 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 | `app/question_gen.py` | 윤지석 | F-INT-002 |
 | `app/scoring.py` | 윤지석 | F-SCR-001 |
 | `app/misconception.py` | 윤지석 (데이터: 정세현) | F-DET-001 |
-| `app/mismatch.py` | 윤지석 | F-DET-002 |
+| `app/mismatch.py` | 윤지석 | F-DET-002 (설문 스키마 확정 대기) |
 | `app/reexplain.py` | 윤지석 | F-INT-004 콘텐츠 |
 
 ## 공통 모듈 (소유: 윤지석)
@@ -42,8 +42,14 @@ Spring `core/AiServiceClient`가 호출하는 6개. 미구현 기능은 **501**�
 | `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
 | `POST /internal/reexplain` | F-INT-004 | 501 |
 
-F-DET-002(적합성 모순)는 이 목록에 엔드포인트가 없다. `/internal/score`에 태울지
-7번째를 낼지 강희진과 확정한 뒤 추가한다 — 출력 스키마도 `contracts/`에 아직 없다.
+F-DET-002(적합성 모순)는 이 목록에 엔드포인트가 없다. 세션 단위 판정이라 항목별
+`/internal/score`에 얹기 어려워 **7번째 `/internal/mismatch`를 제안**했고, 출력 스키마
+초안과 근거는 `proposals/`에 있다. 강희진 확인 후 붙인다.
+
+## proposals/ — 계약 초안 대기소
+
+`contracts/`는 강희진 소유이고 변경에 소유자 승인이 필요하다. 내가 공급자인 계약의
+초안은 여기서 먼저 만들고 합의된 뒤 옮긴다. **여기 있는 파일은 아직 계약이 아니다.**
 
 ## PII 방어선 (P3)
 
