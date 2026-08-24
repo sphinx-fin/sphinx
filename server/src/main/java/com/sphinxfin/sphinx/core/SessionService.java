@@ -19,9 +19,14 @@ public class SessionService {
 
     private final SessionRepository repository;
     private final GateEngine gateEngine;
+    private final CoachingScoreService coachingScoreService;
 
     public Session create(CreateSessionCommand cmd) {
-        return repository.save(Session.create(cmd));
+        Session session = Session.create(cmd);
+        // 생성 시점 취약 가중 산출(모순은 아직 없음). 답변·모순이 들어오면 재계산은 후속.
+        var coaching = coachingScoreService.score(session, false);
+        session.applyCoaching(coaching.score(), coaching.vulnerable());
+        return repository.save(session);
     }
 
     /** 세션 조회. 없으면 예외(→ GlobalExceptionHandler에서 404). */

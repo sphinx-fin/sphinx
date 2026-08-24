@@ -36,7 +36,7 @@ class SessionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SessionService(repository, new GateEngine());   // 실제 gate_rules.yaml 로드
+        service = new SessionService(repository, new GateEngine(), new CoachingScoreService());
     }
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {
@@ -54,6 +54,9 @@ class SessionServiceTest {
         assertThat(s.createdAt()).isNotNull();      // BaseEntity 감사
         assertThat(s.updatedAt()).isNotNull();
         assertThat(repository.findById(s.id())).isPresent();
+        // F-DET-002 코칭: 60대(3)+5천만원대(1)+없음(3)+FACE_TO_FACE(0) = 7 → 취약
+        assertThat(s.coachingScore()).isEqualTo(7);
+        assertThat(s.vulnerable()).isTrue();
     }
 
     @Test
