@@ -26,7 +26,7 @@ cases:
     answer: 은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠.
     expected_grade: U4
     expected_misconception: M04-EARLY-REDEMPTION
-    deterministic: false  # ★ 라이브러리 패턴과 표현 차이가 커서 미매칭(0.31) → 후보 큐
+    deterministic: true   # PR #21 로 M04 에 조각 패턴이 들어가 pattern 단계 1.000 로 잡힌다
 
   - id: TYING-SIGNAL
     source: 기획서 7-2 [기능 2] 판매자 위반 신호

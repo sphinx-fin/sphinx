@@ -74,12 +74,56 @@ def test_legacy_short_value_no_longer_matches():
     assert result.matches == []
 
 
-def test_near_miss_goes_to_review_queue_instead_of_silent_drop():
-    """기획서 4절 대화 예시는 라이브러리 표현과 차이가 커서 미매칭이다.
-    조용히 버리지 않고 미분류 후보로 올린다."""
-    result = misconception.match("은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠.", "ELS")
+def _synthetic_type(pattern: str) -> misconception.MisconceptionType:
+    return misconception.MisconceptionType(
+        type_id="MZZ-SYNTHETIC", label="합성 유형", patterns=(pattern,),
+        products=("ALL",), escalate=None,
+        source=misconception.SourceRef(type="proposal_example", ref="tests/test_misconception.py"),
+    )
+
+
+def test_near_miss_goes_to_review_queue_instead_of_silent_drop(monkeypatch):
+    """임계값에 못 미치지만 무시하기엔 가까운 발화는 조용히 버리지 않고 후보 큐로 올린다.
+
+    라이브러리의 실제 발화를 픽스처로 박으면 두 가지 이유로 깨진다. 후보 큐 구간이
+    [0.45, 0.62) = 0.17 폭뿐이라 임계값을 조금만 조정해도 뒤집히고, 라이브러리 데이터
+    소유가 정세현이라 패턴 한 줄이 추가되면(PR #21) 내 테스트가 남의 PR을 막는다.
+    여기서 고정할 것은 라이브러리 내용이 아니라 **엔진의 near-miss 처리**이므로,
+    발화를 합성하고 구간을 임계값에서 계산한다.
+    """
+    chars = "".join(chr(0xAC00 + i) for i in range(101))   # 서로 다른 바이그램 100개
+    monkeypatch.setattr(misconception, "library", lambda: (_synthetic_type(chars),))
+
+    mid = (misconception.REVIEW_THRESHOLD + misconception.NGRAM_THRESHOLD) / 2
+    near = chars[: int(mid * 100) + 1]                     # 포함도 ≈ mid — 구간 안
+    assert (misconception.REVIEW_THRESHOLD
+            <= misconception._containment(chars, near) < misconception.NGRAM_THRESHOLD)
+
+    result = misconception.match(near, "ELS")
     assert result.matches == []
     assert result.unclassified_candidate is True
+
+
+def test_far_miss_is_dropped_without_polluting_the_queue(monkeypatch):
+    """REVIEW_THRESHOLD 아래는 후보 큐에 올리지 않는다. 하한이 없으면 큐가 무의미해진다."""
+    chars = "".join(chr(0xAC00 + i) for i in range(101))
+    monkeypatch.setattr(misconception, "library", lambda: (_synthetic_type(chars),))
+
+    far = chars[: int(misconception.REVIEW_THRESHOLD * 100) - 4]
+    assert misconception._containment(chars, far) < misconception.REVIEW_THRESHOLD
+
+    result = misconception.match(far, "ELS")
+    assert result.matches == []
+    assert result.unclassified_candidate is False
+
+
+def test_spec_dialogue_example_is_caught_deterministically():
+    """기획서 4절 154행 대화 예시. PR #21 로 M04 에 조각 패턴이 들어가면서 후보 큐가 아니라
+    pattern 단계에서 잡힌다 — 데모 임계 경로가 LLM 응답에서 떨어진다."""
+    result = misconception.match("은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠.", "ELS")
+    assert [m.type_id for m in result.matches] == ["M04-EARLY-REDEMPTION"]
+    assert result.matches[0].stage == "pattern"
+    assert result.unclassified_candidate is False
 
 
 def test_deterministic_fixture_cases_match_expected_type():
