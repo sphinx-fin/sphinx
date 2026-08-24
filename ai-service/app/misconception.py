@@ -24,16 +24,6 @@ import yaml
 
 from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
 
-# 라이브러리(data/misconception_library)는 "VARIABLE_INS", 계약
-# (contracts/parsed_document.schema.json)은 "VARIABLE_INSURANCE"를 쓴다. 둘 다 정세현
-# 소유인데 값이 어긋나 있다. 정규화하지 않으면 **변액 오해가 조용히 하나도 안 잡힌다** —
-# 예외도 로그도 없이 매칭만 실패한다. 라이브러리가 정렬되면 이 표는 지운다.
-PRODUCT_ALIASES = {"VARIABLE_INS": "VARIABLE_INSURANCE"}
-
-
-def canonical_product(value: str) -> str:
-    return PRODUCT_ALIASES.get(value, value)
-
 LIBRARY_PATH = (
     Path(__file__).resolve().parents[2] / "data" / "misconception_library" / "misconceptions.yaml"
 )
@@ -57,7 +47,7 @@ class MisconceptionType:
     source: str
 
     def applies_to(self, product_type: str) -> bool:
-        return "ALL" in self.products or canonical_product(product_type) in self.products
+        return "ALL" in self.products or product_type in self.products
 
 
 def _normalize(text: str) -> str:
@@ -84,12 +74,28 @@ def library() -> tuple[MisconceptionType, ...]:
             type_id=entry["id"],
             label=entry.get("label", entry["id"]),
             patterns=tuple(entry.get("patterns") or ()),
-            products=tuple(canonical_product(v) for v in (entry.get("products") or ("ALL",))),
+            products=tuple(entry.get("products") or ("ALL",)),
             escalate=entry.get("escalate"),
             source=entry.get("source", ""),
         )
         for entry in (raw.get("types") or [])
     )
+
+
+def assert_products_are_canonical() -> None:
+    """라이브러리의 products 값이 계약(PRODUCT_TYPES)을 벗어나지 않는지 확인한다.
+
+    값이 어긋나면 match()가 예외도 로그도 없이 빗나가고 해당 상품 오해가 하나도 잡히지
+    않는다. 그 조용한 실패를 막기 위해 로딩 시점에 터뜨린다.
+    """
+    allowed = set(PRODUCT_TYPES) | {"ALL"}
+    for mtype in library():
+        unknown = set(mtype.products) - allowed
+        if unknown:
+            raise ValueError(
+                f"{mtype.type_id}: 계약 밖의 product 값 {sorted(unknown)}. "
+                f"허용: {sorted(allowed)}"
+            )
 
 
 def library_version() -> int:

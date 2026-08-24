@@ -57,20 +57,21 @@ def test_product_scope_is_respected():
     assert [m.type_id for m in result.matches] == ["M06-SURRENDER-VALUE"]
 
 
-def test_library_product_values_are_normalized_to_contract():
-    """라이브러리는 "VARIABLE_INS", 계약은 "VARIABLE_INSURANCE"를 쓴다(둘 다 정세현 소유).
-    정규화가 빠지면 변액 오해가 예외도 로그도 없이 하나도 안 잡힌다.
-    라이브러리가 정렬되면 PRODUCT_ALIASES와 이 테스트를 지운다."""
+def test_library_products_stay_within_contract():
+    """라이브러리 products 값이 계약(contracts/parsed_document.schema.json)을 벗어나면
+    match()가 예외도 로그도 없이 빗나가고 해당 상품 오해가 하나도 안 잡힌다.
+    그 조용한 실패를 막는 지점이므로 여기서 고정한다."""
+    misconception.assert_products_are_canonical()
     allowed = set(PRODUCT_TYPES) | {"ALL"}
     for mtype in misconception.library():
         assert set(mtype.products) <= allowed, f"{mtype.type_id}: {mtype.products}"
 
 
-def test_alias_still_accepted_on_input():
-    """상류가 아직 단축형을 보내도 매칭이 죽지 않는다."""
-    assert misconception.canonical_product("VARIABLE_INS") == "VARIABLE_INSURANCE"
+def test_legacy_short_value_no_longer_matches():
+    """VARIABLE_INS 는 폐기된 표기다. 조용히 받아주지 않는다 —
+    상류가 옛 값을 보내면 스키마(ProductType)가 422로 거부해야 한다."""
     result = misconception.match("낸 돈은 다 돌려받는 거죠", "VARIABLE_INS")
-    assert [m.type_id for m in result.matches] == ["M06-SURRENDER-VALUE"]
+    assert result.matches == []
 
 
 def test_near_miss_goes_to_review_queue_instead_of_silent_drop():

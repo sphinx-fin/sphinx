@@ -27,8 +27,8 @@ class Grade(str, Enum):
 
 
 # contracts/parsed_document.schema.json 의 product_type enum과 동일해야 한다.
-# 주의: data/misconception_library/misconceptions.yaml 은 아직 "VARIABLE_INS"(단축형)를
-# 쓴다. 둘 다 정세현 소유이며 값이 어긋나 있다 — misconception.py 에서 정규화한다.
+# data/misconception_library/misconceptions.yaml 의 products 값도 여기에 맞춘다 —
+# misconception.assert_products_are_canonical() 이 로딩 시점에 검사한다.
 ProductType = Literal["ELS", "VARIABLE_INSURANCE"]
 PRODUCT_TYPES: tuple[str, ...] = ("ELS", "VARIABLE_INSURANCE")
 
