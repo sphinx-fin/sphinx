@@ -53,12 +53,18 @@ types:
       quote: "지수가 반토막 날 리가 있나"
   - id: M04-EARLY-REDEMPTION
     label: 조기상환 구조 오인
-    patterns: ["만기 3년이면 3년 뒤에 원금과 이자"]
+    # 두 번째 패턴은 기획서 4절 대화 예시(154행)에서 왔다. 기존 패턴만으로는 그 발화가
+    # 포함도 0.308(임계 0.62)로 미매칭이어서, 등급은 LLM 이 U4 로 맞히지만
+    # misconception_type 이 비고 미분류 후보 큐로 갔다 (PR #10 dev set 유일 FAIL).
+    # 문장 전체가 아니라 조각으로 넣었다 — 전체를 넣으면 M01 데모 발화
+    # ("은행에서 파는 거니까 원금은 지켜지는 거죠?")에 포함도 0.429 가 붙어
+    # REVIEW_THRESHOLD(0.45) 를 넘나들며 후보 큐를 오염시킨다. 조각은 0.000 이다.
+    patterns: ["만기 3년이면 3년 뒤에 원금과 이자", "3년 뒤에 이자 붙어서 나오는"]
     products: [ELS]
     source:
       type: proposal_example
-      ref: "docs/proposal.md 4절 [핵심 엔진] 160행"
-      quote: "만기 3년이면 3년 뒤에 원금과 이자"
+      ref: "docs/proposal.md 4절 [핵심 엔진] 160행(오해 목록), 154행(대화 예시)"
+      quote: "만기 3년이면 3년 뒤에 원금과 이자 / 은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠"
   - id: M05-SAVINGS
     label: 저축성 오인
     patterns: ["저축인 줄"]
