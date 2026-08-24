@@ -8,6 +8,9 @@
   - 이해→오해 오판: 마찰. 재응답 경로가 있으므로 관리 지표(10%).
 그래서 후처리는 전부 한 방향으로만 움직인다 — 안전한 쪽(낮은 등급)으로.
 
+신뢰도 기반 황색 강등은 이 모듈이 하지 않는다. 게이트 정책이므로 gate_rules.yaml이
+가진다(강희진 결정). 우리는 grade와 confidence를 정직하게 내보내는 것까지만 한다.
+
 출력은 contracts/judgment.schema.json. 이건 *측정값*이며 게이트 판정이 아니다 (P1).
 """
 from __future__ import annotations
@@ -22,10 +25,15 @@ from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v1.md"
 PROMPT_VERSION = "F-SCR-001_v1"
 
-# 기획서 5절: "애매하면 '이해'가 아니라 '부분이해'로 내려 재설명을 트리거"
-CONFIDENCE_FLOOR = 0.7
+# 신뢰도 기반 황색 강등은 **여기서 하지 않는다.**
+# 강희진 결정(PR #10 리뷰): P1 경계상 게이트 정책이 채점에 섞이지 않아야 하므로
+# ai-service는 진짜 등급 + confidence만 내고, gate_rules.yaml의 confidence 룰이 처리한다.
+# 양쪽 다 하면 이중계산이 된다. 임계값(0.7)의 소유도 게이트로 넘어갔다.
+# 근거와 선택지 비교: proposals/F-SCR-001-yellow-downgrade.md
 
 _WS = re.compile(r"\s+")
+#: 조항 합성 인용에서 허용하는 연결어·구분자. 이것만 남으면 공개 조항으로 환원된 것이다.
+_CLAUSE_JOINERS = re.compile(r"[및,·/\-~()\[\]]|그리고|또는|와|과")
 
 
 def score(
@@ -50,8 +58,8 @@ def score(
     judgment = _pin_item_id(judgment, item_id)
     judgment = _drop_llm_misconception_type(judgment)
     verify_quote_is_verbatim(judgment, answer_text)
-    judgment = apply_misconception_floor(judgment, matched, rubric)
-    return downgrade_low_confidence(judgment)
+    verify_rubric_clause_is_published(judgment, rubric)
+    return apply_misconception_floor(judgment, matched, rubric)
 
 
 # ── 프롬프트 ───────────────────────────────────────────────────────────────────
@@ -118,6 +126,32 @@ def verify_quote_is_verbatim(judgment: Judgment, answer_text: str) -> None:
     )
 
 
+def verify_rubric_clause_is_published(judgment: Judgment, rubric: rubrics.Rubric) -> None:
+    """인용된 루브릭 조항이 **공개된 루브릭 안의 것**인지 대조한다 (P4, 강희진 리뷰).
+
+    `utterance_quote`는 발화 원문과 대조하는데 `rubric_clause`는 비어있지만 않으면
+    통과하던 비대칭을 없앤다. 기획서 5절의 통제는 *"루브릭을 공개하고, 근거 표시를
+    의무화한다"* 이므로, 근거로 적힌 조항이 공개된 루브릭에 없으면 그 의무가 형식만 남는다.
+
+    모델이 조항 두 개를 "A 및 B"처럼 합쳐 인용하는 경우가 실측에서 나왔다. 합성 인용도
+    공개 조항으로 환원되면 추적 가능하므로 허용한다 — 인용문에서 조항들을 걷어낸 잔여가
+    구분자·공백뿐이면 통과다. 잔여에 내용이 남으면 루브릭 밖의 문장을 만든 것이다.
+    """
+    published = tuple(rubric.required_elements) + tuple(rubric.misconception_conditions)
+    cited = _WS.sub("", judgment.evidence.rubric_clause)
+
+    residual = cited
+    for clause in sorted(published, key=len, reverse=True):
+        residual = residual.replace(_WS.sub("", clause), "")
+    if not _CLAUSE_JOINERS.sub("", residual):
+        return
+
+    raise LlmError(
+        f"루브릭 밖의 조항을 인용했다 (P4 위반): item_id={judgment.item_id} "
+        f"clause={judgment.evidence.rubric_clause!r}"
+    )
+
+
 def apply_misconception_floor(
     judgment: Judgment, matched: MisconceptionResponse, rubric: rubrics.Rubric
 ) -> Judgment:
@@ -143,28 +177,3 @@ def apply_misconception_floor(
             f"[{top.stage} {top.score}] → U4 상향)"
         )
     return judgment.model_copy(update=update)
-
-
-def downgrade_low_confidence(judgment: Judgment) -> Judgment:
-    """신뢰도 미달이면 U1을 U2로 내린다. **U4는 건드리지 않는다.**
-
-    기획서 5절: "애매하면 '이해'가 아니라 '부분이해'로 내려 재설명을 트리거.
-    재설명은 차단이 아니므로 보수적 설정의 부작용이 작다."
-
-    U4를 완화하지 않는 이유: U4→황색은 곧 오해한 고객의 통과이고, 그것이 상한 1%로
-    관리하는 치명적 오판이다.
-
-    강등이 ai-service에서 일어나는 이유: gate_rules.yaml에 confidence를 보는 룰이 없어
-    GateEngine은 신뢰도를 모른다. 우리가 내보내는 grade를 바꾸는 것으로만 황색 처리가
-    실현된다(R-04가 U2를 YELLOW로 받는다). P1 경계에 걸치므로 **강등 사실을 reason에
-    남긴다** — 감사 로그에서 추적 가능해야 한다.
-    """
-    if judgment.confidence >= CONFIDENCE_FLOOR or judgment.grade is not Grade.U1:
-        return judgment
-    return judgment.model_copy(
-        update={
-            "grade": Grade.U2,
-            "reason": f"{judgment.reason} (신뢰도 {judgment.confidence:.2f} < "
-                      f"{CONFIDENCE_FLOOR} → 부분이해로 강등)",
-        }
-    )

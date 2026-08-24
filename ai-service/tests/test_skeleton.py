@@ -10,8 +10,6 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.schemas import Evidence, Grade, Judgment
-from app.scoring import downgrade_low_confidence
 
 client = TestClient(app)
 
@@ -27,16 +25,6 @@ RISK_ITEM = {
     "status": "extracted",
 }
 
-
-def _judgment(grade: Grade, confidence: float) -> Judgment:
-    return Judgment(
-        item_id="ELS-PRINCIPAL-LOSS",
-        grade=grade,
-        confidence=confidence,
-        evidence=Evidence(utterance_quote="은행에서 파는 거니까 원금은 지켜지는 거죠",
-                          rubric_clause="원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
-        reason="테스트",
-    )
 
 
 # ── 골격 ──────────────────────────────────────────────────────────────────────
@@ -145,22 +133,3 @@ def test_masked_placeholders_pass_through():
     })
     assert resp.status_code == 200  # PII 통과 → 실제 매칭 도달
     assert resp.json()["matches"][0]["type_id"] == "M01-PRINCIPAL-GUARANTEE"
-
-
-# ── P5 미탐 방지 ──────────────────────────────────────────────────────────────
-def test_low_confidence_u1_is_downgraded_to_u2():
-    out = downgrade_low_confidence(_judgment(Grade.U1, 0.4))
-    assert out.grade is Grade.U2
-    assert "강등" in out.reason  # 감사 추적
-
-
-def test_low_confidence_u4_is_never_downgraded():
-    """U4를 황색으로 완화하면 가장 위험한 케이스에서 미탐이 된다 (P5)."""
-    out = downgrade_low_confidence(_judgment(Grade.U4, 0.4))
-    assert out.grade is Grade.U4
-
-
-def test_high_confidence_is_untouched():
-    out = downgrade_low_confidence(_judgment(Grade.U1, 0.95))
-    assert out.grade is Grade.U1
-    assert out.reason == "테스트"

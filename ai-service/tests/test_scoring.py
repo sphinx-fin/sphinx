@@ -111,31 +111,64 @@ def test_library_type_still_wins_over_discarded_llm_value():
     assert judgment.misconception_type == "M01-PRINCIPAL-GUARANTEE"
 
 
-# ── 신뢰도 강등 (기획서: 애매하면 부분이해) ────────────────────────────────────
-def test_low_confidence_u1_becomes_u2_with_audit_trail():
-    judgment = scoring.downgrade_low_confidence(make_judgment(Grade.U1, 0.4))
-    assert judgment.grade is Grade.U2
-    assert "강등" in judgment.reason
+# ── P4: 루브릭 조항 대조 (강희진 리뷰 반영) ───────────────────────────────────
+def test_clause_outside_the_rubric_is_rejected():
+    """근거로 적힌 조항이 공개 루브릭에 없으면 근거 표시 의무가 형식만 남는다."""
+    bogus = make_judgment()
+    bogus = bogus.model_copy(update={
+        "evidence": bogus.evidence.model_copy(
+            update={"rubric_clause": "고객이 충분히 이해한 것으로 보임"})})
+    with pytest.raises(LlmError, match="루브릭 밖"):
+        _score(bogus)
 
 
-def test_low_confidence_u4_is_never_relaxed():
-    """U4→황색은 오해한 고객의 통과. 상한 1%로 관리하는 치명적 오판이다."""
-    assert scoring.downgrade_low_confidence(make_judgment(Grade.U4, 0.1)).grade is Grade.U4
+def test_published_clause_passes():
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    for clause in rubric.required_elements + rubric.misconception_conditions:
+        j = make_judgment()
+        j = j.model_copy(update={
+            "evidence": j.evidence.model_copy(update={"rubric_clause": clause})})
+        assert _score(j)[0].evidence.rubric_clause == clause
 
 
-def test_low_confidence_u3_is_not_raised():
-    """강등은 한 방향이다 — U3(미이해)를 U2로 올리지 않는다."""
-    assert scoring.downgrade_low_confidence(make_judgment(Grade.U3, 0.1)).grade is Grade.U3
+def test_two_clauses_joined_are_accepted():
+    """실측에서 모델이 "A 및 B"로 합쳐 인용했다. 공개 조항으로 환원되므로 추적 가능하다."""
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    joined = f"{rubric.required_elements[0]} 및 {rubric.required_elements[1]}"
+    j = make_judgment()
+    j = j.model_copy(update={
+        "evidence": j.evidence.model_copy(update={"rubric_clause": joined})})
+    assert _score(j)[0].grade is Grade.U4   # 오해 상향은 그대로 동작
 
 
-def test_high_confidence_is_untouched():
-    original = make_judgment(Grade.U1, 0.95)
-    assert scoring.downgrade_low_confidence(original) == original
+def test_clause_with_extra_content_is_rejected():
+    """조항에 없는 내용이 붙으면 거부한다 — 합성 허용이 구멍이 되지 않게."""
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    j = make_judgment()
+    j = j.model_copy(update={"evidence": j.evidence.model_copy(
+        update={"rubric_clause": rubric.required_elements[0] + " 이므로 판매 가능하다"})})
+    with pytest.raises(LlmError, match="루브릭 밖"):
+        _score(j)
+
+
+# ── 신뢰도는 그대로 통과시킨다 (게이트가 판단) ────────────────────────────────
+def test_low_confidence_grade_is_not_altered():
+    """황색 강등은 게이트 정책이다(강희진 결정). ai-service는 측정값만 낸다 —
+    양쪽에서 하면 이중계산이 된다."""
+    judgment, _ = _score(make_judgment(grade=Grade.U1, confidence=0.3,
+                                       item_id="ELS-EARLY-REDEMPTION"),
+                         item_id="ELS-EARLY-REDEMPTION")
+    assert judgment.grade is Grade.U1
+    assert judgment.confidence == 0.3
+    assert "강등" not in judgment.reason
 
 
 # ── item_id 고정 ──────────────────────────────────────────────────────────────
 def test_item_id_is_pinned_to_caller_value():
-    judgment, _ = _score(make_judgment(item_id="WRONG-ID"))
+    """LLM이 엉뚱한 item_id를 써 보내도 호출자가 지정한 항목이 진실이다."""
+    bogus = make_judgment(item_id="ELS-PRINCIPAL-LOSS").model_copy(
+        update={"item_id": "WRONG-ID"})
+    judgment, _ = _score(bogus)
     assert judgment.item_id == "ELS-PRINCIPAL-LOSS"
 
 

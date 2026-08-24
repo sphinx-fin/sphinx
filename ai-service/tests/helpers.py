@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app import rubrics
 from app.llm_client import LlmClient
 from app.schemas import Evidence, Grade, Judgment
 
@@ -38,13 +39,21 @@ def make_judgment(
     item_id: str = "ELS-PRINCIPAL-LOSS",
     reason: str = "판정 사유",
     misconception_type: str | None = None,
+    rubric_clause: str | None = None,
 ) -> Judgment:
+    """rubric_clause를 주지 않으면 해당 item_id 루브릭의 첫 필수 요소를 쓴다.
+
+    scoring.verify_rubric_clause_is_published()가 공개 조항인지 대조하므로, 항목과
+    무관한 조항을 기본값으로 두면 테스트가 검증 로직에 걸린다.
+    """
     return Judgment(
         item_id=item_id,
         grade=grade,
         confidence=confidence,
-        evidence=Evidence(utterance_quote=quote,
-                          rubric_clause="낙인(배리어) 하회 시 원금 손실 발생"),
+        evidence=Evidence(
+            utterance_quote=quote,
+            rubric_clause=rubric_clause or rubrics.get(item_id).required_elements[0],
+        ),
         reason=reason,
         misconception_type=misconception_type,
     )
