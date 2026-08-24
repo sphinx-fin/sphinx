@@ -1,12 +1,55 @@
 openapi: 3.0.3
-info: {title: SphinX API, version: 0.1.0}
+info:
+  title: SphinX API
+  version: 0.1.0
+  description: >
+    web ↔ server REST 계약. ai-service(내부망 전용)의 /internal/* 인터페이스는 여기 없다 —
+    그 경계의 페이로드는 contracts/*.schema.json(judgment·risk_item·parsed_document)으로 계약한다.
 paths:
   /products/documents:      {post: {summary: "문서 업로드 (F-EXT-001)"}}
   /products/{id}/extract:   {post: {summary: "위험요소 추출 (F-EXT-002)"}}
   /products/{id}/risk-items: {get: {summary: "추출 항목 조회"}}
-  /sessions:                {post: {summary: "세션 생성 (F-INT-001)"}}
+
+  /sessions:
+    post:
+      summary: 세션 생성 (F-INT-001)
+      description: 비식별 속성만 받는다 — 성명·주민번호 필드는 스키마에 존재하지 않는다 (P3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateSessionRequest'}
+      responses:
+        '200':
+          description: 생성된 세션(상태 CREATED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionApiResponse'}
+        '400':
+          description: 필수 속성 누락 또는 유효성 오류
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}:
+    get:
+      summary: 세션 상태 조회 (F-INT-001)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 세션
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions/{id}/questions/next: {post: {summary: "다음 질문 (F-INT-002)"}}
-  /sessions/{id}/answers:   {post: {summary: "텍스트 응답 제출 (F-INT-003) → Judgment 반환"}}
+  /sessions/{id}/answers:   {post: {summary: "텍스트 응답 제출 (F-INT-003) → Judgment 반환. 응답 스키마는 judgment.schema.json 기준(명명 규약 확정 후 $ref 연결)"}}
   /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
   /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
   /sessions/{id}/judge:     {post: {summary: "게이트 판정 (F-GTE-001)"}}
@@ -14,4 +57,49 @@ paths:
   /sessions/{id}/override/approve: {post: {summary: "관리자 승인/반려"}}
   /sessions/{id}/report:    {get: {summary: "이해 기록 (F-GTE-004)"}}
   /dashboard/heatmap:       {get: {summary: "오해 지도 (F-DSH-001)"}}
-# TODO(강희진): request/response 스키마를 contracts/*.schema.json 참조로 채울 것
+
+components:
+  schemas:
+    # 공통 응답 봉투 — 모든 응답은 success + (data | error) 형태.
+    ApiError:
+      type: object
+      required: [code, message, timestamp]
+      properties:
+        code:      {type: string, description: "에러 코드(NOT_FOUND·VALIDATION_ERROR·MALFORMED_REQUEST·ILLEGAL_STATE_TRANSITION·INTERNAL_ERROR)"}
+        message:   {type: string}
+        timestamp: {type: string, format: date-time}
+    ErrorApiResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success: {type: boolean, enum: [false]}
+        data:    {type: object, nullable: true}
+        error:   {$ref: '#/components/schemas/ApiError'}
+
+    CreateSessionRequest:
+      type: object
+      description: 세션 생성 입력. 전부 비식별 — 성명·주민번호는 스키마에 존재하지 않는다 (P3).
+      required: [productId, channel, ageBand]
+      properties:
+        productId:       {type: string, description: "상품 ID"}
+        channel:         {type: string, enum: [FACE_TO_FACE, MOBILE, TM], description: "판매 채널(대면·모바일·TM)"}
+        ageBand:         {type: string, description: "연령대(비식별, 예: 60대)"}
+        experienceLevel: {type: string, nullable: true, description: "투자 경험 수준"}
+        amountBand:      {type: string, nullable: true, description: "가입금액대(비식별)"}
+        contractRef:     {type: string, nullable: true, description: "계약건 참조번호(비식별)"}
+        surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과"}
+    SessionResponse:
+      type: object
+      required: [sessionId, state, productId]
+      properties:
+        sessionId:   {type: string}
+        state:       {type: string, enum: [CREATED, IN_PROGRESS, RE_EXPLAIN, RE_VERIFY, JUDGED, CLOSED, ABORTED]}
+        productId:   {type: string}
+        contractRef: {type: string, nullable: true}
+    SessionApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/SessionResponse'}
+        error:   {type: object, nullable: true}
