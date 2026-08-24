@@ -1,6 +1,31 @@
 server:
   port: 8000
 
+spring:
+  datasource:
+    url: jdbc:h2:mem:sphinx;DB_CLOSE_DELAY=-1   # MVP: 인메모리 H2 → 영속 필요 시 jdbc:h2:file:./data/sphinx
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update                          # MVP: 엔티티 기준 스키마 자동 생성 → 운영은 마이그레이션 도구로 교체
+    open-in-view: false                         # OSIV 비활성(지연로딩을 뷰까지 끌지 않음)
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true                             # 개발용 DB 콘솔: http://localhost:8000/h2-console
+      path: /h2-console
+
+# actuator: 헬스체크만 노출
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
 sphinx:
   ai-service:
     base-url: http://localhost:8100      # ai-service (FastAPI, 윤지석)
