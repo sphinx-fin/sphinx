@@ -8,3 +8,10 @@ data/documents/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
 .DS_Store
+
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
