@@ -8,6 +8,7 @@ data/documents/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
 .DS_Store
+.pytest_cache/
 
 # Gradle
 .gradle/
