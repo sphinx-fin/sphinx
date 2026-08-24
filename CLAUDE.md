@@ -32,8 +32,8 @@ cd web && npm run build
 python eval/run_eval.py
 ```
 
-**주의**: `server/`에 Gradle 래퍼(`gradlew`)가 아직 없다. `./gradlew`를 쓰려면 먼저 생성해야
-한다(`gradle wrapper`). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
+**주의**: `server/`의 Gradle 래퍼(`gradlew`)는 8.10.2로 고정돼 있다(Boot 3.3.2 플러그인 호환,
+PR #6). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
 테스트 러너도 없다 — 테스트는 현재 `server/src/test`의 JUnit 뿐이다.
 
 ## 아키텍처
@@ -98,6 +98,19 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 `risk_item.schema.json`, `judgment.schema.json`, `openapi.yaml`이 모듈 간 계약이다. Java
 `domain/` 레코드는 이 스키마와 1:1로 유지한다. **변경은 강희진 승인 + 수요자 전원 멘션**이
 필요하다(오너 승인 없이 변경 금지).
+
+### `api/` — 응답 봉투·예외·세션 영속 규약 (F-INT-001~)
+
+- **모든 응답은 공통 봉투 `api/dto/ApiResponse<T>`** 로 감싼다: 성공 `{success:true, data, error:null}`,
+  실패 `{success:false, data:null, error:{code,message,timestamp}}`. 컨트롤러가 raw 객체를
+  직접 반환하면 프론트 계약이 깨진다.
+- **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
+  `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
+  `MALFORMED_REQUEST`(400)·`ILLEGAL_STATE_TRANSITION`(409)·`INTERNAL_ERROR`(500).
+- **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
+  (서비스가 web DTO에 의존하지 않도록).
+- **엔티티는 `core/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
+  append-only인 `evidence/`는 상속하지 않는다). 세션은 H2/JPA로 영속한다.
 
 ## 소유권과 기여 규칙
 
