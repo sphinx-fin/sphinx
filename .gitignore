@@ -14,5 +14,8 @@ eval/labeling/*.xlsx
 .gradle/
 build/
 
+# 로컬 전용 (공유 금지)
+CLAUDE.local.md
+
 # IDE
 .idea/
