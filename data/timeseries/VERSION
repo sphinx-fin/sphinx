@@ -1,1 +1,38 @@
-snapshot: TODO (예: 2026-08-25 야후파이낸스 기준)\n
+# 기초자산 지수 시계열 스냅샷 (F-SIM-001). 소유: 정세현
+#
+# 이 파일이 시뮬레이터 재현성(P2)의 근거다. CSV가 바뀌면 sha256이 어긋나고,
+# 그러면 시뮬레이터 출력이 달라진 원인이 코드가 아니라 데이터임을 알 수 있다.
+#
+# 종목은 키움증권 제4181회(데모 대상 ELS)의 기초자산 3종이다.
+# 이전 값(HSCEI)은 실제 확보 문서의 기초자산이 아니어서 정정했다.
+
+snapshot: 2026-08-24
+source: Yahoo Finance chart API (query1.finance.yahoo.com/v8/finance/chart)
+range: 2000-01-01 ~ 2026-08-24
+fetched_by: scripts/fetch_timeseries.py
+
+series:
+  sp500:
+    label: S&P500 지수
+    symbol: ^GSPC
+    file: sp500.csv
+    rows: 6699
+    first_date: 2000-01-03
+    last_date: 2026-08-21
+    sha256: 4c314309d53af744c79a6d58cb109567b09246f794b22fcc9cbf77f5afe4ebe3
+  nikkei225:
+    label: NIKKEI225 지수
+    symbol: ^N225
+    file: nikkei225.csv
+    rows: 6525
+    first_date: 2000-01-04
+    last_date: 2026-08-24
+    sha256: 7f82f6a6821798e66b33d61efee6a0fce040e0398adc979b65df5143ef4aacfa
+  eurostoxx50:
+    label: EuroStoxx50 지수
+    symbol: ^STOXX50E
+    file: eurostoxx50.csv
+    rows: 4862
+    first_date: 2007-03-30
+    last_date: 2026-08-24
+    sha256: 81d39afd900cdd06c488996f6f98f4b90c84eee7de44b243a15373383d8d3905
