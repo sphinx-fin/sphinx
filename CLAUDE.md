@@ -99,6 +99,19 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 `domain/` 레코드는 이 스키마와 1:1로 유지한다. **변경은 강희진 승인 + 수요자 전원 멘션**이
 필요하다(오너 승인 없이 변경 금지).
 
+### `api/` — 응답 봉투·예외·세션 영속 규약 (F-INT-001~)
+
+- **모든 응답은 공통 봉투 `api/dto/ApiResponse<T>`** 로 감싼다: 성공 `{success:true, data, error:null}`,
+  실패 `{success:false, data:null, error:{code,message,timestamp}}`. 컨트롤러가 raw 객체를
+  직접 반환하면 프론트 계약이 깨진다.
+- **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
+  `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
+  `MALFORMED_REQUEST`(400)·`ILLEGAL_STATE_TRANSITION`(409)·`INTERNAL_ERROR`(500).
+- **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
+  (서비스가 web DTO에 의존하지 않도록).
+- **엔티티는 `core/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
+  append-only인 `evidence/`는 상속하지 않는다). 세션은 H2/JPA로 영속한다.
+
 ## 소유권과 기여 규칙
 
 이 레포는 디렉토리·파일 단위로 소유자가 정해져 있고, PR은 **해당 소유자 리뷰**를 거친다.

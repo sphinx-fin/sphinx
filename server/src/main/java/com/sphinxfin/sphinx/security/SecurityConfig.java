@@ -20,6 +20,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.disable())
+            // H2 콘솔은 iframe 기반 — 기본 X-Frame-Options: DENY면 화면이 렌더링되지 않는다.
+            // 개발용 콘솔에 한해 sameOrigin 허용(운영엔 H2 콘솔 자체를 끈다).
+            .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
