@@ -14,7 +14,7 @@ from app.main import app
 client = TestClient(app)
 
 RISK_ITEM = {
-    "item_id": "ELS-PRINCIPAL-LOSS",
+    "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
     "product_id": "mock-els-001",
     "name": "원금손실 조건",
     "importance": "required",
@@ -76,7 +76,7 @@ def test_llm_not_configured_maps_to_503(monkeypatch):
         raise LlmNotConfigured("LLM_API_KEY 미설정")
 
     monkeypatch.setattr(routes.scoring, "score", _raise)
-    body = {"item_id": "ELS-PRINCIPAL-LOSS", "question": "q",
+    body = {"item_id": "ELS-PRINCIPAL-LOSS-WARNING", "question": "q",
             "answer_text": "은행에서 파는 거니까 원금은 지켜지는 거죠", "risk_item": RISK_ITEM}
     assert client.post("/internal/score", json=body).status_code == 503
 
@@ -107,7 +107,7 @@ def test_parse_is_owned_by_someone_else():
 # ── P3 방어선 ─────────────────────────────────────────────────────────────────
 def test_pii_in_answer_is_rejected_not_masked():
     resp = client.post("/internal/score", json={
-        "item_id": "ELS-PRINCIPAL-LOSS",
+        "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
         "question": "확인 부탁드립니다",
         "answer_text": "제 번호는 010-1234-5678 입니다",
         "risk_item": RISK_ITEM,

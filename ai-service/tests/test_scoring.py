@@ -13,7 +13,7 @@ from app.schemas import Condition, Grade, RiskItem, SourceSpan
 from tests.helpers import FakeLlm, make_judgment
 
 RISK_ITEM = RiskItem(
-    item_id="ELS-PRINCIPAL-LOSS",
+    item_id="ELS-PRINCIPAL-LOSS-WARNING",
     product_id="mock-els-001",
     name="원금손실 조건",
     importance="required",
@@ -27,7 +27,7 @@ QUESTION = "이 상품에서 원금 손실이 나는 상황을 본인 말씀으�
 DEMO_ANSWER = "은행에서 파는 거니까 원금은 지켜지는 거죠?"
 
 
-def _score(judgment, answer=DEMO_ANSWER, item_id="ELS-PRINCIPAL-LOSS"):
+def _score(judgment, answer=DEMO_ANSWER, item_id="ELS-PRINCIPAL-LOSS-WARNING"):
     llm = FakeLlm(judgment)
     return scoring.score(item_id, QUESTION, answer, RISK_ITEM, "ELS", llm=llm), llm
 
@@ -35,7 +35,7 @@ def _score(judgment, answer=DEMO_ANSWER, item_id="ELS-PRINCIPAL-LOSS"):
 # ── 루브릭 ────────────────────────────────────────────────────────────────────
 def test_rubric_clauses_reach_the_prompt():
     """루브릭 공개 의무(기획서 5절)는 프롬프트에 실제로 들어가야 의미가 있다."""
-    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")
     prompt = scoring.build_prompt(rubric, RISK_ITEM, QUESTION, DEMO_ANSWER)
     for clause in rubric.required_elements + rubric.misconception_conditions:
         assert clause in prompt
@@ -80,8 +80,8 @@ def test_floor_only_applies_to_rubric_related_types():
     """다른 항목의 오해가 이 항목 등급을 끌어내리면 안 된다.
     ELS-EARLY-REDEMPTION 루브릭은 M01을 관련 유형으로 선언하지 않았다."""
     judgment, _ = _score(
-        make_judgment(grade=Grade.U1, confidence=0.95, item_id="ELS-EARLY-REDEMPTION"),
-        item_id="ELS-EARLY-REDEMPTION",
+        make_judgment(grade=Grade.U1, confidence=0.95, item_id="ELS-EARLY-REDEMPTION-CONDITION"),
+        item_id="ELS-EARLY-REDEMPTION-CONDITION",
     )
     assert judgment.grade is Grade.U1
     assert judgment.misconception_type is None
@@ -99,9 +99,9 @@ def test_llm_supplied_misconception_type_is_discarded():
     유형ID는 오해 지도 집계 키이므로 환각이 하나 섞이면 집계가 조용히 오염된다.
     루브릭이 관련 유형을 선언하지 않은 항목에서는 반드시 None이어야 한다."""
     judgment, _ = _score(
-        make_judgment(grade=Grade.U4, item_id="ELS-EARLY-REDEMPTION",
+        make_judgment(grade=Grade.U4, item_id="ELS-EARLY-REDEMPTION-CONDITION",
                       misconception_type="M-존재하지-않는-유형"),
-        item_id="ELS-EARLY-REDEMPTION",
+        item_id="ELS-EARLY-REDEMPTION-CONDITION",
     )
     assert judgment.misconception_type is None
 
@@ -123,7 +123,7 @@ def test_clause_outside_the_rubric_is_rejected():
 
 
 def test_published_clause_passes():
-    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")
     for clause in rubric.required_elements + rubric.misconception_conditions:
         j = make_judgment()
         j = j.model_copy(update={
@@ -133,8 +133,8 @@ def test_published_clause_passes():
 
 def test_two_clauses_joined_are_accepted():
     """실측에서 모델이 "A 및 B"로 합쳐 인용했다. 공개 조항으로 환원되므로 추적 가능하다."""
-    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
-    joined = f"{rubric.required_elements[0]} 및 {rubric.required_elements[1]}"
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")
+    joined = f"{rubric.required_elements[0]} 및 {rubric.misconception_conditions[0]}"
     j = make_judgment()
     j = j.model_copy(update={
         "evidence": j.evidence.model_copy(update={"rubric_clause": joined})})
@@ -143,7 +143,7 @@ def test_two_clauses_joined_are_accepted():
 
 def test_clause_with_extra_content_is_rejected():
     """조항에 없는 내용이 붙으면 거부한다 — 합성 허용이 구멍이 되지 않게."""
-    rubric = rubrics.get("ELS-PRINCIPAL-LOSS")
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")
     j = make_judgment()
     j = j.model_copy(update={"evidence": j.evidence.model_copy(
         update={"rubric_clause": rubric.required_elements[0] + " 이므로 판매 가능하다"})})
@@ -156,8 +156,8 @@ def test_low_confidence_grade_is_not_altered():
     """황색 강등은 게이트 정책이다(강희진 결정). ai-service는 측정값만 낸다 —
     양쪽에서 하면 이중계산이 된다."""
     judgment, _ = _score(make_judgment(grade=Grade.U1, confidence=0.3,
-                                       item_id="ELS-EARLY-REDEMPTION"),
-                         item_id="ELS-EARLY-REDEMPTION")
+                                       item_id="ELS-EARLY-REDEMPTION-CONDITION"),
+                         item_id="ELS-EARLY-REDEMPTION-CONDITION")
     assert judgment.grade is Grade.U1
     assert judgment.confidence == 0.3
     assert "강등" not in judgment.reason
@@ -166,10 +166,10 @@ def test_low_confidence_grade_is_not_altered():
 # ── item_id 고정 ──────────────────────────────────────────────────────────────
 def test_item_id_is_pinned_to_caller_value():
     """LLM이 엉뚱한 item_id를 써 보내도 호출자가 지정한 항목이 진실이다."""
-    bogus = make_judgment(item_id="ELS-PRINCIPAL-LOSS").model_copy(
+    bogus = make_judgment(item_id="ELS-PRINCIPAL-LOSS-WARNING").model_copy(
         update={"item_id": "WRONG-ID"})
     judgment, _ = _score(bogus)
-    assert judgment.item_id == "ELS-PRINCIPAL-LOSS"
+    assert judgment.item_id == "ELS-PRINCIPAL-LOSS-WARNING"
 
 
 # ── 데모 임계 경로 ────────────────────────────────────────────────────────────

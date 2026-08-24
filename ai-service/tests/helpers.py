@@ -36,7 +36,7 @@ def make_judgment(
     grade: Grade = Grade.U1,
     confidence: float = 0.9,
     quote: str = "원금은 지켜지는 거죠",
-    item_id: str = "ELS-PRINCIPAL-LOSS",
+    item_id: str = "ELS-PRINCIPAL-LOSS-WARNING",
     reason: str = "판정 사유",
     misconception_type: str | None = None,
     rubric_clause: str | None = None,

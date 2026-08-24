@@ -21,15 +21,14 @@ product_name_masked: A증권 주가연계증권 (가명)
 underlying: KOSPI200
 source_document: data/documents/els-31370-simple-prospectus.txt
 items:
-  - item_id: ELS-PRINCIPAL-LOSS
-    name: 원금손실 조건
+  # 이 항목은 p1 **고지 문장**이다. 낙인 배리어·만기 손실조건은 계약 어휘에서 별도
+  # 항목(ELS-KNOCKIN-BARRIER, ELS-MATURITY-LOSS-CONDITION)이며 루브릭이 아직 없다.
+  # 이전에는 낙인/만기 조건 문면을 여기 넣어 항목 의미와 어긋나 있었다.
+  - item_id: ELS-PRINCIPAL-LOSS-WARNING
+    name: 원금손실 가능성 고지
     importance: required
-    value_text: >-
-      본 증권의 조건에 따라 상환이나 지급이 발생한 적 없고 [KOSPI200]의 종가를 기준으로
-      최초기준가격(결정일: 2026년 08월 31일)의 35%보다 작게 된 적이 있고
-      최종기준가격(결정일: 2029년 08월 31일)이 최초기준가격의 70%보다 작은 경우
-      원금 손실이 발생합니다.
-    source_span: {page: 1, start: 4223, end: 4381}
+    value_text: 투자원금의 손실 이 있을 수 있으며 예금자보호 대상이 아닌 점 을 숙지하고 투자 하시기 바랍니다.
+    source_span: {page: 1, start: 293, end: 347}
 
   - item_id: ELS-NO-DEPOSIT-INSURANCE
     name: 예금자보호 비대상
@@ -37,7 +36,7 @@ items:
     value_text: 이 금융상품은 예금자보호법에 따라 보호되지 않습니다.
     source_span: {page: 1, start: 146, end: 175}
 
-  - item_id: ELS-EARLY-REDEMPTION
+  - item_id: ELS-EARLY-REDEMPTION-CONDITION
     name: 조기상환 구조
     importance: required
     value_text: >-

@@ -1,0 +1,16 @@
+# 소유: 윤지석 — 공개 의무. item_id·status 근거는 VAR-PRINCIPAL-LOSS.yaml 참고.
+#
+# 이전 VAR-EARLY-SURRENDER 루브릭을 둘로 분리한 것 중 하나다(정세현 리뷰).
+# 합쳐두면 "환급률이 낮다"는 일반론만 요구하고 수치를 못 짚는 답변이 통과한다 —
+# 나머지 절반은 VAR-EARLY-SURRENDER-RATIO 가 맡는다.
+item_id: VAR-SURRENDER-BELOW-PREMIUM
+product_type: VARIABLE_INSURANCE
+name: 해약환급금이 납입보험료보다 적을 수 있음
+status: draft
+required_elements:
+  - 중도해지 시 해약환급금이 납입한 보험료보다 적거나 없을 수 있음
+misconception_conditions:
+  - 낸 돈은 다 돌려받는다
+  - 언제 해지해도 원금은 나온다
+related_misconceptions:
+  - M06-SURRENDER-VALUE

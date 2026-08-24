@@ -174,6 +174,24 @@ def apply_misconception_floor(
         update["grade"] = Grade.U4
         update["reason"] = (
             f"{judgment.reason} (오해 라이브러리 {top.type_id} 매칭 "
-            f"[{top.stage} {top.score}] → U4 상향)"
+            f"[{top.stage} {top.score}, 근거 {_source_tier(top.type_id)}] → U4 상향)"
         )
     return judgment.model_copy(update=update)
+
+
+def _source_tier(type_id: str) -> str:
+    """상향 근거의 종류를 판정 사유에 남긴다.
+
+    **근거 종류로 상향 여부를 가르지 않는다.** 기획서 5절의 오해→이해 오판 상한 1%이
+    구속 조건이고, `proposal_example`도 기획서 본문이 오해로 제시한 문장이므로 내용상
+    근거가 없는 것이 아니다. 약한 것은 *인용 가능한 출처*이지 판정의 타당성이 아니다.
+
+    그래서 상향은 그대로 하고 근거 등급을 기록에 남긴다. 감사·심사 시점에 조정례 근거와
+    기획서 예시가 구분되고, 어느 판정이 어느 등급에 기댔는지 추적된다.
+    """
+    for mtype in misconception.library():
+        if mtype.type_id == type_id:
+            if mtype.source.is_dispute_grounded:
+                return f"{mtype.source.type} {mtype.source.ref}"
+            return mtype.source.type or "미기재"
+    return "미기재"
