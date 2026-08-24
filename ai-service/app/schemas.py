@@ -75,12 +75,12 @@ class ParseRequest(Strict):
     """F-EXT-001 (정세현). `contracts/parsed_document.schema.json` 미정 — 확정 시 교체."""
 
     document_path: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: Literal["ELS", "VARIABLE_INSURANCE"] = "ELS"
 
 
 class ExtractRequest(Strict):
     product_id: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: Literal["ELS", "VARIABLE_INSURANCE"] = "ELS"
     parsed_document: dict[str, Any] = Field(description="F-EXT-001 출력 (형식 미확정)")
 
 
@@ -107,7 +107,7 @@ class ScoreRequest(Strict):
     question: str
     answer_text: str
     risk_item: RiskItem
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: Literal["ELS", "VARIABLE_INSURANCE"] = "ELS"
 
 
 class MisconceptionMatch(Strict):
@@ -120,7 +120,7 @@ class MisconceptionMatch(Strict):
 
 class MisconceptionRequest(Strict):
     text: str
-    product_type: Literal["ELS", "VARIABLE_INS"] = "ELS"
+    product_type: Literal["ELS", "VARIABLE_INSURANCE"] = "ELS"
 
 
 class MisconceptionResponse(Strict):
