@@ -1,0 +1,75 @@
+{
+  "document_id": "doc-els-demo-001",
+  "product_type": "ELS",
+  "source_file": "els_simple_prospectus_demo.pdf",
+  "parser_version": "manual-0",
+  "parsed_at": "2026-08-22T00:00:00Z",
+  "page_count": 2,
+  "pages": [
+    {
+      "page": 1,
+      "text": "[간이투자설명서] 파생결합증권(ELS) 제0000회\n\n1. 상품 개요\n본 증권은 기초자산의 가격 변동에 따라 손익이 결정되는 파생결합증권입니다.\n이 금융투자상품은 예금자보호법에 따라 보호되지 않습니다.\n투자원금의 손실이 발생할 수 있으며, 그 손실은 투자자에게 귀속됩니다.",
+      "char_count": 152
+    },
+    {
+      "page": 3,
+      "text": "3. 상환 조건\n\n가. 조기상환\n각 조기상환평가일에 기초자산 모두가 행사가격 이상인 경우 액면금액과 수익을 지급합니다.\n\n나. 만기상환\n만기평가일에 기초자산 중 어느 하나라도 최초기준가격의 50% 미만인 경우 원금 손실이 발생할 수 있습니다.\n이 경우 손실률은 최초기준가격 대비 하락률에 연동됩니다.",
+      "char_count": 167
+    }
+  ],
+  "tables": [
+    {
+      "page": 3,
+      "caption": "기초자산 및 행사가격",
+      "rows": [
+        [
+          "기초자산",
+          "최초기준가격",
+          "행사가격(조기)",
+          "낙인"
+        ],
+        [
+          "HSCEI",
+          "6,000.00",
+          "5,400.00",
+          "3,000.00"
+        ],
+        [
+          "S&P500",
+          "5,000.00",
+          "4,500.00",
+          "2,500.00"
+        ]
+      ]
+    }
+  ],
+  "parse_warnings": [
+    {
+      "code": "MANUAL_OVERRIDE",
+      "page": null,
+      "message": "파서 미구현 구간의 수동 샘플. 윤지석 F-EXT-002 프롬프트 착수용 — 파서 완성 시 대체한다."
+    }
+  ],
+  "_expected_risk_items": [
+    {
+      "item_id": "ELS-NO-DEPOSIT-INSURANCE",
+      "name": "예금자보호 비대상",
+      "value_text": "이 금융투자상품은 예금자보호법에 따라 보호되지 않습니다.",
+      "source_span": {
+        "page": 1,
+        "start": 81,
+        "end": 112
+      }
+    },
+    {
+      "item_id": "ELS-PRINCIPAL-LOSS",
+      "name": "원금손실 조건",
+      "value_text": "만기평가일에 기초자산 중 어느 하나라도 최초기준가격의 50% 미만인 경우 원금 손실이 발생할 수 있습니다.",
+      "source_span": {
+        "page": 3,
+        "start": 76,
+        "end": 135
+      }
+    }
+  ]
+}
