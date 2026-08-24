@@ -32,8 +32,8 @@ cd web && npm run build
 python eval/run_eval.py
 ```
 
-**주의**: `server/`에 Gradle 래퍼(`gradlew`)가 아직 없다. `./gradlew`를 쓰려면 먼저 생성해야
-한다(`gradle wrapper`). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
+**주의**: `server/`의 Gradle 래퍼(`gradlew`)는 8.10.2로 고정돼 있다(Boot 3.3.2 플러그인 호환,
+PR #6). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
 테스트 러너도 없다 — 테스트는 현재 `server/src/test`의 JUnit 뿐이다.
 
 ## 아키텍처
