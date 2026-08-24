@@ -35,7 +35,8 @@
     },
     "page_count": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "원본 PDF의 총 페이지 수. 파서는 전 페이지를 내보내므로 page_count == len(pages)가 성립한다. 스팬 검증에는 쓰지 말 것 — source_span 오프셋은 페이지 상대이므로 pages[].char_count를 봐야 한다"
     },
     "pages": {
       "type": "array",
