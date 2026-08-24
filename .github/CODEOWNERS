@@ -47,6 +47,5 @@
 /docs/                                                  @gitIt-sehyeon
 /scripts/                                               @gitIt-sehyeon
 
-# ── web/ — 소유자는 오준서지만 아직 org 멤버가 아니라 배정할 수 없다.
-#    org에 초대한 뒤 아래 주석을 풀 것.
-# /web/                                                 @<오준서-핸들>
+# ── web/ — 오준서 영역 (v1.2 §화면, S-01 ~ S-08)
+/web/                                                   @junseo2323
