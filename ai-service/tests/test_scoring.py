@@ -78,7 +78,7 @@ def test_library_match_raises_grade_to_u4():
 
 def test_floor_only_applies_to_rubric_related_types():
     """다른 항목의 오해가 이 항목 등급을 끌어내리면 안 된다.
-    ELS-EARLY-REDEMPTION 루브릭은 M01을 관련 유형으로 선언하지 않았다."""
+    ELS-EARLY-REDEMPTION-CONDITION 루브릭은 M01을 관련 유형으로 선언하지 않았다."""
     judgment, _ = _score(
         make_judgment(grade=Grade.U1, confidence=0.95, item_id="ELS-EARLY-REDEMPTION-CONDITION"),
         item_id="ELS-EARLY-REDEMPTION-CONDITION",

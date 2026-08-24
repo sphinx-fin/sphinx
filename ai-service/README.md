@@ -108,7 +108,9 @@ pytest
 - `tests/test_skeleton.py` — 골격의 계약: 6개 엔드포인트 존재, 미구현 501, 키 없으면 503,
   PII 거부.
 - `tests/test_misconception.py` — 라이브러리 재현성. 데모 발화가 결정론적으로 잡히는지.
-- `tests/test_scoring.py` — 후처리 비대칭. 지어낸 인용 거부, 오해 상향, U4 불완화.
+- `tests/test_scoring.py` — 후처리 비대칭. 지어낸 인용·루브릭 밖 조항 거부, 오해 상향.
+- `tests/test_parsed_document.py` — `contracts/parsed_document.schema.json` 미러 정합과
+  스팬 항등식(`pages[page].text[start:end] == value_text`)을 실파서 출력으로 검증.
 
 **API 키 없이 전부 돌아간다.** 후처리가 채점 품질의 실질이므로 CI에서 회귀를 잡아야 한다.
 
@@ -118,11 +120,19 @@ pytest
 이해→오해는 관리 지표 10% — 때문에 후처리는 **전부 안전한 방향으로만** 움직인다.
 
 1. `_pin_item_id` — 호출자가 지정한 항목이 진실이다
-2. `verify_quote_is_verbatim` — 근거 인용이 실제 발화에 있는지 대조 (P4).
+2. `_drop_llm_misconception_type` — 모델이 채운 유형ID를 버린다. 유형ID는 오해 라이브러리에서만
+   온다. 실측에서 존재하지 않는 ID를 지어냈고, 그건 오해 지도 집계 키다
+3. `verify_quote_is_verbatim` — 근거 인용이 실제 발화에 있는지 대조 (P4).
    지어낸 인용은 근거 없는 것보다 나쁘다
-3. `apply_misconception_floor` — 루브릭이 관련 유형으로 선언한 오해가 라이브러리에서
-   잡히면 U4 아래로 내려가지 않는다. 데모 임계 경로가 LLM 응답에 의존하지 않게 한다
-4. `downgrade_low_confidence` — 신뢰도 미달 U1 → U2. **U4는 건드리지 않는다**
+4. `verify_rubric_clause_is_published` — 인용된 조항이 공개 루브릭 안의 것인지 대조 (P4).
+   "A 및 B"처럼 합쳐 인용해도 공개 조항으로 환원되면 통과, 잔여에 내용이 남으면 거부
+5. `apply_misconception_floor` — 루브릭이 관련 유형으로 선언한 오해가 라이브러리에서
+   잡히면 U4 아래로 내려가지 않는다. 데모 임계 경로가 LLM 응답에 의존하지 않게 한다.
+   상향 근거의 종류(`dispute_case`/`inspection`/`proposal_example`)를 `reason`에 남긴다
+
+**신뢰도 기반 황색 강등은 여기서 하지 않는다.** 게이트 정책이므로 `gate_rules.yaml`이
+가진다(강희진 결정, PR #10). 양쪽에서 하면 이중계산이다 —
+`proposals/F-SCR-001-yellow-downgrade.md` 참고.
 
 ## dev set
 
