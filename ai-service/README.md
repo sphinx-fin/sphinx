@@ -30,7 +30,7 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 
 ## 엔드포인트
 
-Spring `core/AiServiceClient`가 호출하는 6개. 미구현 기능은 **501**을 반환한다 —
+Spring `core/AiServiceClient`가 호출하는 7개. 미구현 기능은 **501**을 반환한다 —
 "아직 없음"과 "터짐"이 구분돼야 연동하는 쪽이 판단할 수 있다.
 
 | 경로 | 기능ID | 상태 |
@@ -40,11 +40,13 @@ Spring `core/AiServiceClient`가 호출하는 6개. 미구현 기능은 **501**�
 | `POST /internal/question` | F-INT-002 | 501 |
 | `POST /internal/score` | F-SCR-001 | 구현 — LLM 키 필요 |
 | `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
+| `POST /internal/mismatch` | F-DET-002 | 501 |
 | `POST /internal/reexplain` | F-INT-004 | 501 |
 
-F-DET-002(적합성 모순)는 이 목록에 엔드포인트가 없다. 세션 단위 판정이라 항목별
-`/internal/score`에 얹기 어려워 **7번째 `/internal/mismatch`를 제안**했고, 출력 스키마
-초안과 근거는 `proposals/`에 있다. 강희진 확인 후 붙인다.
+F-DET-002는 **7번째 엔드포인트**다(강희진 결정). 모순 판정은 설문 전체 + 세션 발화
+전체가 입력이라 항목 단위 `/internal/score`와 분리한다. 게이트 판정 직전에 호출된다.
+취약 요인 가중·코칭 스코어는 ai-service가 하지 않는다 — 서버 소유(역할분담표 v1.2 §38).
+근거와 결정 이력은 `proposals/F-DET-002-mismatch.md`.
 
 ## proposals/ — 계약 초안 대기소
 

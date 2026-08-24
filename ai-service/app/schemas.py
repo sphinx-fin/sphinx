@@ -240,8 +240,13 @@ class Contradiction(Strict):
 class SuitabilityMismatch(Strict):
     """세션 단위 판정. gate_rules.yaml R-02의 suitabilityMismatch로 들어간다.
 
-    취약 요인 가중(연령·총자산 대비 비중·투자경험·손실경험)은 여기 없다 — 강희진 소유다.
-    이 타입은 가중 전의 모순 사실만 담는다.
+    취약 요인 가중(연령·가입비중·투자경험·채널)은 여기 없다 — 강희진 소유로 확정됐다
+    (결정 ⓓ). `resources/vulnerability_weights.yaml` → 코칭 스코어 → 세션 메타 경로이며
+    스키마에 필드를 추가하지 않는다.
+
+    분담: **판정 = ai-service / 취약가중·코칭·메타 = 강희진** (역할분담표 v1.2 §38).
+    `confidence`는 필수다 — 그것이 우리가 내는 '탐지 자신감'이고, 취약 가중과는 별개다.
+    `direction`은 게이트가 무시하지만(모순이면 R-02 RED) 코칭 문구를 좌우하므로 유지한다.
     """
 
     session_id: str
@@ -269,10 +274,25 @@ class SuitabilityMismatch(Strict):
 
 
 class MismatchRequest(Strict):
-    """제안: POST /internal/mismatch. AiServiceClient의 6개 목록에 없으므로 강희진 확인 대기."""
+    """POST /internal/mismatch — 7번째 엔드포인트로 확정(강희진 결정 ⓐ).
+
+    모순 판정은 설문 전체 + 세션 내 발화 전체가 입력이라 항목 단위 `/internal/score`와
+    분리한다. 호출 시점은 게이트 판정 직전(또는 충분한 답변 확보 후)이다.
+
+    `survey_result`는 **freeform 매핑**이다(강희진 결정 ⓑ). `CreateSession.surveyResult`의
+    `Map<String, Object>`를 그대로 받는다. 키를 문항 식별자로, 값을 기재 답변으로 본다.
+
+    ⚠️ 한계: 설문 쪽에서 `axis`를 주지 않으므로 어느 축의 모순인지는 문항 키·값의 문면을
+    해석해서 판정해야 한다. 문항 문면이 바뀌면 판정이 흔들릴 수 있다 — 정확도가 문제되면
+    설문 스키마에 axis 추가를 다시 제안한다.
+    취약 요인(연령·가입금액대·투자경험·채널)은 여기 오지 않는다. 세션 typed 필드에서
+    강희진이 직접 읽고 가중한다(결정 ⓓ).
+    """
 
     session_id: str
-    survey_result: list[SurveyRef]
+    survey_result: dict[str, Any] = Field(
+        description="CreateSession.surveyResult 원형. 키=문항 식별자, 값=기재 답변"
+    )
     utterances: list[dict[str, Any]] = Field(
         description="[{item_id, text}] — 세션 내 발화. Spring PiiGateway 통과분만 (P3)"
     )

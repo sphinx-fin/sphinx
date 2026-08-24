@@ -136,3 +136,36 @@ def test_vulnerability_weighting_is_not_in_this_schema():
     fields = set(SuitabilityMismatch.model_fields)
     assert not fields & {"age_band", "amount_band", "experience_level",
                          "vulnerability_score", "coaching_score", "weighted_score"}
+
+
+# ── 엔드포인트 (강희진 결정 ⓐ) ────────────────────────────────────────────────
+def test_mismatch_endpoint_is_registered():
+    """7번째 엔드포인트로 확정됐다. 세션 단위 판정이라 /score와 분리한다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    paths = TestClient(app).get("/openapi.json").json()["paths"]
+    assert "/internal/mismatch" in paths
+    assert "post" in paths["/internal/mismatch"]
+
+
+def test_freeform_survey_result_is_accepted():
+    """결정 ⓑ — surveyResult는 Map<String,Object> freeform이다. 정규화된 배열이 아니다."""
+    from app.schemas import MismatchRequest
+
+    req = MismatchRequest(
+        session_id="s1",
+        survey_result={"Q3": "감수 가능", "Q7": {"choice": 2, "label": "3년 이상"}},
+        utterances=[{"item_id": "ELS-PRINCIPAL-LOSS-WARNING", "text": "원금은 지켜지는 거죠"}],
+    )
+    assert req.survey_result["Q3"] == "감수 가능"
+
+
+def test_request_carries_no_vulnerability_factors():
+    """취약 요인(연령·가입금액대·투자경험·채널)은 세션 typed 필드에서 강희진이 직접 읽는다
+    (결정 ⓓ). ai-service로 나갈 이유가 없다 — P3에도 유리하다."""
+    from app.schemas import MismatchRequest
+
+    fields = set(MismatchRequest.model_fields)
+    assert not fields & {"age_band", "amount_band", "experience_level", "channel"}
