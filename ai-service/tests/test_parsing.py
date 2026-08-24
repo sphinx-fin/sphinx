@@ -204,3 +204,20 @@ def test_text_layer_missing_is_reported(scanned_pdf):
     codes = [w["code"] for w in doc["parse_warnings"]]
     assert "TEXT_LAYER_MISSING" in codes
     assert doc["pages"][0]["text"] == ""
+
+
+def test_find_occurrences_uses_same_strategies_as_resolve_span():
+    """resolve_span이 찾은 문면을 find_occurrences가 0회라고 하면 모호성 검사가 무력해진다."""
+    doc = _doc("이 파생결\n합증권은 보호되지 않습니다. 또 파생결\n합증권은 보호되지 않습니다.")
+    quote = "파생결합증권은 보호되지 않습니다."
+    got = parsing.resolve_span(doc, 1, quote)
+    assert got["match"] == "loose"
+    occ = parsing.find_occurrences(doc, 1, quote)
+    assert len(occ) == 2
+    assert all(parsing.verify_span(doc, o["source_span"], o["value_text"]) for o in occ)
+
+
+def test_find_occurrences_prefers_exact_over_looser_tiers():
+    doc = _doc("원금 손실. 원금\n손실.")
+    occ = parsing.find_occurrences(doc, 1, "원금 손실")
+    assert [o["match"] for o in occ] == ["exact"]

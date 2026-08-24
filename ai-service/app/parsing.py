@@ -227,18 +227,21 @@ def resolve_span(doc: dict, page: int, quote: str) -> dict | None:
     if not q:
         return None
 
-    start = text.find(q)
-    if start >= 0:
-        return _span(page, text, start, start + len(q), "exact")
-
-    for strategy, pattern in (
-        ("whitespace", r"\s+".join(re.escape(tok) for tok in q.split())),
-        ("loose", r"\s*".join(re.escape(ch) for ch in q if not ch.isspace())),
-    ):
+    for strategy, pattern in _patterns(q):
         m = re.search(pattern, text)
         if m:
             return _span(page, text, m.start(), m.end(), strategy)
     return None
+
+
+def _patterns(q: str):
+    """느슨해지는 순서로 매칭 전략을 낸다. resolve_span과 find_occurrences가 같은 걸 써야 한다."""
+    yield "exact", re.escape(q)
+    # 공백이 개행으로 바뀐 경우
+    yield "whitespace", r"\s+".join(re.escape(tok) for tok in q.split())
+    # 낱자 사이에 개행이 끼어든 경우. 실제 공시 PDF에서 가장 흔하다 —
+    # 키움 4181 간이투자설명서의 이해항목 7건 중 3건이 이 단계에서만 잡혔다.
+    yield "loose", r"\s*".join(re.escape(ch) for ch in q if not ch.isspace())
 
 
 def _span(page: int, text: str, start: int, end: int, match: str) -> dict:
@@ -250,16 +253,23 @@ def _span(page: int, text: str, start: int, end: int, match: str) -> dict:
 
 
 def find_occurrences(doc: dict, page: int, quote: str) -> list[dict]:
-    """같은 문면이 여러 번 나오면 스팬이 모호하다. 정답 세트를 만들 때 개수를 먼저 확인한다."""
+    """같은 문면이 여러 번 나오면 스팬이 모호하다. 정답 세트를 만들 때 개수를 먼저 확인한다.
+
+    resolve_span과 **같은 전략 순서**를 쓴다. 다르게 구현하면 resolve_span이 찾은 문면을
+    여기서는 0회 출현이라고 보고하게 되고, 모호성 검사가 조용히 무력해진다.
+    """
     text = page_text(doc, page)
     q = _nfc(quote)
     if not q:
         return []
-    out, at = [], text.find(q)
-    while at >= 0:
-        out.append(_span(page, text, at, at + len(q), "exact"))
-        at = text.find(q, at + 1)
-    return out
+    for _strategy_name, pattern in _patterns(q):
+        found = [
+            _span(page, text, m.start(), m.end(), _strategy_name)
+            for m in re.finditer(pattern, text)
+        ]
+        if found:
+            return found
+    return []
 
 
 def verify_span(doc: dict, source_span: dict, value_text: str) -> bool:
