@@ -1,7 +1,10 @@
 package com.sphinxfin.sphinx.core;
 
 import com.sphinxfin.sphinx.domain.Channel;
+import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.Signal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,7 +36,7 @@ class SessionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SessionService(repository);
+        service = new SessionService(repository, new GateEngine());   // 실제 gate_rules.yaml 로드
     }
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {
@@ -75,5 +78,30 @@ class SessionServiceTest {
     void getMissingThrows() {
         assertThatThrownBy(() -> service.get("nope"))
                 .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    @DisplayName("판정 기록 후 게이트 판정: U4 오해 → RED (R-01)")
+    void recordJudgmentThenJudgeRed() {
+        Session s = service.create(cmd(null));
+        Judgment u4 = new Judgment("ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, 0.9,
+                new Judgment.Evidence("은행이니까 원금 보장되죠", "원금손실 조건 인지 필요"),
+                "원금 보장 오해", "M01-PRINCIPAL-GUARANTEE");
+        service.recordJudgment(s.id(), u4);
+        // 첫 답변 → 인터뷰 시작
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
+
+        var result = service.judge(s.id());
+        assertThat(result.signal()).isEqualTo(Signal.RED);
+        assertThat(result.ruleTrace()).containsExactly("R-01");
+        // 판정 후 → JUDGED
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.JUDGED);
+    }
+
+    @Test
+    @DisplayName("판정 없이 게이트 판정 → fail-closed RED")
+    void judgeWithNoJudgment_failsClosed() {
+        Session s = service.create(cmd(null));
+        assertThat(service.judge(s.id()).signal()).isEqualTo(Signal.RED);
     }
 }
