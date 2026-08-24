@@ -14,7 +14,7 @@
   "properties": {
     "item_id": {
       "type": "string",
-      "description": "예: ELS-PRINCIPAL-LOSS"
+      "description": "예: ELS-PRINCIPAL-LOSS-WARNING (정본: contracts/samples의 _expected_risk_items 긴 형식)"
     },
     "product_id": {
       "type": "string"

@@ -35,18 +35,20 @@ public class SessionController {
     @PostMapping("/{sid}/questions/next")
     public Map<String, String> nextQuestion(@PathVariable String sid) {
         // TODO(강희진): ai-service /internal/question 프록시 (F-INT-002, 윤지석)
-        return Map.of("itemId", "ELS-PRINCIPAL-LOSS",
+        return Map.of("itemId", "ELS-PRINCIPAL-LOSS-WARNING",
                 "question", "이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?");
     }
 
     @PostMapping("/{sid}/answers")
-    public Judgment submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
-        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment 반환
-        // 채점 자체는 윤지석(ai-service). P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
-        return new Judgment("ELS-PRINCIPAL-LOSS", Grade.U4, 0.91,
+    public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
+        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment
+        // TODO: ai-service 채점 연결(F-SCR-001, 윤지석) — 지금은 목 판정을 세션에 기록만 한다.
+        // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
+        Judgment measured = new Judgment(body.itemId(), Grade.U4, 0.91,
                 new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
                         "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
                 "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE");
+        return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
     }
 
     @PostMapping("/{sid}/simulate")
@@ -60,9 +62,9 @@ public class SessionController {
     }
 
     @PostMapping("/{sid}/judge")
-    public GateResult judge(@PathVariable String sid) {
-        // TODO(강희진): GateEngine (F-GTE-001)
-        return new GateResult(Signal.RED, List.of("R-01: U4 존재 → RED"));
+    public ApiResponse<GateResult> judge(@PathVariable String sid) {
+        // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
+        return ApiResponse.ok(sessionService.judge(sid));
     }
 
     @GetMapping("/{sid}/report")

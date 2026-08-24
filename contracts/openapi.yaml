@@ -49,10 +49,41 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /sessions/{id}/questions/next: {post: {summary: "다음 질문 (F-INT-002)"}}
-  /sessions/{id}/answers:   {post: {summary: "텍스트 응답 제출 (F-INT-003) → Judgment 반환. 응답 스키마는 judgment.schema.json 기준(명명 규약 확정 후 $ref 연결)"}}
+
+  /sessions/{id}/answers:
+    post:
+      summary: 텍스트 응답 제출 (F-INT-003) → 항목별 판정(측정값) 반환·세션에 기록
+      description: >
+        text는 서버에서 PII 마스킹 후 ai-service로 나간다. 반환 Judgment는 '측정값'이며
+        게이트 판정이 아니다(P1). 웹 응답은 camelCase(내부 ai-service 계약 judgment.schema.json은 snake_case).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnswerRequest'}
+      responses:
+        '200':
+          description: 항목별 이해도 판정
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
+
   /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
   /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
-  /sessions/{id}/judge:     {post: {summary: "게이트 판정 (F-GTE-001)"}}
+
+  /sessions/{id}/judge:
+    post:
+      summary: 게이트 판정 (F-GTE-001) — 세션에 쌓인 판정으로 신호등 산출
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 게이트 판정 결과
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GateApiResponse'}
   /sessions/{id}/override:  {post: {summary: "적색 진행 요청 (F-GTE-002)"}}
   /sessions/{id}/override/approve: {post: {summary: "관리자 승인/반려"}}
   /sessions/{id}/report:    {get: {summary: "이해 기록 (F-GTE-004)"}}
@@ -102,4 +133,51 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/SessionResponse'}
+        error:   {type: object, nullable: true}
+
+    AnswerRequest:
+      type: object
+      description: F-INT-003 텍스트 응답. text는 서버에서 PII 마스킹 후 ai-service로.
+      required: [itemId, text]
+      properties:
+        itemId:    {type: string}
+        text:      {type: string, description: "고객 발화(서버에서 마스킹)"}
+        inputMeta: {type: object, nullable: true, additionalProperties: true, description: "붙여넣기·지연·수정빈도 등(F-INT-003)"}
+
+    # 웹 응답용 Judgment(camelCase). 내부 ai-service 계약은 judgment.schema.json(snake_case).
+    JudgmentView:
+      type: object
+      required: [itemId, grade, confidence, evidence, reason]
+      properties:
+        itemId:     {type: string}
+        grade:      {type: string, enum: [U1, U2, U3, U4]}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        evidence:
+          type: object
+          required: [utteranceQuote, rubricClause]
+          properties:
+            utteranceQuote: {type: string}
+            rubricClause:   {type: string}
+        reason:            {type: string}
+        misconceptionType: {type: string, nullable: true}
+    JudgmentApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/JudgmentView'}
+        error:   {type: object, nullable: true}
+
+    GateResult:
+      type: object
+      required: [signal, ruleTrace]
+      properties:
+        signal:    {type: string, enum: [GREEN, YELLOW, RED]}
+        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+    GateApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/GateResult'}
         error:   {type: object, nullable: true}
