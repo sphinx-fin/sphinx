@@ -1,7 +1,7 @@
 # 황색 강등을 어디서 할 것인가 (P1 경계)
 
 작성: 윤지석 (F-SCR-001 R) · 결정: 강희진 (F-GTE-001 R)
-상태: **결정됨 — C 채택** (PR #10 리뷰 회신).
+상태: **완료** — C 채택(PR #10 리뷰) → 게이트 구현(PR #15 `feat/F-GTE-001-confidence-rule`).
 
 > ai-service는 진짜 등급 + confidence만 낸다. 게이트가 `gate_rules.yaml`의 confidence
 > 룰로 처리한다. 양쪽에서 하면 이중계산이다. 임계값 소유도 게이트로 넘어갔다.
@@ -118,14 +118,34 @@ if (conf.matches()) {
 - [x] ~~A / B / C 중 택일~~ → **C 채택.** (감사 표면 + U4 예외 소거)
 - [x] ~~0.7이 두 곳에 있는 상태 종료~~ → ai-service에서 제거했다. 임계값은 이제
       `application.yml` / `gate_rules.yaml` 한 곳에만 있으면 된다.
-- [ ] (강희진) `Context`에 `minConfidence` 추가 + `compile()` 분기 + R-06 룰.
-      **룰 순서 주의**: R-01~R-03(RED) 뒤에 두어야 U4 예외가 공짜로 성립한다.
+- [x] ~~(강희진) `Context`에 confidence 추가 + `compile()` 분기 + 룰~~
+      → PR #15로 착지. R-05 `anyConfidenceBelow 0.7`, RED 룰 뒤에 배치돼 U4 예외 성립.
 
-## 지금 상태 — 열린 구간
+## 착지 결과 (PR #15)
 
-강등이 아무 곳에서도 일어나지 않는다. 게이트 룰이 들어오기 전까지는 신뢰도 낮은 U1이
-그대로 GREEN으로 간다. `confidence`는 `Judgment`에 required로 실려 나가므로 게이트가
-즉시 쓸 수 있다.
+열린 구간이 닫혔다. 내가 제안한 `minConfidence < 0.7` 대신 `anyConfidenceBelow 0.7`
+문법을 쓴다(의미는 같다).
+
+```yaml
+R-01  anyGrade == 'U4'          → RED
+R-02  suitabilityMismatch       → RED
+R-03  reverifyFailed >= 2       → RED
+R-04  anyGrade in ['U2','U3']   → YELLOW
+R-05  anyConfidenceBelow 0.7    → YELLOW    ← 신규
+R-06  allGrade == 'U1'          → GREEN     ← 기존 R-05에서 번호 이동
+```
+
+**U4 예외가 룰 순서로 보장된다** — R-01이 U4를 먼저 RED로 잡으므로 R-05에 도달하지 않는다.
+제안했던 그대로다. 임계값의 단일 출처도 이 파일이 됐다.
+
+실질적으로 판정이 바뀌는 경우는 **전부 U1인 세션 하나뿐**이다. 낮은 신뢰도의 U2·U3는
+이미 R-04가 YELLOW로 잡고, U4는 R-01이 RED로 잡는다.
+
+### 관측상 사소한 점 (강희진 참고)
+
+R-05가 R-04 뒤에 있어 신호는 같지만 `ruleTrace`에는 먼저 발화한 룰만 남는다. U2가 있고
+동시에 신뢰도도 낮은 세션은 트레이스에 R-04만 기록되고 신뢰도 문제가 보이지 않는다.
+신호가 같으니 판정은 문제없고, 감사 기록에서 두 사유를 구분하려면 볼 지점이다.
 
 ## ★ 구현 전에 읽어야 할 실측 결과
 
