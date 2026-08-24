@@ -13,6 +13,11 @@ rules:
   - id: R-04
     if: "anyGrade in ['U2','U3']"
     then: YELLOW
+  # 신뢰도 기반 황색 강등 — 이해했다지만 채점 신뢰도가 낮으면 통과시키지 않는다.
+  # U4 예외는 순서로 보장(R-01이 U4를 이미 RED로 잡음). 임계값의 단일 출처는 여기다.
   - id: R-05
+    if: "anyConfidenceBelow 0.7"
+    then: YELLOW
+  - id: R-06
     if: "allGrade == 'U1'"
     then: GREEN
