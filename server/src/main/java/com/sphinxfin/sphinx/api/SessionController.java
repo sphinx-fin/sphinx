@@ -1,7 +1,14 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.api.dto.AnswerRequest;
+import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
+import com.sphinxfin.sphinx.api.dto.SessionResponse;
+import com.sphinxfin.sphinx.core.Session;
+import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
-import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -9,17 +16,20 @@ import java.util.Map;
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
 @RestController
 @RequestMapping("/sessions")
+@RequiredArgsConstructor
 public class SessionController {
 
-    /** F-INT-001. 비식별 속성만 받는다 — 성명·주민번호 필드는 존재하지 않음 (P3) */
-    public record CreateSession(@NotBlank String productId, @NotBlank String channel,
-                                @NotBlank String ageBand, String experienceLevel,
-                                String amountBand, Map<String, Object> surveyResult) {}
+    private final SessionService sessionService;
 
     @PostMapping
-    public Map<String, String> create(@RequestBody CreateSession body) {
-        // TODO(강희진): SessionFsm 생성
-        return Map.of("sessionId", "mock-session-001", "state", "CREATED");
+    public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
+        Session session = sessionService.create(body.toCommand());
+        return ApiResponse.ok(SessionResponse.of(session));
+    }
+
+    @GetMapping("/{sid}")
+    public ApiResponse<SessionResponse> get(@PathVariable String sid) {
+        return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
     }
 
     @PostMapping("/{sid}/questions/next")
@@ -29,11 +39,8 @@ public class SessionController {
                 "question", "이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?");
     }
 
-    /** F-INT-003: 텍스트 응답 + 입력 메타(붙여넣기·지연·수정빈도) */
-    public record Answer(@NotBlank String itemId, @NotBlank String text, Map<String, Object> inputMeta) {}
-
     @PostMapping("/{sid}/answers")
-    public Judgment submitAnswer(@PathVariable String sid, @RequestBody Answer body) {
+    public Judgment submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
         // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment 반환
         // 채점 자체는 윤지석(ai-service). P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
         return new Judgment("ELS-PRINCIPAL-LOSS", Grade.U4, 0.91,

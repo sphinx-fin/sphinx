@@ -9,7 +9,7 @@ import yaml
 
 from app import misconception
 from app.schemas import PRODUCT_TYPES
-from tests.conftest import FIXTURES
+from tests.helpers import FIXTURES
 
 
 def _cases():

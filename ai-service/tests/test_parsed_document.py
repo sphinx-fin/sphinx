@@ -48,7 +48,18 @@ def test_mirror_matches_contract_enums():
 def test_contract_samples_validate(path: Path):
     doc = ParsedDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
     assert doc.pages
-    assert doc.is_manual, "수동 샘플은 MANUAL_OVERRIDE로 표시돼야 한다"
+    assert doc.parser_version
+
+
+@pytest.mark.skipif(not _samples(), reason=_MISSING)
+@pytest.mark.parametrize("path", _samples(), ids=lambda p: p.stem)
+def test_contract_samples_are_real_parser_output(path: Path):
+    """샘플은 실문서 파서 출력이어야 한다(F-EXT-001 완료 후).
+
+    수동 샘플로 되돌아가면 여기서 잡힌다 — 사람이 만든 문서로 추출 품질을 말하면
+    성능 수치의 출처가 무너진다."""
+    doc = ParsedDocument.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    assert not doc.is_manual, "MANUAL_OVERRIDE — 수동 샘플로 되돌아갔다"
 
 
 @pytest.mark.skipif(not _samples(), reason=_MISSING)

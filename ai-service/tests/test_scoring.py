@@ -10,7 +10,7 @@ import pytest
 from app import rubrics, scoring
 from app.llm_client import LlmError
 from app.schemas import Condition, Grade, RiskItem, SourceSpan
-from tests.conftest import FakeLlm, make_judgment
+from tests.helpers import FakeLlm, make_judgment
 
 RISK_ITEM = RiskItem(
     item_id="ELS-PRINCIPAL-LOSS",

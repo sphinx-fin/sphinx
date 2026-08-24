@@ -12,7 +12,14 @@ data/documents/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
 .DS_Store
+.pytest_cache/
+
+# Gradle
+.gradle/
+build/
 
 # 로컬 전용 (공유 금지)
 CLAUDE.local.md
+
+# IDE
 .idea/

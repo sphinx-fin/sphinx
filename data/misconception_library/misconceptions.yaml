@@ -1,5 +1,7 @@
 # 오해 패턴 라이브러리 v0 (소유: 정세현 / 매칭 엔진: 윤지석)
 # 근거: 금감원 분쟁조정례·검사결과. 각 항목에 source 필수.
+# products 값은 contracts/parsed_document.schema.json 의 product_type enum 을 따른다
+# (ELS·VARIABLE_INSURANCE). ALL 은 enum 값이 아니라 전체 상품 와일드카드다.
 version: 0
 types:
   - id: M01-PRINCIPAL-GUARANTEE
