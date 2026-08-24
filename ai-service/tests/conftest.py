@@ -1,12 +1,16 @@
 """F-EXT-001 테스트 픽스처. 소유: 정세현
 
-`data/documents/`(수집 문서)는 git 제외이므로, 파서 테스트가 그 문서에 의존하면 다른 사람의
-체크아웃에서는 아예 돌지 않는다. 그래서 이미 머지된 `contracts/samples/*.json`의 페이지
-텍스트를 거꾸로 PDF로 찍어 픽스처로 쓴다 — 텍스트 원본은 계약 샘플 한 곳뿐이다.
+픽스처가 두 종류다.
 
-의도적으로 줄바꿈을 폭에 맞춰 접는다. 실제 공시 PDF는 문장 중간에서 개행되고, 그게
-`resolve_span`이 다뤄야 하는 조건이기 때문이다. 여기서 한 줄에 다 그려버리면 테스트가
-현실보다 쉬워진다.
+- **합성 PDF** — 이 파일 안에 텍스트를 두고 실행 시점에 PDF로 찍는다. 표 추출·캡션 추정·
+  텍스트 레이어 부재 같은 기계적 동작을 문서 없이 검증하기 위한 것이다. 폭에 맞춰 줄바꿈을
+  접는다 — 실제 공시 PDF가 문장 중간에서 개행하고, 그게 스팬 해소가 다뤄야 하는 조건이다.
+- **실문서** — `data/documents/`(git 제외)의 키움증권 제4181회 간이투자설명서. 없으면 해당
+  테스트를 skip 한다. 계약 준수는 결국 실문서로 확인해야 하지만, 문서가 없는 체크아웃에서
+  테스트 전체가 죽으면 안 된다.
+
+합성 픽스처의 텍스트를 `contracts/samples/`에서 가져오지 않는다. 그 샘플은 이제 실문서 파싱
+출력이고, 실문서 텍스트를 합성 PDF로 되돌려 다시 파싱하는 건 아무것도 검증하지 않는다.
 """
 import json
 import pathlib
@@ -30,6 +34,7 @@ MARGIN = 60
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = REPO_ROOT / "contracts" / "samples"
+REAL_ELS_PDF = REPO_ROOT / "data" / "documents" / "els_kiwoom_4181_simple_prospectus.pdf"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -44,6 +49,7 @@ def repo_root():
 
 @pytest.fixture(scope="session")
 def els_sample():
+    """실문서 파싱 출력 = 계약 샘플. `_expected_risk_items`가 정답 스팬이다."""
     return json.loads((SAMPLES / "parsed_els_sample.json").read_text(encoding="utf-8"))
 
 
@@ -51,6 +57,18 @@ def els_sample():
 def var_sample():
     return json.loads((SAMPLES / "parsed_variable_sample.json").read_text(encoding="utf-8"))
 
+
+@pytest.fixture(scope="session")
+def real_els_pdf():
+    if not REAL_ELS_PDF.exists():
+        pytest.skip(
+            f"{REAL_ELS_PDF.relative_to(REPO_ROOT)} 없음 (git 제외). "
+            f"python3 scripts/fetch_documents.py els-4181"
+        )
+    return str(REAL_ELS_PDF)
+
+
+# --- 합성 PDF 생성 ----------------------------------------------------------------
 
 def _wrap(text, max_width):
     """글자 단위 그리디 줄바꿈. 한국어 조판은 단어 중간에서도 끊긴다."""
@@ -104,11 +122,6 @@ def _draw_table(c, rows, y, caption=None):
     return bottom - LEADING
 
 
-def _new_page(c):
-    c.setFont(FONT, FONT_SIZE)
-    return A4[1] - MARGIN
-
-
 def _render(path, page_texts, tables_by_page=None):
     """page_texts: {페이지번호: 텍스트}. 번호가 빈 페이지는 채움 문구로 채운다."""
     tables_by_page = tables_by_page or {}
@@ -117,7 +130,8 @@ def _render(path, page_texts, tables_by_page=None):
     usable = A4[0] - 2 * MARGIN
 
     for page_no in range(1, max_page + 1):
-        y = _new_page(c)
+        c.setFont(FONT, FONT_SIZE)
+        y = A4[1] - MARGIN
         text = page_texts.get(page_no, f"- {page_no} -\n(이 페이지는 데모 범위 밖입니다.)")
         y = _draw_text(c, _wrap(text, usable), y)
         for table in tables_by_page.get(page_no, []):
@@ -127,23 +141,54 @@ def _render(path, page_texts, tables_by_page=None):
     return str(path)
 
 
-def _page_texts(sample):
-    return {p["page"]: p["text"] for p in sample["pages"]}
+# --- 합성 픽스처 내용 -------------------------------------------------------------
+# ELS 간이투자설명서를 닮은 최소 문서. 실문서에서 가져온 문면이 아니라 테스트 소유 데이터다.
+
+SYNTHETIC_P1 = """[간이투자설명서] 파생결합증권(ELS) 제0000회
+
+1. 상품 개요
+본 증권은 기초자산의 가격 변동에 따라 손익이 결정되는 파생결합증권입니다.
+이 금융투자상품은 예금자보호법에 따라 보호되지 않습니다.
+투자원금의 손실이 발생할 수 있으며, 그 손실은 투자자에게 귀속됩니다."""
+
+SYNTHETIC_P3 = """3. 상환 조건
+
+가. 조기상환
+각 조기상환평가일에 기초자산 모두가 행사가격 이상인 경우 액면금액과 수익을 지급합니다.
+
+나. 만기상환
+만기평가일에 기초자산 중 어느 하나라도 최초기준가격의 50% 미만인 경우 원금 손실이 발생할 수 있습니다.
+이 경우 손실률은 최초기준가격 대비 하락률에 연동됩니다."""
+
+SYNTHETIC_TABLE = {
+    "caption": "기초자산 및 행사가격",
+    "rows": [
+        ["기초자산", "최초기준가격", "행사가격(조기)", "낙인"],
+        ["HSCEI", "6,000.00", "5,400.00", "3,000.00"],
+        ["S&P500", "5,000.00", "4,500.00", "2,500.00"],
+    ],
+}
+
+#: 합성 문서에서 해소돼야 하는 문면. (item_id, 페이지, 인용문)
+SYNTHETIC_QUOTES = [
+    ("SYN-NO-DEPOSIT-INSURANCE", 1, "이 금융투자상품은 예금자보호법에 따라 보호되지 않습니다."),
+    ("SYN-PRINCIPAL-LOSS", 3,
+     "만기평가일에 기초자산 중 어느 하나라도 최초기준가격의 50% 미만인 경우 "
+     "원금 손실이 발생할 수 있습니다."),
+]
 
 
 @pytest.fixture(scope="session")
-def els_pdf(tmp_path_factory, els_sample):
-    tables = {}
-    for t in els_sample["tables"]:
-        tables.setdefault(t["page"], []).append(t)
-    path = tmp_path_factory.mktemp("fixtures") / "els_simple_prospectus_demo.pdf"
-    return _render(path, _page_texts(els_sample), tables)
+def synthetic_pdf(tmp_path_factory):
+    path = tmp_path_factory.mktemp("fixtures") / "synthetic_els.pdf"
+    return _render(path, {1: SYNTHETIC_P1, 3: SYNTHETIC_P3}, {3: [SYNTHETIC_TABLE]})
 
 
 @pytest.fixture(scope="session")
 def var_pdf(tmp_path_factory, var_sample):
+    """변액보험 샘플은 아직 수동 텍스트이므로 그대로 PDF로 찍어 쓴다."""
     path = tmp_path_factory.mktemp("fixtures") / "variable_insurance_demo.pdf"
-    return _render(path, _page_texts(var_sample))
+    return _render(path, {p["page"]: p["text"] for p in var_sample["pages"]})
 
 
 @pytest.fixture(scope="session")

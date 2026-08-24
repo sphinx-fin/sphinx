@@ -17,7 +17,7 @@
     {
       "code": "MANUAL_OVERRIDE",
       "page": null,
-      "message": "파서 미구현 구간의 수동 샘플. 윤지석 F-EXT-002 프롬프트 착수용 — 파서 완성 시 대체한다."
+      "message": "파서 미구현 구간이 아니라 문서 미확보 구간의 수동 샘플. 변액보험 상품설명서를 생보협/생보사 공시실에서 확보하면 ELS와 같이 실제 파서 출력으로 대체한다."
     }
   ],
   "_expected_risk_items": [
@@ -29,7 +29,8 @@
         "page": 1,
         "start": 24,
         "end": 73
-      }
+      },
+      "match": "exact"
     },
     {
       "item_id": "VAR-FEE-DEDUCTION",
@@ -39,7 +40,8 @@
         "page": 1,
         "start": 74,
         "end": 128
-      }
+      },
+      "match": "exact"
     },
     {
       "item_id": "VAR-EARLY-SURRENDER",
@@ -49,7 +51,8 @@
         "page": 1,
         "start": 129,
         "end": 173
-      }
+      },
+      "match": "exact"
     }
   ]
 }
