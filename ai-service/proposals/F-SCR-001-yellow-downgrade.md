@@ -1,7 +1,14 @@
 # 황색 강등을 어디서 할 것인가 (P1 경계)
 
-작성: 윤지석 (F-SCR-001 R) · 결정 필요: 강희진 (F-GTE-001 R, 계약 소유)
-상태: **제안.** 현재는 ai-service에서 임시로 적용 중이다.
+작성: 윤지석 (F-SCR-001 R) · 결정: 강희진 (F-GTE-001 R)
+상태: **결정됨 — C 채택** (PR #10 리뷰 회신).
+
+> ai-service는 진짜 등급 + confidence만 낸다. 게이트가 `gate_rules.yaml`의 confidence
+> 룰로 처리한다. 양쪽에서 하면 이중계산이다. 임계값 소유도 게이트로 넘어갔다.
+
+**ai-service 조치 완료**: `downgrade_low_confidence()`·`CONFIDENCE_FLOOR` 제거.
+`scoring.score()`는 모델이 낸 grade와 confidence를 그대로 내보낸다.
+남은 작업은 강희진 영역(`Context`·`compile()`·`gate_rules.yaml`) — 아래 C 스케치 참고.
 
 ## 문제
 
@@ -108,18 +115,19 @@ if (conf.matches()) {
 
 ## 요청
 
-- [ ] **A / B / C 중 택일.** C를 권고한다. 근거는 감사 표면과 U4 예외 소거다.
-- [ ] C를 택하면 `Context`·`compile()`·`gate_rules.yaml` 변경은 강희진 영역이다.
-      내 쪽에서는 `DOWNGRADE_IN_AI_SERVICE = False` 한 줄로 끝난다.
-- [ ] 어느 쪽이든 **0.7이 두 곳에 있는 상태를 끝내야 한다.** 지금 `scoring.py`와
-      `application.yml`에 같은 숫자가 산다.
+- [x] ~~A / B / C 중 택일~~ → **C 채택.** (감사 표면 + U4 예외 소거)
+- [x] ~~0.7이 두 곳에 있는 상태 종료~~ → ai-service에서 제거했다. 임계값은 이제
+      `application.yml` / `gate_rules.yaml` 한 곳에만 있으면 된다.
+- [ ] (강희진) `Context`에 `minConfidence` 추가 + `compile()` 분기 + R-06 룰.
+      **룰 순서 주의**: R-01~R-03(RED) 뒤에 두어야 U4 예외가 공짜로 성립한다.
 
-## 그 전까지
+## 지금 상태 — 열린 구간
 
-`scoring.DOWNGRADE_IN_AI_SERVICE = True`로 A를 유지한다. 끄면 강등이 아예 사라져 기능
-후퇴가 되므로, 결정이 날 때까지는 켜 둔다. 강등 시 `reason`에 사실을 기록한다.
+강등이 아무 곳에서도 일어나지 않는다. 게이트 룰이 들어오기 전까지는 신뢰도 낮은 U1이
+그대로 GREEN으로 간다. `confidence`는 `Judgment`에 required로 실려 나가므로 게이트가
+즉시 쓸 수 있다.
 
-## 참고: 실측에서 이 장치는 거의 발동하지 않는다
+## ★ 구현 전에 읽어야 할 실측 결과
 
 `gemini-3.5-flash-lite`로 애매한 발화를 넣어도 confidence가 0.80 미만으로 내려오지 않았다
 ("잘 모르겠어요" → U3 conf 1.00, "뭐 떨어지면 좀 손해가 나는 거 아닌가요" → U2 conf 0.80).
