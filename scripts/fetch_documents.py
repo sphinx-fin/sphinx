@@ -22,8 +22,20 @@ DART 경로는 막혀 있다. `일괄신고추가서류`를 1년치(1,056건) �
 `서버경로`·`파일명`·`원본문서파일명` 열로 그대로 노출돼 있다. 청약이 끝나면 목록에서 빠지므로
 (`청약종료상품` 메뉴로 이동) 데모 문서는 받아서 보관한다.
 
-변액보험 상품설명서는 여기 없다. 좌측 `변액보험펀드`는 펀드 운용 공시이지 상품설명서가 아니다.
-생명보험협회 공시실 또는 각 생보사 공시실을 봐야 한다. — TODO(정세현)
+## 변액보험: 자동 수집 불가 (수동 취득)
+
+금투협에는 없다 — 좌측 `변액보험펀드`는 펀드 운용 공시이지 상품설명서가 아니다. 생명보험협회
+공시실(pub.insure.or.kr)에 있고, 경로는:
+
+    상품비교공시 > 변액보험 > 저축성 상품비교 > (해당 상품 행) > 상품운영정보 > 상품요약서
+
+여기 메뉴·다운로드가 전부 `javascript:void(0)` 팝업이라 안정적인 URL이 없다. 그래서 이 문서는
+`manual: True`로 두고 스크립트가 자동으로 받지 않는다 — 없는 URL을 지어내면 다음 사람이
+왜 안 되는지부터 파야 한다. 사람이 받아서 `data/documents/`에 넣으면 sha256만 검증한다.
+
+주의: 같은 행의 `공제금액 구분공시` PDF는 **파싱 불가**다. 2페이지 모두 텍스트가 벡터로
+아웃라인 처리돼 `chars=0`이고 `images=0`이라 OCR할 이미지조차 없다. 사업비 근거는 상품요약서
+본문(p10 계약체결·계약관리비용, p12 월공제액·해약환급금 예시)에서 뽑는다.
 """
 import argparse
 import hashlib
@@ -56,7 +68,18 @@ DOCUMENTS = {
         "original_name": "간이투자설명서(ELS 4181).pdf",
         "sha256": "6b95fec7d5c8aee6e28a620bf569ee6c179e926bf5a365ddd00bab0209cd18eb",
     },
-    # TODO(정세현): 변액보험 상품설명서 1종 — 생명보험협회 공시실
+    "var-b2601": {
+        "save_as": "var_samsung_b2601_product_summary.pdf",
+        "product_type": "VARIABLE_INSURANCE",
+        # 삼성생명 삼성 탄탄한 변액연금보험(B2601)(무배당)[최저연금보증형] 상품요약서 18p
+        # 판매채널 방카슈랑스 — 기획서 데모가 창구 판매 상황이고, 오해 라이브러리
+        # M01("은행에서 파니까 원금은 보장")·M05(저축성 오인)가 은행 창구 변액보험
+        # 분쟁에서 나온 패턴이다. p12에 "보험은 은행의 저축과는 달리" 문면과
+        # 해약환급금 예시표(3개월 환급률 58.4%, 20년 43.9%)가 있다.
+        "manual": True,
+        "source": "생명보험협회 공시실 > 상품비교공시 > 변액보험 > 저축성 상품비교 > 상품요약서",
+        "sha256": "2e993c829820cf270bd6304ddaa5e9f64bb92fdc7ac685c6d799f8ec24e463ab",
+    },
 }
 
 
@@ -94,6 +117,16 @@ def kofia_url(doc):
 
 def fetch(key, doc, force=False):
     dest = OUT_DIR / doc["save_as"]
+
+    if doc.get("manual"):
+        if dest.exists():
+            print(f"[skip] {key}: 수동 취득 문서, 이미 있음 {dest.name} "
+                  f"({dest.stat().st_size:,} bytes)")
+            return _verify(key, doc, dest)
+        print(f"[TODO] {key}: 수동으로 받아 {dest.relative_to(OUT_DIR.parent.parent)} 에 두어야 한다.\n"
+              f"       {doc['source']}", file=sys.stderr)
+        return False
+
     if dest.exists() and not force:
         print(f"[skip] {key}: 이미 있음 {dest.name} ({dest.stat().st_size:,} bytes)")
         return _verify(key, doc, dest)

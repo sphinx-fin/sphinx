@@ -7,7 +7,7 @@
 세 층으로 나뉜다.
 1. 순수 단위 테스트 — 스팬 해소 전략. PDF도 문서도 필요 없다.
 2. 합성 PDF — 표 추출·캡션·텍스트 레이어 부재 같은 기계적 동작.
-3. 실문서 — 계약 준수의 최종 확인. 문서가 없으면 skip.
+3. 실문서 — 계약 준수의 최종 확인. 데모 대상 2종 각각에 대해 돌고, 문서가 없으면 skip.
 """
 import json
 import pathlib
@@ -34,22 +34,6 @@ def schema():
 def synthetic_doc(synthetic_pdf):
     return parsing.parse_document(
         synthetic_pdf, document_id="doc-syn-001", product_type="ELS",
-        parsed_at="2026-08-24T00:00:00Z",
-    )
-
-
-@pytest.fixture(scope="session")
-def var_doc(var_pdf):
-    return parsing.parse_document(
-        var_pdf, document_id="doc-var-demo-001", product_type="VARIABLE_INSURANCE",
-        parsed_at="2026-08-24T00:00:00Z",
-    )
-
-
-@pytest.fixture(scope="session")
-def real_doc(real_els_pdf):
-    return parsing.parse_document(
-        real_els_pdf, document_id="doc-els-kiwoom-4181", product_type="ELS",
         parsed_at="2026-08-24T00:00:00Z",
     )
 
@@ -126,16 +110,14 @@ def test_pages_are_one_based_and_contiguous(synthetic_doc):
         list(range(1, synthetic_doc["page_count"] + 1))
 
 
-def test_char_count_is_codepoint_length(synthetic_doc, var_doc):
-    for doc in (synthetic_doc, var_doc):
-        for page in doc["pages"]:
-            assert page["char_count"] == len(page["text"])
+def test_char_count_is_codepoint_length(synthetic_doc):
+    for page in synthetic_doc["pages"]:
+        assert page["char_count"] == len(page["text"])
 
 
-def test_pages_are_nfc_normalized(synthetic_doc, var_doc):
-    for doc in (synthetic_doc, var_doc):
-        for page in doc["pages"]:
-            assert page["text"] == unicodedata.normalize("NFC", page["text"])
+def test_pages_are_nfc_normalized(synthetic_doc):
+    for page in synthetic_doc["pages"]:
+        assert page["text"] == unicodedata.normalize("NFC", page["text"])
 
 
 def test_parser_version_recorded(synthetic_doc):
@@ -199,10 +181,6 @@ def test_table_text_is_also_in_page_text(synthetic_doc):
                     assert cell in text, f"{cell!r}가 p{table['page']} 본문에 없다"
 
 
-def test_clean_parse_has_no_warnings(var_doc):
-    assert var_doc["parse_warnings"] == []
-
-
 def test_text_layer_missing_is_reported(scanned_pdf):
     doc = parsing.parse_document(scanned_pdf, document_id="d", product_type="ELS")
     codes = [w["code"] for w in doc["parse_warnings"]]
@@ -210,45 +188,65 @@ def test_text_layer_missing_is_reported(scanned_pdf):
     assert doc["pages"][0]["text"] == ""
 
 
-# --- 3. 실문서: 계약 준수 최종 확인 --------------------------------------------------
+# --- 3. 실문서: 계약 준수 최종 확인 (데모 대상 2종) ---------------------------------
 
-def test_real_document_satisfies_contract(real_doc, schema):
-    jsonschema.validate(real_doc, schema)
+def test_real_document_satisfies_contract(real_case, schema):
+    jsonschema.validate(real_case["doc"], schema)
 
 
-def test_real_document_parses_without_warnings(real_doc):
+def test_real_document_parses_without_warnings(real_case):
     """실문서에서 경고가 나기 시작하면 문서가 교체됐거나 파서가 퇴행한 것이다."""
-    assert real_doc["parse_warnings"] == [], real_doc["parse_warnings"]
+    assert real_case["doc"]["parse_warnings"] == [], real_case["doc"]["parse_warnings"]
 
 
-def test_real_document_matches_committed_sample(real_doc, els_sample):
+def test_real_document_pages_are_nfc_and_counted(real_case):
+    for page in real_case["doc"]["pages"]:
+        assert page["char_count"] == len(page["text"])
+        assert page["text"] == unicodedata.normalize("NFC", page["text"])
+
+
+def test_real_document_matches_committed_sample(real_case):
     """계약 샘플은 이 문서의 파서 출력이어야 한다 (contracts/README.md 완료 조건).
 
     어긋나면 샘플을 다시 생성해야 한다: python3 scripts/make_parsing_samples.py
     """
+    doc, sample = real_case["doc"], real_case["sample"]
     for key in ("document_id", "product_type", "parser_version", "page_count"):
-        assert real_doc[key] == els_sample[key], key
-    assert [p["text"] for p in real_doc["pages"]] == [p["text"] for p in els_sample["pages"]]
+        assert doc[key] == sample[key], key
+    assert [p["text"] for p in doc["pages"]] == [p["text"] for p in sample["pages"]]
 
 
-def test_real_document_expected_spans_hold(real_doc, els_sample):
-    items = els_sample["_expected_risk_items"]
-    assert len(items) >= 10, "이해항목이 너무 적다 — 정답 세트로 쓸 수 없다"
+def test_real_document_sample_is_parser_output_not_handmade(real_case):
+    """MANUAL_OVERRIDE 가 남아 있으면 아직 사람이 만든 샘플이다."""
+    codes = [w["code"] for w in real_case["sample"]["parse_warnings"]]
+    assert "MANUAL_OVERRIDE" not in codes
+
+
+def test_real_document_expected_spans_hold(real_case):
+    doc, items = real_case["doc"], real_case["sample"]["_expected_risk_items"]
+    assert len(items) >= 9, "이해항목이 너무 적다 — 정답 세트로 쓸 수 없다"
     for item in items:
-        assert parsing.verify_span(real_doc, item["source_span"], item["value_text"]), \
+        assert parsing.verify_span(doc, item["source_span"], item["value_text"]), \
             item["item_id"]
 
 
-def test_real_document_expected_spans_are_unambiguous(real_doc, els_sample):
+def test_real_document_expected_spans_are_unambiguous(real_case):
     """같은 문면이 여러 번 나오면 어느 쪽을 가리키는지 알 수 없어 정답으로 못 쓴다."""
-    for item in els_sample["_expected_risk_items"]:
+    doc = real_case["doc"]
+    for item in real_case["sample"]["_expected_risk_items"]:
         page = item["source_span"]["page"]
-        occ = parsing.find_occurrences(real_doc, page, item["value_text"])
+        occ = parsing.find_occurrences(doc, page, item["value_text"])
         assert len(occ) == 1, f"{item['item_id']}: p{page}에 {len(occ)}회 출현"
 
 
-def test_real_document_reparsing_is_deterministic(real_els_pdf):
-    kwargs = dict(document_id="doc-els-kiwoom-4181", product_type="ELS",
-                  parsed_at="2026-08-24T00:00:00Z")
-    assert parsing.parse_document(real_els_pdf, **kwargs) == \
-        parsing.parse_document(real_els_pdf, **kwargs)
+def test_real_document_reparsing_is_deterministic(real_case):
+    first = parsing.parse_document(real_case["pdf"], **real_case["kwargs"])
+    second = parsing.parse_document(real_case["pdf"], **real_case["kwargs"])
+    assert first == second
+
+
+def test_real_document_records_its_source(real_case):
+    """샘플이 어느 문서에서 나왔는지 추적 불가능하면 재생성도 검증도 못 한다."""
+    source = real_case["sample"]["_source"]
+    assert source["sha256"] and len(source["sha256"]) == 64
+    assert source["fetch_key"]

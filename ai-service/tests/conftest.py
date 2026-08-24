@@ -5,9 +5,9 @@
 - **합성 PDF** — 이 파일 안에 텍스트를 두고 실행 시점에 PDF로 찍는다. 표 추출·캡션 추정·
   텍스트 레이어 부재 같은 기계적 동작을 문서 없이 검증하기 위한 것이다. 폭에 맞춰 줄바꿈을
   접는다 — 실제 공시 PDF가 문장 중간에서 개행하고, 그게 스팬 해소가 다뤄야 하는 조건이다.
-- **실문서** — `data/documents/`(git 제외)의 키움증권 제4181회 간이투자설명서. 없으면 해당
-  테스트를 skip 한다. 계약 준수는 결국 실문서로 확인해야 하지만, 문서가 없는 체크아웃에서
-  테스트 전체가 죽으면 안 된다.
+- **실문서** — `data/documents/`(git 제외)의 데모 대상 2종. 없으면 해당 테스트를 skip 한다.
+  계약 준수는 결국 실문서로 확인해야 하지만, 문서가 없는 체크아웃에서 테스트 전체가 죽으면
+  안 된다.
 
 합성 픽스처의 텍스트를 `contracts/samples/`에서 가져오지 않는다. 그 샘플은 이제 실문서 파싱
 출력이고, 실문서 텍스트를 합성 PDF로 되돌려 다시 파싱하는 건 아무것도 검증하지 않는다.
@@ -34,7 +34,25 @@ MARGIN = 60
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SAMPLES = REPO_ROOT / "contracts" / "samples"
-REAL_ELS_PDF = REPO_ROOT / "data" / "documents" / "els_kiwoom_4181_simple_prospectus.pdf"
+DOCS = REPO_ROOT / "data" / "documents"
+
+#: 데모 대상 2종. 파서 대응은 여기까지다(역할분담표 v1.2 타임박스) — 범용 파서가 아니다.
+REAL_CASES = {
+    "els": {
+        "pdf": "els_kiwoom_4181_simple_prospectus.pdf",
+        "document_id": "doc-els-kiwoom-4181",
+        "product_type": "ELS",
+        "sample": "parsed_els_sample.json",
+        "fetch": "python3 scripts/fetch_documents.py els-4181",
+    },
+    "var": {
+        "pdf": "var_samsung_b2601_product_summary.pdf",
+        "document_id": "doc-var-samsung-b2601",
+        "product_type": "VARIABLE_INSURANCE",
+        "sample": "parsed_variable_sample.json",
+        "fetch": "생보협 공시실에서 수동 취득 — python3 scripts/fetch_documents.py var-b2601",
+    },
+}
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -58,14 +76,27 @@ def var_sample():
     return json.loads((SAMPLES / "parsed_variable_sample.json").read_text(encoding="utf-8"))
 
 
-@pytest.fixture(scope="session")
-def real_els_pdf():
-    if not REAL_ELS_PDF.exists():
-        pytest.skip(
-            f"{REAL_ELS_PDF.relative_to(REPO_ROOT)} 없음 (git 제외). "
-            f"python3 scripts/fetch_documents.py els-4181"
-        )
-    return str(REAL_ELS_PDF)
+@pytest.fixture(scope="session", params=list(REAL_CASES), ids=list(REAL_CASES))
+def real_case(request):
+    """실문서 1건을 파싱해 커밋된 샘플과 함께 준다. 문서가 없으면 skip."""
+    from app import parsing
+
+    spec = REAL_CASES[request.param]
+    pdf = DOCS / spec["pdf"]
+    if not pdf.exists():
+        pytest.skip(f"{pdf.relative_to(REPO_ROOT)} 없음 (git 제외). {spec['fetch']}")
+    kwargs = dict(
+        document_id=spec["document_id"],
+        product_type=spec["product_type"],
+        parsed_at="2026-08-24T00:00:00Z",
+    )
+    return {
+        "key": request.param,
+        "pdf": str(pdf),
+        "kwargs": kwargs,
+        "doc": parsing.parse_document(str(pdf), **kwargs),
+        "sample": json.loads((SAMPLES / spec["sample"]).read_text(encoding="utf-8")),
+    }
 
 
 # --- 합성 PDF 생성 ----------------------------------------------------------------
@@ -182,13 +213,6 @@ SYNTHETIC_QUOTES = [
 def synthetic_pdf(tmp_path_factory):
     path = tmp_path_factory.mktemp("fixtures") / "synthetic_els.pdf"
     return _render(path, {1: SYNTHETIC_P1, 3: SYNTHETIC_P3}, {3: [SYNTHETIC_TABLE]})
-
-
-@pytest.fixture(scope="session")
-def var_pdf(tmp_path_factory, var_sample):
-    """변액보험 샘플은 아직 수동 텍스트이므로 그대로 PDF로 찍어 쓴다."""
-    path = tmp_path_factory.mktemp("fixtures") / "variable_insurance_demo.pdf"
-    return _render(path, {p["page"]: p["text"] for p in var_sample["pages"]})
 
 
 @pytest.fixture(scope="session")
