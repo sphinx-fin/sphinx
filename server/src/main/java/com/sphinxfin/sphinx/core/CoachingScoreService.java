@@ -28,11 +28,7 @@ public class CoachingScoreService {
     private final int vulnerableThreshold;
 
     public CoachingScoreService() {
-        this("/vulnerability_weights.yaml");
-    }
-
-    CoachingScoreService(String classpathResource) {
-        Weights w = load(classpathResource);
+        Weights w = load("/vulnerability_weights.yaml");
         this.factors = w.factors;
         this.mismatchBonus = w.mismatchBonus;
         this.vulnerableThreshold = w.vulnerableThreshold;
