@@ -24,10 +24,14 @@ class GateEngineTest {
     private final GateEngine engine = new GateEngine();
 
     private static Judgment judgment(Grade grade) {
+        return judgment(grade, 0.9);
+    }
+
+    private static Judgment judgment(Grade grade, double confidence) {
         return new Judgment(
                 "ITEM-" + grade,
                 grade,
-                0.9,
+                confidence,
                 new Judgment.Evidence("고객 발화 인용", "루브릭 조항"),
                 "판정 사유",
                 null);
@@ -56,11 +60,28 @@ class GateEngineTest {
     }
 
     @Test
-    @DisplayName("R-05: 전부 U1(이해)이면 → GREEN (판매 진행)")
+    @DisplayName("R-06: 전부 U1(이해) + 신뢰도 충분이면 → GREEN (판매 진행)")
     void allU1_isGreen() {
         GateResult r = judge(List.of(Grade.U1, Grade.U1));
         assertThat(r.signal()).isEqualTo(Signal.GREEN);
+        assertThat(r.ruleTrace()).containsExactly("R-06");
+    }
+
+    @Test
+    @DisplayName("R-05: 전부 U1이어도 신뢰도 낮으면 → YELLOW (통과 안 시킴)")
+    void lowConfidence_isYellow() {
+        GateResult r = engine.judge(
+                List.of(judgment(Grade.U1, 0.6), judgment(Grade.U1, 0.9)), false, 0);
+        assertThat(r.signal()).isEqualTo(Signal.YELLOW);
         assertThat(r.ruleTrace()).containsExactly("R-05");
+    }
+
+    @Test
+    @DisplayName("U4 예외: 신뢰도 낮아도 U4는 RED (R-01 우선)")
+    void lowConfidenceU4_stillRed() {
+        GateResult r = engine.judge(List.of(judgment(Grade.U4, 0.5)), false, 0);
+        assertThat(r.signal()).isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).containsExactly("R-01");
     }
 
     @Test
