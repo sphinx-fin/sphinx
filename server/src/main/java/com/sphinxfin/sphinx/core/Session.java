@@ -23,6 +23,7 @@ import lombok.experimental.Accessors;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * F-INT-001 세션 집합체(JPA 엔티티). 소유: 강희진
@@ -76,6 +77,23 @@ public class Session extends BaseEntity {
     @Column(name = "reverify_count")
     @Builder.Default
     private Map<String, Integer> reverifyCounts = new HashMap<>();
+
+    /**
+     * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
+     * (서비스는 이 결과를 저장만 한다.)
+     */
+    public static Session create(CreateSessionCommand cmd) {
+        return Session.builder()
+                .id(UUID.randomUUID().toString())
+                .productId(cmd.productId())
+                .channel(cmd.channel())
+                .ageBand(cmd.ageBand())
+                .experienceLevel(cmd.experienceLevel())
+                .amountBand(cmd.amountBand())
+                .contractRef(cmd.contractRef())
+                .surveyResult(cmd.surveyResult() == null ? Map.of() : Map.copyOf(cmd.surveyResult()))
+                .build();
+    }
 
     /** 상태 전이. 불법 전이면 SessionFsm이 예외를 던진다. */
     public SessionState fire(SessionFsm.Event event) {
