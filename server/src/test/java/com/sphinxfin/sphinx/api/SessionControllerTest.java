@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.api;
 
+import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,5 +65,32 @@ class SessionControllerTest {
                                 {"productId":"ELS-001","channel":"대면","ageBand":"60대"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MALFORMED_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("데모 흐름: 세션 생성 → U4 답변 기록 → /judge가 RED(R-01)")
+    void answerThenJudge_isRed() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        // 답변 제출 — 목 채점이 U4(오해)로 기록, 세션은 IN_PROGRESS로
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.grade").value("U4"));
+        mvc.perform(get("/sessions/" + sid))
+                .andExpect(jsonPath("$.data.state").value("IN_PROGRESS"));
+
+        // 게이트 판정 — U4 있으니 RED, 세션은 JUDGED로
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.signal").value("RED"))
+                .andExpect(jsonPath("$.data.ruleTrace[0]").value("R-01"));
+        mvc.perform(get("/sessions/" + sid))
+                .andExpect(jsonPath("$.data.state").value("JUDGED"));
     }
 }

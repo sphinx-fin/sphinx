@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.core;
 
 import com.sphinxfin.sphinx.domain.Channel;
+import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -21,7 +22,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -78,6 +81,17 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, Integer> reverifyCounts = new HashMap<>();
 
+    // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
+    @Convert(converter = JudgmentMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, Judgment> judgmentsByItem = new HashMap<>();
+
+    // 적합성 설문 vs 발화 모순 여부(F-DET-002). 감지되면 게이트 R-02로 RED.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean suitabilityMismatch = false;
+
     /**
      * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
      * (서비스는 이 결과를 저장만 한다.)
@@ -113,5 +127,25 @@ public class Session extends BaseEntity {
     /** 항목이 재검증 상한에 도달했는지 — 도달 시 재설명 루프 대신 판정으로 가야 한다. */
     public boolean reverifyExhausted(String itemId, int max) {
         return reverifyCount(itemId) >= max;
+    }
+
+    /** 항목별 최신 판정을 기록(재검증 시 덮어씀). */
+    public void recordJudgment(Judgment judgment) {
+        judgmentsByItem.put(judgment.itemId(), judgment);
+    }
+
+    /** 게이트 입력용 — 항목별 최신 판정 목록. */
+    public List<Judgment> judgments() {
+        return new ArrayList<>(judgmentsByItem.values());
+    }
+
+    /** 게이트 입력용 — 항목 중 최대 재검증 횟수(R-03 판단). */
+    public int maxReverifyCount() {
+        return reverifyCounts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+    }
+
+    /** F-DET-002 모순 감지 결과 반영. */
+    public void flagSuitabilityMismatch(boolean mismatch) {
+        this.suitabilityMismatch = mismatch;
     }
 }
