@@ -36,7 +36,7 @@ class SessionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SessionService(repository, new GateEngine(), new CoachingScoreService());
+        service = new SessionService(repository, new GateEngine(), new CoachingScoreService(), 2);
     }
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {
@@ -97,8 +97,12 @@ class SessionServiceTest {
         var result = service.judge(s.id());
         assertThat(result.signal()).isEqualTo(Signal.RED);
         assertThat(result.ruleTrace()).containsExactly("R-01");
-        // 판정 후 → JUDGED
-        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.JUDGED);
+        // 판정 후 → JUDGED + 게이트 결과 기록(F-GTE-004 감사 기준점)
+        Session judged = service.get(s.id());
+        assertThat(judged.state()).isEqualTo(SessionState.JUDGED);
+        assertThat(judged.gateSignal()).isEqualTo(Signal.RED);
+        assertThat(judged.gateRuleTrace()).isEqualTo("R-01");
+        assertThat(judged.judgedAt()).isNotNull();
     }
 
     @Test
@@ -106,5 +110,68 @@ class SessionServiceTest {
     void judgeWithNoJudgment_failsClosed() {
         Session s = service.create(cmd(null));
         assertThat(service.judge(s.id()).signal()).isEqualTo(Signal.RED);
+    }
+
+    // ── F-INT-004 재설명·재검증 루프 ────────────────────────────────────
+
+    private static Judgment j(String itemId, Grade grade) {
+        return new Judgment(itemId, grade, 0.9,
+                new Judgment.Evidence("발화 인용", "루브릭 조항"), "사유", null);
+    }
+
+    @Test
+    @DisplayName("재설명 후 재검증 통과: 미이해→재설명→이해(U1) → 상태 복귀 후 GREEN")
+    void reexplainThenUnderstood_isGreen() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));              // IN_PROGRESS
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
+
+        service.reExplain(s.id(), "A");                                // → RE_EXPLAIN
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.RE_EXPLAIN);
+
+        service.recordJudgment(s.id(), j("A", Grade.U1));             // 재검증 통과 → IN_PROGRESS 복귀
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
+        assertThat(service.get(s.id()).reverifyCount("A")).isEqualTo(1);
+
+        var r = service.judge(s.id());
+        assertThat(r.signal()).isEqualTo(Signal.GREEN);
+    }
+
+    @Test
+    @DisplayName("재검증 2회 실패: 계속 미이해 → 상한 도달·재설명 불가 → RED (R-03)")
+    void reexplainTwiceFailed_isRed() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // IN_PROGRESS
+        service.reExplain(s.id(), "A");                      // RE_EXPLAIN
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증1 실패 (RE_VERIFY)
+        service.reExplain(s.id(), "A");                      // RE_EXPLAIN
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증2 실패 (RE_VERIFY)
+
+        assertThat(service.get(s.id()).reverifyCount("A")).isEqualTo(2);
+        // 상한 도달 → 재설명 불가
+        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        var r = service.judge(s.id());
+        assertThat(r.signal()).isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).containsExactly("R-03");
+    }
+
+    @Test
+    @DisplayName("이해(U1) 항목은 재설명 대상이 아니다 → 예외")
+    void reexplainUnderstoodItem_rejected() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("중단 → ABORTED")
+    void abortEndsSession() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+        Session aborted = service.abort(s.id());
+        assertThat(aborted.state()).isEqualTo(SessionState.ABORTED);
     }
 }

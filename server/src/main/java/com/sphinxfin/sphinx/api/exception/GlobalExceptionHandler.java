@@ -45,6 +45,13 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", detail)));
     }
 
+    /** 잘못된 요청(재설명 대상 아님·상한 도달 등) → 400 */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> illegalArgument(IllegalArgumentException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("INVALID_REQUEST", e.getMessage())));
+    }
+
     /** 요청 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum 값 등) → 400 */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> unreadable(HttpMessageNotReadableException e) {

@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.sphinxfin.sphinx.api.dto.AnswerRequest;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
+import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
@@ -49,6 +50,18 @@ public class SessionController {
                         "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
                 "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE");
         return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
+    }
+
+    @PostMapping("/{sid}/re-explain")
+    public ApiResponse<SessionService.ReExplanation> reExplain(
+            @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
+        // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
+        return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
+    }
+
+    @PostMapping("/{sid}/abort")
+    public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
+        return ApiResponse.ok(SessionResponse.of(sessionService.abort(sid)));
     }
 
     @PostMapping("/{sid}/simulate")

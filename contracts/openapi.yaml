@@ -70,7 +70,41 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
 
-  /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
+  /sessions/{id}/re-explain:
+    post:
+      summary: 재설명 (F-INT-004) — 이해 부족 항목을 다시 설명, 이후 같은 항목 재답변이 재검증
+      description: 재검증 상한(항목당 max-reverify) 도달 항목은 재설명 불가(400) → 판정으로 진행.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReExplainRequest'}
+      responses:
+        '200':
+          description: 재설명 문면(취약 여부로 맞춤)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReExplanationApiResponse'}
+        '400':
+          description: 재설명 대상 아님 또는 상한 도달
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/abort:
+    post:
+      summary: 세션 중단 (F-INT-001) — 고객 이탈 등 → ABORTED
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 중단된 세션
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionApiResponse'}
+
   /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
 
   /sessions/{id}/judge:
@@ -180,4 +214,24 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/GateResult'}
+        error:   {type: object, nullable: true}
+
+    ReExplainRequest:
+      type: object
+      required: [itemId]
+      properties:
+        itemId: {type: string, description: "다시 설명할 이해항목"}
+    ReExplanation:
+      type: object
+      required: [itemId, content, vulnerable]
+      properties:
+        itemId:     {type: string}
+        content:    {type: string, description: "재설명 문면(취약 시 고령자 모드)"}
+        vulnerable: {type: boolean, description: "취약 고객 여부(맞춤 재설명 적용)"}
+    ReExplanationApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/ReExplanation'}
         error:   {type: object, nullable: true}
