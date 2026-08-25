@@ -79,18 +79,20 @@ def verify_spans(product_type: str = "ELS") -> list[str]:
     return broken
 
 
-def main() -> int:
-    needle = sys.argv[1] if len(sys.argv) > 1 else ""
-    spec = yaml.safe_load((FIXTURES / "utterances" / "els.yaml").read_text(encoding="utf-8"))
+def run_spec(spec_path: Path, needle: str) -> tuple[int, int, int]:
+    """한 상품유형 dev set 을 돌린다. (pass, fail, error) 를 돌려준다."""
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     product_type = spec["product_type"]
     items = load_risk_items(product_type)
 
     broken = verify_spans(product_type)
     if broken:
-        print(f"★ 계약 스팬 등식 불일치: {broken}")
-        return 1
+        print(f"★ {product_type} 계약 스팬 등식 불일치: {broken}")
+        return 0, len(broken), 0
+
     sample = load_sample(product_type)
-    print(f"문서: {sample['document_id']}  파서 {sample['parser_version']}  "
+    print("═" * 78)
+    print(f"[{product_type}]  {sample['document_id']}  파서 {sample['parser_version']}  "
           f"페이지 {len(sample['pages'])}  이해항목 {len(sample['_expected_risk_items'])}종")
 
     passed = failed = errored = 0
@@ -108,8 +110,10 @@ def main() -> int:
 
         if case.get("expected_escalate"):
             ok = lib.escalate is True
-            print(f"  {'PASS' if ok else 'FAIL'}  escalate 기대={case['expected_escalate']} 실제={lib.escalate}")
-            passed += ok; failed += not ok
+            print(f"  {'PASS' if ok else 'FAIL'}  escalate 기대={case['expected_escalate']} "
+                  f"실제={lib.escalate}")
+            passed += ok
+            failed += not ok
             continue
 
         try:
@@ -124,15 +128,31 @@ def main() -> int:
         ok = (exp_g is None or j.grade.value == exp_g) and \
              (exp_m is None or j.misconception_type == exp_m)
         print(f"  판정   {j.grade.value}  conf={j.confidence:.2f}  type={j.misconception_type}")
-        print(f"  근거   \"{j.evidence.utterance_quote}\"")
+        print(f'  근거   "{j.evidence.utterance_quote}"')
         print(f"         ← {j.evidence.rubric_clause}")
         print(f"  사유   {j.reason}")
         print(f"  {'PASS' if ok else 'FAIL'}  기대 grade={exp_g} type={exp_m}")
-        passed += ok; failed += not ok
+        passed += ok
+        failed += not ok
+    return passed, failed, errored
+
+
+def main() -> int:
+    """인자가 없으면 모든 상품유형을 돈다. 인자는 케이스 id 부분일치 필터다."""
+    needle = sys.argv[1] if len(sys.argv) > 1 else ""
+    specs = sorted((FIXTURES / "utterances").glob("*.yaml"))
+    if not specs:
+        print("dev set 이 없다")
+        return 1
+
+    total = [0, 0, 0]
+    for spec_path in specs:
+        result = run_spec(spec_path, needle)
+        total = [a + b for a, b in zip(total, result)]
 
     print("═" * 78)
-    print(f"PASS {passed} · FAIL {failed} · ERROR {errored}")
-    return 1 if (failed or errored) else 0
+    print(f"전체  PASS {total[0]} · FAIL {total[1]} · ERROR {total[2]}")
+    return 1 if (total[1] or total[2]) else 0
 
 
 if __name__ == "__main__":

@@ -165,6 +165,9 @@ RiskItem 은 픽스처에 두지 않고 `contracts/samples/*.json` 에서 만든
 `pages[page].text[start:end] == value_text` 를 검사한다.
 
 ```bash
-python tools/run_devset.py            # 전체
-python tools/run_devset.py DEMO-MAIN  # id 부분일치
+python tools/run_devset.py            # 상품유형 전체 (ELS 5 + 변액 6)
+python tools/run_devset.py VAR-       # 케이스 id 부분일치
 ```
+
+루브릭이 있으면 dev set 케이스도 있어야 한다 — 테스트로 고정했다. 문면만 맞춰둔 루브릭은
+실제로 어떻게 채점되는지 모르는 상태이고, 변액 4종이 한동안 그랬다.

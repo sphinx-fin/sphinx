@@ -119,3 +119,51 @@ def test_no_stale_risk_item_fixture_remains():
 
     stale = Path(__file__).resolve().parent / "fixtures" / "risk_items"
     assert not (stale / "els.yaml").exists(), "risk_items 픽스처가 되살아났다"
+
+
+# ── dev set 커버리지 ──────────────────────────────────────────────────────────
+def test_every_rubric_has_a_devset_case():
+    """루브릭이 있으면 dev set 케이스도 있어야 한다.
+
+    문면만 맞춰둔 루브릭은 실제로 어떻게 채점되는지 모르는 상태다 — 변액 4종이 한동안
+    그랬다. 루브릭을 늘릴 때 검증도 같이 늘도록 여기서 고정한다.
+    """
+    import yaml
+
+    from app import rubrics
+
+    fixtures = _fixtures_dir()
+    covered: set[str] = set()
+    for path in sorted((fixtures / "utterances").glob("*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        covered |= {c["item_id"] for c in spec["cases"]}
+
+    uncovered = sorted(set(rubrics.all_rubrics()) - covered)
+    assert not uncovered, f"루브릭은 있는데 dev set 케이스가 없다: {uncovered}"
+
+
+def test_devset_item_ids_have_rubrics():
+    """반대 방향 — dev set 이 루브릭 없는 항목을 채점하려 하면 RubricNotFound 로 죽는다."""
+    import yaml
+
+    from app import rubrics
+
+    known = set(rubrics.all_rubrics())
+    for path in sorted((_fixtures_dir() / "utterances").glob("*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for case in spec["cases"]:
+            assert case["item_id"] in known, f"{case['id']}: 루브릭 없음 {case['item_id']}"
+
+
+def test_devset_covers_both_product_types():
+    specs = sorted((_fixtures_dir() / "utterances").glob("*.yaml"))
+    import yaml
+
+    types = {yaml.safe_load(p.read_text(encoding="utf-8"))["product_type"] for p in specs}
+    assert types == set(PRODUCT_TYPES), f"상품유형 누락: {set(PRODUCT_TYPES) - types}"
+
+
+def _fixtures_dir():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent / "fixtures"
