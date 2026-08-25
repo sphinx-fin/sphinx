@@ -151,7 +151,9 @@ def detect_mismatch(body: MismatchRequest) -> SuitabilityMismatch:
 @router.post("/reexplain", response_model=ReexplainResponse)
 def do_reexplain(body: ReexplainRequest) -> ReexplainResponse:
     try:
-        return reexplain.reexplain(body.risk_item, body.judgment)
+        return reexplain.reexplain(
+            body.risk_item, body.judgment, body.age_band, body.experience_level
+        )
     except NotImplementedError:
         raise _not_implemented("F-INT-004 재설명")
     except LlmError as exc:

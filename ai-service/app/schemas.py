@@ -245,8 +245,22 @@ class MisconceptionResponse(Strict):
 
 
 class ReexplainRequest(Strict):
+    """F-INT-004 콘텐츠. 루프 오케스트레이션(항목당 최대 2회)은 강희진 소유다.
+
+    `age_band`·`experience_level` 은 **선택**이다. 기획서 4절이 *"고객의 이해 수준과
+    연령·경험에 맞춰 설명을 다시 만든다. 고령 고객에게는 비유 중심으로"* 를 요구하고,
+    기획서 7-3 이 LLM 처리 단계에 남기는 것으로 *"상품코드, 상품 조건, 연령대, 금액구간"*
+    을 명시했다.
+
+    F-DET-002 에서 연령대를 받지 않기로 한 것과 이유가 다르다 — 그쪽은 취약 요인 **가중**이
+    서버 소유라서였고(ADR-005), 이쪽은 콘텐츠 생성에 직접 필요하다. 없으면 고령 고객 기준
+    (기획서 3절이 1순위 대상으로 지정한 층)으로 쓴다.
+    """
+
     risk_item: RiskItem
     judgment: Judgment
+    age_band: str | None = None
+    experience_level: str | None = None
 
 
 class ReexplainResponse(Strict):
