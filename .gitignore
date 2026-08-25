@@ -8,7 +8,6 @@ __pycache__/
 .venv/
 node_modules/
 dist/
-data/documents/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
 .DS_Store

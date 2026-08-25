@@ -545,7 +545,7 @@
   ],
   "parse_warnings": [],
   "_source": {
-    "note": "금융투자협회 전자공시 > 파생결합증권등 청약정보 비교공시. 원본은 git 제외(data/documents/).",
+    "note": "금융투자협회 전자공시 > 파생결합증권등 청약정보 비교공시. 원본은 data/documents/ 에 있다.",
     "fetch_key": "els-4181",
     "original_file": "간이투자설명서(ELS 4181).pdf",
     "sha256": "6b95fec7d5c8aee6e28a620bf569ee6c179e926bf5a365ddd00bab0209cd18eb"

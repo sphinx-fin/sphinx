@@ -53,7 +53,8 @@ public class GateEngine {
      */
     public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch, int reverifyFailed) {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
-        Context ctx = new Context(grades, suitabilityMismatch, reverifyFailed);
+        List<Double> confidences = judgments.stream().map(Judgment::confidence).toList();
+        Context ctx = new Context(grades, confidences, suitabilityMismatch, reverifyFailed);
         for (Rule rule : rules) {
             if (rule.predicate().test(ctx)) {
                 return new GateResult(rule.signal(), List.of(rule.id()));
@@ -100,6 +101,11 @@ public class GateEngine {
             int threshold = Integer.parseInt(reverify.group(1));
             return ctx -> ctx.reverifyFailed() >= threshold;
         }
+        Matcher conf = Pattern.compile("anyConfidenceBelow\\s+(\\d*\\.?\\d+)").matcher(e);
+        if (conf.matches()) {
+            double threshold = Double.parseDouble(conf.group(1));
+            return ctx -> ctx.confidences().stream().anyMatch(c -> c < threshold);
+        }
         if (e.startsWith("anyGrade") && e.contains(" in ")) {
             Set<Grade> allowed = parseGradeList(e);
             return ctx -> ctx.grades().stream().anyMatch(allowed::contains);
@@ -138,7 +144,8 @@ public class GateEngine {
     // ── 내부 타입 ─────────────────────────────────────────────────────
 
     /** 평가 컨텍스트: 룰이 참조하는 값의 전부. */
-    record Context(List<Grade> grades, boolean suitabilityMismatch, int reverifyFailed) {}
+    record Context(List<Grade> grades, List<Double> confidences,
+                   boolean suitabilityMismatch, int reverifyFailed) {}
 
     /** 컴파일된 룰. */
     record Rule(String id, Predicate<Context> predicate, Signal signal) {}

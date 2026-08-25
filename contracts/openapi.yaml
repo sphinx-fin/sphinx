@@ -6,9 +6,62 @@ info:
     web ↔ server REST 계약. ai-service(내부망 전용)의 /internal/* 인터페이스는 여기 없다 —
     그 경계의 페이로드는 contracts/*.schema.json(judgment·risk_item·parsed_document)으로 계약한다.
 paths:
-  /products/documents:      {post: {summary: "문서 업로드 (F-EXT-001)"}}
-  /products/{id}/extract:   {post: {summary: "위험요소 추출 (F-EXT-002)"}}
-  /products/{id}/risk-items: {get: {summary: "추출 항목 조회"}}
+  /products:
+    get:
+      summary: 상품 목록 (S-02 선택지)
+      description: >
+        나머지 /products/* 는 전부 productId 를 이미 알아야 부를 수 있다. 고를 수 있는
+        상품을 주는 유일한 경로다. S-01(문서 업로드)이 붙으면 업로드한 상품이 여기에 나온다.
+      responses:
+        '200':
+          description: 상품 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductListApiResponse'}
+
+  /products/documents:
+    post:
+      summary: 문서 업로드 (F-EXT-001)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:        {type: string, format: binary}
+                productType: {type: string, enum: [ELS, VARIABLE_INSURANCE], default: ELS}
+      responses:
+        '200':
+          description: 업로드·파싱 결과
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadApiResponse'}
+
+  /products/{id}/extract:
+    post:
+      summary: 위험요소 추출 (F-EXT-002)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 추출된 이해항목
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
+
+  /products/{id}/risk-items:
+    get:
+      summary: 추출 항목 조회
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 이해항목 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
 
   /sessions:
     post:
@@ -48,15 +101,324 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
-  /sessions/{id}/questions/next: {post: {summary: "다음 질문 (F-INT-002)"}}
-  /sessions/{id}/answers:   {post: {summary: "텍스트 응답 제출 (F-INT-003) → Judgment 반환. 응답 스키마는 judgment.schema.json 기준(명명 규약 확정 후 $ref 연결)"}}
-  /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
-  /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
-  /sessions/{id}/judge:     {post: {summary: "게이트 판정 (F-GTE-001)"}}
-  /sessions/{id}/override:  {post: {summary: "적색 진행 요청 (F-GTE-002)"}}
-  /sessions/{id}/override/approve: {post: {summary: "관리자 승인/반려"}}
-  /sessions/{id}/report:    {get: {summary: "이해 기록 (F-GTE-004)"}}
-  /dashboard/heatmap:       {get: {summary: "오해 지도 (F-DSH-001)"}}
+  /sessions/{id}/questions/next:
+    post:
+      summary: 다음 질문 + 진행 상태 (F-INT-002)
+      description: >
+        index/total 을 서버가 준다. 화면이 "추출된 항목 수"로 분모를 보완하면 서버가 물어볼
+        항목 수와 어긋날 수 있고, 어긋나면 조용히 틀린 진행률이 보인다.
+        done=true 가 인터뷰 종료 판단의 유일한 근거다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 다음 질문(없으면 done=true)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NextQuestionApiResponse'}
+
+  /sessions/{id}/judgments:
+    get:
+      summary: 세션에 쌓인 항목별 판정 목록 (S-05)
+      description: >
+        S-03(고객 화면)과 S-05(판매자 화면)는 다른 기기·다른 탭이라 화면이 메모리에 들고
+        갈 수 없다. 새로고침에도 살아남아야 한다.
+        항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
+        grade → 색 매핑은 표시 관례이며 판정이 아니다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 항목 ID 오름차순 판정 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JudgmentsApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/answers:
+    post:
+      summary: 텍스트 응답 제출 (F-INT-003) → 항목별 판정(측정값) 반환·세션에 기록
+      description: >
+        text는 서버에서 PII 마스킹 후 ai-service로 나간다. 반환 Judgment는 '측정값'이며
+        게이트 판정이 아니다(P1). 웹 응답은 camelCase(내부 ai-service 계약 judgment.schema.json은 snake_case).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnswerRequest'}
+      responses:
+        '200':
+          description: 항목별 이해도 판정
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
+        '502':
+          description: >
+            EVIDENCE_REQUIRED — 상류(ai-service)가 근거 없는 판정을 반환해 차단됐다(P4).
+            고객이 고칠 수 있는 입력 오류가 아니므로 400이 아니다. 화면은 재입력을 요구하지
+            말고 재시도·황색 보수 처리로 간다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/re-explain:
+    post:
+      summary: 재설명 (F-INT-004) — 이해 부족 항목을 다시 설명, 이후 같은 항목 재답변이 재검증
+      description: >
+        재검증 상한(항목당 max-reverify) 도달 항목은 재설명 불가(400) → 판정으로 진행.
+        400의 두 경우는 화면 처리가 다르므로 error.code로 구분한다(메시지 문자열은 계약이 아니다).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReExplainRequest'}
+      responses:
+        '200':
+          description: 재설명 문면(취약 여부로 맞춤)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReExplanationApiResponse'}
+        '400':
+          description: >
+            REEXPLAIN_NOT_ELIGIBLE — 재설명 대상 아님(판정 없음 또는 이미 이해 U1).
+            화면은 고객에게 아무것도 띄우지 않고 다음 항목으로 넘어간다.
+            REVERIFY_EXHAUSTED — 재검증 상한 도달. 화면은 판정으로 넘어감을 고객에게 알린다
+            (F-INT-004 "2회 실패 시 해당 항목 최종 상태 확정 후 게이트로 이관").
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/abort:
+    post:
+      summary: 세션 중단 (F-INT-001) — 고객 이탈 등 → ABORTED
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 중단된 세션
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SessionApiResponse'}
+  /sessions/{id}/simulate:
+    post:
+      summary: 손실 계산 (F-SIM-001) — 가입금액을 넣으면 시나리오 3건
+      description: >
+        순수 함수다(P2). 같은 입력이면 항상 같은 출력이며 LLM 이 개입하지 않는다.
+        금액은 `data/timeseries/` 실제 종가 시계열을 결정론적 로직에 대입해 산출하고,
+        스냅샷은 `data/timeseries/VERSION` 의 sha256 으로 고정된다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SimulateRequest'}
+      responses:
+        '200':
+          description: 시나리오 3건 (severity 로 worst·mid·best 각 1건)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulateApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+  /sessions/{id}/gate-preview:
+    get:
+      summary: 신호등 미리보기 (F-GTE-001) — 계산만, 기록하지 않음
+      description: >
+        기획서 7-2 [기능 1] "황색 판정 → 재설명 → 재검증 → 녹색 통과"를 성립시키는 경로다.
+        판매자가 황색을 보려고 /judge 를 부르면 JUDGED 로 전이되고 거기서 RE_EXPLAIN 으로
+        갈 수 없어 재설명 흐름 자체가 막힌다. 이 경로는 부수효과가 없다.
+        GateEngine 이 순수 함수라(P2) 미리보기와 확정이 같은 입력에 같은 답을 낸다.
+        이미 판정된 세션은 재계산하지 않고 기록값을 돌려준다(recorded=true).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 현재 입력 기준 신호등
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatePreviewApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/judge:
+    post:
+      summary: 게이트 판정 (F-GTE-001) — 세션에 쌓인 판정으로 신호등 산출
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 게이트 판정 결과
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GateApiResponse'}
+        '409':
+          description: >
+            ILLEGAL_STATE_TRANSITION — 판정할 항목이 하나도 없다. JUDGED 는 CLOSE 외에
+            나가는 전이가 없어 되돌릴 수 없으므로, 답변 0건 세션이 버튼 오작동 한 번으로
+            끝나지 않게 막는다. 신호만 보려면 /gate-preview 를 쓴다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+  /sessions/{id}/override:
+    post:
+      summary: 적색 진행 요청 (F-GTE-002)
+      description: 사유 30자 미만은 거부한다(400 VALIDATION_ERROR).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OverrideRequest'}
+      responses:
+        '200':
+          description: 오버라이드 상태
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OverrideApiResponse'}
+        '400':
+          description: VALIDATION_ERROR — 사유 30자 미만
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/override/approve:
+    post:
+      summary: 관리자 승인/반려 (F-GTE-002)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OverrideRequest'}
+      responses:
+        '200':
+          description: 오버라이드 상태
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OverrideApiResponse'}
+
+  /sessions/{id}/report:
+    get:
+      summary: 이해 기록 리포트 (F-GTE-004)
+      description: >
+        append-only 해시 체인에 기록된 판정 이력에서 생성한다. `contentHash` 가 감사 기준점이며
+        `audit:verify` 로 재계산 검증이 가능하다. 권한: `report:read`
+        (SELLER=own_session · MGR=branch · COMPL=org).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 리포트 메타 + 미리보기·다운로드 경로
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReportApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. `report:read` 는 SELLER=own_session · MGR=branch · COMPL=org 다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/report/summary:
+    get:
+      summary: 고객 교부용 요약 (F-GTE-004)
+      description: >
+        `rbac_policy.yaml` 이 `report:summary:read`(CUST · own_session)를 별도 action 으로
+        분리해 두었다. 판매자용 전문과 고객 교부용 요약은 같은 문서가 아니다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 고객 교부용 요약
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReportSummaryApiResponse'}
+        '403':
+          description: >
+            `report:summary:read` 는 CUST=own_session 이다. 본인 세션이 아니면 거부.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+  /dashboard/heatmap:
+    get:
+      summary: 오해 지도 히트맵 (F-DSH-001)
+      description: >
+        권한 `aggregate:heatmap:read` — COMPL=org · MGR=branch. SELLER·CUST·ADMIN 은
+        의도적으로 부재다(ADR-001, 기획서 7-4). 소표본(n<30)은 셀을 제거하지 않고
+        `masked: true` + `misrate: null` 로 내린다.
+      parameters:
+        - {name: product, in: query, required: false, schema: {type: string}}
+        - {name: ageBand, in: query, required: false, schema: {type: string}}
+        - {name: channel, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: 히트맵 셀
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HeatmapApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. SELLER·CUST·ADMIN 은 집계에 접근할 수 없다(ADR-001 · 기획서 7-4).
+            **화면이 "차단됨"을 그려야 하므로 계약에 선언한다** — 데모에서 역할 차단을 시연하는
+            근거가 이 응답이다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /dashboard/leading-indicators:
+    get:
+      summary: 선행지표 뷰 (F-DSH-002)
+      description: >
+        지점·판매자·문항 단위 추이와 이상치. 권한 `aggregate:indicator:read` —
+        COMPL=org · MGR=branch. 히트맵과 같은 마스킹 규칙을 적용한다.
+      parameters:
+        - name: groupBy
+          in: query
+          required: false
+          schema: {type: string, enum: [branch, seller, item]}
+          description: "집계 축. 데이터 범위(scope)와 다른 개념이다 — 범위는 요청자 역할이 정하고 응답의 scope 로 내려온다"
+        - {name: periods, in: query, required: false, schema: {type: integer, default: 8}, description: "최근 N 주"}
+      responses:
+        '200':
+          description: 추이 시계열 + 이상치
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LeadingIndicatorApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. SELLER·CUST·ADMIN 은 집계에 접근할 수 없다(ADR-001 · 기획서 7-4).
+            **화면이 "차단됨"을 그려야 하므로 계약에 선언한다** — 데모에서 역할 차단을 시연하는
+            근거가 이 응답이다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
 components:
   schemas:
@@ -65,7 +427,20 @@ components:
       type: object
       required: [code, message, timestamp]
       properties:
-        code:      {type: string, description: "에러 코드(NOT_FOUND·VALIDATION_ERROR·MALFORMED_REQUEST·ILLEGAL_STATE_TRANSITION·INTERNAL_ERROR)"}
+        code:
+          type: string
+          description: >
+            에러 코드. 프론트는 이 목록을 유니온 타입으로 들고 분기한다 —
+            목록에 없는 코드를 서버가 내보내면 화면이 조용히 default로 떨어진다.
+          enum:
+            - NOT_FOUND                # 404 세션 등 리소스 없음
+            - VALIDATION_ERROR         # 400 @Valid 실패
+            - MALFORMED_REQUEST        # 400 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum)
+            - ILLEGAL_STATE_TRANSITION # 409 허용되지 않은 세션 상태 전이
+            - REEXPLAIN_NOT_ELIGIBLE   # 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
+            - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
+            - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
         timestamp: {type: string, format: date-time}
     ErrorApiResponse:
@@ -83,11 +458,135 @@ components:
       properties:
         productId:       {type: string, description: "상품 ID"}
         channel:         {type: string, enum: [FACE_TO_FACE, MOBILE, TM], description: "판매 채널(대면·모바일·TM)"}
-        ageBand:         {type: string, description: "연령대(비식별, 예: 60대)"}
-        experienceLevel: {type: string, nullable: true, description: "투자 경험 수준"}
-        amountBand:      {type: string, nullable: true, description: "가입금액대(비식별)"}
+        ageBand:
+          type: string
+          description: >
+            연령대(비식별). 이 값은 server/src/main/resources/vulnerability_weights.yaml 이
+            문자열 키로 가중을 매기는 대상이다. 목록에 없는 값을 보내면 400 이 아니라 조용히
+            0점이 되고, 취약 고객이 일반 고객으로 분류된다. 그래서 enum 으로 고정한다.
+            가중 대상이 아닌 값(20~40대)도 유효한 입력이므로 enum 에 포함한다.
+          enum: ["20대", "30대", "40대", "50대", "60대", "70대", "80대"]
+        experienceLevel:
+          type: string
+          nullable: true
+          description: 투자 경험 수준. ageBand 와 같은 이유로 enum 고정.
+          enum: ["없음", "1년미만", "3년미만", "3년이상"]
+        amountBand:
+          type: string
+          nullable: true
+          description: 가입금액대(비식별). ageBand 와 같은 이유로 enum 고정.
+          enum: ["1천만원미만", "1천만원대", "3천만원대", "5천만원대", "1억원대", "3억원대이상"]
         contractRef:     {type: string, nullable: true, description: "계약건 참조번호(비식별)"}
         surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과"}
+    # data 의 모양을 소유자가 아직 정하지 않은 응답용 봉투. 봉투만 계약하고 안은 열어 둔다.
+    # 프론트는 success 로 분기하고 data 는 해당 화면이 아는 형태로 읽는다.
+    OpaqueApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {type: object, additionalProperties: true}
+        error:   {type: object, nullable: true}
+
+    ProductSummary:
+      type: object
+      required: [productId, name, productType, status]
+      properties:
+        productId:   {type: string}
+        name:        {type: string}
+        productType: {type: string, enum: [ELS, VARIABLE_INSURANCE]}
+        status:      {type: string, enum: [parsed, parse_failed]}
+    ProductListApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {type: array, items: {$ref: '#/components/schemas/ProductSummary'}}
+        error:   {type: object, nullable: true}
+
+    UploadResponse:
+      type: object
+      required: [productId, status]
+      properties:
+        productId: {type: string}
+        status:    {type: string, enum: [parsed, parse_failed]}
+    UploadApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/UploadResponse'}
+        error:   {type: object, nullable: true}
+
+    RiskItemsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: 항목 스키마는 contracts/risk_item.schema.json (snake_case 계약의 camelCase 웹 표현)
+          items: {type: object, additionalProperties: true}
+    RiskItemsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/RiskItemsResponse'}
+        error:   {type: object, nullable: true}
+
+    OverrideRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 30, description: "적색 진행 사유. 30자 미만 거부"}
+    OverrideResponse:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED]}
+    OverrideApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/OverrideResponse'}
+        error:   {type: object, nullable: true}
+
+    NextQuestion:
+      type: object
+      required: [index, total, done]
+      properties:
+        itemId:   {type: string, nullable: true, description: "done=true 면 null"}
+        question: {type: string, nullable: true, description: "done=true 면 null"}
+        index:    {type: integer, description: "1-based. done=true 면 total 과 같다"}
+        total:    {type: integer, description: "서버가 물어볼 항목 수. 추출 항목 수와 다를 수 있다"}
+        done:     {type: boolean, description: "더 물을 항목이 없다. 인터뷰 종료 판단의 유일한 근거"}
+    NextQuestionApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/NextQuestion'}
+        error:   {type: object, nullable: true}
+
+    JudgmentsResponse:
+      type: object
+      required: [sessionId, state, judgments]
+      properties:
+        sessionId: {type: string}
+        state:     {type: string, enum: [CREATED, IN_PROGRESS, RE_EXPLAIN, RE_VERIFY, JUDGED, CLOSED, ABORTED]}
+        judgments:
+          type: array
+          description: 항목 ID 오름차순. 항목별 최신 판정만 담긴다(재검증 시 덮어씀)
+          items: {$ref: '#/components/schemas/JudgmentView'}
+    JudgmentsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/JudgmentsResponse'}
+        error:   {type: object, nullable: true}
+
     SessionResponse:
       type: object
       required: [sessionId, state, productId]
@@ -102,4 +601,293 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/SessionResponse'}
+        error:   {type: object, nullable: true}
+
+    AnswerRequest:
+      type: object
+      description: F-INT-003 텍스트 응답. text는 서버에서 PII 마스킹 후 ai-service로.
+      required: [itemId, text]
+      properties:
+        itemId:    {type: string}
+        text:      {type: string, description: "고객 발화(서버에서 마스킹)"}
+        inputMeta: {type: object, nullable: true, additionalProperties: true, description: "붙여넣기·지연·수정빈도 등(F-INT-003)"}
+
+    # 웹 응답용 Judgment(camelCase). 내부 ai-service 계약은 judgment.schema.json(snake_case).
+    JudgmentView:
+      type: object
+      required: [itemId, grade, confidence, evidence, reason]
+      properties:
+        itemId:     {type: string}
+        grade:      {type: string, enum: [U1, U2, U3, U4]}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        evidence:
+          type: object
+          required: [utteranceQuote, rubricClause]
+          properties:
+            utteranceQuote: {type: string}
+            rubricClause:   {type: string}
+        reason:            {type: string}
+        misconceptionType: {type: string, nullable: true}
+    JudgmentApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/JudgmentView'}
+        error:   {type: object, nullable: true}
+
+    ReExplainRequest:
+      type: object
+      required: [itemId]
+      properties:
+        itemId: {type: string, description: "다시 설명할 이해항목"}
+    ReExplanation:
+      type: object
+      required: [itemId, content, vulnerable, reverifyQuestion]
+      properties:
+        itemId:     {type: string}
+        content:    {type: string, description: "재설명 문면(취약 시 고령자 모드)"}
+        vulnerable:
+          type: boolean
+          description: >
+            취약 고객 여부. 렌더링 힌트(큰 글씨·비유)이지 화면에 표시할 라벨이 아니다 —
+            "취약 고객으로 분류됨"을 본인에게 보이지 않는다(기획서 7-4, 보호 목적으로만).
+        reverifyQuestion:
+          type: string
+          description: >
+            재설명 직후 같은 항목을 다시 물을 때 쓸 변형 질문(F-INT-002). 프론트는 직전 질문을
+            재사용하지 말고 이 값을 띄운다. 서버 구현이 목인 동안에는 항목별 고정 문면이라
+            기획서 7-4 1단계(우회 비용 상향)를 아직 만족하지 않는다 — 문서 자동 생성이
+            붙어야 성립한다. 계약 형태는 그때도 바뀌지 않는다.
+    ReExplanationApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/ReExplanation'}
+        error:   {type: object, nullable: true}
+    GatePreview:
+      type: object
+      required: [signal, ruleTrace, recorded]
+      properties:
+        signal:    {type: string, enum: [GREEN, YELLOW, RED]}
+        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+        recorded:
+          type: boolean
+          description: >
+            감사 기준점으로 기록된 값인가. false 면 아직 확정이 아니다 — 화면이 이걸
+            확정으로 보관하면 안 된다. /judge 를 부른 뒤에만 true 가 된다.
+        judgedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: "기준점 확정 시각. null 이면 /judge 가 아직 호출되지 않은 세션이다"
+    GatePreviewApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/GatePreview'}
+        error:   {type: object, nullable: true}
+    # ── F-SIM-001 손실 시뮬레이터 (소유: 정세현) ──────────────────────────────
+    SimScenario:
+      type: object
+      required: [severity, result, name, payout, pnl, pathMeta]
+      properties:
+        severity:
+          type: string
+          enum: [worst, mid, best]
+          description: >
+            화면 배치·정렬 키다. **표시 라벨이 아니다** — 기획서 7-2 표는 평가어
+            ("최선/중간/최악")를 버리고 금액 순으로 갔다. 그 이유는 스텝다운이 조기상환
+            시점과 무관하게 연 수익률이 같고 총액만 달라서, 가장 자주 일어나는 전개가
+            금액으로는 가장 작기 때문이다("최선이 왜 더 작은가"라는 잘못된 질문이 생긴다).
+            화면은 명세 8절 S-04 의 3열 동일 비중 요건을 위해 이 키로 자리를 고정하고,
+            사람에게 보일 문면은 `name` 을 쓴다.
+        result:
+          type: string
+          description: "정확한 상환 유형. early_1..early_5 | maturity | loss (SimulatorService.Outcome.result 그대로)"
+        name:   {type: string, description: "표시 문면(예: 낙인 45% 하회 후 만기 손실)"}
+        payout: {type: integer, format: int64, description: "상환금액(원). 원 단위 절사"}
+        pnl:    {type: integer, format: int64, description: "손익(원). 음수는 손실"}
+        share:  {type: number, nullable: true, minimum: 0, maximum: 1, description: "역사 전 구간에서 이 전개가 발생한 비중"}
+        pathMeta: {$ref: '#/components/schemas/PathMeta'}
+    PathMeta:
+      type: object
+      description: >
+        어느 실제 지수 구간을 썼는지. 명세 8절 S-04 의 "역사 구간 라벨" 을 그리는 데 쓰고,
+        동시에 P2 재현성의 실물 근거가 된다 — 화면에 스냅샷을 박으면 "이 수치는 이
+        스냅샷에서 나왔다"가 심사자에게 보인다.
+      required: [startDate, endDate, underlyings, worstUnderlying, worstFinal, knockedIn]
+      properties:
+        startDate:       {type: string, format: date, description: "계약일"}
+        endDate:         {type: string, format: date, description: "상환일(조기상환 또는 만기)"}
+        underlyings:     {type: array, items: {type: string}, description: "기초자산 키(sp500·nikkei225·eurostoxx50)"}
+        worstUnderlying: {type: string, description: "만기평가일 최저 종목 — 손실 판정의 기준"}
+        worstFinal:      {type: number, description: "그 종목의 최초기준가격 대비 비율(예: 0.507)"}
+        knockedIn:       {type: boolean, description: "낙인 배리어를 하회한 적이 있는가"}
+    SimulateRequest:
+      type: object
+      description: >
+        `amount` 에 서버 기본값을 두지 않는다. 금액은 화면이 슬라이더로 정하는 값이라
+        서버가 임의 기본값을 갖고 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
+      required: [amount]
+      properties:
+        amount: {type: integer, format: int64, minimum: 0, description: "가입금액(원)"}
+    SimulateResponse:
+      type: object
+      required: [scenarios, timeseriesVersion, productName]
+      properties:
+        scenarios:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: {$ref: '#/components/schemas/SimScenario'}
+          description: "severity 별로 정확히 1건씩"
+        timeseriesVersion: {type: string, description: "data/timeseries/VERSION 의 snapshot(예: 2026-08-24). 화면에 표시한다"}
+        productName:       {type: string, description: "상품 조건의 출처(예: 키움증권 제4181회 ELS)"}
+    SimulateApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/SimulateResponse'}
+        error:   {type: object, nullable: true}
+
+    # ── F-GTE-004 이해 기록 리포트 (소유: 정세현) ─────────────────────────────
+    ReportResponse:
+      type: object
+      required: [reportId, sessionId, generatedAt, contentHash, previewUrl, downloadUrl]
+      properties:
+        reportId:    {type: string}
+        sessionId:   {type: string}
+        generatedAt: {type: string, format: date-time}
+        contentHash:
+          type: string
+          description: >
+            CanonicalJson 직렬화 후의 sha256. append-only 해시 체인의 항목 해시이며
+            감사 기준점이다. `audit:verify` 로 재계산 검증할 수 있다.
+        previewUrl:  {type: string, description: "브라우저 미리보기(PDF 인라인)"}
+        downloadUrl: {type: string, description: "PDF 다운로드"}
+    ReportApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/ReportResponse'}
+        error:   {type: object, nullable: true}
+    ReportSummaryResponse:
+      type: object
+      description: >
+        고객 교부용 요약. 판매자용 전문(`ReportResponse`)과 **다른 문서**이므로 스키마를 나눈다 —
+        경로를 나눈 근거가 두 문서가 다르다는 것이므로, 한쪽이 바뀔 때 다른 쪽 계약이 깨지면
+        안 된다. 전문의 항목별 판정 이력·재설명 이력은 담지 않는다.
+      required: [reportId, sessionId, generatedAt, contentHash, previewUrl]
+      properties:
+        reportId:    {type: string}
+        sessionId:   {type: string}
+        generatedAt: {type: string, format: date-time}
+        contentHash:
+          type: string
+          description: >
+            전문과 **같은 해시**다. 고객이 받은 문서를 나중에 대조할 수 있어야 하므로 요약본에도
+            싣는다.
+        previewUrl:  {type: string, description: "브라우저 미리보기"}
+        downloadUrl: {type: string, nullable: true, description: "교부 방식이 정해지기 전까지 nullable"}
+    ReportSummaryApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/ReportSummaryResponse'}
+        error:   {type: object, nullable: true}
+
+    # ── F-DSH-001·002 대시보드 (집계 소유: 정세현) ────────────────────────────
+    HeatmapCell:
+      type: object
+      required: [product, item, n, masked]
+      properties:
+        product: {type: string}
+        item:    {type: string, description: "이해항목 item_id"}
+        misrate: {type: number, nullable: true, minimum: 0, maximum: 1, description: "오해율. masked 면 null"}
+        n:       {type: integer, minimum: 0, description: "표본 수. 마스킹돼도 내려준다"}
+        masked:
+          type: boolean
+          description: >
+            소표본(n<30) 마스킹 여부. **셀을 제거하지 않는다** — 제거하면 화면이
+            "데이터 없음"과 "가려짐"을 구분할 수 없고, 감사·심사 관점에서는 가려졌다는
+            사실 자체가 마스킹이 동작한 증거다. 근거: rbac_policy.yaml 집계 절.
+    HeatmapResponse:
+      type: object
+      required: [synthetic, scope, cells]
+      properties:
+        synthetic:
+          type: boolean
+          description: "합성 세션 기반이면 true — 화면에 워터마크를 상시 노출한다(연출 금지)"
+        scope:
+          type: string
+          enum: [branch, org]
+          description: >
+            **데이터 범위**다. `rbac_policy.yaml` 의 `own_session`/`branch`/`org` 와 같은 어휘이며
+            요청자 역할이 결정한다(MGR=branch · COMPL=org). 집계 축(`groupBy`)과 혼동하지 말 것 —
+            화면에 표시해 무엇을 보고 있는지 드러낸다.
+        cells: {type: array, items: {$ref: '#/components/schemas/HeatmapCell'}}
+    HeatmapApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/HeatmapResponse'}
+        error:   {type: object, nullable: true}
+    IndicatorPoint:
+      type: object
+      required: [period, n, masked]
+      properties:
+        period:  {type: string, description: "ISO 주 단위(예: 2026-W32)"}
+        misrate: {type: number, nullable: true, minimum: 0, maximum: 1}
+        n:       {type: integer, minimum: 0}
+        masked:  {type: boolean, description: "히트맵과 같은 규칙(n<30)"}
+    IndicatorSeries:
+      type: object
+      required: [groupBy, key, points]
+      properties:
+        groupBy: {type: string, enum: [branch, seller, item], description: "집계 축. 데이터 범위(scope)가 아니다"}
+        key:     {type: string, description: "지점·판매자·항목 식별자. 판매자는 비식별 대체키"}
+        points: {type: array, items: {$ref: '#/components/schemas/IndicatorPoint'}}
+    IndicatorOutlier:
+      type: object
+      required: [groupBy, key, reason]
+      properties:
+        groupBy: {type: string, enum: [branch, seller, item], description: "집계 축. 데이터 범위(scope)가 아니다"}
+        key:     {type: string}
+        reason: {type: string, description: "사람이 읽는 사유(예: 직전 4주 대비 +18%p)"}
+        delta:  {type: number, nullable: true, description: "기계 판독용 변화량"}
+    LeadingIndicatorResponse:
+      type: object
+      required: [synthetic, scope, series, outliers]
+      properties:
+        synthetic: {type: boolean, description: "히트맵과 동일 — 두 뷰 모두 워터마크 상시 노출"}
+        scope:     {type: string, enum: [branch, org], description: "데이터 범위(히트맵과 동일 의미). 집계 축은 groupBy 다"}
+        series:    {type: array, items: {$ref: '#/components/schemas/IndicatorSeries'}}
+        outliers:  {type: array, items: {$ref: '#/components/schemas/IndicatorOutlier'}}
+    LeadingIndicatorApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/LeadingIndicatorResponse'}
+        error:   {type: object, nullable: true}
+
+    GateResult:
+      type: object
+      required: [signal, ruleTrace]
+      properties:
+        signal:    {type: string, enum: [GREEN, YELLOW, RED]}
+        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+    GateApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/GateResult'}
         error:   {type: object, nullable: true}

@@ -106,7 +106,12 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
   직접 반환하면 프론트 계약이 깨진다.
 - **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
-  `MALFORMED_REQUEST`(400)·`ILLEGAL_STATE_TRANSITION`(409)·`INTERNAL_ERROR`(500).
+  `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
+  `ILLEGAL_STATE_TRANSITION`(409)·`EVIDENCE_REQUIRED`(502)·`INTERNAL_ERROR`(500).
+  **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
+  그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
+  새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
+  400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
   (서비스가 web DTO에 의존하지 않도록).
 - **엔티티는 `core/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
