@@ -60,6 +60,11 @@ class SessionServiceTest {
         public void appendGate(String sessionId, com.sphinxfin.sphinx.domain.GateResult result, Instant at) {
             gates.add(result.signal());
         }
+
+        @Override
+        public void appendOverride(String sessionId, String reason, String approver, Instant at) {
+            // 이 테스트는 세션 루프만 다룬다 — 오버라이드 append는 OverrideServiceTest에서 검증.
+        }
     }
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {

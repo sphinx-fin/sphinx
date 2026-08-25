@@ -1,6 +1,9 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.Signal;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +13,9 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+
+import java.time.Instant;
+import java.util.List;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -31,6 +37,8 @@ class EnvelopeContractTest {
 
     @Autowired
     private MockMvc mvc;
+    @Autowired
+    private SessionRepository repository;
 
     /** 봉투 3요소: success=true · data 존재 · error 없음(null). */
     private void assertEnveloped(ResultActions r) throws Exception {
@@ -72,15 +80,22 @@ class EnvelopeContractTest {
     @Test
     @DisplayName("override·dashboard 봉투")
     void overrideAndDashboard() throws Exception {
-        String sid = newSession();
+        String sid = redSession();   // 오버라이드는 적색 세션에만 허용된다(F-GTE-002)
         String reason = "적색이지만 고객이 충분히 이해했다고 판단하여 진행을 요청합니다. 근거는 재설명 후 재검증 통과입니다.";
         assertEnveloped(mvc.perform(post("/sessions/" + sid + "/override")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"" + reason + "\"}")));
-        assertEnveloped(mvc.perform(post("/sessions/" + sid + "/override/approve")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"reason\":\"" + reason + "\"}")));
+        assertEnveloped(mvc.perform(post("/sessions/" + sid + "/override/approve")));
         assertEnveloped(mvc.perform(get("/dashboard/heatmap")));
+    }
+
+    /** 적색 판정이 기록된 세션 id — 오버라이드 봉투 확인용. */
+    private String redSession() throws Exception {
+        String sid = newSession();
+        var session = repository.findById(sid).orElseThrow();
+        session.recordGate(new GateResult(Signal.RED, List.of("R-01")), Instant.now());
+        repository.save(session);
+        return sid;
     }
 
     @Test

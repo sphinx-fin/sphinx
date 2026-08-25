@@ -4,6 +4,7 @@ import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.OverrideStatus;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.Signal;
 import jakarta.persistence.CollectionTable;
@@ -116,6 +117,16 @@ public class Session extends BaseEntity {
     private List<String> gateRuleTrace;
     private Instant judgedAt;              // 판정 시각
 
+    // F-GTE-002 적색 오버라이드 — 적색 판정 세션을 관리자 승인으로 진행한 사실·사유·승인자.
+    // 게이트 신호는 그대로 RED로 남긴다(오버라이드는 신호를 바꾸는 게 아니라 진행을 예외 허가한다).
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @Builder.Default
+    private OverrideStatus overrideStatus = OverrideStatus.NONE;
+    private String overrideReason;        // 판매자가 적은 진행 사유(30자 이상) — 승인 전에도 기록
+    private String overrideApprover;      // 승인한 MGR 식별자(ADR-002) — 승인 전이면 null
+    private Instant overrideDecidedAt;    // 승인 시각 — 승인 전이면 null
+
     /**
      * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
      * (서비스는 이 결과를 저장만 한다.)
@@ -202,5 +213,23 @@ public class Session extends BaseEntity {
         this.gateSignal = result.signal();
         this.gateRuleTrace = List.copyOf(result.ruleTrace());
         this.judgedAt = judgedAt;
+    }
+
+    /** 게이트 판정이 적색인지 — 오버라이드는 적색 세션에만 허용된다(F-GTE-002). */
+    public boolean isRedGate() {
+        return gateSignal == Signal.RED;
+    }
+
+    /** F-GTE-002 오버라이드 요청 — 사유를 기록하고 승인 대기로 둔다. 적색 가드는 서비스가 건다. */
+    public void requestOverride(String reason) {
+        this.overrideStatus = OverrideStatus.PENDING_APPROVAL;
+        this.overrideReason = reason;
+    }
+
+    /** F-GTE-002 오버라이드 승인 — 승인자·시각을 기록한다(불변 기록은 evidence로 별도 append). */
+    public void approveOverride(String approver, Instant at) {
+        this.overrideStatus = OverrideStatus.APPROVED;
+        this.overrideApprover = approver;
+        this.overrideDecidedAt = at;
     }
 }

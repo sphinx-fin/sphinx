@@ -2,6 +2,7 @@ package com.sphinxfin.sphinx.api.exception;
 
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.core.OverrideNotEligibleException;
 import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
 import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.core.SessionFsm;
@@ -67,6 +68,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> reverifyExhausted(ReverifyExhaustedException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ApiError.of("REVERIFY_EXHAUSTED", e.getMessage())));
+    }
+
+    /** 오버라이드 전제 위반(적색 아님·요청 없이 승인) → 409 (F-GTE-002) */
+    @ExceptionHandler(OverrideNotEligibleException.class)
+    public ResponseEntity<ApiResponse<Void>> overrideNotEligible(OverrideNotEligibleException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ApiError.of("OVERRIDE_NOT_ELIGIBLE", e.getMessage())));
     }
 
     /** 요청 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum 값 등) → 400 */
