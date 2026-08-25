@@ -295,7 +295,7 @@ components:
           type: string
           nullable: true
           description: 가입금액대(비식별). ageBand 와 같은 이유로 enum 고정.
-          enum: ["1천만원대", "3천만원대", "5천만원대", "1억원대", "3억원대이상"]
+          enum: ["1천만원미만", "1천만원대", "3천만원대", "5천만원대", "1억원대", "3억원대이상"]
         contractRef:     {type: string, nullable: true, description: "계약건 참조번호(비식별)"}
         surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과"}
     # data 의 모양을 소유자가 아직 정하지 않은 응답용 봉투. 봉투만 계약하고 안은 열어 둔다.
