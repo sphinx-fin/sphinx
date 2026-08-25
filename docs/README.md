@@ -35,3 +35,4 @@
 | [001](adr/001-no-sales-role.md) | 역할 정의에 영업·마케팅 조직 역할을 두지 않는다 | Accepted |
 | [002](adr/002-override-approver.md) | 적색 오버라이드 승인자는 지점 관리자(MGR)를 유지한다 | Accepted (한계 인지) |
 | [003](adr/003-evidence-ownership.md) | F-CMN-002를 정세현이 소유하고 `evidence` 공통 기반을 공유한다 | Accepted |
+| [008](adr/008-canonical-json.md) | `CanonicalJson` 은 RFC 8785 를 따르고, 정규화는 직렬화기가 하지 않는다 | Accepted |
