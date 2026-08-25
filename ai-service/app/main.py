@@ -104,4 +104,5 @@ def healthz() -> dict:
         "llm_model": cfg.llm_model,
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
+        "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
     }

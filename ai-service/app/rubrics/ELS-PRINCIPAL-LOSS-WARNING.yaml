@@ -1,0 +1,18 @@
+# 채점 루브릭 (소유: 윤지석) — 공개 의무 (기획서 5절 통제)
+#
+# item_id는 contracts/samples/*.json 의 _expected_risk_items 를 정본으로 삼는다.
+# 이전 이름 ELS-PRINCIPAL-LOSS 는 세 항목(고지·낙인·만기조건)을 뭉쳐 있었다 —
+# 계약 쪽 분해가 더 정확하다. 이 항목은 p1 고지 문장만 다룬다.
+# 낙인 배리어·만기 손실조건은 별도 항목(ELS-KNOCKIN-BARRIER, ELS-MATURITY-LOSS-CONDITION)이며
+# 루브릭 추가는 커버리지 이슈로 분리한다.
+item_id: ELS-PRINCIPAL-LOSS-WARNING
+product_type: ELS
+name: 원금손실 가능성 고지
+status: confirmed
+required_elements:
+  - 투자원금의 손실이 발생할 수 있음
+misconception_conditions:
+  - 원금이 보장된다
+  - 은행 판매 = 안전하다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE

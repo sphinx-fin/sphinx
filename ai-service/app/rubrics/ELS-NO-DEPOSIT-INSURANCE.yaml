@@ -1,0 +1,15 @@
+# 소유: 윤지석 — 공개 의무. 데모 메인 시나리오 ④의 적색 3건 중 하나 (기획서 7-2)
+# 발행사 신용위험은 별도 항목(ELS-ISSUER-CREDIT-RISK)이라 여기서 요구하지 않는다 —
+# 계약 쪽 항목 분해에 맞춰 범위를 좁혔다.
+item_id: ELS-NO-DEPOSIT-INSURANCE
+product_type: ELS
+name: 예금자보호 비대상
+status: confirmed
+required_elements:
+  - 예금자보호법에 따라 보호되지 않음
+misconception_conditions:
+  - 예금자보호가 된다
+  - 5천만 원까지 보호된다
+  - 은행에 맡긴 예금과 같다
+related_misconceptions:
+  - M02-DEPOSIT-INSURANCE

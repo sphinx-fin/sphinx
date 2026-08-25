@@ -1,0 +1,24 @@
+# 소유: 윤지석 — 공개 의무.
+# item_id는 contracts/samples/parsed_variable_sample.json 의 _expected_risk_items 기준.
+# 그 샘플은 실파서 출력(parse_warnings: [])이며 수동 샘플이 아니다.
+#
+# status: draft — 정답지 대조가 아직 안 됐다.
+#   ADR-007: 기획서 5절이 정답지로 지정한 **핵심설명서는 확보 불가**다(보험업감독규정
+#   §7-45가 게시가 아니라 교부를 규정 — 계약하지 않으면 손에 넣을 수 없다). 정답지는
+#   상품유형별 **공시문서 집합**으로 바뀌었다: 변액 = 상품요약서 + 운용설명서.
+#   두 문서를 합쳐 조항을 대조한 뒤 confirmed로 올린다.
+item_id: VAR-PRINCIPAL-LOSS
+product_type: VARIABLE_INSURANCE
+name: 원금손실 가능성
+status: draft
+required_elements:
+  - 중도해지 시 해약환급금에 최저보증이 없음
+  - 원금손실이 발생할 수 있고 그 손실은 계약자에게 귀속됨
+misconception_conditions:
+  - 원금이 보장된다
+  - 저축이다
+  - 이자가 붙는다
+  - 제시 수익률이 확정된다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE
+  - M05-SAVINGS

@@ -1,0 +1,19 @@
+# 소유: 윤지석 — 공개 의무. item_id·status 근거는 VAR-PRINCIPAL-LOSS.yaml 참고.
+#
+# 분리된 나머지 절반. 이 항목은 **수치를 짚는 것**을 요구한다 — 일반론으로 통과하면
+# 조기해지 시 실제로 얼마를 잃는지 모르는 상태가 이해로 판정된다.
+#
+# 수치를 루브릭에 박지 않는다(P6: 수치는 RiskItem 원문 인용만). 상품마다 값이 다르고,
+# 원문 조건값은 프롬프트의 [상품 조건 원문]으로 들어간다.
+item_id: VAR-EARLY-SURRENDER-RATIO
+product_type: VARIABLE_INSURANCE
+name: 조기해지 환급률
+status: draft
+required_elements:
+  - 조기 해지 시 환급률이 납입액을 크게 밑돎
+  - 상품요약서에 제시된 조기해지 환급률 수준을 수치로 언급
+misconception_conditions:
+  - 낸 돈은 다 돌려받는다
+  - 해지해도 큰 손해는 없다
+related_misconceptions:
+  - M06-SURRENDER-VALUE
