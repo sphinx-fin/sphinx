@@ -9,6 +9,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
@@ -50,6 +51,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> unreadable(HttpMessageNotReadableException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ApiError.of("MALFORMED_REQUEST", "요청 본문을 읽을 수 없다(형식·허용값 확인)")));
+    }
+
+    /**
+     * 매핑되지 않은 경로 → 404. 포괄 Exception 핸들러가 이걸 삼키면 오타 난 URL 이
+     * 500 INTERNAL_ERROR 로 나가고, 프론트는 "서버가 죽었다"로, 모니터링은 장애로 읽는다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> noResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ApiError.of("NOT_FOUND", "경로를 찾을 수 없다: " + e.getResourcePath())));
     }
 
     /** 그 외 예기치 못한 예외 → 500 (원문 메시지는 노출하지 않음) */

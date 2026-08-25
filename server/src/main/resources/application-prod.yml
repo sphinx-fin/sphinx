@@ -1,0 +1,30 @@
+# 배포 프로파일 (SPRING_PROFILES_ACTIVE=prod). 소유: 강희진
+#
+# 기본 프로파일(application.yml)은 로컬 개발 전제다 — H2 콘솔이 열려 있고 전면 허용이다.
+# 그 전제는 퍼블릭 노출과 함께 성립하지 않는다. 이 파일이 배포용 차이만 덮어쓴다.
+
+spring:
+  h2:
+    console:
+      # 브라우저에서 세션 테이블을 직접 조회·수정할 수 있으면 F-GTE-004(이해 기록)와
+      # F-CMN-002(감사 로그)의 전제가 무너진다. 데모 중 판정 기록을 고칠 수 있으면 안 된다.
+      enabled: false
+  jpa:
+    hibernate:
+      # 인메모리 H2 는 부팅 때 스키마를 만들어야 하므로 validate/none 을 쓸 수 없다
+      # (테이블이 없어 기동 또는 첫 쿼리에서 죽는다). update 대신 create 로 명시한다 —
+      # 매 기동 시 빈 스키마에서 시작하므로 기존 스키마를 암묵적으로 변형하지 않는다.
+      # 영속 DB로 옮기면 마이그레이션 도구를 넣고 validate 로 바꾼다.
+      ddl-auto: create
+    properties:
+      hibernate:
+        format_sql: false     # 운영 로그에 SQL 전문을 흘리지 않는다
+
+# 인증 자격증명은 환경변수로만 주입한다. 값을 이 파일에 적지 않는다.
+# 미설정 상태로 prod 를 띄우면 SecurityConfig 가 기동을 거부한다 — Spring 이 임의 비밀번호를
+# 생성해 로그에 찍고 그대로 노출되는 상황을 막기 위해서다.
+sphinx:
+  api:
+    auth:
+      username: ${SPHINX_API_USER:}
+      password: ${SPHINX_API_PASSWORD:}

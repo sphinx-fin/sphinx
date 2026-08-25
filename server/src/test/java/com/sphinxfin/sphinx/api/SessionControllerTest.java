@@ -93,4 +93,15 @@ class SessionControllerTest {
         mvc.perform(get("/sessions/" + sid))
                 .andExpect(jsonPath("$.data.state").value("JUDGED"));
     }
+
+    @Test
+    @DisplayName("매핑 안 된 경로 → 404 NOT_FOUND — 포괄 핸들러가 500으로 삼키지 않는다")
+    void unmappedPathIs404() throws Exception {
+        // 오타 난 URL 이 500 INTERNAL_ERROR 로 나가면 프론트는 "서버가 죽었다"로 읽고
+        // 모니터링은 장애로 집계한다.
+        mvc.perform(get("/nope"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+    }
 }
