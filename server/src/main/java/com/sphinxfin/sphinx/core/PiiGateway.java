@@ -29,13 +29,27 @@ public final class PiiGateway {
      *
      * U+2010 hyphen · U+2011 non-breaking hyphen · U+2012 figure dash · U+2013 en dash
      * U+2014 em dash · U+2015 horizontal bar · U+2212 minus sign · U+FF0D fullwidth hyphen
+     * U+00AD soft hyphen — 눈에 보이지 않는다. 워드·PDF 의 양쪽 정렬 텍스트를 복붙하면 들어온다
+     * U+FE63 small hyphen-minus — IME 가 내는 U+FF0D 의 형제 문자
      */
-    private static final String DASH = "\\-\\u2010-\\u2015\\u2212\\uFF0D";
+    private static final String DASH = "\\-\\u00AD\\u2010-\\u2015\\u2212\\uFE63\\uFF0D";
 
-    /** 구분자 — 대시류 또는 공백. 없어도 매칭(붙여 쓴 경우). */
-    private static final String SEP = "[" + DASH + "\\s]?";
+    /**
+     * 구분자 — 대시류 1글자, 그 **주변 공백까지** 허용한다. 구분자 자체는 없어도 된다.
+     *
+     * 주변 공백을 빼면 {@code 900101 - 1234567} 을 놓친다. 사람이 손으로 그렇게 띄어 쓰고,
+     * en dash 보다 흔하다. 화면(web/src/lib/pii.ts)이 {@code \s*[-–]\s*} 로 그걸 경고하므로
+     * 서버가 못 막으면 "경고했는데 안 막은" 상태가 된다 — 이 클래스의 구멍이다.
+     */
+    private static final String SEP = "\\s*[" + DASH + "]?\\s*";
 
-    /** 계좌번호처럼 구분자가 반드시 있어야 하는 자리. */
+    /**
+     * 계좌번호처럼 구분자가 **반드시** 있어야 하는 자리. 주변 공백도 허용하지 않는다.
+     *
+     * 옵션으로 두면 {@code 1102345678900} 같은 긴 숫자를 통째로 삼키고, 공백을 허용하면
+     * 같은 문제가 공백으로 재발한다. 화면도 계좌번호는 {@code [-–]} 로 붙여 쓴 것만
+     * 경고하므로 "화면 경고 ⊆ 서버 마스킹" 불변식은 이대로 유지된다.
+     */
     private static final String SEP_REQ = "[" + DASH + "]";
 
     private static final Map<String, Pattern> PATTERNS = new LinkedHashMap<>();
