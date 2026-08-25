@@ -64,7 +64,7 @@ class SessionServiceTest {
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {
         return new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE, "60대",
-                "없음", "5천만원대", "CT-1", survey);
+                "없음", "5천만원대", "CT-1", "SUIT-v1", survey);
     }
 
     @Test
@@ -76,6 +76,7 @@ class SessionServiceTest {
         assertThat(s.state()).isEqualTo(SessionState.CREATED);
         assertThat(s.createdAt()).isNotNull();      // BaseEntity 감사
         assertThat(s.updatedAt()).isNotNull();
+        assertThat(s.surveySchemaVersion()).isEqualTo("SUIT-v1");   // #43③ 설문 버전 보존
         assertThat(repository.findById(s.id())).isPresent();
         // F-DET-002 코칭: 60대(3)+5천만원대(1)+없음(3)+FACE_TO_FACE(0) = 7 → 취약
         assertThat(s.coachingScore()).isEqualTo(7);
