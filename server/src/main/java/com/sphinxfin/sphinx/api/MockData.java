@@ -1,10 +1,18 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import java.util.List;
 
 /** 초기 목 데이터 — 각 모듈 구현이 붙으면 삭제한다 */
 public final class MockData {
+
+    /** S-02 상품 선택 목록. 데모 대상 2종(data/documents/ 의 실문서와 같은 ID). */
+    public static final List<ProductSummary> PRODUCTS = List.of(
+            new ProductSummary("doc-els-kiwoom-4181", "키움 ELS 제4181회", "ELS", "parsed"),
+            new ProductSummary("doc-var-samsung-b2601", "삼성생명 변액유니버셜 B2601",
+                    "VARIABLE_INSURANCE", "parsed"));
+
     public static final List<RiskItem> RISK_ITEMS = List.of(
             new RiskItem("ELS-PRINCIPAL-LOSS-WARNING", "mock-els-001", "원금손실 조건", "required",
                     new RiskItem.Condition(

@@ -6,9 +6,62 @@ info:
     web ↔ server REST 계약. ai-service(내부망 전용)의 /internal/* 인터페이스는 여기 없다 —
     그 경계의 페이로드는 contracts/*.schema.json(judgment·risk_item·parsed_document)으로 계약한다.
 paths:
-  /products/documents:      {post: {summary: "문서 업로드 (F-EXT-001)"}}
-  /products/{id}/extract:   {post: {summary: "위험요소 추출 (F-EXT-002)"}}
-  /products/{id}/risk-items: {get: {summary: "추출 항목 조회"}}
+  /products:
+    get:
+      summary: 상품 목록 (S-02 선택지)
+      description: >
+        나머지 /products/* 는 전부 productId 를 이미 알아야 부를 수 있다. 고를 수 있는
+        상품을 주는 유일한 경로다. S-01(문서 업로드)이 붙으면 업로드한 상품이 여기에 나온다.
+      responses:
+        '200':
+          description: 상품 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductListApiResponse'}
+
+  /products/documents:
+    post:
+      summary: 문서 업로드 (F-EXT-001)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:        {type: string, format: binary}
+                productType: {type: string, enum: [ELS, VARIABLE_INSURANCE], default: ELS}
+      responses:
+        '200':
+          description: 업로드·파싱 결과
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadApiResponse'}
+
+  /products/{id}/extract:
+    post:
+      summary: 위험요소 추출 (F-EXT-002)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 추출된 이해항목
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
+
+  /products/{id}/risk-items:
+    get:
+      summary: 추출 항목 조회
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 이해항목 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
 
   /sessions:
     post:
@@ -48,7 +101,43 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
-  /sessions/{id}/questions/next: {post: {summary: "다음 질문 (F-INT-002)"}}
+  /sessions/{id}/questions/next:
+    post:
+      summary: 다음 질문 + 진행 상태 (F-INT-002)
+      description: >
+        index/total 을 서버가 준다. 화면이 "추출된 항목 수"로 분모를 보완하면 서버가 물어볼
+        항목 수와 어긋날 수 있고, 어긋나면 조용히 틀린 진행률이 보인다.
+        done=true 가 인터뷰 종료 판단의 유일한 근거다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 다음 질문(없으면 done=true)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NextQuestionApiResponse'}
+
+  /sessions/{id}/judgments:
+    get:
+      summary: 세션에 쌓인 항목별 판정 목록 (S-05)
+      description: >
+        S-03(고객 화면)과 S-05(판매자 화면)는 다른 기기·다른 탭이라 화면이 메모리에 들고
+        갈 수 없다. 새로고침에도 살아남아야 한다.
+        항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
+        grade → 색 매핑은 표시 관례이며 판정이 아니다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 항목 ID 오름차순 판정 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JudgmentsApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /sessions/{id}/answers:
     post:
@@ -71,7 +160,21 @@ paths:
               schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
 
   /sessions/{id}/re-explain: {post: {summary: "재설명 (F-INT-004)"}}
-  /sessions/{id}/simulate:  {post: {summary: "손실 계산 (F-SIM-001)"}}
+  /sessions/{id}/simulate:
+    post:
+      summary: 손실 계산 (F-SIM-001)
+      description: >
+        data 안의 시나리오 스키마는 F-SIM-001 소유자가 정한다(논의 중). 봉투는 전역 규약이라
+        스키마 확정과 무관하게 먼저 맞춰 둔다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: amount, in: query, required: false, schema: {type: integer, format: int64, default: 50000000}}
+      responses:
+        '200':
+          description: 시나리오별 손익
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpaqueApiResponse'}
 
   /sessions/{id}/judge:
     post:
@@ -84,10 +187,71 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/GateApiResponse'}
-  /sessions/{id}/override:  {post: {summary: "적색 진행 요청 (F-GTE-002)"}}
-  /sessions/{id}/override/approve: {post: {summary: "관리자 승인/반려"}}
-  /sessions/{id}/report:    {get: {summary: "이해 기록 (F-GTE-004)"}}
-  /dashboard/heatmap:       {get: {summary: "오해 지도 (F-DSH-001)"}}
+  /sessions/{id}/override:
+    post:
+      summary: 적색 진행 요청 (F-GTE-002)
+      description: 사유 30자 미만은 거부한다(400 VALIDATION_ERROR).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OverrideRequest'}
+      responses:
+        '200':
+          description: 오버라이드 상태
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OverrideApiResponse'}
+        '400':
+          description: VALIDATION_ERROR — 사유 30자 미만
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/override/approve:
+    post:
+      summary: 관리자 승인/반려 (F-GTE-002)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OverrideRequest'}
+      responses:
+        '200':
+          description: 오버라이드 상태
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OverrideApiResponse'}
+
+  /sessions/{id}/report:
+    get:
+      summary: 이해 기록 (F-GTE-004)
+      description: data 안의 리포트 스키마는 F-GTE-004 소유자가 정한다(논의 중). 봉투만 확정.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 리포트 참조
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpaqueApiResponse'}
+
+  /dashboard/heatmap:
+    get:
+      summary: 오해 지도 (F-DSH-001)
+      description: >
+        data 안의 셀 스키마는 집계 소유자가 정한다(논의 중). 봉투만 확정.
+        집계는 개인 식별자를 담지 않으며 소표본(n<30)은 마스킹된다.
+      responses:
+        '200':
+          description: 히트맵 셀
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpaqueApiResponse'}
 
 components:
   schemas:
@@ -114,11 +278,135 @@ components:
       properties:
         productId:       {type: string, description: "상품 ID"}
         channel:         {type: string, enum: [FACE_TO_FACE, MOBILE, TM], description: "판매 채널(대면·모바일·TM)"}
-        ageBand:         {type: string, description: "연령대(비식별, 예: 60대)"}
-        experienceLevel: {type: string, nullable: true, description: "투자 경험 수준"}
-        amountBand:      {type: string, nullable: true, description: "가입금액대(비식별)"}
+        ageBand:
+          type: string
+          description: >
+            연령대(비식별). 이 값은 server/src/main/resources/vulnerability_weights.yaml 이
+            문자열 키로 가중을 매기는 대상이다. 목록에 없는 값을 보내면 400 이 아니라 조용히
+            0점이 되고, 취약 고객이 일반 고객으로 분류된다. 그래서 enum 으로 고정한다.
+            가중 대상이 아닌 값(20~40대)도 유효한 입력이므로 enum 에 포함한다.
+          enum: ["20대", "30대", "40대", "50대", "60대", "70대", "80대"]
+        experienceLevel:
+          type: string
+          nullable: true
+          description: 투자 경험 수준. ageBand 와 같은 이유로 enum 고정.
+          enum: ["없음", "1년미만", "3년미만", "3년이상"]
+        amountBand:
+          type: string
+          nullable: true
+          description: 가입금액대(비식별). ageBand 와 같은 이유로 enum 고정.
+          enum: ["1천만원대", "3천만원대", "5천만원대", "1억원대", "3억원대이상"]
         contractRef:     {type: string, nullable: true, description: "계약건 참조번호(비식별)"}
         surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과"}
+    # data 의 모양을 소유자가 아직 정하지 않은 응답용 봉투. 봉투만 계약하고 안은 열어 둔다.
+    # 프론트는 success 로 분기하고 data 는 해당 화면이 아는 형태로 읽는다.
+    OpaqueApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {type: object, additionalProperties: true}
+        error:   {type: object, nullable: true}
+
+    ProductSummary:
+      type: object
+      required: [productId, name, productType, status]
+      properties:
+        productId:   {type: string}
+        name:        {type: string}
+        productType: {type: string, enum: [ELS, VARIABLE_INSURANCE]}
+        status:      {type: string, enum: [parsed, parse_failed]}
+    ProductListApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {type: array, items: {$ref: '#/components/schemas/ProductSummary'}}
+        error:   {type: object, nullable: true}
+
+    UploadResponse:
+      type: object
+      required: [productId, status]
+      properties:
+        productId: {type: string}
+        status:    {type: string, enum: [parsed, parse_failed]}
+    UploadApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/UploadResponse'}
+        error:   {type: object, nullable: true}
+
+    RiskItemsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: 항목 스키마는 contracts/risk_item.schema.json (snake_case 계약의 camelCase 웹 표현)
+          items: {type: object, additionalProperties: true}
+    RiskItemsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/RiskItemsResponse'}
+        error:   {type: object, nullable: true}
+
+    OverrideRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 30, description: "적색 진행 사유. 30자 미만 거부"}
+    OverrideResponse:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED]}
+    OverrideApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/OverrideResponse'}
+        error:   {type: object, nullable: true}
+
+    NextQuestion:
+      type: object
+      required: [index, total, done]
+      properties:
+        itemId:   {type: string, nullable: true, description: "done=true 면 null"}
+        question: {type: string, nullable: true, description: "done=true 면 null"}
+        index:    {type: integer, description: "1-based. done=true 면 total 과 같다"}
+        total:    {type: integer, description: "서버가 물어볼 항목 수. 추출 항목 수와 다를 수 있다"}
+        done:     {type: boolean, description: "더 물을 항목이 없다. 인터뷰 종료 판단의 유일한 근거"}
+    NextQuestionApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/NextQuestion'}
+        error:   {type: object, nullable: true}
+
+    JudgmentsResponse:
+      type: object
+      required: [sessionId, state, judgments]
+      properties:
+        sessionId: {type: string}
+        state:     {type: string, enum: [CREATED, IN_PROGRESS, RE_EXPLAIN, RE_VERIFY, JUDGED, CLOSED, ABORTED]}
+        judgments:
+          type: array
+          description: 항목 ID 오름차순. 항목별 최신 판정만 담긴다(재검증 시 덮어씀)
+          items: {$ref: '#/components/schemas/JudgmentView'}
+    JudgmentsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/JudgmentsResponse'}
+        error:   {type: object, nullable: true}
+
     SessionResponse:
       type: object
       required: [sessionId, state, productId]
