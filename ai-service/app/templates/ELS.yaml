@@ -1,0 +1,99 @@
+# 상품유형 템플릿 — ELS(주가연계증권). 소유: 윤지석
+#
+# 기획서 5절 [생성형 AI의 역할] 통제: **"상품유형 템플릿으로 추출 범위를 고정한다."**
+# 즉 여기 없는 항목은 F-EXT-002 가 추출하지 않는다 — 이 파일이 F-EXT-003 재현율의
+# **분모**다(이슈 #26).
+#
+# item_id 는 ADR-006 정본(`contracts/samples/*.json` 의 `_expected_risk_items`)을 따른다.
+#
+# `cue` 는 **상품에 무관해야 한다.** 계약 샘플의 value_text 에는 이 회차의 수치(85%·45%·70%)가
+# 들어있지만 템플릿에 그것을 박으면 다른 발행사 문서에 붙지 않는다. 기획서 4절이 말한
+# "신상품에도 바로 붙는다"가 성립하려면 찾는 단서만 두고 값은 추출 시점에 원문에서 가져와야
+# 한다(P6 — 수치는 원문 인용만).
+#
+# `importance` 는 아직 미정이다. 정세현이 23종에 부여하기로 했고(이슈 #26), 그 값이
+# `RiskItem.importance` 로 나가며 루브릭 작업 범위를 결정한다.
+product_type: ELS
+version: 1
+answer_set_documents:            # ADR-007: 정답지는 단일 문서가 아니라 집합
+  - 간이투자설명서
+items:
+  - item_id: ELS-NO-DEPOSIT-INSURANCE
+    name: 예금자보호 비대상
+    importance: null
+    cue: 예금자보호법에 따라 보호되지 않는다는 고지
+    section_hint: 표지 · 투자결정시 유의사항
+
+  - item_id: ELS-PRINCIPAL-LOSS-WARNING
+    name: 원금손실 가능성 고지
+    importance: null
+    cue: 투자원금의 손실이 발생할 수 있다는 고지
+    section_hint: 표지 · 투자결정시 유의사항
+
+  - item_id: ELS-HIGH-COMPLEXITY
+    name: 고난도금융투자상품
+    importance: null
+    # 자본시장법 시행령 제2조제7호의 정의 수치(원금의 100분의 20)는 cue 에 넣지 않는다 —
+    # 법령 상수라 무해하지만 예외를 허용하면 상품 조건값이 섞여 들어온다.
+    cue: 고난도금융투자상품 해당 여부와 그 판단 기준
+    section_hint: 투자위험 · 상품 해당여부
+
+  - item_id: ELS-ELDERLY-COOLING
+    name: 고령투자자 숙려제도 대상
+    importance: null
+    cue: 65세 이상 고령투자자·부적합 투자자가 숙려제도 대상이라는 안내
+    section_hint: 투자위험 · 유의사항
+
+  - item_id: ELS-EARLY-REDEMPTION-CONDITION
+    name: 조기상환 조건
+    importance: null
+    cue: 자동조기상환평가일에 기초자산이 모두 기준가격 이상일 때 상환된다는 조건
+    section_hint: 상환조건 · 손익구조
+
+  - item_id: ELS-KNOCKIN-BARRIER
+    name: 낙인 배리어
+    importance: null
+    cue: 낙인구간(최초기준가격의 일정 비율) 미만으로 하락한 이력 조건
+    section_hint: 상환조건 · 손익구조
+
+  - item_id: ELS-MATURITY-LOSS-CONDITION
+    name: 만기 손실조건
+    importance: null
+    cue: 만기평가일 기준가격 비율 미만일 때 손실이 발생한다는 조건
+    section_hint: 상환조건 · 손익구조
+
+  - item_id: ELS-TOTAL-LOSS-SCENARIO
+    name: 전액손실 사례
+    importance: null
+    cue: 최대손실 시 투자원금 전액을 잃을 수 있다는 사례·수치
+    section_hint: 손실 사례 · 수익률조견표
+
+  - item_id: ELS-LOSS-SIMULATION
+    name: 과거 데이터 수익률 모의실험
+    importance: null
+    cue: 기초자산 과거 데이터를 이용한 수익률 모의실험 결과
+    section_hint: 모의실험
+
+  - item_id: ELS-MIDWAY-REDEMPTION-COST
+    name: 중도상환 원금손실
+    importance: null
+    cue: 중도상환 시 공정가액 대비 차감이 발생해 원금에 미달할 수 있다는 조건
+    section_hint: 중도상환 · 유동성 위험
+
+  - item_id: ELS-COOLING-PERIOD
+    name: 숙려기간
+    importance: null
+    cue: 판매 과정에서 확보되는 숙려기간(영업일 수)
+    section_hint: 청약 · 숙려제도
+
+  - item_id: ELS-NO-LISTING
+    name: 환금성 제약(비상장)
+    importance: null
+    cue: 거래소에 상장하지 않아 만기 전 환금이 제약된다는 고지
+    section_hint: 유동성 위험
+
+  - item_id: ELS-ISSUER-CREDIT-RISK
+    name: 발행사 신용위험
+    importance: null
+    cue: 발행인의 신용으로 발행되는 무보증 증권이라는 고지와 신용등급
+    section_hint: 발행사 위험
