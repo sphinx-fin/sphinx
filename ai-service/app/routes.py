@@ -15,7 +15,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from . import extraction, misconception, mismatch, question_gen, reexplain, rubrics, scoring
+from . import (extraction, misconception, mismatch, question_gen, reexplain, rubrics,
+               scoring, templates)
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
@@ -67,12 +68,17 @@ def parse(body: ParseRequest) -> dict:
 @router.post("/extract", response_model=ExtractResponse)
 def extract(body: ExtractRequest) -> ExtractResponse:
     try:
-        items = extraction.extract(body.product_id, body.product_type, body.parsed_document)
+        return extraction.extract(
+            body.product_id, body.product_type,
+            body.parsed_document.model_dump(),
+        )
+    except templates.TemplateNotFound as exc:
+        # 템플릿 없는 상품유형은 추출 범위가 정의되지 않았다 — 500 이 아니라 422다
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError:
         raise _not_implemented("F-EXT-002 추출")
     except LlmError as exc:
         raise _llm_unavailable(exc)
-    return ExtractResponse(items=items)
 
 
 # ── F-INT-002 ─────────────────────────────────────────────────────────────────
