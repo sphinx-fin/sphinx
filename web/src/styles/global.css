@@ -1,0 +1,106 @@
+/**
+ * 전역 토큰·리셋. 소유: 오준서.
+ *
+ * 고령자 모드(명세 10절 접근성)는 여기서 **한 번만** 정의한다 —
+ * `<html data-elderly="on">` 하나로 글자 크기·간격·선 두께가 전 화면에서 같이 커진다.
+ * 화면마다 큰 글씨 스타일을 따로 만들면 모드가 새고, S-03에서만 적용되는 사고가 난다.
+ */
+
+:root {
+  /* 배율 — 고령자 모드에서 이 두 개만 바뀐다 */
+  --scale: 1;
+  --font-base: 16px;
+
+  --font-sm: calc(var(--font-base) * 0.875 * var(--scale));
+  --font-md: calc(var(--font-base) * var(--scale));
+  --font-lg: calc(var(--font-base) * 1.25 * var(--scale));
+  --font-xl: calc(var(--font-base) * 1.625 * var(--scale));
+  --font-2xl: calc(var(--font-base) * 2.125 * var(--scale));
+
+  --space-1: calc(4px * var(--scale));
+  --space-2: calc(8px * var(--scale));
+  --space-3: calc(12px * var(--scale));
+  --space-4: calc(16px * var(--scale));
+  --space-5: calc(24px * var(--scale));
+  --space-6: calc(32px * var(--scale));
+  --space-8: calc(48px * var(--scale));
+
+  --radius: 10px;
+  --line: 1.65;
+
+  /* 면 */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-sunken: #eef1f5;
+  --border: #d8dee7;
+  --border-strong: #b6c0cd;
+
+  /* 글자 */
+  --text: #17202b;
+  --text-muted: #5a6673;
+  --text-inverse: #ffffff;
+
+  --accent: #1f4e8c;
+  --accent-hover: #163b6b;
+
+  /* 신호등 — 명세 0.5절. 색만으로 구분하지 않는다(라벨·아이콘 병기) */
+  --green: #1a7a4c;
+  --green-bg: #e6f4ec;
+  --yellow: #8a6100;
+  --yellow-bg: #fdf3dd;
+  --red: #b3261e;
+  --red-bg: #fbeae9;
+
+  --focus: #2563eb;
+}
+
+/* 고령자 모드 — 글자 확대 + 간격 확대. 입력 시간 제한은 별도로 해제한다(S-03). */
+:root[data-elderly="on"] {
+  --scale: 1.35;
+  --line: 1.85;
+  --border: #b6c0cd;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", system-ui, sans-serif;
+  font-size: var(--font-md);
+  line-height: var(--line);
+  -webkit-font-smoothing: antialiased;
+  word-break: keep-all;   /* 한글 단어 중간 줄바꿈 방지 */
+}
+
+h1, h2, h3, p, figure { margin: 0; }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+
+/* 포커스는 절대 지우지 않는다 — 창구 태블릿·키보드 사용자 */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* 스크린리더 전용 */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
