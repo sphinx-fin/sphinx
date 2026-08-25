@@ -6,5 +6,5 @@
 
 | 파일 | 대상 | 상태 |
 |---|---|---|
-| `suitability_mismatch.schema.json` | F-DET-002 출력 | 초안 — 강희진 확인 대기 |
+| ~~`suitability_mismatch.schema.json`~~ | F-DET-002 출력 | **승격 완료** → `contracts/suitability_mismatch.schema.json` (PR #47). 사본 삭제 |
 | `F-DET-002-mismatch.md` | 위 스키마의 근거와 미결 쟁점 | — |

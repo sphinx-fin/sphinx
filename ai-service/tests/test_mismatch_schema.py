@@ -1,7 +1,9 @@
-"""F-DET-002 출력 스키마 초안의 불변식 검증. 소유: 윤지석
+"""F-DET-002 출력 스키마의 불변식 검증. 소유: 윤지석
 
-스키마가 아직 contracts/에 없으므로, 초안 JSON Schema와 pydantic 모델이 어긋나지
-않는지도 여기서 잡는다. 두 파일이 갈라지면 강희진이 옮길 때 드러난다.
+스키마는 PR #47 로 `contracts/suitability_mismatch.schema.json` 에 승격됐다.
+**이 테스트는 그 계약 파일을 직접 읽는다.** 초안 사본을 읽던 시절에는 계약이 바뀌어도
+테스트가 그대로 통과하고 pydantic 미러만 조용히 갈라졌다 — 통과하는 걸 보고서야 알게 되는
+종류다(ErrorCodeContractTest 가 처음 무용지물이었던 것과 같은 구조).
 """
 from __future__ import annotations
 
@@ -13,7 +15,8 @@ from pydantic import ValidationError
 
 from app.schemas import Contradiction, SuitabilityMismatch, SurveyRef
 
-DRAFT = Path(__file__).resolve().parents[1] / "proposals" / "suitability_mismatch.schema.json"
+CONTRACT = (Path(__file__).resolve().parents[2] / "contracts"
+            / "suitability_mismatch.schema.json")
 
 
 def _contradiction(confidence: float = 0.88) -> Contradiction:
@@ -110,10 +113,10 @@ def test_no_mismatch_with_no_contradictions_is_valid():
     assert m.mismatch is False
 
 
-# ── 초안 JSON Schema와의 정합 ─────────────────────────────────────────────────
-def test_draft_and_pydantic_agree_on_required_fields():
-    draft = json.loads(DRAFT.read_text(encoding="utf-8"))
-    required = set(draft["required"])
+# ── 계약 JSON Schema와의 정합 ─────────────────────────────────────────────────
+def test_contract_and_pydantic_agree_on_required_fields():
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    required = set(contract["required"])
     pydantic_required = {
         name for name, f in SuitabilityMismatch.model_fields.items() if f.is_required()
     }
@@ -122,13 +125,13 @@ def test_draft_and_pydantic_agree_on_required_fields():
     assert pydantic_required - required == set()
 
 
-def test_draft_and_pydantic_agree_on_enums():
-    draft = json.loads(DRAFT.read_text(encoding="utf-8"))
-    c = draft["$defs"]["contradiction"]["properties"]
+def test_contract_and_pydantic_agree_on_enums():
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    c = contract["$defs"]["contradiction"]["properties"]
     schema = Contradiction.model_json_schema()
     for field in ("axis", "direction"):
         assert set(c[field]["enum"]) == set(schema["properties"][field]["enum"]), field
-    assert set(draft["properties"]["status"]["enum"]) == {"evaluated", "insufficient_input"}
+    assert set(contract["properties"]["status"]["enum"]) == {"evaluated", "insufficient_input"}
 
 
 def test_vulnerability_weighting_is_not_in_this_schema():
