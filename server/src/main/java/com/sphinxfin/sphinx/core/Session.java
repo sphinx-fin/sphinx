@@ -108,7 +108,11 @@ public class Session extends BaseEntity {
     // 판정 시점의 게이트 결과 기록(F-GTE-004 감사 기준점 — 재계산값이 아니라 기록값).
     @Enumerated(EnumType.STRING)
     private Signal gateSignal;              // 판정 전이면 null
-    private String gateRuleTrace;          // 발화 룰 ID, 콤마 결합(예: "R-01")
+
+    // 발화 룰 ID 목록(예: ["R-01"]). 콤마 결합하지 않는다 — StringListConverter 주석 참고.
+    @Convert(converter = StringListConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private List<String> gateRuleTrace;
     private Instant judgedAt;              // 판정 시각
 
     /**
@@ -194,7 +198,7 @@ public class Session extends BaseEntity {
     /** 판정 시점의 게이트 결과를 기록한다(감사 기준점, F-GTE-004). */
     public void recordGate(GateResult result, Instant judgedAt) {
         this.gateSignal = result.signal();
-        this.gateRuleTrace = String.join(",", result.ruleTrace());
+        this.gateRuleTrace = List.copyOf(result.ruleTrace());
         this.judgedAt = judgedAt;
     }
 }

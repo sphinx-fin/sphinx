@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 /**
  * F-INT-001/004 세션 서비스. 소유: 강희진
@@ -23,15 +24,22 @@ public class SessionService {
     private final SessionRepository repository;
     private final GateEngine gateEngine;
     private final CoachingScoreService coachingScoreService;
+    private final EvidenceRecorder evidenceRecorder;
     private final int maxReverify;   // 항목당 재검증 상한(application.yml)
 
+    /**
+     * evidenceRecorder는 Optional 주입 — evidence/ 구현(F-GTE-004)이 등록되기 전에도
+     * 세션 루프가 돌아야 하므로, 없으면 NO_OP으로 대체한다.
+     */
     public SessionService(SessionRepository repository,
                           GateEngine gateEngine,
                           CoachingScoreService coachingScoreService,
+                          Optional<EvidenceRecorder> evidenceRecorder,
                           @Value("${sphinx.scoring.max-reverify:2}") int maxReverify) {
         this.repository = repository;
         this.gateEngine = gateEngine;
         this.coachingScoreService = coachingScoreService;
+        this.evidenceRecorder = evidenceRecorder.orElse(EvidenceRecorder.NO_OP);
         this.maxReverify = maxReverify;
     }
 
@@ -70,6 +78,9 @@ public class SessionService {
             session.fire(SessionFsm.Event.RESUME);
         }
         repository.save(session);
+        // 세션은 덮어쓰지만 이력은 남긴다 — 재설명 이력의 유일한 보존 경로(기획서 174행).
+        evidenceRecorder.appendJudgment(
+                sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
         return judgment;
     }
 
@@ -82,24 +93,72 @@ public class SessionService {
         Session session = get(sessionId);
         Judgment judgment = session.judgmentFor(itemId);
         if (judgment == null || judgment.grade() == Grade.U1) {
-            throw new IllegalArgumentException("재설명 대상이 아니다(판정 없음 또는 이미 이해): " + itemId);
+            throw new ReExplainNotEligibleException("재설명 대상이 아니다(판정 없음 또는 이미 이해): " + itemId);
         }
         if (session.reverifyExhausted(itemId, maxReverify)) {
-            throw new IllegalArgumentException(
+            throw new ReverifyExhaustedException(
                     "재검증 상한(" + maxReverify + "회) 도달 — 재설명 불가, 판정으로 진행: " + itemId);
         }
         session.fire(SessionFsm.Event.REQUEST_REEXPLAIN);
         repository.save(session);
-        return new ReExplanation(itemId, reExplainContent(session.vulnerable()), session.vulnerable());
+        return new ReExplanation(itemId, reExplainContent(itemId, session.vulnerable()),
+                session.vulnerable(), reverifyQuestion(itemId, session.vulnerable()));
     }
 
-    /** TODO: ai-service /internal/reexplain 연결(F-INT-004, 윤지석). 지금은 취약 여부로 가른 목. */
-    private String reExplainContent(boolean vulnerable) {
-        return vulnerable
-                ? "쉽게 다시 설명드릴게요. 이 상품은 은행 예금과 달라서 맡긴 돈(원금)이 줄어들 수 있어요. "
-                  + "'예금처럼 안전하다'가 아니라는 점만 꼭 기억해 주세요."
-                : "다시 설명드리면, 기초자산이 정해진 수준 아래로 내려가면 원금 손실이 발생합니다. "
-                  + "예금자보호 대상도 아닙니다.";
+    /**
+     * 재설명 문면. 기획서 7-2 [기능 1]은 "해당 항목만" 재설명하라고 하므로 itemId로 가른다
+     * — 예금자보호 항목을 물었는데 원금손실을 설명하면 재설명이 아니라 딴소리다.
+     * 눈높이는 취약 여부로 다시 가른다(기획서 175행: 비유 중심·짧은 문장).
+     * TODO: ai-service /internal/reexplain 연결(F-INT-004, 윤지석). 지금은 데모 항목 2종 목.
+     */
+    private String reExplainContent(String itemId, boolean vulnerable) {
+        return switch (itemId) {
+            case "ELS-PRINCIPAL-LOSS-WARNING" -> vulnerable
+                    ? "쉽게 다시 설명드릴게요. 이 상품은 은행 예금과 달라서 맡긴 돈(원금)이 "
+                      + "줄어들 수 있어요. '예금처럼 안전하다'가 아니라는 점만 꼭 기억해 주세요."
+                    : "다시 설명드리면, 기초자산이 정해진 수준 아래로 내려가면 원금 손실이 "
+                      + "발생합니다. 손실은 하락폭에 비례해 커집니다.";
+            case "ELS-NO-DEPOSIT-INSURANCE" -> vulnerable
+                    ? "이건 예금이 아니에요. 은행이 잘못돼도 나라가 5천만 원까지 돌려주는 "
+                      + "예금자보호가 이 상품에는 적용되지 않습니다."
+                    : "다시 설명드리면, 이 상품은 예금자보호법 적용 대상이 아닙니다. "
+                      + "예금자보호 한도와 무관하게 원금이 보호되지 않습니다.";
+            default -> vulnerable
+                    ? "쉽게 다시 설명드릴게요. 이 상품은 은행 예금과 달라서 맡긴 돈이 "
+                      + "줄어들 수 있어요."
+                    : "다시 설명드리면, 이 상품은 원금이 보장되지 않으며 조건에 따라 "
+                      + "손실이 발생할 수 있습니다.";
+        };
+    }
+
+    /**
+     * 재검증용 변형 질문(F-INT-002). 재설명 응답에 실어 프론트가 직전 질문을 그대로 다시
+     * 띄우지 않게 한다.
+     *
+     * 주의 — 이 목은 기획서 7-4 1단계(우회 비용 상향)를 만족하지 않는다. 그 조항이 요구하는
+     * 것은 "질문이 상품 문서에서 자동 생성되므로 고정 문항을 사전에 확보하는 것이 불가능"한
+     * 상태인데, 아래는 항목별로 갈리기만 할 뿐 고정 문항이다. 사전에 확보하면 그대로 뚫린다.
+     * 우회 비용이 실제로 올라가는 것은 F-INT-002가 문서에서 질문을 생성한 뒤부터다.
+     * TODO: ai-service /internal/question?variant=reverify 연결(F-INT-002, 윤지석).
+     */
+    private String reverifyQuestion(String itemId, boolean vulnerable) {
+        // 데모 항목 2종(api/MockData.RISK_ITEMS와 같은 ID). ai-service 연결 시 함께 사라진다.
+        // 질문도 재설명 문면과 같은 눈높이여야 한다 — 쉬운 말로 설명해 놓고 곧바로 "기초자산"을
+        // 되물으면 고령자 모드가 한 응답 안에서 깨진다(기획서 175행: 비유 중심·짧은 문장).
+        return switch (itemId) {
+            case "ELS-PRINCIPAL-LOSS-WARNING" -> vulnerable
+                    ? "그러면 어떤 경우에 맡기신 돈이 줄어드는지, 편하게 말씀해 주시겠어요?"
+                    : "그러면 기초자산이 어디까지 떨어졌을 때 손실이 나는지, 방금 설명을"
+                      + " 기준으로 본인 말씀으로 한 번만 더 말씀해 주시겠어요?";
+            case "ELS-NO-DEPOSIT-INSURANCE" -> vulnerable
+                    ? "이 상품에 넣으신 돈이 은행 예금처럼 보호받지 못한다는 게 어떤 뜻일까요?"
+                    : "이 상품에 넣은 돈이 예금자보호를 받지 못한다는 게 어떤 뜻인지,"
+                      + " 본인 말씀으로 다시 설명해 주시겠어요?";
+            default -> vulnerable
+                    ? "방금 설명드린 것 중에 가장 중요한 게 뭐라고 이해하셨는지 말씀해 주시겠어요?"
+                    : "방금 설명드린 내용 중 가장 중요한 조건이 무엇인지, 그리고 그 조건에"
+                      + " 해당하면 어떻게 되는지 본인 말씀으로 다시 설명해 주시겠어요?";
+        };
     }
 
     /**
@@ -110,11 +169,14 @@ public class SessionService {
         Session session = get(sessionId);
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
-        session.recordGate(result, Instant.now());   // 감사 기준점 기록(F-GTE-004)
+        Instant judgedAt = Instant.now();
+        session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.JUDGE)) {
             session.fire(SessionFsm.Event.JUDGE);
         }
         repository.save(session);
+        // 신호의 변천(황색→녹색)을 남긴다 — 세션에는 최종 신호만 남으므로.
+        evidenceRecorder.appendGate(sessionId, result, judgedAt);
         return result;
     }
 
@@ -128,6 +190,11 @@ public class SessionService {
         return session;
     }
 
-    /** 재설명 결과(문면 + 취약 모드 여부). */
-    public record ReExplanation(String itemId, String content, boolean vulnerable) {}
+    /**
+     * 재설명 결과. vulnerable은 렌더링 힌트(큰 글씨·비유)이지 화면에 표시할 라벨이 아니다
+     * — "취약 고객으로 분류됨"을 본인에게 보이면 기획서 7-4의 취급 원칙(보호 목적으로만)에
+     * 어긋난다. reverifyQuestion은 재설명 직후 같은 항목을 다시 물을 때 쓸 변형 질문이다.
+     */
+    public record ReExplanation(String itemId, String content, boolean vulnerable,
+                                String reverifyQuestion) {}
 }

@@ -13,8 +13,12 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,10 +37,29 @@ class SessionServiceTest {
     private TestEntityManager em;
 
     private SessionService service;
+    private RecordingEvidence evidence;
 
     @BeforeEach
     void setUp() {
-        service = new SessionService(repository, new GateEngine(), new CoachingScoreService(), 2);
+        evidence = new RecordingEvidence();
+        service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
+                Optional.of(evidence), 2);
+    }
+
+    /** evidence append 지점이 실제로 호출되는지 보려는 테스트 더블(구현은 정세현 evidence/). */
+    private static final class RecordingEvidence implements EvidenceRecorder {
+        private final List<String> judgments = new ArrayList<>();
+        private final List<Signal> gates = new ArrayList<>();
+
+        @Override
+        public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at) {
+            judgments.add(judgment.itemId() + ":" + judgment.grade() + ":" + reverifyCount);
+        }
+
+        @Override
+        public void appendGate(String sessionId, com.sphinxfin.sphinx.domain.GateResult result, Instant at) {
+            gates.add(result.signal());
+        }
     }
 
     private CreateSessionCommand cmd(Map<String, Object> survey) {
@@ -101,8 +124,20 @@ class SessionServiceTest {
         Session judged = service.get(s.id());
         assertThat(judged.state()).isEqualTo(SessionState.JUDGED);
         assertThat(judged.gateSignal()).isEqualTo(Signal.RED);
-        assertThat(judged.gateRuleTrace()).isEqualTo("R-01");
         assertThat(judged.judgedAt()).isNotNull();
+
+        em.flush();
+        em.clear();   // 컨버터를 실제로 태운다(1차 캐시로 통과하지 않도록)
+
+        // 저장 형태가 콤마 문자열이 아니라 JSON 배열이어야 한다 — evidence가 CanonicalJson으로
+        // 해싱할 때 배열로 정규화돼야 하고, 룰 ID에 콤마가 들어가도 깨지지 않아야 한다.
+        Object raw = em.getEntityManager()
+                .createNativeQuery("select gate_rule_trace from sessions where id = ?1")
+                .setParameter(1, s.id())
+                .getSingleResult();
+        assertThat(raw.toString()).isEqualTo("[\"R-01\"]");
+        assertThat(repository.findById(s.id()).orElseThrow().gateRuleTrace())
+                .containsExactly("R-01");
     }
 
     @Test
@@ -148,9 +183,9 @@ class SessionServiceTest {
         service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증2 실패 (RE_VERIFY)
 
         assertThat(service.get(s.id()).reverifyCount("A")).isEqualTo(2);
-        // 상한 도달 → 재설명 불가
+        // 상한 도달 → 재설명 불가. '대상 아님'과 타입이 달라야 프론트가 문면 파싱 없이 가른다.
         assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(ReverifyExhaustedException.class);
 
         var r = service.judge(s.id());
         assertThat(r.signal()).isEqualTo(Signal.RED);
@@ -158,12 +193,89 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("이해(U1) 항목은 재설명 대상이 아니다 → 예외")
+    @DisplayName("이해(U1) 항목은 재설명 대상이 아니다 → REEXPLAIN_NOT_ELIGIBLE 계열 예외")
     void reexplainUnderstoodItem_rejected() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U1));
         assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(ReExplainNotEligibleException.class);
+    }
+
+    @Test
+    @DisplayName("판정이 아직 없는 항목도 재설명 대상이 아니다")
+    void reexplainUnjudgedItem_rejected() {
+        Session s = service.create(cmd(null));
+        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+                .isInstanceOf(ReExplainNotEligibleException.class);
+    }
+
+    @Test
+    @DisplayName("재설명 응답에 재검증용 변형 질문이 실린다 — 직전 질문 재사용 방지(F-INT-002)")
+    void reexplainCarriesReverifyQuestion() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+
+        var r = service.reExplain(s.id(), "A");
+        assertThat(r.reverifyQuestion()).isNotBlank();
+        assertThat(r.content()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("고령자 모드에서는 재설명 문면과 변형 질문이 같은 눈높이여야 한다")
+    void reverifyQuestionFollowsVulnerableMode() {
+        // 60대(3)+5천만원대(1)+없음(3) = 7 ≥ 임계 4 → 취약
+        Session s = service.create(cmd(Map.of("riskProfile", "안정형")));
+        assertThat(s.vulnerable()).isTrue();
+        service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U3));
+
+        var r = service.reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING");
+        assertThat(r.vulnerable()).isTrue();
+        // 쉬운 말로 설명해 놓고 곧바로 전문용어로 되물으면 한 응답 안에서 모드가 깨진다.
+        assertThat(r.content()).doesNotContain("기초자산");
+        assertThat(r.reverifyQuestion()).doesNotContain("기초자산");
+    }
+
+    @Test
+    @DisplayName("재설명은 '해당 항목만' 설명한다 — 항목이 다르면 문면도 달라야 한다")
+    void reexplainContentIsScopedToItem() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U3));
+        service.recordJudgment(s.id(), j("ELS-NO-DEPOSIT-INSURANCE", Grade.U3));
+
+        String loss = service.reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING").content();
+        // 상태를 되돌리기 위해 재검증을 한 번 태운다(RE_EXPLAIN → RE_VERIFY → IN_PROGRESS)
+        service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U1));
+        String deposit = service.reExplain(s.id(), "ELS-NO-DEPOSIT-INSURANCE").content();
+
+        assertThat(loss).isNotEqualTo(deposit);
+        assertThat(deposit).contains("예금자보호");
+    }
+
+    @Test
+    @DisplayName("덮어쓰기 전 판정이 evidence로 append된다 — 재설명 이력 보존(기획서 174행)")
+    void reexplainHistoryIsAppendedToEvidence() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // 최초 미이해
+        service.reExplain(s.id(), "A");
+        service.recordJudgment(s.id(), j("A", Grade.U1));   // 재검증 통과 — 세션에서 U3는 소실
+        var result = service.judge(s.id());
+
+        // 세션에는 최신값만 남는다 — 게이트 입력으로는 이게 맞다
+        assertThat(service.get(s.id()).judgmentFor("A").grade()).isEqualTo(Grade.U1);
+        assertThat(result.signal()).isEqualTo(Signal.GREEN);
+        // 이력은 evidence 쪽에 전부 남는다 — "처음에 미이해였다"가 복원 가능해야 한다
+        assertThat(evidence.judgments).containsExactly("A:U3:0", "A:U1:1");
+        assertThat(evidence.gates).containsExactly(Signal.GREEN);
+    }
+
+    @Test
+    @DisplayName("evidence 구현이 없어도(NO_OP) 세션 루프는 그대로 돈다")
+    void worksWithoutEvidenceRecorder() {
+        SessionService bare = new SessionService(repository, new GateEngine(),
+                new CoachingScoreService(), Optional.empty(), 2);
+        Session s = bare.create(cmd(null));
+        bare.recordJudgment(s.id(), j("A", Grade.U1));
+        assertThat(bare.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
     }
 
     @Test

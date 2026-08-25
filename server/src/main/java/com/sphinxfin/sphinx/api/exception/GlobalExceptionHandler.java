@@ -2,6 +2,8 @@ package com.sphinxfin.sphinx.api.exception;
 
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
+import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.core.SessionFsm;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import lombok.extern.slf4j.Slf4j;
@@ -48,11 +50,22 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", detail)));
     }
 
-    /** 잘못된 요청(재설명 대상 아님·상한 도달 등) → 400 */
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiResponse<Void>> illegalArgument(IllegalArgumentException e) {
+    /**
+     * 재설명 대상 아님(판정 없음·이미 이해 U1) → 400. 화면은 조용히 다음 항목으로 넘어간다.
+     * 상한 도달과 코드를 가르는 이유: 메시지 문자열은 계약이 아니라서, 한 코드로 내보내면
+     * 프론트가 서버 문면을 파싱해야 하고 문면이 바뀌는 순간 조용히 깨진다.
+     */
+    @ExceptionHandler(ReExplainNotEligibleException.class)
+    public ResponseEntity<ApiResponse<Void>> reExplainNotEligible(ReExplainNotEligibleException e) {
         return ResponseEntity.badRequest()
-                .body(ApiResponse.fail(ApiError.of("INVALID_REQUEST", e.getMessage())));
+                .body(ApiResponse.fail(ApiError.of("REEXPLAIN_NOT_ELIGIBLE", e.getMessage())));
+    }
+
+    /** 재검증 상한 도달 → 400. 화면은 판정으로 넘어감을 고객에게 알려야 한다(F-INT-004). */
+    @ExceptionHandler(ReverifyExhaustedException.class)
+    public ResponseEntity<ApiResponse<Void>> reverifyExhausted(ReverifyExhaustedException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("REVERIFY_EXHAUSTED", e.getMessage())));
     }
 
     /** 요청 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum 값 등) → 400 */

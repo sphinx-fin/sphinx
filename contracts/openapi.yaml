@@ -69,11 +69,21 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
+        '502':
+          description: >
+            EVIDENCE_REQUIRED — 상류(ai-service)가 근거 없는 판정을 반환해 차단됐다(P4).
+            고객이 고칠 수 있는 입력 오류가 아니므로 400이 아니다. 화면은 재입력을 요구하지
+            말고 재시도·황색 보수 처리로 간다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /sessions/{id}/re-explain:
     post:
       summary: 재설명 (F-INT-004) — 이해 부족 항목을 다시 설명, 이후 같은 항목 재답변이 재검증
-      description: 재검증 상한(항목당 max-reverify) 도달 항목은 재설명 불가(400) → 판정으로 진행.
+      description: >
+        재검증 상한(항목당 max-reverify) 도달 항목은 재설명 불가(400) → 판정으로 진행.
+        400의 두 경우는 화면 처리가 다르므로 error.code로 구분한다(메시지 문자열은 계약이 아니다).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       requestBody:
@@ -88,7 +98,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReExplanationApiResponse'}
         '400':
-          description: 재설명 대상 아님 또는 상한 도달
+          description: >
+            REEXPLAIN_NOT_ELIGIBLE — 재설명 대상 아님(판정 없음 또는 이미 이해 U1).
+            화면은 고객에게 아무것도 띄우지 않고 다음 항목으로 넘어간다.
+            REVERIFY_EXHAUSTED — 재검증 상한 도달. 화면은 판정으로 넘어감을 고객에게 알린다
+            (F-INT-004 "2회 실패 시 해당 항목 최종 상태 확정 후 게이트로 이관").
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
@@ -130,7 +144,20 @@ components:
       type: object
       required: [code, message, timestamp]
       properties:
-        code:      {type: string, description: "에러 코드(NOT_FOUND·VALIDATION_ERROR·MALFORMED_REQUEST·ILLEGAL_STATE_TRANSITION·INTERNAL_ERROR)"}
+        code:
+          type: string
+          description: >
+            에러 코드. 프론트는 이 목록을 유니온 타입으로 들고 분기한다 —
+            목록에 없는 코드를 서버가 내보내면 화면이 조용히 default로 떨어진다.
+          enum:
+            - NOT_FOUND                # 404 세션 등 리소스 없음
+            - VALIDATION_ERROR         # 400 @Valid 실패
+            - MALFORMED_REQUEST        # 400 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum)
+            - ILLEGAL_STATE_TRANSITION # 409 허용되지 않은 세션 상태 전이
+            - REEXPLAIN_NOT_ELIGIBLE   # 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
+            - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
+            - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
         timestamp: {type: string, format: date-time}
     ErrorApiResponse:
@@ -223,11 +250,22 @@ components:
         itemId: {type: string, description: "다시 설명할 이해항목"}
     ReExplanation:
       type: object
-      required: [itemId, content, vulnerable]
+      required: [itemId, content, vulnerable, reverifyQuestion]
       properties:
         itemId:     {type: string}
         content:    {type: string, description: "재설명 문면(취약 시 고령자 모드)"}
-        vulnerable: {type: boolean, description: "취약 고객 여부(맞춤 재설명 적용)"}
+        vulnerable:
+          type: boolean
+          description: >
+            취약 고객 여부. 렌더링 힌트(큰 글씨·비유)이지 화면에 표시할 라벨이 아니다 —
+            "취약 고객으로 분류됨"을 본인에게 보이지 않는다(기획서 7-4, 보호 목적으로만).
+        reverifyQuestion:
+          type: string
+          description: >
+            재설명 직후 같은 항목을 다시 물을 때 쓸 변형 질문(F-INT-002). 프론트는 직전 질문을
+            재사용하지 말고 이 값을 띄운다. 서버 구현이 목인 동안에는 항목별 고정 문면이라
+            기획서 7-4 1단계(우회 비용 상향)를 아직 만족하지 않는다 — 문서 자동 생성이
+            붙어야 성립한다. 계약 형태는 그때도 바뀌지 않는다.
     ReExplanationApiResponse:
       type: object
       required: [success, data]
