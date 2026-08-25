@@ -92,6 +92,15 @@ public class Session extends BaseEntity {
     @Builder.Default
     private boolean suitabilityMismatch = false;
 
+    // F-DET-002 코칭 메타 — 취약 가중치 합산 점수·취약 여부. 게이트 신호 아님(코칭·리포트용).
+    @Column(nullable = false)
+    @Builder.Default
+    private int coachingScore = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean vulnerable = false;
+
     /**
      * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
      * (서비스는 이 결과를 저장만 한다.)
@@ -147,5 +156,11 @@ public class Session extends BaseEntity {
     /** F-DET-002 모순 감지 결과 반영. */
     public void flagSuitabilityMismatch(boolean mismatch) {
         this.suitabilityMismatch = mismatch;
+    }
+
+    /** F-DET-002 코칭 스코어·취약 여부 반영(세션 메타). */
+    public void applyCoaching(int score, boolean vulnerable) {
+        this.coachingScore = score;
+        this.vulnerable = vulnerable;
     }
 }
