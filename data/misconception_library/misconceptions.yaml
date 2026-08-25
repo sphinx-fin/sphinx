@@ -18,9 +18,22 @@
 # 검사결과라는 뜻이다"* 라고 못박는다. 따라서 proposal_example 은 **잠정 상태**다 —
 # 판정의 타당성은 기획서 본문이 뒷받침하지만 인용 가능한 1차 출처가 아니다.
 #
-# 현재 8종 중 7종이 proposal_example, 1종(M07)이 근거 미확보다. 조정례·검사결과를 확보하는
-# 대로 dispute_case / inspection 으로 승급한다. 승급 여부는 types_without_citable_source()
-# 와 SourceRef.is_dispute_grounded 로 확인한다.
+# 현재 7종 중 3종(M01·M02·M03)이 dispute_case, 4종(M04·M05·M06·M08)이 proposal_example 이다.
+# 승급 여부는 types_without_citable_source() 와 SourceRef.is_dispute_grounded 로 확인한다.
+#
+# ── 근거 수집 결과 (2026-08-25) ─────────────────────────────────────────────
+#
+# 금감원 분쟁조정사례 DB(fss.or.kr, 전체 814건)를 제목 기준으로 전수 확인했다.
+#
+#   ELS·파생결합 계열 8건 존재 — 제2010-97·96·73·28·27호, 제2009-93호(ELF 손익구조
+#     설명불충분), 제2016-19호(DLS), DLF 불완전판매 손해배상비율 산정기준(2020.1.15)
+#   변액보험 0건 — "변액"·"해지환급금"·"저축성"으로 전수 대조. M05·M06 은 이 경로로는
+#     근거가 안 나온다
+#   꺾기·구속성 0건 — M08 은 조정례가 아니라 검사·제재 자료로 가야 한다
+#
+# ELS 8건의 본문은 전부 .hwp 첨부라 자동 파싱이 안 된다. 그래서 이번에는 **PDF 로 공개된
+# 홍콩 H지수 ELS 보도자료 2건**(data/dispute_cases/)에서 인용했다. hwp 를 열어보면
+# M04 는 제2009-93호로 승급할 여지가 있다.
 #
 # quote 는 로더가 읽지 않는다(SourceRef 는 type·ref 만 받는다). 근거 문면을 파일 안에
 # 남겨 두려는 것이고, 승급 시 조정례 원문 인용으로 교체한다 — 번호만 적으면 잘못 붙였을 때
@@ -41,34 +54,42 @@
 # 이 정책대로면 #17(source 구조화)은 올리지 않는 게 맞았고, 이 PR(M04 패턴)은 올린다.
 # @yoonjiseok 이 Judgment 에 library_version 을 싣기로 했다(#21 회신 3번). 그게 붙으면
 # 이 번호가 실제로 판정마다 기록된다.
-version: 2
+version: 3
 types:
   - id: M01-PRINCIPAL-GUARANTEE
     label: 원금보장 오인
     patterns: ["은행에서 파니까 원금은 보장", "원금은 지켜지는"]
     products: [ELS, VARIABLE_INSURANCE]
     source:
-      type: proposal_example
-      ref: "docs/proposal.md 4절 [핵심 엔진] 157행"
-      quote: "은행에서 파니까 원금은 보장되겠지"
+      type: dispute_case
+      ref: "금융감독원 「홍콩 H지수 ELS 관련 국민은행 등 5개 은행의 대표사례에 대한 분쟁조정 결정」 2024.5.14 (R2405598) p2 — 개별 부당권유 금지 위반"
+      quote: "판매직원이 신탁통장 표지에 금액, 이율 등 확정금리를 제공하는 안전한 상품이라고 오인하게 할 소지가 있는 내용을 기재하는 등 부당권유가 있었습니다"
   - id: M02-DEPOSIT-INSURANCE
     label: 예금자보호 오인
     patterns: ["예금자보호 되는 줄"]
     products: [ELS, VARIABLE_INSURANCE]
+    # 주의: 조정례가 인정한 것은 "예·적금 가입 목적으로 방문했다"는 사실이지 "예금자보호법
+    # 대상으로 오인했다"는 진술이 아니다. 같은 오해의 인접 표현으로 보고 인용하되, 승급
+    # 범위를 넘겨 "예금자보호 오인이 조정례에서 인정됐다"고 쓰지 않는다.
     source:
-      type: proposal_example
-      ref: "docs/proposal.md 4절 [핵심 엔진] 158행"
-      quote: "예금자보호 되는 줄 알았다"
+      type: dispute_case
+      ref: "금융감독원 「홍콩 H지수 ELS ... 분쟁조정 결정」 2024.5.14 (R2405598) p5 사례 A(국민은행) / p8 분쟁조정기준(안) 고객요인 '예적금 가입목적' 10%p 가산"
+      quote: "암 보험 진단금을 정기예금에 예치하러 온 고객에게 ELT를 권유 / (기준) 예적금 예치 등 원금보장상품 가입을 목적으로 금융회사를 방문한 것이 인정되는 경우"
   - id: M03-PROBABILITY
     label: 확률 오인
     patterns: ["반토막 날 리가"]
     products: [ELS]
+    # 이 유형의 근거가 F-SIM-001 이 2008 을 강제 포함하는 이유와 같다(P2). 확률 오인은
+    # 고객이 혼자 만든 것이 아니라 분석기간에서 2008 을 빼는 방식으로 만들어졌다.
     source:
-      type: proposal_example
-      ref: "docs/proposal.md 4절 [핵심 엔진] 159행"
-      quote: "지수가 반토막 날 리가 있나"
+      type: dispute_case
+      ref: "금융감독원 「홍콩 H지수 ELS ... 분쟁조정 결정」 2024.5.14 (R2405598) p2 — 일괄 설명의무 위반"
+      quote: "손실위험에 대한 시나리오 분석대상 기간을 20년 대신 10년 또는 15년으로 설정함으로써 손실위험이 축소된 결과를 활용하여 안내 (예: '08년도 글로벌 금융위기 기간이 제외)"
   - id: M04-EARLY-REDEMPTION
     label: 조기상환 구조 오인
+    # 승급 후보: 금감원 분쟁조정결정 제2009-93호「ELF 손익구조 설명불충분 관련 손해배상책임
+    # 여부」(2010.2.2). 제목이 이 유형과 정확히 겹치지만 본문이 .hwp 첨부라 문면을 못 뽑았다.
+    # 열어서 인용 가능한 진술이 나오면 dispute_case 로 올린다.
     # 두 번째 패턴은 기획서 4절 대화 예시(154행)에서 왔다. 기존 패턴만으로는 그 발화가
     # 포함도 0.308(임계 0.62)로 미매칭이어서, 등급은 LLM 이 U4 로 맞히지만
     # misconception_type 이 비고 미분류 후보 큐로 갔다 (PR #10 dev set 유일 FAIL).
@@ -93,6 +114,8 @@ types:
       quote: "만기 3년이면 3년 뒤에 원금과 이자 / 은행에서 파는 거니까 3년 뒤에 이자 붙어서 나오는 거죠"
   - id: M05-SAVINGS
     label: 저축성 오인
+    # 금감원 분쟁조정사례 DB 814건 전수 대조 결과 변액보험 조정례가 없다(2026-08-25).
+    # 이 경로로는 승급 불가. 생보협·판례 등 다른 수집원을 봐야 한다.
     patterns: ["저축인 줄"]
     products: [VARIABLE_INSURANCE]
     source:
@@ -101,25 +124,20 @@ types:
       quote: "저축인 줄 알았다"
   - id: M06-SURRENDER-VALUE
     label: 해지환급금 오인
+    # 금감원 분쟁조정사례 DB 814건 전수 대조 결과 변액보험 조정례가 없다(2026-08-25).
+    # 이 경로로는 승급 불가. 생보협·판례 등 다른 수집원을 봐야 한다.
     patterns: ["낸 돈은 다 돌려받는"]
     products: [VARIABLE_INSURANCE]
     source:
       type: proposal_example
       ref: "docs/proposal.md 4절 [핵심 엔진] 162행"
       quote: "낸 돈은 다 돌려받는 거죠"
-  - id: M07-YIELD-OVERCONFIDENCE
-    label: 수익률 과신
-    patterns: ["제시 수익률이 확정"]
-    products: [ELS, VARIABLE_INSURANCE]
-    # 8종 중 유일하게 기획서 오해 목록(157~163행)에 대응하는 줄이 없다. 가장 가까운 것은
-    # 109행 "상품 구조 대신 제시 수익률만 보고 가입하는 패턴이 동일하게 관측된다" 인데
-    # 그건 2순위 대상 고객층 서술이고 오해 유형으로 세운 것이 아니다.
-    # 근거를 확보하면 승급하고, 안 나오면 라이브러리에서 뺀다 — 근거 없는 유형을 남겨두면
-    # floor 가 그걸로 U4 를 확정한다.
-    source:
-      ref: "TODO 근거 미확보 — 기획서 오해 목록에 대응 항목 없음"
   - id: M08-TYING
     label: 꺾기(불공정영업) 신호
+    # escalate 가 걸린 유일한 유형이라 오탐 비용이 조직 밖으로 나간다. 근거 우선순위 1번.
+    # 조정례 DB 에는 꺾기 건이 없다 — 승급 후보는 금감원「8개 은행의 금융상품 구속행위에
+    # 대한 검사 및 조치결과」(2011, 검사 7.12~9.9, 943건 330억원 적발)이고 type 은
+    # inspection 이 된다.
     patterns: ["대출받으려면 이것도 들어야"]
     products: [ALL]
     escalate: compliance      # F-GTE-003 즉시 알림, 판매자 화면 비노출
