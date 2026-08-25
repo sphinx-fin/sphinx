@@ -159,3 +159,12 @@ pytest
 
 `tests/fixtures/`는 프롬프트 튜닝용이며 **F-CMN-003 공식 평가셋과 무관하다**
 (윤지석은 프롬프트 당사자로 라벨링 제외). 자세한 내용은 그 디렉토리의 README.
+
+RiskItem 은 픽스처에 두지 않고 `contracts/samples/*.json` 에서 만든다 — 조항 문면을
+복사하면 낡는다. 러너가 실행 전에 계약 규약 등식
+`pages[page].text[start:end] == value_text` 를 검사한다.
+
+```bash
+python tools/run_devset.py            # 전체
+python tools/run_devset.py DEMO-MAIN  # id 부분일치
+```

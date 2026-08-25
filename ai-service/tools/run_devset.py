@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -15,33 +16,82 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import misconception, scoring  # noqa: E402
+from app import misconception, scoring, templates  # noqa: E402
 from app.llm_client import LlmError  # noqa: E402
 from app.schemas import Condition, RiskItem, SourceSpan  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
+CONTRACT_SAMPLES = Path(__file__).resolve().parents[2] / "contracts" / "samples"
+
+#: dev set 이 쓰는 RiskItem 은 **계약 샘플에서 직접 만든다.**
+#: 조항 문면을 픽스처에 복사해두면 낡는다 — 실제로 그랬다. 이전 픽스처는 내가 개별로
+#: 받은 삼성증권 회차를 인용했는데 팀 데모 문서는 키움 4181 로 정해졌고, 그 결과 스팬이
+#: 다른 사람이 검증할 수 없는 문서를 가리켰다. 계약 샘플은 git 추적 대상이므로 누구나
+#: 등식 pages[page].text[start:end] == value_text 를 확인할 수 있다.
+SAMPLE_BY_PRODUCT = {"ELS": "parsed_els_sample.json",
+                     "VARIABLE_INSURANCE": "parsed_variable_sample.json"}
+
+#: RiskItem.importance 는 계약상 required 필드인데 템플릿에 아직 미부여다(이슈 #26).
+#: dev set 은 채점 튜닝용이므로 자리표시자를 쓰고, 부여되면 템플릿에서 읽는다.
+IMPORTANCE_PLACEHOLDER = "required"
 
 
-def load_risk_items() -> dict[str, RiskItem]:
-    raw = yaml.safe_load((FIXTURES / "risk_items" / "els.yaml").read_text(encoding="utf-8"))
-    return {
-        it["item_id"]: RiskItem(
-            item_id=it["item_id"], product_id=raw["product_id"], name=it["name"],
-            importance=it["importance"], status="extracted",
+def load_sample(product_type: str) -> dict:
+    path = CONTRACT_SAMPLES / SAMPLE_BY_PRODUCT[product_type]
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_risk_items(product_type: str = "ELS") -> dict[str, RiskItem]:
+    """계약 샘플의 `_expected_risk_items` → RiskItem. 스팬은 페이지 상대 그대로 쓴다."""
+    raw = load_sample(product_type)
+    try:
+        tpl = templates.get(product_type)
+        importance_by_id = {i.item_id: i.importance for i in tpl.items}
+    except templates.TemplateNotFound:
+        importance_by_id = {}
+
+    items: dict[str, RiskItem] = {}
+    for entry in raw["_expected_risk_items"]:
+        items[entry["item_id"]] = RiskItem(
+            item_id=entry["item_id"],
+            product_id=raw["document_id"],
+            name=entry["name"],
+            importance=importance_by_id.get(entry["item_id"]) or IMPORTANCE_PLACEHOLDER,
+            status="extracted",
             condition=Condition(
-                value_text=it["value_text"].strip(),
-                source_span=SourceSpan(**it["source_span"]),
+                value_text=entry["value_text"],
+                source_span=SourceSpan(**entry["source_span"]),
             ),
         )
-        for it in raw["items"]
-    }
+    return items
+
+
+def verify_spans(product_type: str = "ELS") -> list[str]:
+    """계약 규약 등식을 실제로 확인한다. 어긋난 item_id 목록을 돌려준다."""
+    raw = load_sample(product_type)
+    pages = {p["page"]: p["text"] for p in raw["pages"]}
+    broken = []
+    for entry in raw["_expected_risk_items"]:
+        sp = entry["source_span"]
+        text = pages.get(sp["page"], "")
+        if text[sp["start"]:sp["end"]] != entry["value_text"]:
+            broken.append(entry["item_id"])
+    return broken
 
 
 def main() -> int:
     needle = sys.argv[1] if len(sys.argv) > 1 else ""
     spec = yaml.safe_load((FIXTURES / "utterances" / "els.yaml").read_text(encoding="utf-8"))
-    items = load_risk_items()
     product_type = spec["product_type"]
+    items = load_risk_items(product_type)
+
+    broken = verify_spans(product_type)
+    if broken:
+        print(f"★ 계약 스팬 등식 불일치: {broken}")
+        return 1
+    sample = load_sample(product_type)
+    print(f"문서: {sample['document_id']}  파서 {sample['parser_version']}  "
+          f"페이지 {len(sample['pages'])}  이해항목 {len(sample['_expected_risk_items'])}종")
 
     passed = failed = errored = 0
     for case in spec["cases"]:

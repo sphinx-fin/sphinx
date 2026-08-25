@@ -86,3 +86,33 @@ def test_coverage_report_shape():
     for product_type, row in report.items():
         assert row["template_items"] == row["contract_items"], product_type
         assert row["rubric_covered"] <= row["template_items"]
+
+
+# ── dev set 이 계약 샘플을 근거로 삼는지 ────────────────────────────────────────
+def test_devset_risk_items_come_from_contract_sample():
+    """dev set 의 RiskItem 은 계약 샘플에서 만든다 — 조항 문면을 픽스처에 복사하면 낡는다.
+
+    실제로 그랬다. 이전 픽스처는 내가 개별로 받은 삼성증권 회차를 인용했는데 팀 데모 문서가
+    키움 4181 로 정해졌고, 그 결과 스팬이 **다른 사람이 검증할 수 없는 문서**를 가리켰다.
+    계약 샘플은 git 추적 대상이므로 누구나 등식을 확인할 수 있다.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from run_devset import load_risk_items, load_sample, verify_spans
+
+    for product_type in PRODUCT_TYPES:
+        assert not verify_spans(product_type), f"{product_type}: 계약 스팬 등식 불일치"
+        items = load_risk_items(product_type)
+        sample = load_sample(product_type)
+        assert set(items) == {i["item_id"] for i in sample["_expected_risk_items"]}
+        assert all(v.product_id == sample["document_id"] for v in items.values())
+
+
+def test_no_stale_risk_item_fixture_remains():
+    """복사본 픽스처를 되살리지 않는다 — 계약 샘플이 유일한 출처여야 드리프트가 없다."""
+    from pathlib import Path
+
+    stale = Path(__file__).resolve().parent / "fixtures" / "risk_items"
+    assert not (stale / "els.yaml").exists(), "risk_items 픽스처가 되살아났다"
