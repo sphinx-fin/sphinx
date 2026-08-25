@@ -43,9 +43,26 @@ def test_all_six_internal_endpoints_are_registered():
         assert "post" in paths[f"/internal/{name}"]
 
 
-def test_unimplemented_features_return_501_not_500():
-    """강희진이 연결할 때 '아직 없음'과 '터짐'이 구분돼야 한다."""
-    resp = client.post("/internal/question", json={"risk_item": RISK_ITEM})
+def test_unimplemented_features_return_501_not_500(monkeypatch):
+    """연동하는 쪽이 '아직 없음'과 '터짐'을 구분해야 한다.
+
+    특정 엔드포인트를 예시로 쓰면 그 기능이 구현될 때마다 테스트가 낡는다(extract →
+    question 으로 두 번 옮겼다). 매핑 자체를 검증한다.
+    """
+    from app import routes
+
+    def _unimplemented(*_a, **_k):
+        raise NotImplementedError
+
+    monkeypatch.setattr(routes.reexplain, "reexplain", _unimplemented)
+    resp = client.post("/internal/reexplain", json={
+        "risk_item": RISK_ITEM,
+        "judgment": {
+            "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "grade": "U4", "confidence": 0.9,
+            "evidence": {"utterance_quote": "원금은 지켜지는", "rubric_clause": "원금이 보장된다"},
+            "reason": "오해",
+        },
+    })
     assert resp.status_code == 501, resp.text
 
 

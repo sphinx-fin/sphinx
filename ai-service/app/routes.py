@@ -85,7 +85,10 @@ def extract(body: ExtractRequest) -> ExtractResponse:
 @router.post("/question", response_model=QuestionResponse)
 def question(body: QuestionRequest) -> QuestionResponse:
     try:
-        return question_gen.generate(body.risk_item, body.asked_types)
+        return question_gen.generate(body.risk_item, body.asked_types, body.product_type)
+    except templates.TemplateNotFound as exc:
+        # 템플릿 밖 항목은 인터뷰 대상이 아니다 — 500 이 아니라 422다
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError:
         raise _not_implemented("F-INT-002 질문 생성")
     except LlmError as exc:

@@ -197,6 +197,14 @@ class ExtractionDraft(Strict):
 class QuestionRequest(Strict):
     risk_item: RiskItem
     asked_types: list[str] = Field(default_factory=list, description="이미 쓴 유형 — 반복 방지")
+    product_type: ProductType = "ELS"
+
+
+class QuestionDraft(Strict):
+    """F-INT-002 LLM 초안 (계약 아님 — 내부 타입)."""
+
+    question: str = Field(min_length=1)
+    question_type: Literal["situation", "amount", "condition"]
 
 
 class QuestionResponse(Strict):

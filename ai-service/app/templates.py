@@ -40,6 +40,9 @@ class TemplateItem:
     section_hint: str | None = None
     found_in: tuple[str, ...] = ()
     conflict: str | None = None
+    #: F-INT-002 — 생성 질문이 정답 노출 검사를 통과하지 못할 때 쓰는 기본 질문.
+    #: 인터뷰가 멈추면 세션이 진행되지 않으므로 폴백이 없으면 안 된다.
+    fallback_question: str | None = None
 
     @property
     def importance_assigned(self) -> bool:
@@ -81,7 +84,7 @@ def _parse(path: Path) -> ProductTemplate:
     items = []
     seen: set[str] = set()
     for entry in raw["items"]:
-        for key in ("item_id", "name", "cue"):
+        for key in ("item_id", "name", "cue", "fallback_question"):
             if not entry.get(key):
                 raise ValueError(f"{path.name}: {entry.get('item_id')} 에 {key!r} 없음")
         importance = entry.get("importance")
@@ -99,6 +102,7 @@ def _parse(path: Path) -> ProductTemplate:
                 importance=importance, section_hint=entry.get("section_hint"),
                 found_in=tuple(entry.get("found_in") or ()),
                 conflict=entry.get("conflict"),
+                fallback_question=entry.get("fallback_question"),
             )
         )
     return ProductTemplate(

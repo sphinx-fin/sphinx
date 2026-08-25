@@ -39,7 +39,7 @@ Spring `core/AiServiceClient`가 호출하는 7개. 미구현 기능은 **501**�
 |---|---|---|
 | `POST /internal/parse` | F-EXT-001 (정세현) | 501 |
 | `POST /internal/extract` | F-EXT-002 | 구현 — LLM 키 필요 |
-| `POST /internal/question` | F-INT-002 | 501 |
+| `POST /internal/question` | F-INT-002 | 구현 — LLM 키 필요 |
 | `POST /internal/score` | F-SCR-001 | 구현 — LLM 키 필요 |
 | `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
 | `POST /internal/mismatch` | F-DET-002 | 501 |
