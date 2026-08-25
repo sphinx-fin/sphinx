@@ -35,3 +35,7 @@
 | [001](adr/001-no-sales-role.md) | 역할 정의에 영업·마케팅 조직 역할을 두지 않는다 | Accepted |
 | [002](adr/002-override-approver.md) | 적색 오버라이드 승인자는 지점 관리자(MGR)를 유지한다 | Accepted (한계 인지) |
 | [003](adr/003-evidence-ownership.md) | F-CMN-002를 정세현이 소유하고 `evidence` 공통 기반을 공유한다 | Accepted |
+| [004](adr/004-evidence-append-contract.md) | `evidence` 적재는 세션 트랜잭션에 묶고, 중복을 흡수하지 않는다 | Accepted |
+| [005](adr/005-threshold-ownership.md) | 판정을 바꾸는 임계값은 게이트가 소유하고, 측정 자신감은 ai-service 가 소유한다 | Accepted |
+| [006](adr/006-item-id-canonical-form.md) | `item_id` 정본은 `_expected_risk_items` 긴 형식이다 | Accepted |
+| [007](adr/007-extraction-answer-set.md) | F-EXT-003 정답지는 공시문서 집합이다 — 핵심설명서는 확보 불가 | Accepted |
