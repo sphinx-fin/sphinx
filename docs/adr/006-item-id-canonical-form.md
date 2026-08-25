@@ -74,3 +74,14 @@ ELS-MATURITY-LOSS-CONDITION    만기 70%
 - 새 항목을 만들 때는 **뭉치지 말고 쪼갠다.** 뭉친 항목은 느슨한 답변을 통과시킨다.
 - 앞으로 이 종류의 조용한 실패를 막기 위해 로딩 시점 검사를 늘리는 방향이다
   (`assert_products_are_canonical()` 이 같은 패턴의 선례).
+
+## 덧 — 같은 실패 양식이 `related_misconceptions` 에도 있었다
+
+이 ADR 은 `item_id` 를 다루지만, *"예외도 로그도 없이 빗나간다"* 는 성질은 이름을 키로 쓰는
+모든 곳에 있다. 실제로 한 번 더 났다 — `M07-YIELD-OVERCONFIDENCE` 가 근거 미확보로
+라이브러리에서 빠졌는데(PR #31) 루브릭 2종이 계속 그것을 참조했고,
+**`apply_misconception_floor` 가 예외도 로그도 없이 발동을 멈췄다.** 채점은 계속 성공하고
+결정론 상향만 사라진다. 테스트의 유형 개수 단정문이 우연히 잡았을 뿐이다.
+
+윤지석이 `rubrics.assert_related_misconceptions_exist()` 를 넣어 로딩 시점에 터지게 했다
+(PR #10). 위 결과의 "로딩 시점 검사를 늘리는 방향"의 두 번째 사례다.
