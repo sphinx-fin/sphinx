@@ -31,6 +31,13 @@ sphinx:
     base-url: http://localhost:8100      # ai-service (FastAPI, 윤지석)
   gate:
     rules-path: classpath:gate_rules.yaml
+  simulator:
+    # F-SIM-001 지수 시계열 디렉토리. 클래스패스 리소스로 복사하지 않는다 — 18,089줄을 한 벌
+    # 더 커밋하면 data/timeseries/VERSION 의 sha256 으로 고정한 원본과 조용히 갈라지고,
+    # 시뮬레이터 출력이 달라진 원인이 코드인지 데이터인지 구분할 수 없게 된다(P2).
+    # 기본값은 레포 루트 기준(작업 디렉토리 server/). 컨테이너는 읽기 전용 볼륨 마운트 지점을
+    # 환경변수로 주입한다.
+    timeseries-dir: ${SPHINX_TIMESERIES_DIR:../data/timeseries}
   scoring:
     # 신뢰도 임계값은 gate_rules.yaml R-05가 단일 출처(게이트가 황색 강등을 결정, P1).
     max-reverify: 2                      # F-INT-004
