@@ -35,4 +35,13 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'   // 보안 엔드포인트 테스트(F-CMN-002)
 }
 
-tasks.named('test') { useJUnitPlatform() }
+tasks.named('test') {
+    useJUnitPlatform()
+
+    // ErrorCodeContractTest가 소스셋 밖의 contracts/를 읽는다. 입력으로 선언하지 않으면
+    // 계약 파일만 바뀌었을 때 Gradle이 test를 UP-TO-DATE로 건너뛰어, 하필 계약 어긋남을
+    // 잡아야 할 상황에서 테스트가 돌지 않는다.
+    inputs.files(fileTree('../contracts'))
+            .withPropertyName('contracts')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+}

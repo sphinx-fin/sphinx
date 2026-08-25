@@ -18,7 +18,7 @@ public record Judgment(
         if (evidence == null
                 || evidence.utteranceQuote() == null || evidence.utteranceQuote().isBlank()
                 || evidence.rubricClause() == null || evidence.rubricClause().isBlank()) {
-            throw new IllegalArgumentException("근거 없는 판정은 무효 (P4): evidence(발화 인용·루브릭 조항) 필수");
+            throw new EvidenceRequiredException("근거 없는 판정은 무효 (P4): evidence(발화 인용·루브릭 조항) 필수");
         }
     }
 

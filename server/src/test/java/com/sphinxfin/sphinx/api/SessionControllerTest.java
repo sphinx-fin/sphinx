@@ -186,4 +186,73 @@ class SessionControllerTest {
                 .andExpect(jsonPath("$.data[0].productId").isNotEmpty())
                 .andExpect(jsonPath("$.data[0].productType").isNotEmpty());
     }
+
+    // ── F-INT-004 재설명 에러 코드 (PR #28 리뷰 ②③) ────────────────────
+    // 프론트가 error.code를 유니온 타입으로 분기하므로 와이어 레벨에서 고정한다.
+    // 메시지 문면이 바뀌어도 이 테스트는 깨지지 않아야 한다 — 그게 코드를 가른 이유다.
+
+    /** 세션 하나 만들고 목 채점(U4)까지 태워 재설명 가능한 상태로 만든다. */
+    private String sessionWithMisunderstoodItem() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk());
+        return sid;
+    }
+
+    @Test
+    @DisplayName("재설명 성공 → 200 + 재검증용 변형 질문 동봉")
+    void reExplainCarriesReverifyQuestion() throws Exception {
+        String sid = sessionWithMisunderstoodItem();
+
+        mvc.perform(post("/sessions/" + sid + "/re-explain").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isNotEmpty())
+                .andExpect(jsonPath("$.data.reverifyQuestion").isNotEmpty())
+                .andExpect(jsonPath("$.data.vulnerable").isBoolean());
+    }
+
+    @Test
+    @DisplayName("판정 없는 항목 재설명 → 400 + error.code=REEXPLAIN_NOT_ELIGIBLE")
+    void reExplainNotEligible() throws Exception {
+        String sid = sessionWithMisunderstoodItem();
+
+        mvc.perform(post("/sessions/" + sid + "/re-explain").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("REEXPLAIN_NOT_ELIGIBLE"));
+    }
+
+    @Test
+    @DisplayName("재검증 상한 도달 후 재설명 → 400 + error.code=REVERIFY_EXHAUSTED")
+    void reverifyExhausted() throws Exception {
+        String sid = sessionWithMisunderstoodItem();
+        String item = "ELS-PRINCIPAL-LOSS-WARNING";
+        String reExplainBody = "{\"itemId\":\"" + item + "\"}";
+        String answerBody = "{\"itemId\":\"" + item + "\",\"text\":\"여전히 잘 모르겠어요\"}";
+
+        // 목 채점이 항상 U4라 재검증은 2회 모두 실패한다 → 상한 도달
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(post("/sessions/" + sid + "/re-explain")
+                    .contentType(MediaType.APPLICATION_JSON).content(reExplainBody))
+                    .andExpect(status().isOk());
+            mvc.perform(post("/sessions/" + sid + "/answers")
+                    .contentType(MediaType.APPLICATION_JSON).content(answerBody))
+                    .andExpect(status().isOk());
+        }
+
+        mvc.perform(post("/sessions/" + sid + "/re-explain")
+                .contentType(MediaType.APPLICATION_JSON).content(reExplainBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("REVERIFY_EXHAUSTED"));
+    }
 }

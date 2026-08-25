@@ -1,8 +1,11 @@
 package com.sphinxfin.sphinx.core;
 
 import com.sphinxfin.sphinx.domain.Channel;
+import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.Signal;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -22,6 +25,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -101,6 +105,16 @@ public class Session extends BaseEntity {
     @Builder.Default
     private boolean vulnerable = false;
 
+    // 판정 시점의 게이트 결과 기록(F-GTE-004 감사 기준점 — 재계산값이 아니라 기록값).
+    @Enumerated(EnumType.STRING)
+    private Signal gateSignal;              // 판정 전이면 null
+
+    // 발화 룰 ID 목록(예: ["R-01"]). 콤마 결합하지 않는다 — StringListConverter 주석 참고.
+    @Convert(converter = StringListConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private List<String> gateRuleTrace;
+    private Instant judgedAt;              // 판정 시각
+
     /**
      * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
      * (서비스는 이 결과를 저장만 한다.)
@@ -148,9 +162,26 @@ public class Session extends BaseEntity {
         return new ArrayList<>(judgmentsByItem.values());
     }
 
-    /** 게이트 입력용 — 항목 중 최대 재검증 횟수(R-03 판단). */
-    public int maxReverifyCount() {
-        return reverifyCounts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+    /** 항목의 최신 판정(없으면 null). */
+    public Judgment judgmentFor(String itemId) {
+        return judgmentsByItem.get(itemId);
+    }
+
+    /**
+     * 게이트 입력용 — '재검증 실패' 최대 횟수(R-03 판단).
+     * 재검증했지만 여전히 이해(U1)에 도달하지 못한 항목의 재검증 횟수만 센다.
+     * (2회 재검증 후 U1이 됐다면 실패가 아니므로 0으로 친다.)
+     */
+    public int failedReverifyCount() {
+        int max = 0;
+        for (var entry : reverifyCounts.entrySet()) {
+            Judgment j = judgmentsByItem.get(entry.getKey());
+            boolean understood = j != null && j.grade() == Grade.U1;
+            if (!understood) {
+                max = Math.max(max, entry.getValue());
+            }
+        }
+        return max;
     }
 
     /** F-DET-002 모순 감지 결과 반영. */
@@ -162,5 +193,12 @@ public class Session extends BaseEntity {
     public void applyCoaching(int score, boolean vulnerable) {
         this.coachingScore = score;
         this.vulnerable = vulnerable;
+    }
+
+    /** 판정 시점의 게이트 결과를 기록한다(감사 기준점, F-GTE-004). */
+    public void recordGate(GateResult result, Instant judgedAt) {
+        this.gateSignal = result.signal();
+        this.gateRuleTrace = List.copyOf(result.ruleTrace());
+        this.judgedAt = judgedAt;
     }
 }

@@ -2,7 +2,11 @@ package com.sphinxfin.sphinx.api.exception;
 
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
+import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.core.SessionFsm;
+import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -19,6 +23,7 @@ import java.util.stream.Collectors;
  * 컨트롤러마다 예외 처리를 흩지 않고 여기서 일관된 ApiResponse.fail(...) 로 변환한다.
  * (@RestControllerAdvice는 패키지와 무관하게 모든 컨트롤러에 적용된다.)
  */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -46,11 +51,40 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", detail)));
     }
 
+    /**
+     * 재설명 대상 아님(판정 없음·이미 이해 U1) → 400. 화면은 조용히 다음 항목으로 넘어간다.
+     * 상한 도달과 코드를 가르는 이유: 메시지 문자열은 계약이 아니라서, 한 코드로 내보내면
+     * 프론트가 서버 문면을 파싱해야 하고 문면이 바뀌는 순간 조용히 깨진다.
+     */
+    @ExceptionHandler(ReExplainNotEligibleException.class)
+    public ResponseEntity<ApiResponse<Void>> reExplainNotEligible(ReExplainNotEligibleException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("REEXPLAIN_NOT_ELIGIBLE", e.getMessage())));
+    }
+
+    /** 재검증 상한 도달 → 400. 화면은 판정으로 넘어감을 고객에게 알려야 한다(F-INT-004). */
+    @ExceptionHandler(ReverifyExhaustedException.class)
+    public ResponseEntity<ApiResponse<Void>> reverifyExhausted(ReverifyExhaustedException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("REVERIFY_EXHAUSTED", e.getMessage())));
+    }
+
     /** 요청 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum 값 등) → 400 */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> unreadable(HttpMessageNotReadableException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ApiError.of("MALFORMED_REQUEST", "요청 본문을 읽을 수 없다(형식·허용값 확인)")));
+    }
+
+    /**
+     * P4 위반 — 근거 없는 판정 → 502. 우리 서버 버그(500)가 아니라 상류(ai-service) 계약
+     * 위반이므로 구분한다. 차단 사실을 로그로 남긴다(감사 로그 F-CMN-002 붙기 전까지의 최소 기록).
+     */
+    @ExceptionHandler(EvidenceRequiredException.class)
+    public ResponseEntity<ApiResponse<Void>> evidenceRequired(EvidenceRequiredException e) {
+        log.warn("P4 차단 — 근거 없는 판정 거부: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ApiError.of("EVIDENCE_REQUIRED", "근거 없는 판정은 처리할 수 없습니다 (P4)")));
     }
 
     /**
@@ -63,9 +97,10 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(ApiError.of("NOT_FOUND", "경로를 찾을 수 없다: " + e.getResourcePath())));
     }
 
-    /** 그 외 예기치 못한 예외 → 500 (원문 메시지는 노출하지 않음) */
+    /** 그 외 예기치 못한 예외 → 500. 원인은 로그에 남기고(삼키지 않음), 응답엔 노출하지 않는다. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> unexpected(Exception e) {
+        log.error("처리되지 않은 예외", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.fail(ApiError.of("INTERNAL_ERROR", "서버 내부 오류")));
     }

@@ -1,0 +1,39 @@
+package com.sphinxfin.sphinx.core;
+
+import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.Judgment;
+
+import java.time.Instant;
+
+/**
+ * 이해 기록 append 지점(PR #28 리뷰 결정, 2026-08-25). 인터페이스는 core, 구현은 evidence.
+ *
+ * 세션은 가변 엔티티라 항목별 최신 판정만 갖는다(게이트 입력으로는 그게 맞다). 그래서
+ * 재검증으로 덮어쓰기 전 값 — "처음에 황색이었다" — 이 세션에는 남지 않는다. 기획서 174행이
+ * 이해 기록의 구성요소로 못박은 "재설명 이력"이 바로 그것이라, 세션을 고치는 대신 매 이벤트를
+ * append-only 저장소로 흘려보낸다(ADR-003).
+ *
+ * 의존 방향을 뒤집으려고 인터페이스를 core에 둔다 — core는 evidence를 모른다.
+ * 구현이 아직 없는 동안은 {@link #NO_OP}이 대신 들어간다(F-GTE-004 착수 전).
+ */
+public interface EvidenceRecorder {
+
+    /** 항목 판정 1건 append. 재검증분도 매 건 들어온다(덮어쓰기 전 값이 아니라 발생 순서 전부). */
+    void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at);
+
+    /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
+    void appendGate(String sessionId, GateResult result, Instant at);
+
+    /** 구현(evidence/) 등록 전까지의 기본값. 삼키는 것을 드러내려고 무명 클래스가 아니라 상수로 둔다. */
+    EvidenceRecorder NO_OP = new EvidenceRecorder() {
+        @Override
+        public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at) {
+            // F-GTE-004 미착수 — 구현 등록 시 자동으로 대체된다.
+        }
+
+        @Override
+        public void appendGate(String sessionId, GateResult result, Instant at) {
+            // 위와 같다.
+        }
+    };
+}

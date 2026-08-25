@@ -5,6 +5,7 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
+import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
@@ -77,6 +78,18 @@ public class SessionController {
         return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
     }
 
+    @PostMapping("/{sid}/re-explain")
+    public ApiResponse<SessionService.ReExplanation> reExplain(
+            @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
+        // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
+        return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
+    }
+
+    @PostMapping("/{sid}/abort")
+    public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
+        return ApiResponse.ok(SessionResponse.of(sessionService.abort(sid)));
+    }
+
     /**
      * 봉투만 씌운다. 안의 시나리오 스키마는 F-SIM-001 소유자 몫이라 여기서 타입을 굳히지
      * 않는다(#45 에서 논의 중). 봉투는 프론트 전역 규약이라 스키마와 무관하게 지금 맞춘다.
@@ -91,9 +104,22 @@ public class SessionController {
                 Map.of("name", "최악(2008년 경로)", "payout", 32_000_000, "pnl", -18_000_000))));
     }
 
+    /**
+     * 신호등 미리보기 — 계산만 하고 기록하지 않는다. GET 이므로 부수효과가 없다.
+     *
+     * 기획서 7-2 [기능 1] "황색 판정 → 재설명 → 재검증 → 녹색 통과"를 성립시키는 경로다.
+     * 판매자가 황색을 보려고 /judge 를 부르면 JUDGED 로 전이되고, 거기서 RE_EXPLAIN 으로
+     * 갈 수 없어 재설명 흐름 자체가 막힌다.
+     */
+    @GetMapping("/{sid}/gate-preview")
+    public ApiResponse<SessionService.GatePreview> gatePreview(@PathVariable String sid) {
+        return ApiResponse.ok(sessionService.previewGate(sid));
+    }
+
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
+        // 감사 기준점을 찍는다 — 되돌릴 수 없다. 신호만 보려면 /gate-preview 를 쓴다.
         return ApiResponse.ok(sessionService.judge(sid));
     }
 

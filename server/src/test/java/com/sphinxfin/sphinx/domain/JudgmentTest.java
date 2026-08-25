@@ -21,7 +21,7 @@ class JudgmentTest {
     @DisplayName("evidence가 null이면 예외 (P4)")
     void nullEvidence_rejected() {
         assertThatThrownBy(() -> new Judgment("A", Grade.U4, 0.9, null, "사유", null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(EvidenceRequiredException.class);
     }
 
     @Test
@@ -29,9 +29,9 @@ class JudgmentTest {
     void blankEvidence_rejected() {
         assertThatThrownBy(() -> new Judgment("A", Grade.U4, 0.9,
                 new Judgment.Evidence("", "루브릭"), "사유", null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(EvidenceRequiredException.class);
         assertThatThrownBy(() -> new Judgment("A", Grade.U4, 0.9,
                 new Judgment.Evidence("발화", "  "), "사유", null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(EvidenceRequiredException.class);
     }
 }
