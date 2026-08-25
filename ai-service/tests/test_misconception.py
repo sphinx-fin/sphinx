@@ -17,10 +17,17 @@ def _cases():
     return yaml.safe_load((FIXTURES / "utterances" / "els.yaml").read_text(encoding="utf-8"))
 
 
-def test_library_loads_all_eight_types():
+def test_library_type_count():
+    """현재 7종이다. 기획서·역할분담표는 "오해 라이브러리 8종"이라고 쓰지만,
+    M07-YIELD-OVERCONFIDENCE 가 인용 가능한 근거를 찾지 못해 라이브러리에서 빠졌다
+    (근거 없는 유형을 남기면 apply_misconception_floor 가 그것으로 U4 를 확정한다).
+
+    제출 문서의 "8종" 문면과 어긋나므로 그 문장도 손봐야 한다 — 이 테스트가 그 사실을
+    코드에 남겨 둔다. 유형이 또 바뀌면 여기서 먼저 걸린다."""
     lib = misconception.library()
-    assert len(lib) == 8
+    assert len(lib) == 7
     assert {m.type_id for m in lib} >= {"M01-PRINCIPAL-GUARANTEE", "M08-TYING"}
+    assert "M07-YIELD-OVERCONFIDENCE" not in {m.type_id for m in lib}
 
 
 def test_demo_utterance_is_caught_deterministically():

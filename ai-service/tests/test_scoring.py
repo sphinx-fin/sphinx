@@ -33,6 +33,13 @@ def _score(judgment, answer=DEMO_ANSWER, item_id="ELS-PRINCIPAL-LOSS-WARNING"):
 
 
 # ── 루브릭 ────────────────────────────────────────────────────────────────────
+def test_no_rubric_references_a_missing_misconception_type():
+    """없는 유형을 참조하면 apply_misconception_floor 가 조용히 발동하지 않는다.
+
+    M07-YIELD-OVERCONFIDENCE 가 근거 미확보로 라이브러리에서 빠졌을 때 두 루브릭이
+    그것을 계속 참조했고, 채점은 성공한 채로 결정론 상향만 사라졌다. 개수 단정문이
+    뒤늦게 잡았을 뿐이다 — 이 검사가 그 실패 양식을 로딩 시점으로 끌어올린다."""
+    rubrics.assert_related_misconceptions_exist()
 def test_rubric_clauses_reach_the_prompt():
     """루브릭 공개 의무(기획서 5절)는 프롬프트에 실제로 들어가야 의미가 있다."""
     rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")

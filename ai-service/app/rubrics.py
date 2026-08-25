@@ -71,3 +71,29 @@ def get(item_id: str) -> Rubric:
 
 def all_rubrics() -> dict[str, Rubric]:
     return dict(_all())
+
+
+def assert_related_misconceptions_exist() -> None:
+    """루브릭의 `related_misconceptions` 가 오해 라이브러리에 실제로 있는지 확인한다.
+
+    없는 유형을 참조하면 `apply_misconception_floor` 가 **예외도 로그도 없이 발동하지
+    않는다** — 해당 항목의 결정론적 U4 상향이 사라지고, 채점은 계속 성공한다.
+    라이브러리 데이터 소유는 정세현이므로 유형이 빠지는 일이 실제로 있었다
+    (M07-YIELD-OVERCONFIDENCE, 근거 미확보로 삭제). 그때 이 검사가 없어서 테스트의
+    개수 단정문이 뒤늦게 잡았다.
+
+    misconception 을 지연 임포트한다 — 그쪽이 이 모듈을 쓰지는 않지만 순환 위험을 남기지 않는다.
+    """
+    from .misconception import library
+
+    known = {m.type_id for m in library()}
+    dangling: dict[str, list[str]] = {}
+    for item_id, rubric in _all().items():
+        missing = [t for t in rubric.related_misconceptions if t not in known]
+        if missing:
+            dangling[item_id] = missing
+    if dangling:
+        raise ValueError(
+            "라이브러리에 없는 오해 유형을 참조하는 루브릭이 있다 "
+            f"(결정론 상향이 조용히 사라진다): {dangling}"
+        )
