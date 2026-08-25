@@ -3,7 +3,7 @@
     python3 scripts/fetch_documents.py            # 등록된 문서 전부
     python3 scripts/fetch_documents.py els-4181   # 하나만
 
-저장 위치는 `data/documents/` (git 제외). 받은 파일의 sha256을 찍는다 — 파싱 결과가 달라졌을 때
+저장 위치는 `data/documents/` (git 추적). 받은 파일의 sha256을 찍는다 — 파싱 결과가 달라졌을 때
 파서가 바뀐 건지 문서가 바뀐 건지 구분하려면 이게 있어야 한다(P2).
 
 ## 출처: DART 아님 (2026-08-24 확인)
@@ -31,7 +31,7 @@ DART 경로는 막혀 있다. `일괄신고추가서류`를 1년치(1,056건) �
 
 여기 메뉴·다운로드가 전부 `javascript:void(0)` 팝업이라 안정적인 URL이 없다. 그래서 이 문서는
 `manual: True`로 두고 스크립트가 자동으로 받지 않는다 — 없는 URL을 지어내면 다음 사람이
-왜 안 되는지부터 파야 한다. 사람이 받아서 `data/documents/`에 넣으면 sha256만 검증한다.
+왜 안 되는지부터 파야 한다. 사람이 받아서 `data/documents/`에 넣으면 sha256만 검증한다. 받은 문서는 레포에 커밋한다.
 
 주의: 같은 행의 `공제금액 구분공시` PDF는 **파싱 불가**다. 2페이지 모두 텍스트가 벡터로
 아웃라인 처리돼 `chars=0`이고 `images=0`이라 OCR할 이미지조차 없다. 사업비 근거는 상품요약서
@@ -80,10 +80,30 @@ DOCUMENTS = {
         "source": "생명보험협회 공시실 > 상품비교공시 > 변액보험 > 저축성 상품비교 > 상품요약서",
         "sha256": "2e993c829820cf270bd6304ddaa5e9f64bb92fdc7ac685c6d799f8ec24e463ab",
     },
+    "var-b2601-ops": {
+        "save_as": "var_samsung_b2601_operations_manual.pdf",
+        "product_type": "VARIABLE_INSURANCE",
+        # 같은 상품의 **운용설명서** 14p. 상품요약서와 다른 문서이고 서로를 대체하지 않는다.
+        #
+        # 보험업감독규정 §7-45②1호 다목이 변액보험에만 요구하는 교부 서류다. p1 최상단이
+        # 통째로 경고문이고 원금손실·실적배당·예금자보호 부분보호가 거기 있다 — F-EXT-003
+        # 정답지로서 상품요약서보다 이 문면이 낫다.
+        #
+        # 다만 사업비·환급률 수치는 없다. 이해항목 10종 중 6종만 덮는다:
+        #   덮음    실적배당·원금손실·예금자보호·계약체결관리비용·저축과 다름·해약환급금 최저보증 부재
+        #   안 덮음 월공제액·중도인출 수수료·환급률 58.4%(3개월)·43.9%(20년) → 상품요약서 p10·p12
+        # 그래서 정답 세트는 두 문서의 합집합이다.
+        #
+        # 상품요약서와 달리 안정적인 직접 URL 이 있다(생보협이 아니라 삼성생명 공시실).
+        # 준법감시필 번호가 파일명이라 개정되면 URL 이 바뀐다 — sha256 불일치로 잡힌다.
+        "direct_url": "https://www.samsunglife.com/dcms/upload/2026/03/31/26-0825.pdf",
+        "source": "삼성생명 공시실 > 상품공시 > 변액보험 상품공시 > 삼성 탄탄한 변액연금보험(B2601)(무배당)[최저연금보증형]",
+        "sha256": "dc0410514382193bf83aa7b0e6446d35e37b3618b58dee57eaf4acdf924398c6",
+    },
 }
 
 
-def _download(url):
+def _download(url, referer=None):
     """curl로 받는다. Python urllib으로는 이 호스트에 붙지 못한다.
 
     `disdown.kofia.or.kr`가 리프 인증서만 보내고 중간 인증서(GlobalSign RSA OV SSL CA 2018)를
@@ -96,11 +116,10 @@ def _download(url):
     """
     if not shutil.which("curl"):
         raise RuntimeError("curl이 필요하다 (Python urllib은 이 호스트의 불완전한 인증서 체인을 못 넘는다)")
-    proc = subprocess.run(
-        ["curl", "-sS", "--fail", "--location", "--max-time", "60",
-         "-A", _UA, "-e", _KOFIA_REFERER, url],
-        capture_output=True,
-    )
+    cmd = ["curl", "-sS", "--fail", "--location", "--max-time", "60", "-A", _UA]
+    if referer:
+        cmd += ["-e", referer]
+    proc = subprocess.run(cmd + [url], capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError(f"curl 실패 (exit {proc.returncode}): {proc.stderr.decode(errors='replace').strip()}")
     return proc.stdout
@@ -132,15 +151,20 @@ def fetch(key, doc, force=False):
         return _verify(key, doc, dest)
 
     try:
-        body = _download(kofia_url(doc))
+        if doc.get("direct_url"):
+            body = _download(doc["direct_url"])
+        else:
+            body = _download(kofia_url(doc), referer=_KOFIA_REFERER)
     except RuntimeError as exc:
         print(f"[FAIL] {key}: {exc}", file=sys.stderr)
         return False
 
     # 이 엔드포인트는 실패해도 200에 HTML을 준다. 확장자·상태코드로는 못 걸러진다.
     if not body.startswith(b"%PDF"):
-        print(f"[FAIL] {key}: PDF가 아니다 ({len(body):,} bytes). 청약종료로 내려갔을 수 있다 — "
-              f"금투협 '청약종료상품' 목록에서 파일명을 다시 확인해야 한다.", file=sys.stderr)
+        hint = (f"{doc['source']} 에서 파일을 다시 확인해야 한다."
+                if doc.get("direct_url") else
+                "청약종료로 내려갔을 수 있다 — 금투협 '청약종료상품' 목록에서 파일명을 다시 확인해야 한다.")
+        print(f"[FAIL] {key}: PDF가 아니다 ({len(body):,} bytes). {hint}", file=sys.stderr)
         return False
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

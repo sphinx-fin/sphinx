@@ -13,6 +13,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
@@ -84,6 +85,16 @@ public class GlobalExceptionHandler {
         log.warn("P4 차단 — 근거 없는 판정 거부: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ApiError.of("EVIDENCE_REQUIRED", "근거 없는 판정은 처리할 수 없습니다 (P4)")));
+    }
+
+    /**
+     * 매핑되지 않은 경로 → 404. 포괄 Exception 핸들러가 이걸 삼키면 오타 난 URL 이
+     * 500 INTERNAL_ERROR 로 나가고, 프론트는 "서버가 죽었다"로, 모니터링은 장애로 읽는다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> noResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ApiError.of("NOT_FOUND", "경로를 찾을 수 없다: " + e.getResourcePath())));
     }
 
     /** 그 외 예기치 못한 예외 → 500. 원인은 로그에 남기고(삼키지 않음), 응답엔 노출하지 않는다. */

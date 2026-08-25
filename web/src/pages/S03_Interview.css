@@ -1,0 +1,160 @@
+/* S-03 인터뷰 (고객 화면). 소유: 오준서. 크기·간격은 전부 global.css 토큰 → 고령자 모드 연동 */
+
+.iv {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.iv__shell { width: 100%; max-width: 46rem; }
+
+/* ── 상단 바: 진행 표시 + 고령자 모드 ─────────────────────────────────────── */
+.iv__top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.iv__progress { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 16rem; }
+
+.iv__progress-label { font-size: var(--font-sm); color: var(--text-muted); }
+.iv__progress-label b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.iv__bar {
+  height: calc(8px * var(--scale));
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.iv__bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+
+.iv__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  white-space: nowrap;
+}
+.iv__mode[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+
+/* ── 대필 방지 안내 (F-INT-003) ───────────────────────────────────────────── */
+.iv__notice {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border);
+  border-left: calc(4px * var(--scale)) solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+.iv__notice b { color: var(--text); }
+
+/* ── 질문 카드 ────────────────────────────────────────────────────────────── */
+.iv__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+}
+
+.iv__item-name {
+  display: inline-block;
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.iv__question {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  line-height: 1.45;
+  margin-bottom: var(--space-5);
+}
+
+.iv__field { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.iv__textarea {
+  width: 100%;
+  min-height: calc(9rem * var(--scale));
+  padding: var(--space-4);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--font-lg);
+  line-height: var(--line);
+  resize: vertical;
+}
+.iv__textarea:disabled { background: var(--surface-sunken); }
+
+.iv__meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+.iv__count { font-variant-numeric: tabular-nums; }
+
+/* ── 안내/경고 배너 ───────────────────────────────────────────────────────── */
+.iv__alert {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  font-size: var(--font-sm);
+  border: 1px solid transparent;
+}
+.iv__alert--warn { background: var(--yellow-bg); border-color: var(--yellow); color: var(--yellow); }
+.iv__alert--error { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+.iv__alert--info { background: var(--surface-sunken); border-color: var(--border); color: var(--text-muted); }
+.iv__alert b { display: block; margin-bottom: var(--space-1); }
+
+/* ── 버튼 ─────────────────────────────────────────────────────────────────── */
+.iv__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.iv__btn {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: var(--font-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+.iv__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.iv__btn--primary { background: var(--accent); color: var(--text-inverse); }
+.iv__btn--primary:not(:disabled):hover { background: var(--accent-hover); }
+
+.iv__btn--ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+.iv__btn--ghost:not(:disabled):hover { background: var(--surface-sunken); }
+
+.iv__state {
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-muted);
+}

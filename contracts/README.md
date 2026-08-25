@@ -7,6 +7,7 @@
 | `parsed_document.schema.json` | **정세현** | F-EXT-001 출력 (정세현 → 윤지석) |
 | `risk_item.schema.json` | 강희진 | F-EXT-002 출력 (윤지석 → 강희진·정세현·오준서) |
 | `judgment.schema.json` | 강희진 | F-SCR-001 출력 (윤지석 → 강희진·오준서) |
+| `suitability_mismatch.schema.json` | 강희진 | F-DET-002 출력 (윤지석 → 강희진) |
 | `openapi.yaml` | 강희진 | REST API 전체 (강희진 → 오준서) |
 
 디렉토리는 강희진 소유지만 **계약별 소유자는 다르다** (역할 분담표 v1.2 §4). 파일을 고칠 때는
@@ -14,6 +15,16 @@
 
 변경 절차: PR + 계약 소유자 승인 + 수요자 전원 멘션. Java `domain/` 레코드는 이 스키마와
 1:1로 유지한다.
+
+## `suitability_mismatch` — `mismatch=false`를 '적합'으로 읽지 말 것 (주의)
+
+`status`가 `insufficient_input`이면 `mismatch`는 항상 `false`다. **판정하지 못한 것이지
+모순이 없는 것이 아니다.** 스키마가 두 필드를 나눠 둔 이유가 그것이다.
+
+게이트는 지금 `mismatch` 불리언 하나만 읽는다(`gate_rules.yaml` R-02의
+`suitabilityMismatch`). 즉 **판정 실패가 통과로 읽힌다.** 소비 측이 `status`를 함께 보도록
+고치기 전까지 이 격차는 남아 있다 — 게이트 입력을 바꾸는 일이라 룰 변경(감사 대상)을
+동반한다.
 
 ## `samples/` — 계약이 아니라 픽스처
 

@@ -2,7 +2,7 @@
 
     python3 scripts/make_parsing_samples.py
 
-두 샘플 모두 **실문서를 실제 파서로 파싱한 출력**이다. `data/documents/`(git 제외)에 문서가
+두 샘플 모두 **실문서를 실제 파서로 파싱한 출력**이다. `data/documents/`(git 추적)에 문서가
 있어야 한다 — 없으면 `scripts/fetch_documents.py`가 안내한다. 수동으로 만든 부분이 없으므로
 `parse_warnings`에 `MANUAL_OVERRIDE`가 붙지 않는다.
 
@@ -101,7 +101,7 @@ def resolve_items(doc, items):
 def build_els():
     if not ELS_PDF.exists():
         sys.exit(
-            f"FAIL: {ELS_PDF.relative_to(ROOT)} 가 없다 (data/documents/ 는 git 제외).\n"
+            f"FAIL: {ELS_PDF.relative_to(ROOT)} 가 없다 (레포에 있어야 한다 — git 추적 대상).\n"
             f"      python3 scripts/fetch_documents.py els-4181"
         )
 
@@ -114,7 +114,7 @@ def build_els():
     )
 
     doc["_source"] = {
-        "note": "금융투자협회 전자공시 > 파생결합증권등 청약정보 비교공시. 원본은 git 제외(data/documents/).",
+        "note": "금융투자협회 전자공시 > 파생결합증권등 청약정보 비교공시. 원본은 data/documents/ 에 있다.",
         "fetch_key": "els-4181",
         "original_file": "간이투자설명서(ELS 4181).pdf",
         "sha256": "6b95fec7d5c8aee6e28a620bf569ee6c179e926bf5a365ddd00bab0209cd18eb",
@@ -158,7 +158,7 @@ VAR_ITEMS = [
 def build_variable():
     if not VAR_PDF.exists():
         sys.exit(
-            f"FAIL: {VAR_PDF.relative_to(ROOT)} 가 없다 (data/documents/ 는 git 제외).\n"
+            f"FAIL: {VAR_PDF.relative_to(ROOT)} 가 없다 (레포에 있어야 한다 — git 추적 대상).\n"
             f"      생보협 공시실에서 수동 취득해야 한다: "
             f"python3 scripts/fetch_documents.py var-b2601"
         )
@@ -170,7 +170,7 @@ def build_variable():
     )
     doc["_source"] = {
         "note": "생명보험협회 공시실 > 상품비교공시 > 변액보험 > 저축성 상품비교 > 상품요약서. "
-                "판매채널 방카슈랑스. 원본은 git 제외(data/documents/).",
+                "판매채널 방카슈랑스. 원본은 data/documents/ 에 있다.",
         "fetch_key": "var-b2601",
         "original_file": "상품요약서 — 삼성 탄탄한 변액연금보험(B2601)(무배당)[최저연금보증형]",
         "sha256": "2e993c829820cf270bd6304ddaa5e9f64bb92fdc7ac685c6d799f8ec24e463ab",

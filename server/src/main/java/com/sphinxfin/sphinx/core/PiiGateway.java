@@ -20,19 +20,38 @@ import java.util.regex.Pattern;
  */
 public final class PiiGateway {
 
+    /**
+     * 숫자 사이 구분자로 실제로 들어오는 문자들. ASCII 하이픈만 보면 안 된다.
+     *
+     * 모바일 자판·워드프로세서 자동 교정·문서 복붙이 하이픈을 유니코드 대시로 바꾼다.
+     * 그걸 놓치면 "화면은 주민번호라고 경고했는데 서버는 마스킹하지 않은" 상태가 되고,
+     * 고객이 경고를 무시하고 제출하는 순간 원문이 그대로 ai-service 로 나간다 (P3 위반).
+     *
+     * U+2010 hyphen · U+2011 non-breaking hyphen · U+2012 figure dash · U+2013 en dash
+     * U+2014 em dash · U+2015 horizontal bar · U+2212 minus sign · U+FF0D fullwidth hyphen
+     */
+    private static final String DASH = "\\-\\u2010-\\u2015\\u2212\\uFF0D";
+
+    /** 구분자 — 대시류 또는 공백. 없어도 매칭(붙여 쓴 경우). */
+    private static final String SEP = "[" + DASH + "\\s]?";
+
+    /** 계좌번호처럼 구분자가 반드시 있어야 하는 자리. */
+    private static final String SEP_REQ = "[" + DASH + "]";
+
     private static final Map<String, Pattern> PATTERNS = new LinkedHashMap<>();
 
     static {
         // 이메일 — '@'로 구별돼 오탐 적음
         PATTERNS.put("EMAIL", Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"));
         // 주민등록번호 — 뒷자리 첫 숫자 1~4
-        PATTERNS.put("RRN", Pattern.compile("\\d{6}[-\\s]?[1-4]\\d{6}"));
+        PATTERNS.put("RRN", Pattern.compile("\\d{6}" + SEP + "[1-4]\\d{6}"));
         // 카드번호 — 16자리(4-4-4-4)
-        PATTERNS.put("CARD", Pattern.compile("\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}"));
+        PATTERNS.put("CARD", Pattern.compile("\\d{4}" + SEP + "\\d{4}" + SEP + "\\d{4}" + SEP + "\\d{4}"));
         // 휴대전화
-        PATTERNS.put("PHONE", Pattern.compile("01[016789][-\\s]?\\d{3,4}[-\\s]?\\d{4}"));
-        // 계좌번호 — 하이픈 3구획(은행별 자릿수 상이). 카드·전화가 먼저 마스킹된 뒤 남은 것만.
-        PATTERNS.put("ACCOUNT", Pattern.compile("\\d{2,6}-\\d{2,6}-\\d{2,6}(?:-\\d{1,6})?"));
+        PATTERNS.put("PHONE", Pattern.compile("01[016789]" + SEP + "\\d{3,4}" + SEP + "\\d{4}"));
+        // 계좌번호 — 구분자 3구획(은행별 자릿수 상이). 카드·전화가 먼저 마스킹된 뒤 남은 것만.
+        PATTERNS.put("ACCOUNT", Pattern.compile(
+                "\\d{2,6}" + SEP_REQ + "\\d{2,6}" + SEP_REQ + "\\d{2,6}(?:" + SEP_REQ + "\\d{1,6})?"));
         // TODO(강희진): 성명·주소는 사전/NER 기반(정규식 오탐 큼) — 사전 리소스 확보 후 추가
     }
 
