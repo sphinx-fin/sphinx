@@ -77,6 +77,15 @@ class GateEngineTest {
     }
 
     @Test
+    @DisplayName("트레이스: 같은 신호(YELLOW)를 낸 발화 룰을 전부 기록 (부분이해 + 저신뢰 → R-04·R-05)")
+    void multipleRulesSameSignal_allTraced() {
+        // U2(R-04 YELLOW) + 저신뢰(R-05 YELLOW) 동시 → 신호는 YELLOW, 트레이스엔 둘 다
+        GateResult r = engine.judge(List.of(judgment(Grade.U2, 0.6)), false, 0);
+        assertThat(r.signal()).isEqualTo(Signal.YELLOW);
+        assertThat(r.ruleTrace()).containsExactly("R-04", "R-05");
+    }
+
+    @Test
     @DisplayName("U4 예외: 신뢰도 낮아도 U4는 RED (R-01 우선)")
     void lowConfidenceU4_stillRed() {
         GateResult r = engine.judge(List.of(judgment(Grade.U4, 0.5)), false, 0);

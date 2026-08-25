@@ -733,7 +733,7 @@ components:
         서버가 임의 기본값을 갖고 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
       required: [amount]
       properties:
-        amount: {type: integer, format: int64, minimum: 0, description: "가입금액(원)"}
+        amount: {type: integer, format: int64, minimum: 1, description: "가입금액(원, 양수)"}
     SimulateResponse:
       type: object
       required: [scenarios, timeseriesVersion, productName]
