@@ -71,13 +71,16 @@ def test_invalid_importance_is_rejected():
                                          "importance": "must-know"})
 
 
-def test_answer_set_conflict_is_surfaced():
-    """ADR-007 이 정답지를 문서 집합으로 바꿨고, 그 합집합에 문면 충돌이 하나 있다.
-    상품요약서는 "예금자보호 비대상", 운용설명서는 "부분 보호"라고 한다.
-    정답을 확정해야 채점 기준이 정해지므로 조용히 덮지 않는다."""
+def test_pending_contract_change_is_surfaced():
+    """계약 쪽에서 곧 바뀔 항목을 조용히 두지 않는다.
+
+    PR #53 이 VAR-NO-DEPOSIT-INSURANCE → VAR-PARTIAL-DEPOSIT-INSURANCE 로 개칭한다.
+    여기서 미리 바꾸면 계약 샘플(아직 옛 이름)과 어긋나 test_template_matches_contract_exactly
+    가 깨진다 — 그래서 대기 사유를 `conflict` 로 남긴다. #53 이 머지되면 그 테스트가 먼저
+    깨져서 갱신 시점을 알려준다."""
     conflicts = templates.get("VARIABLE_INSURANCE").conflicts()
     assert [c.item_id for c in conflicts] == ["VAR-NO-DEPOSIT-INSURANCE"]
-    assert "불일치" in conflicts[0].conflict
+    assert "#53" in conflicts[0].conflict
 
 
 def test_coverage_report_shape():
