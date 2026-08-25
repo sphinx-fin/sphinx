@@ -141,10 +141,13 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("판정 없이 게이트 판정 → fail-closed RED")
-    void judgeWithNoJudgment_failsClosed() {
+    @DisplayName("판정 없는 세션의 미리보기 → fail-closed RED (엔진 동작은 그대로)")
+    void previewWithNoJudgment_failsClosed() {
+        // 게이트가 보수적으로 RED 를 내는 것(P5)은 그대로다. 바뀐 건 그 RED 로 감사
+        // 기준점을 찍을 수 있느냐이고, 그건 judge 쪽에서 막는다.
         Session s = service.create(cmd(null));
-        assertThat(service.judge(s.id()).signal()).isEqualTo(Signal.RED);
+        assertThat(service.previewGate(s.id()).signal()).isEqualTo(Signal.RED);
+        assertThat(service.previewGate(s.id()).recorded()).isFalse();
     }
 
     // ── F-INT-004 재설명·재검증 루프 ────────────────────────────────────
@@ -285,5 +288,75 @@ class SessionServiceTest {
         service.recordJudgment(s.id(), j("A", Grade.U3));
         Session aborted = service.abort(s.id());
         assertThat(aborted.state()).isEqualTo(SessionState.ABORTED);
+    }
+
+    // ── 2026-08-25 결정 반영 ────────────────────────────────────────────
+
+    @Test
+    @DisplayName("판정 0건 세션은 판정할 수 없다 — JUDGED 는 되돌릴 수 없으므로")
+    void judgeWithNoJudgment_isRejected() {
+        Session s = service.create(cmd(null));
+        assertThatThrownBy(() -> service.judge(s.id()))
+                .isInstanceOf(SessionFsm.IllegalStateTransitionException.class);
+        // 거절됐으니 상태도 기준점도 안 남는다
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.CREATED);
+        assertThat(service.get(s.id()).judgedAt()).isNull();
+        assertThat(evidence.gates).isEmpty();
+    }
+
+    @Test
+    @DisplayName("judge 는 멱등하다 — 재호출해도 재계산하지 않고 기록값을 돌려준다")
+    void judgeIsIdempotent() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+
+        var first = service.judge(s.id());
+        Instant firstAt = service.get(s.id()).judgedAt();
+        var second = service.judge(s.id());
+        var third = service.judge(s.id());
+
+        assertThat(second).isEqualTo(first);
+        assertThat(third).isEqualTo(first);
+        // 기준점이 갱신되지 않는다 — 감사 기준점은 재계산값이 아니라 기록값이다
+        assertThat(service.get(s.id()).judgedAt()).isEqualTo(firstAt);
+        // append 도 1건뿐이다 (evidence 는 흡수하지 않으므로 서버가 막는다)
+        assertThat(evidence.gates).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("미리보기는 아무것도 기록하지 않는다 — 7-2 [기능 1] 재설명 흐름이 성립한다")
+    void previewGateHasNoSideEffect() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // 황색 재료
+
+        var preview = service.previewGate(s.id());
+        assertThat(preview.signal()).isEqualTo(Signal.YELLOW);
+        assertThat(preview.recorded()).isFalse();
+        assertThat(preview.judgedAt()).isNull();
+
+        // 상태도 기준점도 안 움직인다 → 재설명 루프로 들어갈 수 있다
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
+        assertThat(service.get(s.id()).judgedAt()).isNull();
+        assertThat(evidence.gates).isEmpty();
+
+        // 황색을 보고 재설명 → 재검증 → 녹색. 미리보기가 없으면 이 흐름이 막힌다.
+        service.reExplain(s.id(), "A");
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        assertThat(service.previewGate(s.id()).signal()).isEqualTo(Signal.GREEN);
+        assertThat(service.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
+    }
+
+    @Test
+    @DisplayName("판정 후 미리보기는 재계산하지 않고 기록값을 준다(recorded=true)")
+    void previewAfterJudgeReturnsRecorded() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        var judged = service.judge(s.id());
+
+        var preview = service.previewGate(s.id());
+        assertThat(preview.recorded()).isTrue();
+        assertThat(preview.judgedAt()).isNotNull();
+        assertThat(preview.signal()).isEqualTo(judged.signal());
+        assertThat(preview.ruleTrace()).isEqualTo(judged.ruleTrace());
     }
 }

@@ -4,10 +4,13 @@ import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -63,6 +66,7 @@ public class SessionService {
      * - RE_EXPLAIN: 재설명 후 재답변이므로 재검증(재검증 횟수 +1, →RE_VERIFY).
      *   이번에 이해(U1)했으면 정상 흐름으로 복귀(→IN_PROGRESS).
      */
+    @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment) {
         Session session = get(sessionId);
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.START)) {
@@ -79,6 +83,9 @@ public class SessionService {
         }
         repository.save(session);
         // 세션은 덮어쓰지만 이력은 남긴다 — 재설명 이력의 유일한 보존 경로(기획서 174행).
+        // 같은 트랜잭션 안이다(2026-08-25 결정): append-only 해시 체인은 순서가 해시에
+        // 들어가므로 구멍을 나중에 메울 수 없다. append 가 실패하면 세션 저장도 함께 롤백되고
+        // 요청 전체가 실패한다 — 근거 없는 판정이 무효라면 기록 없는 판정도 무효다(P4와 같은 논리).
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
         return judgment;
@@ -165,8 +172,25 @@ public class SessionService {
      * 게이트 판정 — 세션에 쌓인 판정 + 모순 + '재검증 실패' 횟수를 GateEngine에 넘긴다(P1).
      * 판정 가능한 상태면 JUDGED로 전이.
      */
+    @Transactional
     public GateResult judge(String sessionId) {
         Session session = get(sessionId);
+
+        // 멱등(2026-08-25 결정) — 이미 판정된 세션은 재계산하지 않고 기록값을 돌려준다.
+        // 재계산하면 그 사이 gate_rules.yaml 이 바뀐 경우 다른 답이 나오고 감사 기준점이
+        // 둘이 된다. #16 합의: 기준점은 재계산값이 아니라 기록값이다.
+        if (session.judgedAt() != null) {
+            return recordedGate(session);
+        }
+
+        // 판정 0건 가드 — fail-closed RED 자체는 P5에 맞지만, JUDGED 는 CLOSE 외에 나가는
+        // 전이가 없어서 되돌릴 수 없다. 답변 하나 없는 세션이 버튼 오작동 한 번으로 끝나면
+        // 안 된다. 신호만 보고 싶으면 previewGate 를 쓴다(부수효과 없음).
+        if (session.judgments().isEmpty()) {
+            throw new SessionFsm.IllegalStateTransitionException(
+                    session.state(), SessionFsm.Event.JUDGE);
+        }
+
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
         Instant judgedAt = Instant.now();
@@ -175,9 +199,39 @@ public class SessionService {
             session.fire(SessionFsm.Event.JUDGE);
         }
         repository.save(session);
-        // 신호의 변천(황색→녹색)을 남긴다 — 세션에는 최종 신호만 남으므로.
+        // append 는 같은 트랜잭션 안이다(recordJudgment 주석 참고).
         evidenceRecorder.appendGate(sessionId, result, judgedAt);
         return result;
+    }
+
+    /**
+     * F-GTE-001 신호등 미리보기 — 계산만 하고 **아무것도 기록하지 않는다.**
+     *
+     * 기획서 7-2 [기능 1]이 "황색 판정 → 재설명 → 재검증 → 녹색 통과"인데, 판매자가 황색을
+     * 보려면 신호등을 조회해야 한다. 그걸 judge() 로 하면 JUDGED 로 전이되고 거기서
+     * RE_EXPLAIN 으로 갈 수 없어 그 흐름 자체가 성립하지 않는다.
+     *
+     * JUDGED → REQUEST_REEXPLAIN 전이를 여는 대신 조회 경로를 나눈다. 전이를 열면 판정
+     * 시점이 여러 개가 되고 어느 것이 감사 기준점인지 모호해진다.
+     * GateEngine 이 순수 함수라(P2) 미리보기와 확정이 같은 입력에 같은 답을 낸다.
+     *
+     * 이미 판정된 세션은 재계산하지 않고 기록값을 돌려준다 — judge() 멱등과 같은 이유다.
+     */
+    @Transactional(readOnly = true)
+    public GatePreview previewGate(String sessionId) {
+        Session session = get(sessionId);
+        if (session.judgedAt() != null) {
+            GateResult recorded = recordedGate(session);
+            return new GatePreview(recorded.signal(), recorded.ruleTrace(), true, session.judgedAt());
+        }
+        GateResult result = gateEngine.judge(
+                session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
+        return new GatePreview(result.signal(), result.ruleTrace(), false, null);
+    }
+
+    /** 세션에 기록된 게이트 결과(감사 기준점). 재계산하지 않는다. */
+    private GateResult recordedGate(Session session) {
+        return new GateResult(session.gateSignal(), session.gateRuleTrace());
     }
 
     /** 세션 중단(고객 이탈 등) → ABORTED. */
@@ -197,4 +251,11 @@ public class SessionService {
      */
     public record ReExplanation(String itemId, String content, boolean vulnerable,
                                 String reverifyQuestion) {}
+
+    /**
+     * 신호등 미리보기. recorded=false 면 아직 감사 기준점이 아니다 — 화면이 이걸 확정으로
+     * 보관하면 안 된다. judgedAt 이 null 이면 /judge 가 아직 호출되지 않은 세션이다.
+     */
+    public record GatePreview(Signal signal, List<String> ruleTrace,
+                              boolean recorded, Instant judgedAt) {}
 }
