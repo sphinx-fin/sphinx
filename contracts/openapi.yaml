@@ -440,6 +440,7 @@ components:
             - REEXPLAIN_NOT_ELIGIBLE   # 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
             - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
         timestamp: {type: string, format: date-time}

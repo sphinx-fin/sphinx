@@ -1,14 +1,24 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.RiskItem;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -24,6 +34,25 @@ class SessionControllerTest {
 
     @Autowired
     private MockMvc mvc;
+
+    /**
+     * ai-service(F-SCR-001)는 이 통합 테스트의 대상이 아니라 상류 의존성이다 — 실제
+     * HTTP(:8100)에 붙이지 않고 목으로 대신한다. 채점 결과는 예전 컨트롤러 목과 동일하게
+     * U4(오해)로 고정해 이 파일의 기존 단정(U4·RED·R-01·재검증 상한)을 그대로 유지한다.
+     * AiServiceClient 자체의 HTTP 계약(snake_case·PII 마스킹·실패 매핑)은 AiServiceClientTest가 검증한다.
+     */
+    @MockBean
+    private AiServiceClient aiServiceClient;
+
+    @BeforeEach
+    void stubScoring() {
+        // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+                .thenAnswer(inv -> new Judgment(inv.getArgument(0), Grade.U4, 0.91,
+                        new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
+                                "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                        "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"));
+    }
 
     @Test
     @DisplayName("생성 성공 → 200 + 봉투(success:true, data.state=CREATED)")

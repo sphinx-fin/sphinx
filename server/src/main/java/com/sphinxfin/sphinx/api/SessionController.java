@@ -7,6 +7,7 @@ import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
+import com.sphinxfin.sphinx.core.AiServiceClient;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
@@ -23,6 +24,7 @@ import java.util.Map;
 public class SessionController {
 
     private final SessionService sessionService;
+    private final AiServiceClient aiServiceClient;
 
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
@@ -68,13 +70,21 @@ public class SessionController {
 
     @PostMapping("/{sid}/answers")
     public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
-        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment
-        // TODO: ai-service 채점 연결(F-SCR-001, 윤지석) — 지금은 목 판정을 세션에 기록만 한다.
+        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment (F-SCR-001).
+        // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
-        Judgment measured = new Judgment(body.itemId(), Grade.U4, 0.91,
-                new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
-                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
-                "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE");
+        //
+        // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
+        // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
+        // 쌓인 항목·질문으로 교체한다.
+        RiskItem item = MockData.RISK_ITEMS.stream()
+                .filter(r -> r.itemId().equals(body.itemId()))
+                .findFirst()
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "항목을 찾을 수 없다: " + body.itemId()));
+        String question = "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+        Judgment measured = aiServiceClient.score(
+                item.itemId(), question, body.text(), item, "ELS");
         return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
     }
 
