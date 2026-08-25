@@ -52,3 +52,6 @@
 
 # ── web/ — 오준서 영역 (v1.2 §화면, S-01 ~ S-08)
 /web/                                                   @junseo2323
+
+# ── 인프라 — 오준서 영역 (v1.2 §인프라). CODEOWNERS 자체는 PM 유지.
+/.github/workflows/                                     @junseo2323

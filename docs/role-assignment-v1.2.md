@@ -68,6 +68,39 @@
 | F-CMN-002 | 접근 통제·감사 로그 | **정세현** | 강희진 | 정세현: 역할 정의·접근 정책(`rbac_policy.yaml`), **영업 조직 역할 부재 원칙**(Role enum에 영업·마케팅 역할을 두지 않음), 데이터 범위 분리(SELLER=자기 세션만·집계 접근 불가, 집계는 COMPL 전용, MGR=자기 지점), 감사 로그 — F-GTE-004와 불변 저장 계층(`evidence` 패키지) 공유. 강희진: 컨트롤러·필터에 권한 체크 적용. **기획서 7-4 역이용 방지의 실물 근거이므로 축소 대상 아님** — 데모에서 권한 차단·로그 기록 시연 |
 | F-CMN-003 | 채점 성능 평가 파이프라인 | **정세현** | 강희진, 오준서 | 정세현: 파이프라인 운영, QWK·미탐율 산출, 성능 리포트 작성. **라벨링: 강희진+오준서 2인 독립** (윤지석: 프롬프트 당사자 제외, 정세현: 운영자 제외) |
 
+### 인프라 (R: 오준서)
+
+기능ID 를 붙이지 않는다 — 기능 명세서 v1.1 의 F-CMN 은 003 까지이고, 없는 ID 를 만들면
+명세서와 어긋난다. 화면 섹션과 같은 형태로 R 만 지정한다.
+
+| 항목 | 내용 | 비고 |
+|---|---|---|
+| CI | PR 에서 3모듈 테스트 실행 (`server` JUnit · `ai-service` pytest · `web` `tsc --noEmit`) | 현재 `.github/workflows/` 에는 리뷰 승인 여부만 보는 `pr-review-guard.yml` 뿐이고 **테스트가 CI 에서 한 번도 돌지 않았다** |
+| 로컬 실행 | 세 서비스(:8000 · :8100 · :5173) 동시 기동 절차 | 지금은 문서에 없다. 3주차 통합·리허설 전에 서 있어야 한다 |
+| 개발환경 문서 | 필요한 런타임 버전과 함정 | 아래 참고 |
+| 데모 환경 | 리허설·시연용 기동 | 9/3~9/6 |
+
+**범위 밖** — 각 모듈 *내부* 툴체인은 그대로 소유자 것이다: `server/build.gradle`·
+`settings.gradle`(강희진), `ai-service/requirements*.txt`(윤지석), `web/package.json`·
+`tsconfig.json`(오준서 본인). `.github/CODEOWNERS` 는 PM(정세현) 이 유지한다.
+린터는 3주 타임박스에서 비용이 이득보다 커서 데모 범위 밖으로 둔다.
+
+**인계 사항 — JDK 17 함정 (2026-08-25 확인).** `server/build.gradle` 이 툴체인을
+`languageVersion=17` 로 고정하는데, 이 값이 README·CLAUDE.md 어디에도 없다. macOS 에서
+Homebrew 로 깔면 `openjdk@17` 이 keg-only 여서 `/Library/Java/JavaVirtualMachines` 에
+링크가 안 걸리고, 그러면 Gradle 툴체인 자동 탐지와 `/usr/libexec/java_home` 이 못 찾는다
+(`No locally installed toolchains match`). sudo 없이 넘기는 방법:
+
+```
+brew install openjdk@17
+# ~/.gradle/gradle.properties
+org.gradle.java.installations.paths=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+```
+
+이 상태에서 `cd server && ./gradlew test` → 67건 통과를 확인했다. 레포에
+`settings.gradle` 로 툴체인 자동 다운로드(foojay-resolver)를 넣는 방법도 있는데 그 파일은
+강희진 소유이므로 CI 설계와 함께 정하는 게 낫다.
+
 ### 화면 (전체 R: 오준서)
 
 | 화면ID | 화면 | 비고 |
@@ -96,8 +129,9 @@ F-EXT-001(축소), F-EXT-003, F-SIM-001, F-GTE-004, F-DSH-003, F-CMN-002, F-CMN-
 **소유 서사: 이 시스템에 남는 모든 기록과 증거** — 이해 기록(F-GTE-004) + 감사 로그(F-CMN-002) + 접근 정책. 두 기능이 `evidence` 공통 기반을 공유하므로 설계를 한 번만 제대로 한다.
 ※ 전제: F-EXT-001을 문서 2종으로 타임박스하지 않으면 PM이 병목이 된다.
 
-**오준서 (프론트) — R 3개 + 화면 8종**
+**오준서 (프론트 + 인프라) — R 3개 + 화면 8종 + 인프라**
 F-INT-003, F-DSH-001~002, S-01~S-08, 데모 시연 흐름 총괄. 목 API로 첫 주부터 화면 착수. S-03(인터뷰)과 S-04(시뮬레이터)가 데모 인상의 8할이므로 S-01·S-08은 마지막에.
+**인프라 R 추가** — CI(3모듈 테스트), 로컬·데모 실행 환경, 개발환경 문서. 역할표 초판에 담당이 지정돼 있지 않아 기본 소유자(PM)에게 떨어져 있던 몫이다. 데모 시연 흐름을 총괄하는 사람이 실행 환경을 갖는 것이 자연스럽다.
 
 ---
 
