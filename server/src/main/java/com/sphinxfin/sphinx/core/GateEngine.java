@@ -48,13 +48,17 @@ public class GateEngine {
 
     /**
      * @param judgments          항목별 이해도 판정 목록(AI 측정값)
-     * @param suitabilityMismatch 적합성 설문 vs 발화 모순 여부(F-DET-002)
+     * @param suitabilityMismatch 적합성 모순이 **확인**됐는가(F-DET-002 → R-02)
+     * @param suitabilityUnknown  판정을 시도했으나 **확인하지 못했는가**(결정 10.9 → R-02b).
+     *                            모순 없음과 다른 상태다 — 자세한 근거는 SuitabilityStatus 참고
      * @param reverifyFailed     재검증 실패 누적 횟수(F-INT-004, 항목당 최대 2회)
      */
-    public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch, int reverifyFailed) {
+    public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch,
+                           boolean suitabilityUnknown, int reverifyFailed) {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
         List<Double> confidences = judgments.stream().map(Judgment::confidence).toList();
-        Context ctx = new Context(grades, confidences, suitabilityMismatch, reverifyFailed);
+        Context ctx = new Context(grades, confidences, suitabilityMismatch,
+                suitabilityUnknown, reverifyFailed);
 
         // 신호는 first-match-wins(파일 순서 = 우선순위). 트레이스는 그 신호를 낸 발화 룰을 전부
         // 남긴다 — 감사 시점에 "왜 이 신호였나"를 모든 사유로 설명하기 위함(예: YELLOW가
@@ -107,6 +111,9 @@ public class GateEngine {
     static Predicate<Context> compile(String ifExpr) {
         String e = ifExpr == null ? "" : ifExpr.trim();
 
+        if (e.matches("suitabilityUnknown\\s*==\\s*true")) {
+            return Context::suitabilityUnknown;
+        }
         if (e.matches("suitabilityMismatch\\s*==\\s*true")) {
             return Context::suitabilityMismatch;
         }
@@ -159,7 +166,8 @@ public class GateEngine {
 
     /** 평가 컨텍스트: 룰이 참조하는 값의 전부. */
     record Context(List<Grade> grades, List<Double> confidences,
-                   boolean suitabilityMismatch, int reverifyFailed) {}
+                   boolean suitabilityMismatch, boolean suitabilityUnknown,
+                   int reverifyFailed) {}
 
     /** 컴파일된 룰. */
     record Rule(String id, Predicate<Context> predicate, Signal signal) {}
