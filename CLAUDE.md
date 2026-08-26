@@ -138,6 +138,10 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 
 작업 브랜치: `feat/<기능ID>-설명`.
 
+PR 담당자(assignee)는 `.github/workflows/pr-author-assignee.yml`이 **작성자로 자동
+지정**한다. 이미 담당자가 있으면 손대지 않으므로, 일부러 다른 사람에게 넘긴 PR은
+그대로 유지된다. 담당자는 "이 PR을 끝까지 끌고 갈 사람"이고 리뷰어와 다르다.
+
 ### PR 리뷰 라벨은 자동이다 — 손으로 붙이지 않는다
 
 `.github/workflows/pr-reviewer-label.yml`이 리뷰가 지금 **누구 손에 있는지**를 라벨로
