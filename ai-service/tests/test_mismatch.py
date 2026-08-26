@@ -290,6 +290,33 @@ def test_unknown_survey_question_is_422_not_502():
     assert "SUIT-CRYPTO-EXPERIENCE" in resp.json()["detail"]
 
 
+def test_axis_mismatch_is_logged_not_silent(caplog):
+    """덮어쓰기만 하고 비교하지 않으면 프롬프트가 매핑 표를 안 읽는 것을 알 수 없다.
+
+    PR #113 리뷰(정세현) — `#74` 에서 약속한 "불일치를 경고로 남긴다" 의 남은 절반이다.
+    판정에는 영향이 없다(계산값이 이긴다). 계약에 필드를 늘리지 않고 로그로 둔다.
+    """
+    import logging
+
+    wrong = _contradiction(question_id="SUIT-HORIZON", recorded="5년 이상 묶어둘 수 있다")
+    assert wrong.axis == "principal_preservation", "픽스처 기본값이 기간 축이 아니어야 한다"
+
+    with caplog.at_level(logging.INFO, logger="app.mismatch"):
+        pinned = mismatch._pin_axis(wrong)
+
+    assert pinned.axis == "investment_horizon"
+    assert any("축 불일치" in r.message for r in caplog.records), caplog.text
+
+
+def test_matching_axis_is_not_logged(caplog):
+    """일치할 때도 로그를 남기면 불일치가 묻힌다."""
+    import logging
+
+    right = _contradiction(question_id="SUIT-PRINCIPAL-LOSS")   # 기본 axis 와 같다
+    with caplog.at_level(logging.INFO, logger="app.mismatch"):
+        mismatch._pin_axis(right)
+    assert not [r for r in caplog.records if "축 불일치" in r.message]
+
 # ── 세션 단위 dev set (LLM 없이 픽스처 계약만 본다) ──────────────────────────
 def _session_specs():
     import yaml
