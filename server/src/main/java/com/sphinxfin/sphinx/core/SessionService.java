@@ -257,12 +257,18 @@ public class SessionService {
         Session session = get(sessionId);
         if (session.judgedAt() != null) {
             GateResult recorded = recordedGate(session);
-            return new GatePreview(recorded.signal(), recorded.ruleTrace(), true, session.judgedAt());
+            return new GatePreview(recorded.signal(), recorded.ruleTrace(), true,
+                    session.judgedAt(), session.suitabilityStatus());
         }
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
                 session.failedReverifyCount());
-        return new GatePreview(result.signal(), result.ruleTrace(), false, null);
+        // 미리보기는 모순 판정을 부르지 않는다 — GET 이 상태를 바꾸면 안 되고 LLM 호출 비용도
+        // 든다. 대신 아직 평가 전이라는 사실을 실어 보낸다. 안 실으면 signal=GREEN 만 오는데,
+        // /judge 는 모순을 평가하므로 같은 세션이 YELLOW·RED 로 갈릴 수 있다 — 미리보기가
+        // 판정보다 낙관적인 쪽이라 판매자가 재설명 루프를 건너뛰게 된다.
+        return new GatePreview(result.signal(), result.ruleTrace(), false, null,
+                session.suitabilityStatus());
     }
 
     /** 세션에 기록된 게이트 결과(감사 기준점). 재계산하지 않는다. */
@@ -292,6 +298,18 @@ public class SessionService {
      * 신호등 미리보기. recorded=false 면 아직 감사 기준점이 아니다 — 화면이 이걸 확정으로
      * 보관하면 안 된다. judgedAt 이 null 이면 /judge 가 아직 호출되지 않은 세션이다.
      */
+    /**
+     * 게이트 미리보기.
+     *
+     * <p>{@code suitabilityStatus} 를 함께 싣는 이유: 미리보기는 적합성 모순을 평가하지
+     * <b>않는다.</b> {@code NOT_EVALUATED} 인 채로 계산되므로 R-02·R-02b 가 둘 다 안 걸리고,
+     * 전부 U1 이면 GREEN 이 나온다. 같은 세션에서 {@code /judge} 는 모순을 평가하므로
+     * YELLOW·RED 가 될 수 있다 — <b>미리보기가 판정보다 낙관적</b>이라 나쁜 방향이다.
+     *
+     * <p>신호를 바꾸지 않고 그 사실을 드러낸다. {@code NOT_EVALUATED} 면 화면은
+     * "적합성 미확인" 을 함께 보여야 하고, 이 GREEN 을 최종 통과로 그리면 안 된다.
+     */
     public record GatePreview(Signal signal, List<String> ruleTrace,
-                              boolean recorded, Instant judgedAt) {}
+                              boolean recorded, Instant judgedAt,
+                              SuitabilityStatus suitabilityStatus) {}
 }

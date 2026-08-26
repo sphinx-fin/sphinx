@@ -47,6 +47,35 @@ class SessionServiceTest {
                 Optional.of(evidence), 2);
     }
 
+    @Test
+    @DisplayName("❗미리보기 GREEN 은 모순 평가 전 값이다 — 상태를 실어 화면이 구별하게 한다")
+    void previewCarriesSuitabilityStatus() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+
+        var preview = service.previewGate(s.id());
+
+        // 신호 자체는 GREEN 이다 — 미리보기는 모순을 평가하지 않으므로 바꾸지 않는다.
+        assertThat(preview.signal()).isEqualTo(Signal.GREEN);
+        assertThat(preview.suitabilityStatus())
+                .as("이 값이 없으면 화면은 signal=GREEN 만 보고 최종 통과로 그린다 — "
+                        + "그런데 /judge 는 모순을 평가하므로 YELLOW·RED 로 갈릴 수 있다")
+                .isEqualTo(SuitabilityStatus.NOT_EVALUATED);
+    }
+
+    @Test
+    @DisplayName("모순을 평가한 뒤에는 미리보기와 판정이 같은 신호를 낸다")
+    void previewMatchesJudgeAfterEvaluation() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordSuitability(s.id(), SuitabilityStatus.UNKNOWN);
+
+        var preview = service.previewGate(s.id());
+        assertThat(preview.signal()).isEqualTo(Signal.YELLOW);
+        assertThat(preview.suitabilityStatus()).isEqualTo(SuitabilityStatus.UNKNOWN);
+        assertThat(service.judge(s.id()).signal()).isEqualTo(preview.signal());
+    }
+
     // ── F-DET-002 모순 배선 (이슈 #65 · 결정 10.9) ─────────────────────
 
     @Test
