@@ -1579,15 +1579,15 @@
       "match": "whitespace"
     },
     {
-      "item_id": "VAR-NO-DEPOSIT-INSURANCE",
-      "name": "예금자보호 비대상",
-      "value_text": "이 보험계약은 예금자보호법에 따라 보호되지 않습니다",
+      "item_id": "VAR-PARTIAL-DEPOSIT-INSURANCE",
+      "name": "예금자보호 부분 대상(최저보증·특약 한정)",
+      "value_text": "이 보험계약은 예금자보호법에 따라 보호되지 않습니다. 다만, 약관에서 정한 최저사\n망지급금, 최저실적배당종신연금 및 특약에 한하여 예금자보호법에 따라 보호됩니다.\n보호 한도는 해약환급금(또는 만기 시 보험금)에 기타지급금을 합하여 1인당 \"1억원까\n지\"(본 보험회사의 여타 보호상품과 합산)이며, 이와 별도로 본 보험회사 보호상품의\n사고보험금을 합산하여 1인당 \"1억원까지\"입니다.",
       "source_span": {
         "page": 2,
         "start": 566,
-        "end": 594
+        "end": 779
       },
-      "match": "exact"
+      "match": "loose"
     },
     {
       "item_id": "VAR-WITHDRAWAL-FEE",

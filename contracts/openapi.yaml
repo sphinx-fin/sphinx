@@ -453,6 +453,7 @@ components:
             - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
             - OVERRIDE_NOT_ELIGIBLE    # 409 오버라이드 전제 위반(적색 아님 또는 요청 없이 승인)
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
         timestamp: {type: string, format: date-time}
@@ -747,7 +748,7 @@ components:
         서버가 임의 기본값을 갖고 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
       required: [amount]
       properties:
-        amount: {type: integer, format: int64, minimum: 0, description: "가입금액(원)"}
+        amount: {type: integer, format: int64, minimum: 1, description: "가입금액(원, 양수)"}
     SimulateResponse:
       type: object
       required: [scenarios, timeseriesVersion, productName]

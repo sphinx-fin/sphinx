@@ -2,6 +2,7 @@ package com.sphinxfin.sphinx.api.exception;
 
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.core.OverrideNotEligibleException;
 import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
 import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
@@ -93,6 +94,18 @@ public class GlobalExceptionHandler {
         log.warn("P4 차단 — 근거 없는 판정 거부: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ApiError.of("EVIDENCE_REQUIRED", "근거 없는 판정은 처리할 수 없습니다 (P4)")));
+    }
+
+    /**
+     * ai-service 호출 실패(non-2xx·연결 오류·501 미구현 등) → 502. 우리 서버 버그(500)가
+     * 아니라 상류(ai-service) 의존성 문제이므로 구분한다. 프론트가 "서버가 죽었다"가 아니라
+     * "채점 서비스 일시 불가"로 읽어야 재시도·안내 문면을 가를 수 있다.
+     */
+    @ExceptionHandler(AiServiceException.class)
+    public ResponseEntity<ApiResponse<Void>> aiServiceUnavailable(AiServiceException e) {
+        log.warn("ai-service 호출 실패: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ApiError.of("AI_SERVICE_UNAVAILABLE", "채점 서비스에 연결할 수 없습니다")));
     }
 
     /**

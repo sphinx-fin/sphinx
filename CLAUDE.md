@@ -108,7 +108,7 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
   `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
   `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`EVIDENCE_REQUIRED`(502)·
-  `INTERNAL_ERROR`(500).
+  `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
@@ -142,6 +142,10 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 
 `docs/adr/`에 있다. 코드가 왜 이런지의 근거이므로, 관련 코드를 고치기 전에 해당 ADR을 읽는다.
 **결정이 바뀌면 새 ADR을 추가하고 기존 문서는 상태만 갱신한다 — 삭제·수정하지 않는다.**
+
+ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계약·규약·배선 결정은
+[`docs/decision-log.md`](docs/decision-log.md)에 전수로 모여 있다 — 자기 영역을 건드리기 전에
+해당 절을 먼저 본다. 남은 미결이 누구 몫이고 언제까지인지도 그 문서 10절에 있다.
 
 ## 알려진 문서 불일치
 
