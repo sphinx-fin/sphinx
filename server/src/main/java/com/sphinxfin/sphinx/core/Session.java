@@ -69,6 +69,21 @@ public class Session extends BaseEntity {
     private String experienceLevel;   // 투자 경험 수준 — nullable(@Column 기본값)
     private String amountBand;         // 가입금액대 — nullable(@Column 기본값)
     private String contractRef;        // 계약건 참조번호(비식별) — nullable(@Column 기본값)
+
+    /**
+     * 이 세션을 진행한 창구 직원과 그 지점. rbac_policy.yaml 의 scope 를 평가할 근거다 —
+     * own_session 은 sellerId 를, branch 는 branchId 를 행위자와 비교한다.
+     *
+     * <p><b>인증 주체에서만 채워진다</b>(CurrentActor). 요청 본문에 이 필드가 없는 것이
+     * 요지다 — 본문으로 받으면 자기가 아닌 사람을 소유자로 적을 수 있고 own_session 이
+     * 견제가 아니라 자기 신고가 된다.
+     *
+     * <p>계정 분리(결정 10.5) 전에는 null 이고, 그러면 정책이 "판단할 수 없다" 로 <b>거부</b>
+     * 한다 — 통과가 아니라 거부라 안전한 방향이다. 지금 필드를 두는 이유는, 계정이 생긴 뒤에
+     * 붙이면 <b>그 사이 세션이 영원히 주인 없는 상태</b>로 남아 아무도 못 읽게 되기 때문이다.
+     */
+    private String sellerId;           // nullable — 10.5 전까지
+    private String branchId;           // nullable — 10.5 전까지
     private String surveySchemaVersion; // 적합성 설문 문항 세트 버전 — 리포트가 어느 세트로 받았는지 안다(F-GTE-004)
 
     @Convert(converter = JsonMapConverter.class)
@@ -165,6 +180,8 @@ public class Session extends BaseEntity {
                 .experienceLevel(cmd.experienceLevel())
                 .amountBand(cmd.amountBand())
                 .contractRef(cmd.contractRef())
+                .sellerId(cmd.sellerId())
+                .branchId(cmd.branchId())
                 .surveySchemaVersion(cmd.surveySchemaVersion())
                 .surveyResult(cmd.surveyResult() == null ? Map.of() : Map.copyOf(cmd.surveyResult()))
                 .build();

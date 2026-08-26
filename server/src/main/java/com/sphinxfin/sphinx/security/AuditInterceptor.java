@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  * 나눠 적으면 둘이 갈리고, 갈린 쪽이 감사 누락이 된다 — 그러면 "기록이 없다"가 "접근이
  * 없었다"로 읽힌다. 선언은 한 곳뿐이어야 한다.
  *
- * 문자열 형식은 {@code @accessGuard.can('<action>'...)} 로 고정이고
+ * 문자열 형식은 {@code @accessGuard.can*('<action>'...)} 로 고정이고
+ * ({@code can} · {@code canCreate} · {@code canAggregate} — 대상의 종류를 호출부가 말한다)
  * AccessControlWiringTest가 그 형식과 action 존재를 함께 고정한다.
  * ────────────────────────────────────────────────────────────────────
  */
@@ -38,7 +39,7 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     /** @PreAuthorize("@accessGuard.can('override:approve', #sid)") 에서 action을 뽑는다. */
     private static final Pattern ACTION =
-            Pattern.compile("@accessGuard\\.can\\('([a-z][a-z:]*)'");
+            Pattern.compile("@accessGuard\\.can[A-Za-z]*\\('([a-z][a-z:]*)'");
 
     private final RbacPolicyFile policyFile;
     private final AuditLog auditLog;

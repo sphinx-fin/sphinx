@@ -39,7 +39,7 @@ class AccessControlWiringTest {
 
     /** AuditInterceptor가 쓰는 것과 같은 형식. 여기서 형식 자체를 고정한다. */
     private static final Pattern ACTION =
-            Pattern.compile("@accessGuard\\.can\\('([a-z][a-z:]*)'");
+            Pattern.compile("@accessGuard\\.can[A-Za-z]*\\('([a-z][a-z:]*)'");
 
     // actuator가 같은 타입 빈을 하나 더 등록한다 — 이름으로 MVC 쪽을 집는다.
     @Autowired
@@ -47,6 +47,44 @@ class AccessControlWiringTest {
     private RequestMappingHandlerMapping mapping;
     @Autowired
     private RbacPolicyFile policy;
+
+    /** {@code can*} 의 종류까지 뽑는다 — 어떤 형태로 부르는지가 검사 강도를 바꾼다. */
+    private static final Pattern GUARD_CALL =
+            Pattern.compile("@accessGuard\\.(can[A-Za-z]*)\\('([a-z][a-z:]*)'");
+
+    @Test
+    @DisplayName("❗canCreate 는 :create action 에만 쓴다 — 다른 곳에 쓰면 소유권 검사가 사라진다")
+    void canCreateIsOnlyForCreation() {
+        // canCreate 가 만드는 Target 은 항상 요청자 자신이 소유자다. 그래서 own_session ·
+        // branch · org 가 전부 통과하고, 남는 것은 "이 역할에 그랜트가 있나" 뿐이다.
+        // session:create 에는 그게 맞다 — 만들면 내 것이니까. 문제는 다른 action 에 쓰면
+        // scope 가 조용히 사라진다는 것이다. can(..., #sid) 를 canCreate 로 잘못 적으면
+        // 그 action 이 모든 세션에 열리는데 아무 테스트도 안 깨진다(실측 — PR #110 리뷰).
+        //
+        // canAggregate 는 반대로 더 좁아서(집계는 own_session 을 거부한다) 오기가 나면
+        // 막혀서 드러난다. 완화 방향으로 틀리는 것은 canCreate 뿐이라 여기만 고정한다.
+        List<String> misuse = new ArrayList<>();
+        mapping.getHandlerMethods().forEach((RequestMappingInfo info, HandlerMethod method) -> {
+            if (!method.getBeanType().getPackageName().startsWith("com.sphinxfin.sphinx.api")) {
+                return;
+            }
+            PreAuthorize pre = method.getMethodAnnotation(PreAuthorize.class);
+            if (pre == null) {
+                return;
+            }
+            Matcher m = GUARD_CALL.matcher(pre.value());
+            while (m.find()) {
+                if ("canCreate".equals(m.group(1)) && !m.group(2).endsWith(":create")) {
+                    misuse.add(method.getBeanType().getSimpleName() + "#" + method.getMethod().getName()
+                            + " → canCreate('" + m.group(2) + "')");
+                }
+            }
+        });
+        assertThat(misuse)
+                .as("canCreate 는 대상이 아직 없는 생성에만 쓴다. 이미 존재하는 리소스에 쓰면 "
+                        + "요청자가 소유자로 간주되어 scope 검사가 통째로 사라진다")
+                .isEmpty();
+    }
 
     /** 엔드포인트 → @PreAuthorize에 적힌 action(없으면 null). */
     private Map<String, String> endpointActions() {
@@ -91,7 +129,7 @@ class AccessControlWiringTest {
                 .map(e -> e.getKey() + " " + e.getValue())
                 .toList();
         assertThat(malformed)
-                .as("@accessGuard.can('<action>'...) 형식이어야 한다. 형식이 깨지면 감사가 조용히 빠진다")
+                .as("@accessGuard.can*('<action>'...) 형식이어야 한다. 형식이 깨지면 감사가 조용히 빠진다")
                 .isEmpty();
     }
 

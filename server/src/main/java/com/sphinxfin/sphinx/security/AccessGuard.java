@@ -31,13 +31,16 @@ public class AccessGuard {
 
     private final AccessPolicy policy;
     private final SessionRepository sessions;
+    private final CurrentActor actorSource;
     private final boolean enforce;
 
     public AccessGuard(AccessPolicy policy,
                        SessionRepository sessions,
+                       CurrentActor actorSource,
                        @Value("${sphinx.security.enforce:false}") boolean enforce) {
         this.policy = policy;
         this.sessions = sessions;
+        this.actorSource = actorSource;
         this.enforce = enforce;
         if (!enforce) {
             // 조용히 열려 있으면 "정책이 붙었다"고 착각하게 된다. 기동 로그에 남긴다.
@@ -63,9 +66,38 @@ public class AccessGuard {
         return policy.permits(actor, action, targetOf(resourceId));
     }
 
-    /** 세션과 무관한 action(집계 등). */
-    public boolean can(String action) {
+    /**
+     * 집계 요청 — 귀속 주체가 없다. {@code scope: org}·{@code branch} 인 action 전용이다.
+     *
+     * <p>예전에는 {@code can(action)} 하나가 "리소스가 없다" 를 곧 "집계다" 로 접었다. 그런데
+     * <b>리소스가 없는 이유는 둘</b>이다 — 집계라서 대상이 없는 것과, 생성이라 대상이 아직
+     * 없는 것. 그 둘을 값의 부재로 추론하니 {@code session:create}(own_session)가 집계로
+     * 판정돼 <b>SELLER 가 세션을 만들 수조차 없었다</b>(enforce=true 에서 403, 실측).
+     * #99 가 {@code Target} 에서 고친 것과 같은 오류라 같은 방식으로 고친다 — 호출부가 말한다.
+     */
+    public boolean canAggregate(String action) {
         return can(action, null);
+    }
+
+    /**
+     * 생성 요청 — 대상이 <b>아직</b> 없다. 만들어질 세션은 지금 요청한 사람의 것이므로
+     * 자기 자신을 귀속으로 두고 판단한다. {@code own_session} 그랜트가 그대로 성립한다.
+     *
+     * <p>집계와 달리 이건 "주인 없는 대상" 이 아니라 "주인이 정해진 대상" 이다.
+     *
+     * <p>❗익명 요청은 <b>정책에 닿지 않는다.</b> 익명도 {@code isAuthenticated()} 는 true 지만
+     * 권한이 {@code ROLE_ANONYMOUS} 라 {@code Role.valueOf} 가 실패해서 {@link #currentActor()}
+     * 가 먼저 던지고, {@code GlobalExceptionHandler} 가 <b>401</b> 로 매핑한다(#105). 403 이
+     * 아닌 것이 맞다 — 로그인하면 해소되는 상태다. 거부가 어디서 나는지를 적어두는 이유는,
+     * 401·403 이 갈리는 지점이라 문면이 틀리면 다음 사람이 잘못된 층에서 원인을 찾는다.
+     */
+    public boolean canCreate(String action) {
+        if (!enforce) {
+            return true;
+        }
+        AccessPolicy.Actor actor = currentActor();
+        return policy.permits(actor, action,
+                AccessPolicy.Target.session(null, actor.actorId(), actor.branchId()));
     }
 
     /**
@@ -93,36 +125,39 @@ public class AccessGuard {
                 .findFirst()
                 .orElseThrow(() -> new AccessDeniedNotAuthenticatedException(
                         "Role enum에 없는 권한이다: " + auth.getAuthorities()));
-        return new AccessPolicy.Actor(auth.getName(), role, branchOf(auth));
+        return new AccessPolicy.Actor(auth.getName(), role, branchOf());
     }
 
     /**
-     * 소속 지점. 계정 분리(10.5) 전까지 알 수 없다.
-     * null이면 scope=branch 판단이 성립하지 않으므로 정책이 거부한다 — 통과가 아니라 거부다.
+     * 소속 지점. {@link CurrentActor} 와 <b>같은 출처</b>를 써야 한다 — 세션에 적히는 지점과
+     * 인가 판단에 쓰는 지점이 갈리면, 자기가 만든 세션을 자기가 못 읽는 상태가 난다.
+     * 그래서 {@code Authentication} 을 인자로 받지 않는다. 받으면 여기서 따로 읽어도 되는
+     * 것처럼 보이고, 그 순간 출처가 둘이 된다.
      */
-    private String branchOf(Authentication auth) {
-        return null;
+    private String branchOf() {
+        return actorSource.branchId();
     }
 
     /**
-     * 세션 귀속.
+     * 세션 귀속. 정책이 scope 를 평가할 근거다.
      *
-     * ❗ ownerId·branchId를 채울 수 없다 — {@link Session}에 그 필드가 없다. 그래서 지금은
-     * rbac_policy.yaml의 scope 중 own_session·branch를 **평가할 근거가 존재하지 않는다**.
-     * 정책이 그 둘을 요구하면 null과 비교하게 되어 거부된다(통과가 아니라 거부라 안전한
-     * 방향이지만, "막고 있다"가 아니라 "판단할 수 없다"는 뜻이다).
+     * <p>세션이 <b>없으면</b> 귀속을 만들지 않는다. 예전에는 없는 세션을
+     * {@code new Target(null, null, null)} 로 접었는데, 그 값이 집계와 구별되지 않아
+     * <b>실재하지 않는 세션이 실재하는 남의 지점 세션보다 더 허용되는</b> 역전이 났다(#99).
+     * 지금은 {@code Target.Kind} 가 종류를 들고 있어 그 혼동은 없지만, 여기서도 조회 실패를
+     * 그대로 드러낸다 — 거부 사유가 "지점을 알 수 없다" 가 아니라 <b>"세션이 없다"</b> 여야
+     * 운영 중에 원인을 가를 수 있다.
      *
-     * TODO(강희진): 세션에 진행 주체(sellerId)·지점(branchId)을 싣는다. 요청 본문이 아니라
-     *   인증 주체에서 얻어야 한다 — 본문으로 받으면 자기가 자기를 소유자로 적을 수 있고,
-     *   그러면 own_session이 견제가 아니게 된다(오버라이드 승인자를 본문에서 뺀 것과 같은 이유).
-     *   따라서 역할별 계정 분리(결정 10.5)가 선행이다.
+     * <p>{@code sellerId}·{@code branchId} 는 계정 분리(결정 10.5) 전까지 null 이다. 그러면
+     * 정책이 "판단할 수 없다" 로 거부한다 — 통과가 아니라 거부다.
      */
     private AccessPolicy.Target targetOf(String sessionId) {
         if (sessionId == null) {
             return AccessPolicy.Target.aggregate();
         }
-        boolean exists = sessions.findById(sessionId).isPresent();
-        return new AccessPolicy.Target(exists ? sessionId : null, null, null);
+        return sessions.findById(sessionId)
+                .map(s -> AccessPolicy.Target.session(s.id(), s.sellerId(), s.branchId()))
+                .orElseGet(() -> AccessPolicy.Target.session(null, null, null));
     }
 
     /** 인증 자체가 없을 때. 401/403 매핑은 GlobalExceptionHandler가 한다. */
