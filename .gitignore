@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
+# .env는 슬래시가 없어 모든 깊이에 적용된다(ai-service/.env 포함).
+# 변형 이름도 함께 막고, 템플릿만 예외로 둔다.
 .env
+.env.*
+!.env.example
 .venv/
 node_modules/
 dist/

@@ -9,6 +9,9 @@
 - `role-assignment-v1.2.md` — 기능ID 단위 역할 분담표 (F-CMN-002 정세현 이관, F-EXT-001 범위 축소 반영)
 - `adr/` — 설계 결정 기록. 코드가 왜 이런지의 근거. 결정이 바뀌면 새 ADR을 추가하고
   기존 문서는 상태만 갱신한다(삭제·수정 금지).
+- `decision-log.md` — **PR·이슈에서 확정된 것 전수 색인.** ADR 은 원칙급 결정만 담으므로,
+  스레드에서 합의됐지만 ADR 급이 아닌 계약·규약·배선 결정은 여기 모은다. 자기 영역에서
+  무엇이 확정됐는지 한 곳에서 보고, 남은 미결이 누구 몫인지도 여기에 있다.
 - 제출용 기획서 PDF 최신본도 여기에 함께 보관한다(`proposal.md`에서 뽑은 결과물).
 
 ## 구현 범위의 기준 문서
@@ -35,4 +38,8 @@
 | [001](adr/001-no-sales-role.md) | 역할 정의에 영업·마케팅 조직 역할을 두지 않는다 | Accepted |
 | [002](adr/002-override-approver.md) | 적색 오버라이드 승인자는 지점 관리자(MGR)를 유지한다 | Accepted (한계 인지) |
 | [003](adr/003-evidence-ownership.md) | F-CMN-002를 정세현이 소유하고 `evidence` 공통 기반을 공유한다 | Accepted |
+| [004](adr/004-evidence-append-contract.md) | `evidence` 적재는 세션 트랜잭션에 묶고, 중복을 흡수하지 않는다 | Accepted |
+| [005](adr/005-threshold-ownership.md) | 판정을 바꾸는 임계값은 게이트가 소유하고, 측정 자신감은 ai-service 가 소유한다 | Accepted |
+| [006](adr/006-item-id-canonical-form.md) | `item_id` 정본은 `_expected_risk_items` 긴 형식이다 | Accepted |
+| [007](adr/007-extraction-answer-set.md) | F-EXT-003 정답지는 공시문서 집합이다 — 핵심설명서는 확보 불가 | Accepted |
 | [008](adr/008-canonical-json.md) | `CanonicalJson` 은 RFC 8785 를 따르고, 정규화는 직렬화기가 하지 않는다 | Accepted |

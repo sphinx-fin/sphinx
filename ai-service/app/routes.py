@@ -6,9 +6,8 @@
 미구현 기능은 500이 아니라 **501 Not Implemented**를 돌려준다 — 강희진이 붙일 때
 "아직 없음"과 "터짐"을 구분할 수 있어야 한다.
 
-주의: F-DET-002(적합성 모순)는 `AiServiceClient`의 6개 엔드포인트 목록에 없다.
-/internal/score에 태울지 7번째 엔드포인트를 낼지 강희진과 확정한 뒤 추가한다.
-스키마도 미정이므로 여기서 임의로 만들지 않는다.
+F-DET-002(적합성 모순)는 7번째 엔드포인트 `/internal/mismatch`로 확정됐다(강희진 결정).
+모순 판정은 설문 전체 + 세션 발화 전체가 입력이라 항목 단위 /internal/score와 분리한다.
 """
 from __future__ import annotations
 
@@ -16,7 +15,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from . import extraction, misconception, question_gen, reexplain, scoring
+from . import extraction, misconception, mismatch, question_gen, reexplain, rubrics, scoring
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
@@ -25,11 +24,13 @@ from .schemas import (
     Judgment,
     MisconceptionRequest,
     MisconceptionResponse,
+    MismatchRequest,
     ParseRequest,
     QuestionRequest,
     QuestionResponse,
     ReexplainRequest,
     ReexplainResponse,
+    SuitabilityMismatch,
     ScoreRequest,
 )
 
@@ -94,6 +95,9 @@ def score(body: ScoreRequest) -> Judgment:
         return scoring.score(
             body.item_id, body.question, body.answer_text, body.risk_item, body.product_type
         )
+    except rubrics.RubricNotFound as exc:
+        # 루브릭이 없는 항목은 채점하지 않는다 — 근거 없는 판정은 무효다 (P4)
+        raise HTTPException(status_code=422, detail=f"루브릭 없음: {body.item_id}") from exc
     except NotImplementedError:
         raise _not_implemented("F-SCR-001 채점")
     except LlmError as exc:
@@ -108,6 +112,28 @@ def detect_misconception(body: MisconceptionRequest) -> MisconceptionResponse:
         return misconception.match(body.text, body.product_type)
     except NotImplementedError:
         raise _not_implemented("F-DET-001 오해 탐지")
+    except LlmError as exc:
+        raise _llm_unavailable(exc)
+
+
+# ── F-DET-002 ─────────────────────────────────────────────────────────────────
+@router.post("/mismatch", response_model=SuitabilityMismatch)
+def detect_mismatch(body: MismatchRequest) -> SuitabilityMismatch:
+    """설문 기재 vs 발화 모순. 세션 단위 판정이므로 /score와 분리한다.
+
+    출력의 `mismatch`가 gate_rules.yaml R-02로 들어간다. 취약 요인 가중·코칭 스코어는
+    여기서 하지 않는다 — 강희진 소유(역할분담표 v1.2 §38).
+    """
+    for utterance in body.utterances:
+        text = utterance.get("text")
+        if isinstance(text, str):
+            assert_clean(text, "mismatch.utterances[].text")
+    try:
+        return mismatch.detect(
+            body.session_id, body.survey_result, body.utterances, body.survey_schema_version
+        )
+    except NotImplementedError:
+        raise _not_implemented("F-DET-002 적합성 모순 탐지")
     except LlmError as exc:
         raise _llm_unavailable(exc)
 

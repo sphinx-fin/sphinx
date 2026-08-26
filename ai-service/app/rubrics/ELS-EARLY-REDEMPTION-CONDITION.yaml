@@ -1,0 +1,14 @@
+# 소유: 윤지석 — 공개 의무. item_id 근거는 ELS-PRINCIPAL-LOSS-WARNING.yaml 참고.
+# 이전 이름 ELS-EARLY-REDEMPTION.
+item_id: ELS-EARLY-REDEMPTION-CONDITION
+product_type: ELS
+name: 조기상환 조건
+status: confirmed
+required_elements:
+  - 조기상환은 평가일에 기초자산이 모두 기준가격 이상일 때만 발생
+  - 조건 미충족 시 다음 평가일 또는 만기까지 유지됨
+misconception_conditions:
+  - 만기까지 두면 원금과 이자를 받는다
+  - 정해진 이자가 확정 지급된다
+related_misconceptions:
+  - M04-EARLY-REDEMPTION
