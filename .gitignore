@@ -19,10 +19,12 @@ build/
 
 # 로컬 전용 (공유 금지)
 CLAUDE.local.md
-# .claude/ 는 스킬을 공유하려고 추적한다(#111). 그런데 Claude Code 가 같은
-# 디렉토리에 그 사람 머신의 권한 허용 목록·경로를 담은 로컬 설정을 쓴다.
-# 한 번 커밋되면 사람마다 달라서 매번 충돌하고, 히스토리에서 빼야 한다.
-.claude/settings.local.json
+# .claude/ 는 스킬을 공유하려고 추적한다(#111) — 그 자리는 .claude/skills/ 뿐이다.
+# 그 외(settings.local.json, worktrees/ 등)는 머신별 산물이라 기본을 "무시"로 둔다.
+# 차단 목록(파일마다 한 줄)은 새 산물이 생길 때마다 추가해야 하고, 추가하기 전까지는
+# 조용히 커밋된다 — 허용 목록이면 그 창이 없다.
+.claude/*
+!.claude/skills/
 
 # IDE
 .idea/
