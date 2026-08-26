@@ -2,8 +2,6 @@ package com.sphinxfin.sphinx.evidence;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,9 +67,14 @@ public class AuditLog {
                         String resource, String resultCode, Instant occurredAt) {}
 
     private final ImmutableStore store;
+    private final AuditAppender appender;
 
-    public AuditLog(ImmutableStore store) {
+    /** 스트림 개방은 한 번이면 된다. 매 요청마다 확인하면 그만큼 트랜잭션이 늘어난다. */
+    private volatile boolean streamOpened;
+
+    public AuditLog(ImmutableStore store, AuditAppender appender) {
         this.store = store;
+        this.appender = appender;
     }
 
     /**
@@ -79,14 +82,36 @@ public class AuditLog {
      * {@code afterCompletion}이라 던져도 응답을 바꿀 수 없고, 감사 실패로 창구 업무를 막는 것도
      * 맞지 않다. 대신 <b>무엇을 잃었는지</b>를 로그에 남긴다.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(Entry entry) {
         try {
-            store.append(STREAM, entry);
+            // 스트림을 먼저 연다(멱등). 첫 append 는 잠글 닻 행이 없어 동시에 오면 하나가
+            // 지는데, 감사 스트림은 모든 요청이 몰리므로 그 창을 미리 없앤다. append 와
+            // 별개의 트랜잭션이고 순차로 부른다 — 중첩하면 커넥션을 둘 쥐고 멈춘다(실측).
+            ensureStreamOpened();
+            // 트랜잭션 경계는 AuditAppender 에 있다. 여기 @Transactional 을 두면 프록시가
+            // 커밋하는 시점이 이 메서드 밖이라 UnexpectedRollbackException 을 못 잡는다.
+            appender.append(entry);
         } catch (RuntimeException e) {
             // 기록을 잃은 사실 자체가 감사 정보다. 조용히 지나가면 "접근이 없었다"로 읽힌다.
             log.error("감사 기록 적재 실패 — 이 접근은 불변 기록에 없다: action={} actor={} resource={}",
                     entry.action(), entry.actorId(), entry.resource(), e);
+        }
+    }
+
+    /**
+     * 스트림을 한 번만 열되 <b>열리기 전에 다른 스레드가 append 로 들어가지 않게</b> 한다.
+     * {@code compareAndSet} 으로는 안 된다 — 한 스레드만 개방을 시작하고 나머지는 그대로
+     * 통과해서, 닻이 아직 없는 상태로 append 에 몰린다(20건 중 11건만 남는 것을 실측).
+     */
+    private void ensureStreamOpened() {
+        if (streamOpened) {
+            return;
+        }
+        synchronized (this) {
+            if (!streamOpened) {
+                appender.openStream();
+                streamOpened = true;
+            }
         }
     }
 

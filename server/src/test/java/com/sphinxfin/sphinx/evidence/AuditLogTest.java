@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 기록에 안 나타난다.
  */
 @DataJpaTest
-@Import({JpaImmutableStore.class, AuditLog.class})
+@Import({JpaImmutableStore.class, AuditLog.class, AuditAppender.class})
 // 테스트 트랜잭션을 열지 않는다. AuditLog.record 가 REQUIRES_NEW 라, 밖에서 트랜잭션을 잡고
 // 있으면 같은 anchor 행을 두 트랜잭션이 건드려 락 경합으로 멈춘다(실측). 그 성질 자체가
 // AuditLog 주석에 적은 "감사 적재는 업무 트랜잭션과 분리된다"의 실물이다.
