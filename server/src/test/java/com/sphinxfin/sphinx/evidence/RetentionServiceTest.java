@@ -83,7 +83,7 @@ class RetentionServiceTest {
         void purgesExpired() {
             String old = sessionAged(200, "원금은 지켜지죠");
 
-            assertThat(retention.purgeExpiredUtterances(NOW)).isEqualTo(1);
+            assertThat(retention.purgeExpiredUtterances(NOW).purged()).isEqualTo(1);
             assertThat(utteranceRows(old)).isZero();
         }
 
@@ -92,7 +92,7 @@ class RetentionServiceTest {
         void keepsFresh() {
             String fresh = sessionAged(10, "원금은 지켜지죠");
 
-            assertThat(retention.purgeExpiredUtterances(NOW)).isZero();
+            assertThat(retention.purgeExpiredUtterances(NOW).purged()).isZero();
             assertThat(utteranceRows(fresh)).isEqualTo(1);
         }
 
@@ -101,8 +101,8 @@ class RetentionServiceTest {
         void isIdempotent() {
             sessionAged(200, "원금은 지켜지죠");
 
-            assertThat(retention.purgeExpiredUtterances(NOW)).isEqualTo(1);
-            assertThat(retention.purgeExpiredUtterances(NOW))
+            assertThat(retention.purgeExpiredUtterances(NOW).purged()).isEqualTo(1);
+            assertThat(retention.purgeExpiredUtterances(NOW).purged())
                     .as("두 번째 호출이 또 1 을 돌려주면 언제 지웠는지가 흐려진다")
                     .isZero();
         }
@@ -126,11 +126,71 @@ class RetentionServiceTest {
     }
 
     @Nested
+    @DisplayName("커트오프는 달력 개월이다")
+    class Cutoff {
+
+        @Test
+        @DisplayName("보존기간 직전 하루는 남는다 — 30일 근사면 이 발화가 지워졌다")
+        void doesNotPurgeBeforeCalendarMonths() {
+            // NOW - 6개월 = 2026-02-26. 30일*6=180일 근사면 커트오프가 2026-02-27 이라
+            // 그 사이(2026-02-26~27)에 만들어진 세션이 아직 6개월이 안 됐는데 지워졌다.
+            sessionAged(181, "원금은 지켜지죠");   // 2026-02-26 — 정확히 경계 하루 안쪽
+
+            assertThat(retention.purgeExpiredUtterances(NOW).purged())
+                    .as("6개월이라고 적어놓고 5개월 26일에 지우면 그것도 지키지 않는 정책이다")
+                    .isZero();
+        }
+
+        @Test
+        @DisplayName("달력 6개월을 넘기면 지운다")
+        void purgesAfterCalendarMonths() {
+            sessionAged(200, "원금은 지켜지죠");
+            assertThat(retention.purgeExpiredUtterances(NOW).purged()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("꺼져 있는 것과 대상이 없는 것을 가른다")
+    class RanFlag {
+
+        @Test
+        @DisplayName("대상이 없으면 ran=true · purged=0")
+        void ranWithNothingToPurge() {
+            sessionAged(10, "원금은 지켜지죠");
+            RetentionService.PurgeResult result = retention.purgeExpiredUtterances(NOW);
+            assertThat(result.ran()).isTrue();
+            assertThat(result.purged()).isZero();
+        }
+    }
+
+    @Nested
     @DisplayName("삭제도 기록한다")
     class PurgeIsAudited {
 
         @Autowired
         private AuditLog auditLog;
+
+        @Test
+        @DisplayName("❗바깥이 롤백되면 감사도 남지 않는다 — 안 지웠는데 \'지웠다\' 가 최악이다")
+        void doesNotRecordWhenOuterRollsBack() {
+            String old = sessionAged(200, "원금은 지켜지죠");
+            int before = auditLog.replay().size();
+
+            try {
+                // 스케줄러가 여러 작업을 한 트랜잭션에 묶는 상황을 흉내낸다.
+                tx.executeWithoutResult(status -> {
+                    retention.purgeExpiredUtterances(NOW);
+                    throw new IllegalStateException("배치 뒷단계 실패");
+                });
+            } catch (IllegalStateException expected) {
+                // 롤백을 유발하는 것이 목적이다
+            }
+
+            assertThat(utteranceRows(old)).as("삭제가 롤백됐다").isEqualTo(1);
+            assertThat(auditLog.replay().size() - before)
+                    .as("감사는 커밋 이후에만 남는다 — 있는 거짓 기록은 조사를 끝내버린다")
+                    .isZero();
+        }
 
         @Test
         @DisplayName("지운 사실이 감사 스트림에 남는다 — '없다' 와 '지웠다' 는 다른 답이다")

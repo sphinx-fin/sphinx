@@ -6,8 +6,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,6 +37,16 @@ import java.util.List;
  * 같은 것이 아니다. 인용은 루브릭 조항에 걸린 한 조각이라 범위가 한정돼 있고, 그게 기획서가
  * *"판정 결과만 남긴다"* 로 허용한 범위라고 읽었다.
  *
+ * <h2>감사 로그의 두 번째 호출 지점 — 명시적 예외다</h2>
+ *
+ * <p>CLAUDE.md 는 <i>"감사 로그는 {@code AuditInterceptor} 단일 통로로 기록한다"</i> 고 정했고
+ * 그 근거는 <b>감사 관심사가 {@code api/} 에 흩어지는 것</b>을 막는 것이다. 여기는 <b>HTTP 요청이
+ * 아니다</b> — 인터셉터가 덮을 수 없는 자리이므로 규약이 막으려던 상황이 아니다.
+ *
+ * <p><b>예외를 적어두는 이유</b>: 규약이 조용히 닳지 않게 하려는 것이다. 같은 규약 때문에
+ * 필터 단계 감사(#105)는 별건으로 빠졌다 — 두 결정이 같은 근거에서 갈리므로, 문면이 없으면
+ * 다음 사람이 어느 쪽을 따라야 할지 모른다. 기준은 <b>"HTTP 요청 경로인가"</b> 다.
+ *
  * <h2>삭제도 기록한다</h2>
  *
  * <p>지운 사실을 감사 스트림에 남긴다. 안 남기면 <b>"발화가 없다"와 "발화를 지웠다"가 구별되지
@@ -52,6 +67,20 @@ public class RetentionService {
     /** 시스템 행위다 — HTTP action 이 아니라 rbac_policy.yaml 에 없다. */
     static final String PURGE_ACTION = "retention:purge";
 
+    /**
+     * {@code AuditLog.Entry.resultCode} 에 넣는 값.
+     *
+     * <p><b>그 필드는 HTTP 상태 문자열이 아니다</b> — {@code AuditInterceptor} 가 HTTP 경로에서
+     * {@code String.valueOf(status)} 로 채우지만, 이 스트림에는 HTTP 가 아닌 행위도 들어온다.
+     * 그래서 필드의 뜻을 <b>"HTTP 상태 또는 시스템 행위 결과"</b> 로 넓혀 쓰고, 둘을 가르는
+     * 것은 {@code action} 이다({@code retention:*} 은 시스템, 그 외는 HTTP action 이름).
+     *
+     * <p>숫자로 통일하지 않은 이유: 삭제에 맞는 HTTP 상태가 없다. 200 을 쓰면 <b>요청이 있었던
+     * 것처럼 보이고</b>, 그게 감사에서 더 나쁜 오독이다. {@code audit:read} 가 붙을 때
+     * *"4xx 만 골라 차단 시도를 본다"* 같은 질의는 <b>{@code action} 으로 먼저 좁히면 된다.</b>
+     */
+    static final String PURGE_RESULT = "PURGED";
+
     private final EntityManager em;
     private final AuditLog auditLog;
     private final int months;
@@ -71,7 +100,14 @@ public class RetentionService {
     }
 
     /**
-     * 보존기간이 지난 세션의 발화 전문을 지운다. 지운 세션 수를 돌려준다.
+     * 실행 결과. <b>{@code ran=false}(정책이 꺼져 있었다)와 {@code purged=0}(돌았고 대상이
+     * 없었다)을 가른다.</b> 하나로 두면 호출자가 "0건 삭제" 를 찍고, 그건
+     * <b>"정책이 돌았고 대상이 없었다"로 읽힌다</b> — 이 클래스가 경계한 바로 그 양식이다.
+     */
+    public record PurgeResult(boolean ran, int purged) {}
+
+    /**
+     * 보존기간이 지난 세션의 발화 전문을 지운다.
      *
      * <p>기준 시각은 {@code createdAt} 이다 — 발화가 그 세션에서 일어났으므로. <b>한계가 있다</b>:
      * 계약이 실제로 끝난 시점이 아니라 세션이 시작된 시점이라, 오래 열려 있던 세션은 마지막
@@ -79,11 +115,14 @@ public class RetentionService {
      * 그렇지 않게 되면 종료 시각을 기준으로 바꿔야 한다.
      */
     @Transactional
-    public int purgeExpiredUtterances(Instant now) {
+    public PurgeResult purgeExpiredUtterances(Instant now) {
         if (!enforce) {
-            return 0;
+            return new PurgeResult(false, 0);
         }
-        Instant cutoff = now.minus(months * 30L, ChronoUnit.DAYS);
+        // 달력 개월로 뺀다. months * 30일 로 근사하면 커트오프가 더 나중이 되어
+        // **아직 보존기간이 안 된 발화가 지워진다**(6개월 설정에서 최대 4일 — PR #107 리뷰).
+        // "6개월 보존" 이라고 적고 5개월 26일에 지우는 것도 지키지 않는 정책이다.
+        Instant cutoff = now.atZone(ZoneOffset.UTC).minusMonths(months).toInstant();
 
         // 발화가 남아 있는 만료 세션만 고른다. 이미 지운 세션을 다시 세면 감사 기록이 부풀고,
         // "지웠다"가 여러 번 남아 언제 지웠는지가 흐려진다.
@@ -94,7 +133,7 @@ public class RetentionService {
                 .setParameter("cutoff", cutoff)
                 .getResultList();
         if (expired.isEmpty()) {
-            return 0;
+            return new PurgeResult(true, 0);
         }
 
         // 벌크 삭제다 — 세션을 로드해 맵을 비우는 것보다 싸고, 이건 도메인 행위가 아니라
@@ -107,12 +146,40 @@ public class RetentionService {
 
         // 세션 단위로 남긴다. 어느 세션의 발화가 지워졌는지가 감사에서 필요한 단위다.
         // 건수가 커지면 한 건으로 묶는 편이 낫지만 그러면 payload 모양을 바꿔야 한다.
-        for (String sessionId : expired) {
-            auditLog.record(new AuditLog.Entry(
-                    null, null, PURGE_ACTION, "session:" + sessionId, "PURGED",
-                    now.truncatedTo(ChronoUnit.MILLIS)));
-        }
+        recordAfterCommit(expired, now.truncatedTo(ChronoUnit.MILLIS));
         log.info("보존기간 경과 발화 삭제 — 세션 {}건 · 행 {}개 · 기준 {}", expired.size(), rows, cutoff);
-        return expired.size();
+        return new PurgeResult(true, expired.size());
+    }
+
+    /**
+     * 감사 기록을 <b>바깥 트랜잭션이 커밋된 뒤에</b> 남긴다.
+     *
+     * <p>{@link AuditLog#record} 는 {@code REQUIRES_NEW} 라 즉시 커밋된다. 그런데 삭제는 이
+     * 트랜잭션에 달려 있으므로, 바깥이 롤백되면 <b>발화는 살아 있는데 감사는 "지웠다"고 말한다.</b>
+     * 이 클래스의 논거가 *"'없다'와 '지웠다'는 다른 답이다"* 인데 그 경우는 <b>'안 지웠다'가
+     * '지웠다'로 기록되는 것</b>이라 방향이 더 나쁘다 — 없는 기록은 조사하면 드러나지만
+     * <b>있는 거짓 기록은 조사를 끝내버린다.</b> (PR #107 리뷰에서 실측으로 재현했다.)
+     *
+     * <p>대가는 반대쪽이다: 커밋과 기록 사이에 죽으면 <b>지웠는데 기록이 없다.</b> 감사가
+     * 거짓을 주장하는 것보다 침묵하는 편이 낫다 — 침묵은 다른 흔적(발화 부재)과 대조하면
+     * 드러나고, 거짓 주장은 대조해도 맞아 보인다.
+     */
+    private void recordAfterCommit(List<String> sessionIds, Instant at) {
+        List<AuditLog.Entry> entries = new ArrayList<>();
+        for (String sessionId : sessionIds) {
+            entries.add(new AuditLog.Entry(
+                    null, null, PURGE_ACTION, "session:" + sessionId, PURGE_RESULT, at));
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            // 트랜잭션 밖에서 불릴 일은 없다(@Transactional). 그래도 조용히 버리지 않는다.
+            entries.forEach(auditLog::record);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                entries.forEach(auditLog::record);
+            }
+        });
     }
 }
