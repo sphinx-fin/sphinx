@@ -4,7 +4,6 @@ import com.sphinxfin.sphinx.simulator.SimulatorService.Outcome;
 import com.sphinxfin.sphinx.simulator.SimulatorService.Product;
 import com.sphinxfin.sphinx.simulator.SimulatorService.Quote;
 import com.sphinxfin.sphinx.simulator.SimulatorService.Series;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -284,7 +283,17 @@ class SimulatorServiceTest {
      * {@code scripts/verify_payoff.py} 가 낸 집계와 대조한다. 어긋나면 포팅이 틀린 것이다.
      *
      * <p>기대값은 참조 구현 출력이고, 그 출력은 발행사 공시 모의실험(간이투자설명서 p11~p12)과
-     * 분포 형태가 재현되는 것으로 이미 검증됐다. 실데이터가 없는 체크아웃에서는 건너뛴다.
+     * 분포 형태가 재현되는 것으로 이미 검증됐다.
+     *
+     * <p><b>데이터가 없으면 건너뛰지 않고 실패한다.</b> 예전에는 `fetch_timeseries.py`를 안 돌린
+     * 체크아웃을 막지 않으려고 {@code Assumptions}로 건너뛰었는데, `data/timeseries/`(VERSION +
+     * CSV 3개)가 레포에 커밋된 뒤로 그 전제가 사라졌다 — 이제 이 디렉토리가 없다는 것은
+     * "아직 안 받았다"가 아니라 "뭔가 잘못됐다"다.
+     *
+     * <p>건너뛰기가 위험한 이유는 <b>초록으로 남기 때문</b>이다. 이건 P2(시뮬레이터는 결정론적
+     * 순수 함수) 검산이고, 시뮬레이터는 고객에게 금액을 보여주는 기능이다. 검산이 조용히 안 도는
+     * 것이 여기서 가장 나쁜 실패 양식이다 — 특히 CI 로그에서는 아무도 눈치채지 못한다.
+     * (이슈 #73 · decision-log 10.26 · 오준서 #37 코멘트 ②)
      */
     @Nested
     @DisplayName("실데이터 — 참조 구현 집계와 대조")
@@ -294,12 +303,14 @@ class SimulatorServiceTest {
         private static final Path TIMESERIES_DIR = Path.of("..", "data", "timeseries");
 
         private Map<String, Series> load() {
-            Assumptions.assumeTrue(Files.isDirectory(TIMESERIES_DIR),
-                    "data/timeseries/ 가 없다 — python3 scripts/fetch_timeseries.py");
+            assertTrue(Files.isDirectory(TIMESERIES_DIR),
+                    "data/timeseries/ 가 없다. 이 디렉토리는 레포에 커밋돼 있으므로 체크아웃만 하면 있어야 한다 "
+                            + "— 없다면 작업 디렉토리가 server/ 가 아니거나 컨테이너 마운트가 빠진 것이다. "
+                            + "건너뛰지 않는다: P2 결정론 검산이 안 돌았다는 사실이 초록으로 덮이면 안 된다.");
             Map<String, Series> series = new LinkedHashMap<>();
             for (String key : SimulatorService.KIWOOM_4181.underlyings()) {
-                Assumptions.assumeTrue(Files.exists(TIMESERIES_DIR.resolve(key + ".csv")),
-                        key + ".csv 가 없다");
+                assertTrue(Files.exists(TIMESERIES_DIR.resolve(key + ".csv")),
+                        key + ".csv 가 없다 — data/timeseries/ 가 VERSION 이 가리키는 스냅샷과 다르다");
                 series.put(key, SimulatorService.loadSeries(TIMESERIES_DIR, key));
             }
             return series;
