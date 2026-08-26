@@ -70,7 +70,11 @@ class AiServiceClientTest {
 
         assertThat(j.itemId()).isEqualTo("ELS-PRINCIPAL-LOSS-WARNING");
         assertThat(j.grade()).isEqualTo(Grade.U4);
-        assertThat(j.confidence()).isEqualTo(0.91);
+        // JSON 0.91 이 double 을 거치지 않고 BigDecimal 0.91 로 온다. Jackson 기본 설정으로도
+        // 텍스트를 그대로 읽으므로 경계 매퍼에 USE_BIG_DECIMAL_FOR_FLOATS 를 켤 필요가 없다
+        // (재생 경로는 Object 로 받아서 필요하다 — ImmutableStore 참고).
+        assertThat(j.confidence()).isEqualByComparingTo("0.91");
+        assertThat(j.confidence().toPlainString()).isEqualTo("0.91");
         assertThat(j.evidence().utteranceQuote()).isEqualTo("원금은 지켜지죠");
         assertThat(j.evidence().rubricClause()).isNotBlank();
         assertThat(j.misconceptionType()).isEqualTo("M01-PRINCIPAL-GUARANTEE");

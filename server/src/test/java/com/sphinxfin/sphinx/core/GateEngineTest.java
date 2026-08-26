@@ -1,5 +1,7 @@
 package com.sphinxfin.sphinx.core;
 
+import java.math.BigDecimal;
+
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -23,15 +25,35 @@ class GateEngineTest {
 
     private final GateEngine engine = new GateEngine();
 
-    private static Judgment judgment(Grade grade) {
-        return judgment(grade, 0.9);
+    @Test
+    @DisplayName("R-05 경계 — 임계값과 정확히 같으면 발동하지 않는다 (BigDecimal 전환 후에도)")
+    void confidenceExactlyAtThresholdDoesNotFire() {
+        // gate_rules.yaml 의 anyConfidenceBelow 0.7 은 "미만"이다. double 시절에도 0.7 < 0.7 은
+        // 거짓이었고 BigDecimal 로 바꾼 뒤에도 같아야 한다 — 임계값을 문자열에서 만들지 않고
+        // Double.parseDouble 을 거치면 이 경계가 표현 오차에 걸릴 수 있다.
+        GateResult atThreshold = engine.judge(List.of(judgment(Grade.U1, "0.7")), false, 0);
+        assertThat(atThreshold.signal()).isEqualTo(Signal.GREEN);
+
+        GateResult justBelow = engine.judge(List.of(judgment(Grade.U1, "0.69")), false, 0);
+        assertThat(justBelow.signal()).isEqualTo(Signal.YELLOW);
     }
 
-    private static Judgment judgment(Grade grade, double confidence) {
+    @Test
+    @DisplayName("자릿수만 다른 같은 신뢰도는 같게 판정된다 — 0.70 과 0.7")
+    void trailingZeroDoesNotChangeJudgment() {
+        assertThat(engine.judge(List.of(judgment(Grade.U1, "0.70")), false, 0).signal())
+                .isEqualTo(engine.judge(List.of(judgment(Grade.U1, "0.7")), false, 0).signal());
+    }
+
+    private static Judgment judgment(Grade grade) {
+        return judgment(grade, "0.9");
+    }
+
+    private static Judgment judgment(Grade grade, String confidence) {
         return new Judgment(
                 "ITEM-" + grade,
                 grade,
-                confidence,
+                new BigDecimal(confidence),
                 new Judgment.Evidence("고객 발화 인용", "루브릭 조항"),
                 "판정 사유",
                 null);
@@ -71,7 +93,7 @@ class GateEngineTest {
     @DisplayName("R-05: 전부 U1이어도 신뢰도 낮으면 → YELLOW (통과 안 시킴)")
     void lowConfidence_isYellow() {
         GateResult r = engine.judge(
-                List.of(judgment(Grade.U1, 0.6), judgment(Grade.U1, 0.9)), false, 0);
+                List.of(judgment(Grade.U1, "0.6"), judgment(Grade.U1, "0.9")), false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
         assertThat(r.ruleTrace()).containsExactly("R-05");
     }
@@ -80,7 +102,7 @@ class GateEngineTest {
     @DisplayName("트레이스: 같은 신호(YELLOW)를 낸 발화 룰을 전부 기록 (부분이해 + 저신뢰 → R-04·R-05)")
     void multipleRulesSameSignal_allTraced() {
         // U2(R-04 YELLOW) + 저신뢰(R-05 YELLOW) 동시 → 신호는 YELLOW, 트레이스엔 둘 다
-        GateResult r = engine.judge(List.of(judgment(Grade.U2, 0.6)), false, 0);
+        GateResult r = engine.judge(List.of(judgment(Grade.U2, "0.6")), false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
         assertThat(r.ruleTrace()).containsExactly("R-04", "R-05");
     }
@@ -88,7 +110,7 @@ class GateEngineTest {
     @Test
     @DisplayName("U4 예외: 신뢰도 낮아도 U4는 RED (R-01 우선)")
     void lowConfidenceU4_stillRed() {
-        GateResult r = engine.judge(List.of(judgment(Grade.U4, 0.5)), false, 0);
+        GateResult r = engine.judge(List.of(judgment(Grade.U4, "0.5")), false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).containsExactly("R-01");
     }

@@ -9,6 +9,7 @@ import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.Signal;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -53,7 +54,7 @@ public class GateEngine {
      */
     public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch, int reverifyFailed) {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
-        List<Double> confidences = judgments.stream().map(Judgment::confidence).toList();
+        List<BigDecimal> confidences = judgments.stream().map(Judgment::confidence).toList();
         Context ctx = new Context(grades, confidences, suitabilityMismatch, reverifyFailed);
 
         // 신호는 first-match-wins(파일 순서 = 우선순위). 트레이스는 그 신호를 낸 발화 룰을 전부
@@ -117,8 +118,10 @@ public class GateEngine {
         }
         Matcher conf = Pattern.compile("anyConfidenceBelow\\s+(\\d*\\.?\\d+)").matcher(e);
         if (conf.matches()) {
-            double threshold = Double.parseDouble(conf.group(1));
-            return ctx -> ctx.confidences().stream().anyMatch(c -> c < threshold);
+            // 임계값을 문자열 그대로 BigDecimal 로 만든다. Double.parseDouble 을 거치면
+            // 0.7 이 이진 근사값이 되고, 같은 "0.7" 을 비교하는데 판정이 표현 오차에 걸린다.
+            BigDecimal threshold = new BigDecimal(conf.group(1));
+            return ctx -> ctx.confidences().stream().anyMatch(c -> c.compareTo(threshold) < 0);
         }
         if (e.startsWith("anyGrade") && e.contains(" in ")) {
             Set<Grade> allowed = parseGradeList(e);
@@ -158,7 +161,7 @@ public class GateEngine {
     // ── 내부 타입 ─────────────────────────────────────────────────────
 
     /** 평가 컨텍스트: 룰이 참조하는 값의 전부. */
-    record Context(List<Grade> grades, List<Double> confidences,
+    record Context(List<Grade> grades, List<BigDecimal> confidences,
                    boolean suitabilityMismatch, int reverifyFailed) {}
 
     /** 컴파일된 룰. */
