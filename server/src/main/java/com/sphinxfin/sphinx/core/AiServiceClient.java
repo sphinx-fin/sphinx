@@ -32,8 +32,10 @@ import java.util.Map;
  *   Judgment 생성자가 EvidenceRequiredException으로 막는다 (P4) — 이 경로를 그대로 둔다.
  *
  * base-url은 application.yml(sphinx.ai-service.base-url).
- * 엔드포인트: /internal/score (구현됨). /internal/question·/internal/reexplain은
- * ai-service에서 아직 NotImplementedError(501)라 여기서 연결하지 않는다.
+ * 엔드포인트: /internal/score·/internal/mismatch (구현됨). /internal/question·
+ * /internal/reexplain 클라이언트도 여기 있다(ai-service PR #60 계약 기준). 다만 실제
+ * SessionController·SessionService 배선은 #60 머지 후 별도 단계로 붙인다 — 이 클래스는
+ * 호출 능력만 추가할 뿐 목 데모 흐름을 바꾸지 않는다.
  */
 @Component
 public class AiServiceClient {
@@ -145,8 +147,90 @@ public class AiServiceClient {
         return response.toStatus();
     }
 
+    /**
+     * F-INT-002 질문 생성 — risk_item으로 다음 검증 질문을 만든다.
+     *
+     * 입력은 상품에서 유도된 값(risk_item·이미 쓴 질문유형·상품유형)뿐이고 고객 텍스트가
+     * 없다. 그래서 score()·detectMismatch()와 달리 PiiGateway.mask()를 거치지 않는다 (P3는
+     * 고객 텍스트가 나가는 경로에만 걸린다). 응답은 게이트 판정이 아니라 질문 초안이다.
+     *
+     * askedTypes가 null이면 빈 리스트로 보낸다 — ai-service ScoreRequest/QuestionRequest
+     * (PR #60)의 asked_types는 non-nullable(default=[])이라, null을 그대로 보내면 Strict
+     * 스키마가 422로 거절한다.
+     *
+     * @param askedTypes 이미 사용한 질문유형(반복 방지). null이면 [] 로 보낸다
+     * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
+     */
+    public Question question(RiskItem riskItem, List<String> askedTypes, String productType) {
+        List<String> asked = askedTypes == null ? List.of() : askedTypes;
+        QuestionRequest request = new QuestionRequest(riskItem, asked, productType);
+        QuestionResponse response;
+        try {
+            response = restClient.post()
+                    .uri("/internal/question")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), (req, resp) -> {
+                        throw new AiServiceException(
+                                "ai-service /internal/question 실패: HTTP " + resp.getStatusCode());
+                    })
+                    .body(QuestionResponse.class);
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new AiServiceException("ai-service /internal/question 응답이 비었다");
+        }
+        return new Question(response.question(), response.questionType());
+    }
+
+    /**
+     * F-INT-004 재설명 — 판정(측정값)과 risk_item으로 눈높이 재설명 콘텐츠를 만든다.
+     *
+     * 입력은 상품 유도값(risk_item)과 측정값(judgment), 연령대·경험수준뿐이라 고객 텍스트가
+     * 없다 — question()과 같은 이유로 PiiGateway.mask()를 거치지 않는다. ageBand·
+     * experienceLevel은 선택이며(#60 스키마도 nullable), null이면 그대로 null로 보낸다.
+     *
+     * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
+     */
+    public ReExplanation reExplain(RiskItem riskItem, Judgment judgment,
+                                   String ageBand, String experienceLevel) {
+        ReExplainRequest request =
+                new ReExplainRequest(riskItem, judgment, ageBand, experienceLevel);
+        ReExplainResponse response;
+        try {
+            response = restClient.post()
+                    .uri("/internal/reexplain")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .onStatus(status -> status.isError(), (req, resp) -> {
+                        throw new AiServiceException(
+                                "ai-service /internal/reexplain 실패: HTTP " + resp.getStatusCode());
+                    })
+                    .body(ReExplainResponse.class);
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new AiServiceException("ai-service /internal/reexplain 응답이 비었다");
+        }
+        return new ReExplanation(response.content(), response.citedSpans());
+    }
+
     /** 채점 결과 — 측정값과 그때 실제로 나간 마스킹 발화를 함께 돌려준다. */
     public record Scored(Judgment judgment, String maskedAnswer) {}
+
+    /** F-INT-002 질문 생성 결과. question_type ∈ {situation, amount, condition}. */
+    public record Question(String question, String questionType) {}
+
+    /** F-INT-004 재설명 결과. citedSpans는 P6 원문 인용 스팬(없으면 빈 리스트). */
+    public record ReExplanation(String content, List<RiskItem.SourceSpan> citedSpans) {}
 
     /**
      * /internal/mismatch 요청 본문. snake_case 매퍼로 직렬화된다.
@@ -200,4 +284,35 @@ public class AiServiceClient {
      */
     record ScoreRequest(String itemId, String question, String answerText,
                         RiskItem riskItem, String productType) {}
+
+    /**
+     * /internal/question 요청 본문. snake_case로 ai-service QuestionRequest
+     * (risk_item, asked_types, product_type)와 1:1 (PR #60).
+     */
+    record QuestionRequest(RiskItem riskItem, List<String> askedTypes, String productType) {}
+
+    /**
+     * /internal/question 응답. ai-service QuestionResponse(item_id, question, question_type,
+     * fallback_used)와 1:1 (PR #60). itemId·fallbackUsed는 배선에서 쓰지 않지만 **필드로 받아
+     * 둔다** — 이 클라이언트 전용 매퍼는 FAIL_ON_UNKNOWN_PROPERTIES가 기본값(on)이라 빠뜨리면
+     * 역직렬화가 통째로 실패한다(MismatchResponse와 같은 이유).
+     */
+    record QuestionResponse(String itemId, String question, String questionType,
+                            boolean fallbackUsed) {}
+
+    /**
+     * /internal/reexplain 요청 본문. snake_case로 ai-service ReexplainRequest
+     * (risk_item, judgment, age_band, experience_level)와 1:1 (PR #60).
+     * age_band·experience_level은 선택이라 null이면 null로 나간다.
+     */
+    record ReExplainRequest(RiskItem riskItem, Judgment judgment,
+                            String ageBand, String experienceLevel) {}
+
+    /**
+     * /internal/reexplain 응답. ai-service ReexplainResponse(item_id, content, cited_spans)와
+     * 1:1 (PR #60). cited_spans는 [{page, start, end}] 형태라 domain의 SourceSpan을 재사용한다.
+     * itemId는 배선에서 쓰지 않지만 FAIL_ON_UNKNOWN_PROPERTIES 때문에 필드로 받아 둔다.
+     */
+    record ReExplainResponse(String itemId, String content,
+                             List<RiskItem.SourceSpan> citedSpans) {}
 }
