@@ -25,8 +25,16 @@ public class SimulatorProperties {
 
     private final Path timeseriesDir;
 
-    public SimulatorProperties(@Value("${sphinx.simulator.timeseries-dir}") Path timeseriesDir) {
-        this.timeseriesDir = timeseriesDir;
+    /**
+     * 경로를 String 으로 받아 직접 변환한다.
+     *
+     * Path 로 바로 주입받으면 Spring 이 리소스 경로 변환기를 태우는데, 그 변환기가
+     * 상대경로의 {@code ..} 를 루트 이탈로 보고 null 로 정규화한다 — 기본값
+     * {@code ../data/timeseries} 에서 기동이 실패한다("has been normalized to [null]").
+     * 여기서 필요한 것은 리소스 해석이 아니라 파일 경로라 Path.of 로 직접 만든다.
+     */
+    public SimulatorProperties(@Value("${sphinx.simulator.timeseries-dir}") String timeseriesDir) {
+        this.timeseriesDir = Path.of(timeseriesDir);
     }
 
     public Path timeseriesDir() {

@@ -15,9 +15,13 @@ import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.NoSuchElementException;
 
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
@@ -29,12 +33,14 @@ public class SessionController {
     private final SessionService sessionService;
     private final AiServiceClient aiServiceClient;
 
+    @PreAuthorize("@accessGuard.can('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
         Session session = sessionService.create(body.toCommand());
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @GetMapping("/{sid}")
     public ApiResponse<SessionResponse> get(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
@@ -48,11 +54,13 @@ public class SessionController {
      * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
      * grade → 색 매핑은 표시 관례이며 판정이 아니다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {
         return ApiResponse.ok(JudgmentsResponse.of(sessionService.get(sid)));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/questions/next")
     public ApiResponse<NextQuestionResponse> nextQuestion(@PathVariable String sid) {
         // TODO(강희진): ai-service /internal/question 프록시 (F-INT-002, 윤지석)
@@ -71,6 +79,7 @@ public class SessionController {
                 answered + 1, items.size()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:answer', #sid)")
     @PostMapping("/{sid}/answers")
     public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
         // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment (F-SCR-001).
@@ -125,6 +134,7 @@ public class SessionController {
                         "상품유형을 알 수 없다(상품 목록에 없음): " + session.productId()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/re-explain")
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
@@ -132,6 +142,7 @@ public class SessionController {
         return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/abort")
     public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.abort(sid)));
@@ -144,12 +155,58 @@ public class SessionController {
     @PostMapping("/{sid}/simulate")
     public ApiResponse<Map<String, Object>> simulate(@PathVariable String sid,
                                                      @Valid @RequestBody SimulateRequest body) {
-        // 금액은 body로만 받는다(기본값 없음, #48). long amount = body.amount();
-        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2)
-        return ApiResponse.ok(Map.of("scenarios", List.of(
-                Map.of("name", "최선(6개월 조기상환)", "payout", 51_500_000, "pnl", 1_500_000),
-                Map.of("name", "중간(3년 만기상환)", "payout", 59_000_000, "pnl", 9_000_000),
-                Map.of("name", "최악(2008년 경로)", "payout", 32_000_000, "pnl", -18_000_000))));
+        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2).
+        // 목이지만 **계약(SimulateApiResponse)의 필수 필드를 전부 채운다.** 빠뜨리면 S-04가
+        // 백지가 되고, 특히 severity 가 없으면 카드가 최선→중간→최악 순으로 서서 기획서
+        // 4절이 요구하는 것("최선만 강조하는 관행의 정반대")과 반대가 된다.
+        //
+        // 수치는 기획서 7-2 표 확정본이다(낙인 45%·쿠폰 연 11.00%·만기 3년). 가입금액이
+        // 5,000만 원이 아니면 표 비율로 환산한다 — 목이라도 슬라이더를 움직였을 때 금액이
+        // 안 바뀌면 시뮬레이터로 안 보인다.
+        long amount = body.amount();
+        return ApiResponse.ok(Map.of(
+                "timeseriesVersion", TIMESERIES_SNAPSHOT,
+                "productName", "A증권 제4181회 ELS (원금비보장형)",
+                "scenarios", List.of(
+                        scenario("worst", "loss", "낙인 45% 하회 후 만기 손실", amount, 0.5066, 0.029,
+                                "2007-10-31", "2010-10-29", "eurostoxx50", 0.507, true),
+                        scenario("mid", "early_1", "6개월 뒤 첫 조기상환", amount, 1.055, 0.857,
+                                "2012-05-02", "2012-11-01", "nikkei225", 1.031, false),
+                        scenario("best", "maturity", "조기상환 없이 만기 상환", amount, 1.33, 0.015,
+                                "2013-01-04", "2016-01-04", "sp500", 1.142, false))));
+    }
+
+    /** data/timeseries/VERSION 의 snapshot. 화면에 표시해 P2 재현성의 근거를 보인다. */
+    private static final String TIMESERIES_SNAPSHOT = "2026-08-24";
+
+    /**
+     * 계약(SimScenario)의 필수 6필드를 채운 목 시나리오.
+     *
+     * severity 는 화면 배치·정렬 키이지 표시 라벨이 아니다 — 기획서 7-2 표가 평가어를 버리고
+     * 금액 순으로 간 이유가 스텝다운은 조기상환 시점과 무관하게 연 수익률이 같아서
+     * "가장 자주 일어나는 전개(85.7%)가 금액으로는 중간"이기 때문이다. 사람에게 보일 문면은
+     * name 을 쓴다.
+     */
+    private static Map<String, Object> scenario(String severity, String result, String name,
+                                                long amount, double payoutRatio, double share,
+                                                String startDate, String endDate,
+                                                String worstUnderlying, double worstFinal,
+                                                boolean knockedIn) {
+        long payout = Math.round(amount * payoutRatio);
+        return Map.of(
+                "severity", severity,
+                "result", result,
+                "name", name,
+                "payout", payout,
+                "pnl", payout - amount,
+                "share", share,
+                "pathMeta", Map.of(
+                        "startDate", startDate,
+                        "endDate", endDate,
+                        "underlyings", List.of("sp500", "nikkei225", "eurostoxx50"),
+                        "worstUnderlying", worstUnderlying,
+                        "worstFinal", worstFinal,
+                        "knockedIn", knockedIn));
     }
 
     /**
@@ -159,11 +216,13 @@ public class SessionController {
      * 판매자가 황색을 보려고 /judge 를 부르면 JUDGED 로 전이되고, 거기서 RE_EXPLAIN 으로
      * 갈 수 없어 재설명 흐름 자체가 막힌다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/gate-preview")
     public ApiResponse<SessionService.GatePreview> gatePreview(@PathVariable String sid) {
         return ApiResponse.ok(sessionService.previewGate(sid));
     }
 
+    @PreAuthorize("@accessGuard.can('session:judge', #sid)")
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
@@ -172,9 +231,44 @@ public class SessionController {
     }
 
     /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
+    /**
+     * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
+     *
+     * 발행을 GET 에서 분리한 이유는 감사다 — report:read 는 audited action 이라 GET 이
+     * 발행까지 하면 로그에서 "읽었다"와 "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을
+     * 열람하는 것만으로 발행 기록이 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @PostMapping("/{sid}/report")
+    public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
+        // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
+        // 목이지만 계약의 필수 필드를 채운다 — previewUrl·downloadUrl 은 PDF 생성 전까지
+        // null 이 계약이다(채우면 404 나는 경로를 계약이 보장하게 된다).
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /**
+     * 발행된 리포트 조회. 상태를 바꾸지 않는다.
+     * 발행한 적 없으면 404 — "아직 교부하지 않았다"와 "교부했다"는 감사에서 구별돼야 한다.
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
-    public ApiResponse<Map<String, String>> report(@PathVariable String sid) {
-        // TODO(정세현): ReportService (F-GTE-004)
-        return ApiResponse.ok(Map.of("reportId", "mock-report-001"));
+    public ApiResponse<Map<String, Object>> report(@PathVariable String sid) {
+        // TODO(정세현): ReportService.latest(sid) 연결. 목은 발행 여부를 모르므로 항상 돌려준다.
+        sessionService.get(sid);
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /** 계약(ReportResponse)의 필수 4필드를 채운 목. URL 둘은 PDF 전까지 null 이 계약이다. */
+    private static Map<String, Object> reportPayload(String sid) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("reportId", "mock-report-001");
+        out.put("sessionId", sid);
+        out.put("generatedAt", Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());
+        out.put("contentHash", "0".repeat(64));
+        out.put("previewUrl", null);
+        out.put("downloadUrl", null);
+        return out;
     }
 }
