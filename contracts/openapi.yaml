@@ -487,6 +487,7 @@ components:
             - UNAUTHORIZED             # 401 인증되지 않은 요청 — 로그인하면 해소된다
             - FORBIDDEN                # 403 권한 없음(F-CMN-002) — 로그인해도 해소되지 않는다
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - MEASUREMENT_INVALID      # 502 신뢰도 누락·범위(0~1) 이탈 — 상류 ai-service 계약 위반
             - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}

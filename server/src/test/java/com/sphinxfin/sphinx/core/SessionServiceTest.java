@@ -1,5 +1,7 @@
 package com.sphinxfin.sphinx.core;
 
+import java.math.BigDecimal;
+
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -199,7 +201,7 @@ class SessionServiceTest {
     @DisplayName("판정 기록 후 게이트 판정: U4 오해 → RED (R-01)")
     void recordJudgmentThenJudgeRed() {
         Session s = service.create(cmd(null));
-        Judgment u4 = new Judgment("ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, 0.9,
+        Judgment u4 = new Judgment("ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, conf("0.9"),
                 new Judgment.Evidence("은행이니까 원금 보장되죠", "원금손실 조건 인지 필요"),
                 "원금 보장 오해", "M01-PRINCIPAL-GUARANTEE");
         service.recordJudgment(s.id(), u4);
@@ -241,8 +243,13 @@ class SessionServiceTest {
 
     // ── F-INT-004 재설명·재검증 루프 ────────────────────────────────────
 
+    /** 문자열에서 만든다 — new BigDecimal(double) 은 0.9 를 0.9000000000000000222… 로 만든다. */
+    private static BigDecimal conf(String v) {
+        return new BigDecimal(v);
+    }
+
     private static Judgment j(String itemId, Grade grade) {
-        return new Judgment(itemId, grade, 0.9,
+        return new Judgment(itemId, grade, conf("0.9"),
                 new Judgment.Evidence("발화 인용", "루브릭 조항"), "사유", null);
     }
 

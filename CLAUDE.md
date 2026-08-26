@@ -108,8 +108,8 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
   `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
   `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`UNAUTHORIZED`(401)·
-  `FORBIDDEN`(403)·`EVIDENCE_REQUIRED`(502)·`AI_SERVICE_UNAVAILABLE`(502)·
-  `INTERNAL_ERROR`(500).
+  `FORBIDDEN`(403)·`EVIDENCE_REQUIRED`(502)·`MEASUREMENT_INVALID`(502)·
+  `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
   세 벌(핸들러·openapi·이 문단)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부 대조한다.

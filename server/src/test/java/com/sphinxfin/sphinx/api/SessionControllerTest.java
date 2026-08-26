@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import org.mockito.ArgumentCaptor;
+import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,7 +60,7 @@ class SessionControllerTest {
         // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
-                        new Judgment(inv.getArgument(0), Grade.U4, 0.91,
+                        new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.91"),
                                 new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
                                         "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
                                 "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"),
@@ -76,7 +77,7 @@ class SessionControllerTest {
         // "확인 못 함"이므로 통과가 아니라 재확인(R-02b YELLOW)이어야 한다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
-                        new Judgment(inv.getArgument(0), Grade.U1, 0.95,
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.95"),
                                 new Judgment.Evidence("낙인 하회하면 원금 손실 난다고 들었어요",
                                         "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
                                 "조건을 정확히 진술", null),
@@ -135,7 +136,7 @@ class SessionControllerTest {
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
                 eq("VARIABLE_INSURANCE")))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
-                        new Judgment(inv.getArgument(0), Grade.U1, 0.9,
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
                                         "예금자보호 범위: 보호되는 급부와 한도를 인지해야 함"),
                                 "부분 보호 범위를 정확히 진술", null),
