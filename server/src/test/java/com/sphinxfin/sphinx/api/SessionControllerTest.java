@@ -1,14 +1,25 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.RiskItem;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,12 +36,78 @@ class SessionControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    /**
+     * ai-service(F-SCR-001)는 이 통합 테스트의 대상이 아니라 상류 의존성이다 — 실제
+     * HTTP(:8100)에 붙이지 않고 목으로 대신한다. 채점 결과는 예전 컨트롤러 목과 동일하게
+     * U4(오해)로 고정해 이 파일의 기존 단정(U4·RED·R-01·재검증 상한)을 그대로 유지한다.
+     * AiServiceClient 자체의 HTTP 계약(snake_case·PII 마스킹·실패 매핑)은 AiServiceClientTest가 검증한다.
+     */
+    @MockBean
+    private AiServiceClient aiServiceClient;
+
+    @BeforeEach
+    void stubScoring() {
+        // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+                .thenAnswer(inv -> new Judgment(inv.getArgument(0), Grade.U4, 0.91,
+                        new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
+                                "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                        "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"));
+    }
+
+    @Test
+    @DisplayName("변액 세션은 VARIABLE_INSURANCE로 채점된다 — ELS로 하드코딩하면 M02가 오판한다")
+    void productTypeComesFromSession() throws Exception {
+        // product_type은 ai-service에서 오해 유형 필터의 입력이다(misconception.applies_to).
+        // PR #57(결정 10.24)이 M02-DEPOSIT-INSURANCE를 products:[ELS]로 좁힌 이유가 변액에서의
+        // 이해→오해 오판이었는데, 호출부가 변액 세션에도 "ELS"를 보내면 라이브러리에서 닫은
+        // 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀리는 종류다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                eq("VARIABLE_INSURANCE")))
+                .thenAnswer(inv -> new Judgment(inv.getArgument(0), Grade.U1, 0.9,
+                        new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
+                                "예금자보호 범위: 보호되는 급부와 한도를 인지해야 함"),
+                        "부분 보호 범위를 정확히 진술", null));
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-var-samsung-b2601","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.grade").value("U1"));
+
+        // 하드코딩이면 "ELS" 스텁이 잡혀 U4가 나온다 — 넘어간 값을 직접 확인한다.
+        verify(aiServiceClient).score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                eq("VARIABLE_INSURANCE"));
+    }
+
+    @Test
+    @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
+    void unknownProductTypeFailsLoudly() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-unknown-9999","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"원금은 지켜지죠"}"""))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+    }
+
     @Test
     @DisplayName("생성 성공 → 200 + 봉투(success:true, data.state=CREATED)")
     void createSuccess() throws Exception {
         mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대","contractRef":"CT-1"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대","contractRef":"CT-1"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.sessionId").isNotEmpty())
@@ -62,7 +139,7 @@ class SessionControllerTest {
     void invalidChannel() throws Exception {
         mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"대면","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"대면","ageBand":"60대"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MALFORMED_REQUEST"));
     }
@@ -93,7 +170,7 @@ class SessionControllerTest {
     void answerThenJudge_isRed() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -132,7 +209,7 @@ class SessionControllerTest {
     void judgmentsAreRetrievable() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -170,7 +247,7 @@ class SessionControllerTest {
     void nextQuestionCarriesProgress() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -216,7 +293,7 @@ class SessionControllerTest {
     private String sessionWithMisunderstoodItem() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
         mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)

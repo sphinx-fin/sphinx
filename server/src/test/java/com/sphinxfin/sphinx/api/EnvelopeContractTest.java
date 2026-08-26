@@ -43,7 +43,7 @@ class EnvelopeContractTest {
     private String newSession() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(created, "$.data.sessionId");
     }
