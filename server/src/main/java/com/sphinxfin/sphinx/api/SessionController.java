@@ -18,7 +18,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.NoSuchElementException;
 
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
@@ -228,10 +231,44 @@ public class SessionController {
     }
 
     /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
+    /**
+     * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
+     *
+     * 발행을 GET 에서 분리한 이유는 감사다 — report:read 는 audited action 이라 GET 이
+     * 발행까지 하면 로그에서 "읽었다"와 "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을
+     * 열람하는 것만으로 발행 기록이 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @PostMapping("/{sid}/report")
+    public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
+        // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
+        // 목이지만 계약의 필수 필드를 채운다 — previewUrl·downloadUrl 은 PDF 생성 전까지
+        // null 이 계약이다(채우면 404 나는 경로를 계약이 보장하게 된다).
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /**
+     * 발행된 리포트 조회. 상태를 바꾸지 않는다.
+     * 발행한 적 없으면 404 — "아직 교부하지 않았다"와 "교부했다"는 감사에서 구별돼야 한다.
+     */
     @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
-    public ApiResponse<Map<String, String>> report(@PathVariable String sid) {
-        // TODO(정세현): ReportService (F-GTE-004)
-        return ApiResponse.ok(Map.of("reportId", "mock-report-001"));
+    public ApiResponse<Map<String, Object>> report(@PathVariable String sid) {
+        // TODO(정세현): ReportService.latest(sid) 연결. 목은 발행 여부를 모르므로 항상 돌려준다.
+        sessionService.get(sid);
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /** 계약(ReportResponse)의 필수 4필드를 채운 목. URL 둘은 PDF 전까지 null 이 계약이다. */
+    private static Map<String, Object> reportPayload(String sid) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("reportId", "mock-report-001");
+        out.put("sessionId", sid);
+        out.put("generatedAt", Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());
+        out.put("contentHash", "0".repeat(64));
+        out.put("previewUrl", null);
+        out.put("downloadUrl", null);
+        return out;
     }
 }
