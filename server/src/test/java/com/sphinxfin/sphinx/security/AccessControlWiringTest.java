@@ -39,7 +39,7 @@ class AccessControlWiringTest {
 
     /** AuditInterceptor가 쓰는 것과 같은 형식. 여기서 형식 자체를 고정한다. */
     private static final Pattern ACTION =
-            Pattern.compile("@accessGuard\\.can\\('([a-z][a-z:]*)'");
+            Pattern.compile("@accessGuard\\.can[A-Za-z]*\\('([a-z][a-z:]*)'");
 
     // actuator가 같은 타입 빈을 하나 더 등록한다 — 이름으로 MVC 쪽을 집는다.
     @Autowired
@@ -91,7 +91,7 @@ class AccessControlWiringTest {
                 .map(e -> e.getKey() + " " + e.getValue())
                 .toList();
         assertThat(malformed)
-                .as("@accessGuard.can('<action>'...) 형식이어야 한다. 형식이 깨지면 감사가 조용히 빠진다")
+                .as("@accessGuard.can*('<action>'...) 형식이어야 한다. 형식이 깨지면 감사가 조용히 빠진다")
                 .isEmpty();
     }
 

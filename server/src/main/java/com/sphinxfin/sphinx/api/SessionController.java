@@ -10,6 +10,7 @@ import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.security.CurrentActor;
 import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
@@ -35,11 +36,14 @@ public class SessionController {
 
     private final SessionService sessionService;
     private final AiServiceClient aiServiceClient;
+    private final CurrentActor currentActor;
 
-    @PreAuthorize("@accessGuard.can('session:create')")
+    @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
-        Session session = sessionService.create(body.toCommand());
+        // 귀속은 인증 주체에서만 온다 — 본문에 없다(CreateSessionRequest 주석).
+        Session session = sessionService.create(
+                body.toCommand(currentActor.actorId(), currentActor.branchId()));
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
