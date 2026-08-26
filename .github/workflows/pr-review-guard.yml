@@ -1,7 +1,12 @@
 name: PR 리뷰 확인
 
 # 현재 org 플랜(free + private)에서는 브랜치 보호를 쓸 수 없어 머지를 강제로 막지 못한다.
-# 이 워크플로는 승인 없는 PR에 빨간 X를 띄워 실수 머지를 눈에 보이게 만드는 용도다.
+# 이 워크플로는 승인이 덜 된 PR에 빨간 X를 띄워 실수 머지를 눈에 보이게 만드는 용도다.
+#
+# 판정 기준: **요청된 리뷰어가 전원 승인**해야 초록이다(승인 1건이 아니다).
+# 1건으로 두면 초록이 "봐야 할 사람이 다 봤다"를 뜻하지 않는다 — 여러 사람의 결정이
+# 섞인 PR에서 한 명만 승인해도 통과하고, 다른 사람 몫이 확인 없이 들어간다.
+# 그 대신 리뷰어 지정이 장식이 아니라 게이트가 되므로, **꼭 봐야 할 사람만** 건다.
 # Team 플랜으로 올리면 이 커밋 상태를 required status check으로 걸어 실제 차단이 된다.
 #
 # 판정 결과는 잡의 종료 코드가 아니라 `소유자 승인 여부` 커밋 상태로 낸다.
@@ -41,40 +46,50 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 사용자별 최신 리뷰 상태만 본다. COMMENTED는 승인을 취소하지 않으므로 제외하고,
-          # APPROVED / CHANGES_REQUESTED / DISMISSED 중 가장 최근 것으로 판단한다.
-          approvers=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '
+          join() { printf '%s' "$(printf '%s\n' "$1" | sed '/^$/d' | sort -u | paste -sd ',' - | sed 's/,/, /g')"; }
+
+          # 사용자별 최신 리뷰 상태. COMMENTED는 승인을 취소하지 않으므로 판정 대상에서 빼고
+          # (APPROVED 뒤에 코멘트를 달아도 승인은 유지된다), 그 셋 중 가장 최근 것으로 본다.
+          latest=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '
             [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
             | group_by(.user.login)[]
             | max_by(.submitted_at)
-            | select(.state == "APPROVED")
-            | .user.login
-          ' | sort -u | paste -sd ", " -)
+            | "\(.user.login)\t\(.state)"
+          ')
+          approvers=$(printf '%s\n' "$latest" | awk -F'\t' '$2=="APPROVED"{print $1}')
+          changes=$(printf '%s\n' "$latest" | awk -F'\t' '$2=="CHANGES_REQUESTED"{print $1}')
 
-          changes=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '
-            [ .[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") ]
-            | group_by(.user.login)[]
-            | max_by(.submitted_at)
-            | select(.state == "CHANGES_REQUESTED")
-            | .user.login
-          ' | sort -u | paste -sd ", " -)
+          # 요구 대상 = 리뷰 요청 중인 사람 ∪ 리뷰를 남긴 사람.
+          #
+          # reviewRequests 만 보면 안 된다 — GitHub은 리뷰를 제출하는 순간 그 사람을 요청
+          # 목록에서 뺀다. 그래서 "코멘트만 달고 승인하지 않은 사람"이 어느 목록에도 안 남고
+          # 조용히 통과한다. 리뷰를 남긴 사람도 요구 대상에 넣어야 그 구멍이 닫힌다.
+          # (DISMISSED도 미승인으로 잡힌다 — 승인이 취소된 상태다.)
+          requested=$(gh pr view "$PR" --repo "$REPO" --json reviewRequests --jq '.reviewRequests[].login')
+          reviewed=$(gh api "/repos/$REPO/pulls/$PR/reviews" --paginate --jq '.[].user.login')
+          required=$(printf '%s\n%s\n' "$requested" "$reviewed" | sed '/^$/d' | sort -u)
+          missing=$(comm -23 <(printf '%s\n' "$required" | sed '/^$/d') \
+                             <(printf '%s\n' "$approvers" | sed '/^$/d' | sort -u))
 
-          pending=$(gh pr view "$PR" --repo "$REPO" \
-            --json reviewRequests --jq '[.reviewRequests[].login] | join(", ")')
+          echo "요구 대상: $(join "$required")"
+          echo "승인: $(join "$approvers")"
+          echo "변경 요청: $(join "$changes")"
+          echo "미승인: $(join "$missing")"
 
-          echo "승인: ${approvers:-(없음)}"
-          echo "변경 요청: ${changes:-(없음)}"
-          echo "리뷰 대기: ${pending:-(없음)}"
-
-          if [ -n "$changes" ]; then
+          if [ -n "$(join "$changes")" ]; then
             state=failure
-            desc="변경 요청이 해소되지 않았습니다 ($changes). 머지하지 마세요."
-          elif [ -z "$approvers" ]; then
+            desc="변경 요청이 해소되지 않았습니다 ($(join "$changes")). 머지하지 마세요."
+          elif [ -z "$(join "$approvers")" ]; then
+            # 리뷰어를 아무도 안 걸면 요구 대상이 비어 "전원 승인"이 공허하게 참이 된다.
+            # 이 가드가 그 구멍을 막는다.
             state=failure
             desc="승인이 0건입니다. CODEOWNERS 기준 소유자 리뷰 후 머지하세요."
+          elif [ -n "$(join "$missing")" ]; then
+            state=failure
+            desc="아직 승인하지 않은 리뷰어가 있습니다 ($(join "$missing")). 전원 승인이 필요합니다."
           else
             state=success
-            desc="승인 확인 — $approvers"
+            desc="전원 승인 확인 — $(join "$approvers")"
           fi
 
           # description 은 140자 제한이 있다.
