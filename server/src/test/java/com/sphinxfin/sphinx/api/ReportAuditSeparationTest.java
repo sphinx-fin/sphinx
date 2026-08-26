@@ -66,6 +66,10 @@ class ReportAuditSeparationTest {
                 .toList();
     }
 
+    // TODO(강희진): 역할별 계정 분리(결정 10.5, 8/29) 후 actorId 단정을 얹는다.
+    //   이 변경의 주장은 "언제 **누가** 교부했는가" 인데 지금 테스트는 action 만 본다.
+    //   지금 단정하면 단일 계정 값에 못박는 셈이라 계정이 갈린 뒤가 맞는 자리다 (#108 리뷰).
+
     @Test
     @DisplayName("❗발행과 조회가 서로 다른 action 으로 남는다 — 같으면 교부 시점을 못 답한다")
     void issueAndReadAreDistinctActions() throws Exception {
