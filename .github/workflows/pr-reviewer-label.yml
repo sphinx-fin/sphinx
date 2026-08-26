@@ -1,14 +1,24 @@
 name: PR 리뷰 담당자 라벨
 
-# CODEOWNERS 가 배정한 리뷰어를 "리뷰대기: <이름>" 라벨로 PR 목록에 드러낸다.
-# GitHub 은 리뷰가 제출되면 그 사람을 reviewRequests 에서 빼므로, 이 워크플로는
-# "아직 리뷰하지 않은 소유자" 집합을 그대로 라벨에 미러링한다 — 붙는 것도 떨어지는 것도 자동이다.
+# 리뷰가 누구 손에 있는지를 PR 목록에서 바로 보이게 한다.
 #
-# 이 라벨은 표시일 뿐 판단 근거가 아니다. 승인 없는 머지를 막는 것은 pr-review-guard.yml 이다.
+#   리뷰어 미배정      — 리뷰어가 아무도 없다. 붙이는 게 다음 할 일이다.
+#   리뷰대기: <이름>   — 배정됐고 아직 아무것도 제출하지 않았다.
+#   리뷰중:  <이름>    — 코멘트나 변경요청을 냈고 아직 승인하지 않았다.
+#   (라벨 없음)        — 배정된 사람이 모두 승인했다. 완료는 pr-review-guard 의
+#                        초록 체크가 말한다 — 같은 사실을 라벨로 중복하지 않는다.
+#
+# 행동이 필요한 상태에만 라벨을 붙인다. 종착역에 라벨을 붙이면 떼는 사건이 없어
+# 영원히 눌어붙는다(기존 `리뷰대기` 라벨이 닫힌 PR 32건에 남아 있는 이유다).
+#
+# 판정 기준은 pr-review-guard.yml 과 같다. 라벨과 체크가 서로 다른 말을 하면
+# 둘 다 못 믿게 되므로, 승인 유효성 판단(COMMENTED 는 승인을 취소하지 않는다,
+# 사용자별 최신 상태만 본다)을 그대로 맞춘다. 라벨은 표시일 뿐이고 머지를 막는
+# 것은 여전히 pr-review-guard 다.
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, review_requested, review_request_removed, closed]
+    types: [opened, reopened, ready_for_review, converted_to_draft, review_requested, review_request_removed, closed]
   pull_request_review:
     types: [submitted, dismissed]
 
@@ -23,7 +33,7 @@ concurrency:
 
 jobs:
   label:
-    name: 리뷰 대기 라벨 동기화
+    name: 리뷰 상태 라벨 동기화
     runs-on: ubuntu-latest
     steps:
       - name: 라벨 동기화
@@ -32,7 +42,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           PR_STATE: ${{ github.event.pull_request.state }}
-          PREFIX: "리뷰대기: "
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           set -euo pipefail
 
@@ -48,36 +58,88 @@ jobs:
             esac
           }
 
-          # 닫힌 PR 에는 대기 라벨을 남기지 않는다. 열려 있으면 현재 리뷰 요청이 곧 대기 집합이다.
-          if [ "$PR_STATE" = "closed" ]; then
-            pending=""
-          else
-            pending=$(gh pr view "$PR" --repo "$REPO" --json reviewRequests \
-              --jq '.reviewRequests[] | (.login // .slug)')
+          TMP=$(mktemp -d)
+          : > "$TMP/want"
+
+          # 닫힌 PR 과 초안에는 라벨을 남기지 않는다.
+          if [ "$PR_STATE" != "closed" ] && [ "$IS_DRAFT" != "true" ]; then
+
+            # 배정 이력과 리뷰 이력을 한 파일에 모은다. 첫 열이 출처다 —
+            # awk 의 FNR==NR 관용구는 첫 파일이 비면 둘째 파일을 첫 파일로 착각한다.
+            {
+              # 리뷰 요청/취소. 리뷰를 제출해도 GitHub 은 review_request_removed 를
+              # 남기지 않으므로, 여기서 본 배정은 리뷰 후에도 유효하다.
+              # (요청 목록 자체는 리뷰 제출 시 비워지므로 기준으로 쓸 수 없다.)
+              gh api "/repos/$REPO/issues/$PR/timeline?per_page=100" --paginate \
+                -H "Accept: application/vnd.github+json" --jq '
+                  .[] | select(.event == "review_requested" or .event == "review_request_removed")
+                      | ["REQ", .event, (.requested_reviewer.login // .requested_team.slug // "")] | @tsv'
+
+              # 제출된 리뷰. pr-review-guard.yml 이 보는 것과 같은 목록이다.
+              gh api "/repos/$REPO/pulls/$PR/reviews?per_page=100" --paginate --jq '
+                  .[] | ["REV", .state, .user.login] | @tsv'
+            } > "$TMP/ev"
+
+            # 사람별로 마지막 배정 상태와 마지막 유효 리뷰 상태를 접는다.
+            # COMMENTED 는 승인을 취소하지 않으므로 유효 상태 계산에서 뺀다(가드와 동일).
+            awk -F'\t' '
+              $1 == "REQ" && $3 != "" { req[$3] = $2 }
+              $1 == "REV" && $3 != "" {
+                submitted[$3] = 1
+                if ($2 == "APPROVED" || $2 == "CHANGES_REQUESTED" || $2 == "DISMISSED") eff[$3] = $2
+              }
+              END {
+                n = 0
+                for (u in req) {
+                  if (req[u] != "review_requested") continue    # 배정이 취소된 사람
+                  n++
+                  if (eff[u] == "APPROVED") continue            # 승인이 유효하다 — 라벨 없음
+                  if (submitted[u]) print "리뷰중: \t" u        # 뭔가 냈지만 승인은 아니다
+                  else              print "리뷰대기: \t" u      # 아직 아무것도 안 냈다
+                }
+                if (n == 0) print "MISSING\t"
+              }
+            ' "$TMP/ev" > "$TMP/pend"
+
+            if grep -q '^MISSING' "$TMP/pend"; then
+              echo "리뷰어 미배정" > "$TMP/want"
+            else
+              # 개행으로만 나눈다 — 셸의 IFS 설정에 기대지 않는다.
+              while IFS=$'\t' read -r prefix login; do
+                [ -n "$login" ] || continue
+                printf '%s%s\n' "$prefix" "$(name_of "$login")"
+              done < "$TMP/pend" | sort -u > "$TMP/want"
+            fi
           fi
 
-          # 개행으로만 나눈다 — 셸의 IFS 설정에 기대지 않는다.
-          want=$(printf '%s\n' "$pending" | sed '/^$/d' | while IFS= read -r login; do
-            printf '%s%s\n' "$PREFIX" "$(name_of "$login")"
-          done | sort -u)
+          # 이 워크플로가 관리하는 라벨만 건드린다. 나머지 라벨은 손대지 않는다.
+          gh pr view "$PR" --repo "$REPO" --json labels --jq '
+            .labels[].name
+            | select(startswith("리뷰대기: ") or startswith("리뷰중: ") or . == "리뷰어 미배정")
+          ' | sort -u > "$TMP/have"
 
-          have=$(gh pr view "$PR" --repo "$REPO" --json labels \
-            --jq '.labels[].name | select(startswith("리뷰대기: "))' | sort -u)
+          echo "목표: $(paste -sd', ' "$TMP/want" || true)"
+          echo "현재: $(paste -sd', ' "$TMP/have" || true)"
 
-          echo "대기: ${pending:-(없음)}"
-          echo "현재 라벨: ${have:-(없음)}"
+          color_of() {
+            case "$1" in
+              "리뷰어 미배정") echo "9E9E9E" ;;
+              리뷰중:*)        echo "F29513" ;;
+              *)               echo "FBCA04" ;;
+            esac
+          }
 
-          # 더 이상 대기가 아닌 라벨을 뗀다.
-          comm -13 <(printf '%s\n' "$want" | sed '/^$/d') <(printf '%s\n' "$have" | sed '/^$/d') | while read -r l; do
+          # 더 이상 맞지 않는 라벨을 뗀다.
+          comm -13 "$TMP/want" "$TMP/have" | while IFS= read -r l; do
+            [ -n "$l" ] || continue
             echo "제거: $l"
-            gh pr edit "$PR" --repo "$REPO" --remove-label "$l"
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$l" >/dev/null
           done
 
-          # 새로 대기가 된 라벨을 붙인다. 라벨이 저장소에 없으면 만들고 진행한다.
-          comm -23 <(printf '%s\n' "$want" | sed '/^$/d') <(printf '%s\n' "$have" | sed '/^$/d') | while read -r l; do
+          # 새로 맞게 된 라벨을 붙인다. 라벨이 저장소에 없으면 만들고 진행한다.
+          comm -23 "$TMP/want" "$TMP/have" | while IFS= read -r l; do
+            [ -n "$l" ] || continue
             echo "추가: $l"
-            gh label create "$l" --repo "$REPO" --color FBCA04 \
-              --description "${l#$PREFIX} 리뷰 대기 (CODEOWNERS 배정, 리뷰 제출 시 자동 해제)" \
-              >/dev/null 2>&1 || true
-            gh pr edit "$PR" --repo "$REPO" --add-label "$l"
+            gh label create "$l" --repo "$REPO" --color "$(color_of "$l")" >/dev/null 2>&1 || true
+            gh pr edit "$PR" --repo "$REPO" --add-label "$l" >/dev/null
           done
