@@ -132,6 +132,10 @@ def detect_mismatch(body: MismatchRequest) -> SuitabilityMismatch:
         return mismatch.detect(
             body.session_id, body.survey_result, body.utterances, body.survey_schema_version
         )
+    except mismatch.UnknownSurveyQuestion as exc:
+        # 설문 세트가 우리가 아는 축을 벗어났다 — 요청이 잘못된 것이지 LLM 이 죽은 게 아니다.
+        # 502 로 내면 "AI 가 안 된다"로 읽히고 세트 버전 불일치가 안 보인다.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError:
         raise _not_implemented("F-DET-002 적합성 모순 탐지")
     except LlmError as exc:

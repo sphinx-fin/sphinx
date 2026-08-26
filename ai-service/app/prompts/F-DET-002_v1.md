@@ -20,10 +20,11 @@
 4. `direction` 은 어느 쪽이 더 위험 감수적인지다.
    - `survey_overstates_tolerance` — 설문이 발화보다 위험 감수적 (설문에 감수 가능, 말로는 못 감수)
    - `survey_understates_tolerance` — 그 반대
-5. `axis` 는 어긋난 축이다. 설문 문항의 문면과 값을 읽어 판단한다.
-   `risk_tolerance` 위험 감수 성향 / `principal_preservation` 원금 보전 요구 /
-   `loss_capacity` 손실 감내 능력 / `investment_horizon` 투자 기간 /
-   `product_understanding` 상품 이해 / `purpose` 투자 목적
+5. `axis` 는 어긋난 축이다. **문항 키에서 정해지므로 추론하지 않는다** — 서버가
+   `question_id` 로 다시 채운다. 스키마가 값을 요구하니 아래 표대로 옮겨 적는다.
+   `SUIT-RISK-PROFILE`→`risk_tolerance` / `SUIT-PRINCIPAL-LOSS`→`principal_preservation` /
+   `SUIT-LOSS-TOLERANCE`→`loss_capacity` / `SUIT-HORIZON`→`investment_horizon` /
+   `SUIT-PRODUCT-EXPERIENCE`→`product_understanding` / `SUIT-PURPOSE`→`purpose`
 6. **모순이 없으면 빈 배열을 낸다.** 억지로 찾지 않는다 — 없는 모순을 만들면 정상 계약을
    가로막는다.
 7. `confidence` 는 그 모순이 실제 모순이라는 확신도다. 발화가 짧거나 설문 문항의 뜻이

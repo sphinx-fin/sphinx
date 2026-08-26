@@ -15,7 +15,13 @@ from app import mismatch
 from app.llm_client import LlmClient
 from app.schemas import Contradiction, SuitabilityMismatch, SurveyRef
 
-SURVEY = {"Q3_위험감수": "원금 손실을 감수할 수 있다", "Q7_기간": "3년 이상"}
+#: 문항 키는 #44 에서 확정된 `s02-survey-v1` 세트다. `_surveySchemaVersion` 을 **일부러**
+#: 넣어 둔다 — 메타키가 문항으로 새는 결함(#98 ②)의 회귀 고정이다.
+SURVEY = {
+    "_surveySchemaVersion": "s02-survey-v1",
+    "SUIT-PRINCIPAL-LOSS": "손실이 나더라도 감수할 수 있다",
+    "SUIT-HORIZON": "5년 이상 묶어둘 수 있다",
+}
 UTTERANCES = [{"item_id": "ELS-PRINCIPAL-LOSS-WARNING",
                "text": "원금은 절대 손해 보면 안 됩니다. 은행이라 믿고 온 거예요."}]
 
@@ -32,8 +38,8 @@ class FakeLlm(LlmClient):
 
 def _contradiction(
     quote: str = "원금은 절대 손해 보면 안 됩니다",
-    question_id: str = "Q3_위험감수",
-    recorded: str = "원금 손실을 감수할 수 있다",
+    question_id: str = "SUIT-PRINCIPAL-LOSS",
+    recorded: str = "손실이 나더라도 감수할 수 있다",
     confidence: float = 0.9,
 ) -> Contradiction:
     return Contradiction(
@@ -191,3 +197,94 @@ def test_detect_takes_no_vulnerability_inputs():
                          "vulnerability_weights", "coaching_score"}
     assert params == {"session_id", "survey_result", "utterances",
                       "survey_schema_version", "llm"}
+
+
+# ── 설문 맵: 문항과 메타데이터 (#98 ②, 규약 #44) ──────────────────────────────
+def test_metadata_keys_are_not_questions():
+    kept = mismatch.survey_questions(SURVEY)
+    assert "_surveySchemaVersion" not in kept
+    assert set(kept) == {"SUIT-PRINCIPAL-LOSS", "SUIT-HORIZON"}
+
+
+def test_metadata_key_does_not_reach_the_prompt():
+    """모델이 `_surveySchemaVersion` 을 설문 문항으로 읽으면 안 된다."""
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=False, confidence=0.0,
+        contradictions=[], reason="없다",
+    ))
+    mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    prompt = llm.calls[0]["prompt"]
+    assert "_surveySchemaVersion" not in prompt
+    assert "SUIT-PRINCIPAL-LOSS" in prompt
+
+
+def test_metadata_key_cannot_be_cited_as_survey_evidence():
+    """★ 이게 #98 이 적은 것보다 나쁜 쪽이다.
+
+    `_is_traceable` 은 `question_id in survey_result` 만 봤다. 메타키도 맵에 있으므로
+    **문항이 아닌 것을 근거로 든 모순이 P4 대조를 통과했다.** 필터를 `build_prompt` 안에만
+    두면 이 경로는 그대로 남는다 — 그래서 입구에서 걸러야 한다.
+    """
+    bogus = _contradiction(
+        question_id="_surveySchemaVersion", recorded="s02-survey-v1", confidence=0.95,
+    )
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=True, confidence=0.95,
+        contradictions=[bogus], reason="메타키를 근거로 든 판정",
+    ))
+    out = mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    assert out.contradictions == []
+    assert out.mismatch is False
+
+
+# ── 축 고정 (#44 회신) ────────────────────────────────────────────────────────
+def test_axis_comes_from_question_id_not_from_the_model():
+    """모델이 축을 틀리게 내도 `question_id` 가 정한다.
+
+    v1 은 모델이 문항 문면을 읽어 축을 판단했고 그게 '약한 고리'였다. 키가 축을 말하므로
+    (#44 ①) 축은 계산되는 값이다.
+    """
+    # 축 기본값은 principal_preservation 인데 참조는 기간 문항이다.
+    wrong = _contradiction(question_id="SUIT-HORIZON", recorded="5년 이상 묶어둘 수 있다")
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=True, confidence=0.9,
+        contradictions=[wrong], reason="축이 틀린 판정",
+    ))
+    out = mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    assert [c.axis for c in out.contradictions] == ["investment_horizon"]
+
+
+def test_axis_map_is_one_to_one_with_the_contract():
+    """계약 enum 과 매핑이 어긋나면 한쪽 축이 영원히 안 나오거나 판정 시점에 죽는다."""
+    mismatch.assert_axis_map_matches_contract()
+    assert len(mismatch.AXIS_BY_QUESTION) == len(set(mismatch.AXIS_BY_QUESTION.values()))
+
+
+def test_unknown_survey_question_is_rejected_not_guessed():
+    """설문 세트가 바뀌면 축 매핑도 같이 올라와야 한다 — 조용히 빼고 판정하지 않는다."""
+    with pytest.raises(mismatch.UnknownSurveyQuestion) as exc:
+        mismatch.survey_questions({"SUIT-CRYPTO-EXPERIENCE": "없다"})
+    assert "SUIT-CRYPTO-EXPERIENCE" in str(exc.value)
+
+
+def test_survey_with_only_metadata_is_insufficient_not_evaluated():
+    """메타키만 온 것은 '모순 없음'이 아니라 '판정 불가'다."""
+    out = mismatch.detect("S", {"_surveySchemaVersion": "s02-survey-v1"}, UTTERANCES)
+    assert out.status == "insufficient_input"
+    assert out.mismatch is False
+
+
+# ── 엔드포인트 ────────────────────────────────────────────────────────────────
+def test_unknown_survey_question_is_422_not_502():
+    """세트 버전 불일치는 요청 문제다. 502 로 내면 "AI 가 안 된다"로 읽힌다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    resp = TestClient(app).post("/internal/mismatch", json={
+        "session_id": "S",
+        "survey_result": {"SUIT-CRYPTO-EXPERIENCE": "없다"},
+        "utterances": [{"text": "원금은 절대 손해 보면 안 됩니다. 은행이라 믿고 왔어요."}],
+    })
+    assert resp.status_code == 422
+    assert "SUIT-CRYPTO-EXPERIENCE" in resp.json()["detail"]
