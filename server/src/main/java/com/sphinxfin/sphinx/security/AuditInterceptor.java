@@ -41,9 +41,11 @@ public class AuditInterceptor implements HandlerInterceptor {
             Pattern.compile("@accessGuard\\.can\\('([a-z][a-z:]*)'");
 
     private final RbacPolicyFile policyFile;
+    private final AuditLog auditLog;
 
-    public AuditInterceptor(RbacPolicyFile policyFile) {
+    public AuditInterceptor(RbacPolicyFile policyFile, AuditLog auditLog) {
         this.policyFile = policyFile;
+        this.auditLog = auditLog;
     }
 
     /**
@@ -67,18 +69,10 @@ public class AuditInterceptor implements HandlerInterceptor {
                 action,
                 request.getRequestURI(),
                 String.valueOf(response.getStatus()),
-                Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());   // ADR-008
-        record(entry);
-    }
-
-    /**
-     * TODO(정세현): ImmutableStore.append("audit", entry) — F-CMN-002.
-     *
-     * 그때까지는 로그로 남긴다. 비워두면 인터셉터가 등록됐는지조차 확인할 수 없고,
-     * "감사 로그가 붙었다"고 착각하기 쉽다. 로그는 불변 기록이 아니라는 점을 분명히 한다.
-     */
-    private void record(AuditLog.Entry entry) {
-        log.info("[감사 로그 — 불변 저장 전 임시] {}", entry);
+                // 타입으로 넘긴다 — 포맷은 CanonicalJson 이 ADR-008 대로 한 곳에서 정한다.
+                // Instant.toString() 은 밀리초가 0 이면 소수부를 생략해서 자릿수가 흔들린다.
+                Instant.now().truncatedTo(ChronoUnit.MILLIS));
+        auditLog.record(entry);
     }
 
     private static String actionOf(HandlerMethod method) {

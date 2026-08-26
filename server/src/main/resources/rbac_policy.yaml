@@ -8,7 +8,7 @@
 #   ① 역할 부재 — 본부 영업·마케팅에 대응하는 역할이 존재하지 않는다 (명세서 0.4, ADR-001)
 #   ② 범위 분리 — 역할이 있어도 집계 데이터에 닿는 범위가 제한된다 (아래 scope)
 # ①만으로는 부족하다. SELLER 권한으로 대시보드가 열리면 같은 구멍이 난다.
-version: 3
+version: 4
 
 roles: [CUST, SELLER, MGR, COMPL, ADMIN]
 
@@ -50,10 +50,21 @@ permissions:
     - { roles: [MGR],    scope: branch }
     - { roles: [COMPL],  scope: org }
 
-  report:read:                                       # F-GTE-004 이해 기록 리포트
+  report:read:                                       # F-GTE-004 이해 기록 리포트 조회
     - { roles: [SELLER], scope: own_session }
     - { roles: [MGR],    scope: branch }
     - { roles: [COMPL],  scope: org }
+  # 발행(교부)은 조회와 다른 action 이다. 이유가 둘이다.
+  #
+  # ① 감사에서 갈려야 한다. AuditInterceptor 가 @PreAuthorize 의 action 이름으로 기록하므로,
+  #    조회와 발행이 같은 이름이면 로그에서 "읽었다"와 "교부했다"가 구별되지 않는다. 분쟁
+  #    시점에 답해야 하는 것은 "언제 누가 교부했는가"이지 "누가 열어봤는가"가 아니다.
+  # ② MGR·COMPL 을 빼는 것이 요지다. 그쪽은 감독·점검을 위해 남의 세션을 *읽는* 역할이고
+  #    (branch·org 범위), 교부는 그 세션을 진행한 창구 직원이 한다. 조회와 같은 action 이면
+  #    COMPL 이 org 전체 세션에 대해 발행할 수 있다 — 권한을 안 주는 것과 줄 수 있는 대상이
+  #    없는 것은 다르다(ADR-001 과 같은 결).
+  report:issue:                                      # F-GTE-004 발행(교부) — PR #94 리뷰
+    - { roles: [SELLER], scope: own_session }
   report:summary:read:                               # 고객 교부용 요약
     - { roles: [CUST], scope: own_session }
 
@@ -90,6 +101,7 @@ audited:
   - override:request
   - override:approve
   - report:read
+  - report:issue
   - audit:read
   - audit:verify
   - aggregate:heatmap:read

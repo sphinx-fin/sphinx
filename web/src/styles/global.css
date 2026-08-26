@@ -1,64 +1,43 @@
 /**
- * 전역 토큰·리셋. 소유: 오준서.
+ * 전역 리셋 + 배율. 소유: 오준서.
  *
- * 고령자 모드(명세 10절 접근성)는 여기서 **한 번만** 정의한다 —
- * `<html data-elderly="on">` 하나로 글자 크기·간격·선 두께가 전 화면에서 같이 커진다.
- * 화면마다 큰 글씨 스타일을 따로 만들면 모드가 새고, S-03에서만 적용되는 사고가 난다.
+ * 색·간격·모서리는 `tokens.css`, 타이포 스케일은 `typography.css` 에 있다.
+ * 이 파일은 **문서 전체에 한 번만 걸리는 것**만 둔다 — 서체 로딩, 배율, 리셋, 포커스.
+ *
+ * ── 고령자 모드 (명세 10절 접근성) ──────────────────────────────────────────
+ *
+ * `<html data-elderly="on">` 하나로 글자·간격·행간이 전 화면에서 같이 커진다. 화면마다
+ * 큰 글씨 스타일을 따로 만들면 모드가 새고 S-03 에서만 적용되는 사고가 난다.
+ *
+ * 배율이 둘인 이유: 글자만 키우면 줄 간격이 상대적으로 답답해진다. `--scale` 은 크기를,
+ * `--leading-scale` 은 행간을 따로 늘려 타입 스케일의 층별 비율은 유지한 채 여백만 벌린다.
  */
 
+/* Pretendard — 자체 호스팅.
+   폰트 스택에 이름은 있었는데 **실제로 아무 데서도 안 불러오고 있었다.** 그래서 지금까지
+   화면은 시스템 한글 폰트(Apple SD Gothic Neo)로 렌더되고 있었다.
+
+   CDN 을 링크하지 않는 이유는 시연이 EC2 위에서 돌기 때문이다. 리허설 중 외부 폰트 호스트가
+   느리면 화면 전체가 폰트 없이 뜬다 — 네트워크 사고가 아니라 데모 사고다.
+
+   **쓰는 굵기만 싣는다.** 통합 파일은 9종 굵기 × 92조각 = 828 개 @font-face 라 CSS 만
+   548KB 가 된다. 타입 스케일이 쓰는 건 400·500·600·700 넷뿐이다. */
+@import "pretendard/dist/web/static/Pretendard-Regular.css";
+@import "pretendard/dist/web/static/Pretendard-Medium.css";
+@import "pretendard/dist/web/static/Pretendard-SemiBold.css";
+@import "pretendard/dist/web/static/Pretendard-Bold.css";
+
+@import "./tokens.css";
+@import "./typography.css";
+
 :root {
-  /* 배율 — 고령자 모드에서 이 두 개만 바뀐다 */
   --scale: 1;
-  --font-base: 16px;
-
-  --font-sm: calc(var(--font-base) * 0.875 * var(--scale));
-  --font-md: calc(var(--font-base) * var(--scale));
-  --font-lg: calc(var(--font-base) * 1.25 * var(--scale));
-  --font-xl: calc(var(--font-base) * 1.625 * var(--scale));
-  --font-2xl: calc(var(--font-base) * 2.125 * var(--scale));
-
-  --space-1: calc(4px * var(--scale));
-  --space-2: calc(8px * var(--scale));
-  --space-3: calc(12px * var(--scale));
-  --space-4: calc(16px * var(--scale));
-  --space-5: calc(24px * var(--scale));
-  --space-6: calc(32px * var(--scale));
-  --space-8: calc(48px * var(--scale));
-
-  --radius: 10px;
-  --line: 1.65;
-
-  /* 면 */
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-sunken: #eef1f5;
-  --border: #d8dee7;
-  --border-strong: #b6c0cd;
-
-  /* 글자 */
-  --text: #17202b;
-  --text-muted: #5a6673;
-  --text-inverse: #ffffff;
-
-  --accent: #1f4e8c;
-  --accent-hover: #163b6b;
-
-  /* 신호등 — 명세 0.5절. 색만으로 구분하지 않는다(라벨·아이콘 병기) */
-  --green: #1a7a4c;
-  --green-bg: #e6f4ec;
-  --yellow: #8a6100;
-  --yellow-bg: #fdf3dd;
-  --red: #b3261e;
-  --red-bg: #fbeae9;
-
-  --focus: #2563eb;
+  --leading-scale: 1;
 }
 
-/* 고령자 모드 — 글자 확대 + 간격 확대. 입력 시간 제한은 별도로 해제한다(S-03). */
 :root[data-elderly="on"] {
   --scale: 1.35;
-  --line: 1.85;
-  --border: #b6c0cd;
+  --leading-scale: 1.12;
 }
 
 * { box-sizing: border-box; }
@@ -71,15 +50,19 @@ body {
   color: var(--text);
   font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
     "Malgun Gothic", system-ui, sans-serif;
-  font-size: var(--font-md);
-  line-height: var(--line);
+
+  /* 기본 본문 = 타입 스케일의 Body 1 / Normal */
+  font-size: calc(16px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  letter-spacing: 0.0057em;
+
   -webkit-font-smoothing: antialiased;
   word-break: keep-all;   /* 한글 단어 중간 줄바꿈 방지 */
 }
 
 h1, h2, h3, p, figure { margin: 0; }
 
-button, input, textarea, select { font: inherit; color: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
 
 /* 포커스는 절대 지우지 않는다 — 창구 태블릿·키보드 사용자 */
 :focus-visible {

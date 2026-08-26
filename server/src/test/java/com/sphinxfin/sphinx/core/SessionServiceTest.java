@@ -6,6 +6,7 @@ import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,88 @@ class SessionServiceTest {
         evidence = new RecordingEvidence();
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
                 Optional.of(evidence), 2);
+    }
+
+    @Test
+    @DisplayName("❗미리보기 GREEN 은 모순 평가 전 값이다 — 상태를 실어 화면이 구별하게 한다")
+    void previewCarriesSuitabilityStatus() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+
+        var preview = service.previewGate(s.id());
+
+        // 신호 자체는 GREEN 이다 — 미리보기는 모순을 평가하지 않으므로 바꾸지 않는다.
+        assertThat(preview.signal()).isEqualTo(Signal.GREEN);
+        assertThat(preview.suitabilityStatus())
+                .as("이 값이 없으면 화면은 signal=GREEN 만 보고 최종 통과로 그린다 — "
+                        + "그런데 /judge 는 모순을 평가하므로 YELLOW·RED 로 갈릴 수 있다")
+                .isEqualTo(SuitabilityStatus.NOT_EVALUATED);
+    }
+
+    @Test
+    @DisplayName("모순을 평가한 뒤에는 미리보기와 판정이 같은 신호를 낸다")
+    void previewMatchesJudgeAfterEvaluation() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordSuitability(s.id(), SuitabilityStatus.UNKNOWN);
+
+        var preview = service.previewGate(s.id());
+        assertThat(preview.signal()).isEqualTo(Signal.YELLOW);
+        assertThat(preview.suitabilityStatus()).isEqualTo(SuitabilityStatus.UNKNOWN);
+        assertThat(service.judge(s.id()).signal()).isEqualTo(preview.signal());
+    }
+
+    // ── F-DET-002 모순 배선 (이슈 #65 · 결정 10.9) ─────────────────────
+
+    @Test
+    @DisplayName("모순 판정 전에는 NOT_EVALUATED — 모순도 미확인도 아니다")
+    void beforeDetectionIsNotEvaluated() {
+        Session s = service.create(cmd(null));
+        assertThat(s.suitabilityMismatch()).isFalse();
+        assertThat(s.suitabilityUnknown()).isFalse();
+    }
+
+    @Test
+    @DisplayName("❗판정 못 함(UNKNOWN)은 모순 없음과 다르다 — 게이트가 YELLOW 로 받는다")
+    void unknownIsNotSameAsNoMismatch() {
+        Session unknown = service.create(cmd(null));
+        service.recordSuitability(unknown.id(), SuitabilityStatus.UNKNOWN);
+        service.recordJudgment(unknown.id(), j("A", Grade.U1));
+
+        Session clean = service.create(cmd(null));
+        service.recordSuitability(clean.id(), SuitabilityStatus.NO_MISMATCH);
+        service.recordJudgment(clean.id(), j("A", Grade.U1));
+
+        // 같은 U1 인데 신호가 갈린다 — 그게 두 상태를 나눈 이유다
+        assertThat(service.judge(unknown.id()).signal()).isEqualTo(Signal.YELLOW);
+        assertThat(service.judge(clean.id()).signal()).isEqualTo(Signal.GREEN);
+    }
+
+    @Test
+    @DisplayName("모순 확인 시 코칭 스코어를 다시 계산한다 — 생성 시점엔 모순을 몰랐다")
+    void mismatchRecalculatesCoachingScore() {
+        // 40대·소액·경험있음 → 가중 0점. mismatch-bonus 가 붙어야 점수가 오른다.
+        Session s = service.create(new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE,
+                "40대", "3년이상", "1천만원대", "CT-1", null, null));
+        int before = s.coachingScore();
+
+        Session after = service.recordSuitability(s.id(), SuitabilityStatus.MISMATCH);
+
+        assertThat(after.coachingScore())
+                .as("모순이 확인됐는데 가산이 없으면 취약 임계값을 넘겨야 할 고객이 안 넘는다")
+                .isGreaterThan(before);
+    }
+
+    @Test
+    @DisplayName("판정 못 함(UNKNOWN)은 코칭 가산 대상이 아니다 — 모순이 확인된 게 아니다")
+    void unknownDoesNotAddCoachingBonus() {
+        Session s = service.create(new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE,
+                "40대", "3년이상", "1천만원대", "CT-1", null, null));
+        int before = s.coachingScore();
+
+        Session after = service.recordSuitability(s.id(), SuitabilityStatus.UNKNOWN);
+
+        assertThat(after.coachingScore()).isEqualTo(before);
     }
 
     /** evidence append 지점이 실제로 호출되는지 보려는 테스트 더블(구현은 정세현 evidence/). */

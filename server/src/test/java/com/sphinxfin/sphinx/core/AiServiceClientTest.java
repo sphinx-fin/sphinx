@@ -66,7 +66,8 @@ class AiServiceClientTest {
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        Judgment j = client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", "원금은 지켜지죠", ITEM, "ELS");
+        Judgment j = client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", "원금은 지켜지죠", ITEM, "ELS")
+                .judgment();
 
         assertThat(j.itemId()).isEqualTo("ELS-PRINCIPAL-LOSS-WARNING");
         assertThat(j.grade()).isEqualTo(Grade.U4);

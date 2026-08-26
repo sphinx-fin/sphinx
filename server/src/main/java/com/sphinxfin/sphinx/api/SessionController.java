@@ -10,20 +10,26 @@ import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.NoSuchElementException;
 
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
 @RestController
 @RequestMapping("/sessions")
+@Slf4j
 @RequiredArgsConstructor
 public class SessionController {
 
@@ -92,9 +98,40 @@ public class SessionController {
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException(
                         "항목을 찾을 수 없다: " + body.itemId()));
-        Judgment measured = aiServiceClient.score(
+        var scored = aiServiceClient.score(
                 item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
-        return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
+        // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
+        return ApiResponse.ok(sessionService.recordJudgment(
+                sid, scored.judgment(), scored.maskedAnswer()));
+    }
+
+    /**
+     * 판정 직전 1회, 적합성 모순을 판정한다 (F-DET-002, 이슈 #65).
+     *
+     * 여기서 부르는 이유: 모순 판정은 항목 단위가 아니라 설문 + 세션 전체 발화가 입력이라
+     * (suitability_mismatch.schema.json) 답변이 다 모인 뒤여야 한다. 이미 판정된 세션은
+     * 다시 부르지 않는다 — /judge 는 멱등이고, 재호출하면 같은 입력에 다른 답이 나올 수 있다.
+     *
+     * ❗ai-service 호출이 실패하면 502 로 올리지 않고 UNKNOWN 으로 적는다. 모순 판정이
+     * 안 됐다고 게이트 판정 자체를 막으면 판매가 멈추는데, 그건 이 실패에 비례하지 않는다.
+     * 대신 UNKNOWN 은 R-02b 로 황색이 되므로 "확인 못 했다"가 통과로 새지 않는다 —
+     * 실패를 은폐하지 않으면서(E-EXT-03) 흐름은 유지하는 자리다.
+     */
+    private void detectSuitabilityMismatch(String sid) {
+        Session session = sessionService.get(sid);
+        if (!session.suitabilityNotEvaluated()) {
+            return;
+        }
+        SuitabilityStatus status;
+        try {
+            status = aiServiceClient.detectMismatch(
+                    sid, session.surveyResult(), session.maskedUtterances(),
+                    session.surveySchemaVersion());
+        } catch (AiServiceException e) {
+            log.warn("적합성 모순 판정 실패 — UNKNOWN 으로 기록한다 (session={})", sid, e);
+            status = SuitabilityStatus.UNKNOWN;
+        }
+        sessionService.recordSuitability(sid, status);
     }
 
     /**
@@ -222,16 +259,51 @@ public class SessionController {
     @PreAuthorize("@accessGuard.can('session:judge', #sid)")
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
+        detectSuitabilityMismatch(sid);
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
         // 감사 기준점을 찍는다 — 되돌릴 수 없다. 신호만 보려면 /gate-preview 를 쓴다.
         return ApiResponse.ok(sessionService.judge(sid));
     }
 
     /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
+    /**
+     * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
+     *
+     * 발행을 GET 에서 분리한 이유는 감사다 — report:read 는 audited action 이라 GET 이
+     * 발행까지 하면 로그에서 "읽었다"와 "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을
+     * 열람하는 것만으로 발행 기록이 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @PostMapping("/{sid}/report")
+    public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
+        // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
+        // 목이지만 계약의 필수 필드를 채운다 — previewUrl·downloadUrl 은 PDF 생성 전까지
+        // null 이 계약이다(채우면 404 나는 경로를 계약이 보장하게 된다).
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /**
+     * 발행된 리포트 조회. 상태를 바꾸지 않는다.
+     * 발행한 적 없으면 404 — "아직 교부하지 않았다"와 "교부했다"는 감사에서 구별돼야 한다.
+     */
     @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
-    public ApiResponse<Map<String, String>> report(@PathVariable String sid) {
-        // TODO(정세현): ReportService (F-GTE-004)
-        return ApiResponse.ok(Map.of("reportId", "mock-report-001"));
+    public ApiResponse<Map<String, Object>> report(@PathVariable String sid) {
+        // TODO(정세현): ReportService.latest(sid) 연결. 목은 발행 여부를 모르므로 항상 돌려준다.
+        sessionService.get(sid);
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /** 계약(ReportResponse)의 필수 4필드를 채운 목. URL 둘은 PDF 전까지 null 이 계약이다. */
+    private static Map<String, Object> reportPayload(String sid) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("reportId", "mock-report-001");
+        out.put("sessionId", sid);
+        out.put("generatedAt", Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());
+        out.put("contentHash", "0".repeat(64));
+        out.put("previewUrl", null);
+        out.put("downloadUrl", null);
+        return out;
     }
 }

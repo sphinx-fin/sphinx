@@ -4,6 +4,7 @@ import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -68,7 +69,19 @@ public class SessionService {
      */
     @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment) {
+        return recordJudgment(sessionId, judgment, null);
+    }
+
+    /**
+     * 마스킹된 발화까지 함께 기록한다. 발화는 F-DET-002(세션 전체 발화 입력)에서 다시 쓴다.
+     * maskedAnswer 가 null 이면 발화를 남기지 않는다 — 판정만 넣는 기존 경로용이다.
+     */
+    @Transactional
+    public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer) {
         Session session = get(sessionId);
+        if (maskedAnswer != null) {
+            session.recordUtterance(judgment.itemId(), maskedAnswer);
+        }
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.START)) {
             session.fire(SessionFsm.Event.START);
         }
@@ -89,6 +102,27 @@ public class SessionService {
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
         return judgment;
+    }
+
+    /**
+     * F-DET-002 모순 판정 반영. ai-service 의 status·mismatch 를 세션 상태로 옮기고
+     * **코칭 스코어를 다시 계산한다.**
+     *
+     * 재계산이 필요한 이유: 생성 시점에는 모순을 모르므로 mismatch=false 로 점수를 냈다
+     * (PR #24 의 한계). 모순이 확인되면 vulnerability_weights.yaml 의 mismatch-bonus 가
+     * 붙어야 하는데, 안 붙이면 취약 임계값을 넘겨야 할 고객이 안 넘고 고령자 모드 재설명이
+     * 안 걸린다 — 에러도 로그도 없이 시연만 밋밋해진다(결정 10.12 와 같은 실패 양식).
+     *
+     * UNKNOWN 일 때는 가산하지 않는다. 모순이 확인된 게 아니므로 코칭 가중의 근거가 없다 —
+     * 게이트가 R-02b 로 황색을 내서 재확인을 요구하는 것이 그 상태에 맞는 처리다.
+     */
+    @Transactional
+    public Session recordSuitability(String sessionId, SuitabilityStatus status) {
+        Session session = get(sessionId);
+        session.recordSuitability(status);
+        var coaching = coachingScoreService.score(session, status.isMismatch());
+        session.applyCoaching(coaching.score(), coaching.vulnerable());
+        return repository.save(session);
     }
 
     /**
@@ -192,7 +226,8 @@ public class SessionService {
         }
 
         GateResult result = gateEngine.judge(
-                session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
+                session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
+                session.failedReverifyCount());
         Instant judgedAt = Instant.now();
         session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.JUDGE)) {
@@ -222,11 +257,18 @@ public class SessionService {
         Session session = get(sessionId);
         if (session.judgedAt() != null) {
             GateResult recorded = recordedGate(session);
-            return new GatePreview(recorded.signal(), recorded.ruleTrace(), true, session.judgedAt());
+            return new GatePreview(recorded.signal(), recorded.ruleTrace(), true,
+                    session.judgedAt(), session.suitabilityStatus());
         }
         GateResult result = gateEngine.judge(
-                session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
-        return new GatePreview(result.signal(), result.ruleTrace(), false, null);
+                session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
+                session.failedReverifyCount());
+        // 미리보기는 모순 판정을 부르지 않는다 — GET 이 상태를 바꾸면 안 되고 LLM 호출 비용도
+        // 든다. 대신 아직 평가 전이라는 사실을 실어 보낸다. 안 실으면 signal=GREEN 만 오는데,
+        // /judge 는 모순을 평가하므로 같은 세션이 YELLOW·RED 로 갈릴 수 있다 — 미리보기가
+        // 판정보다 낙관적인 쪽이라 판매자가 재설명 루프를 건너뛰게 된다.
+        return new GatePreview(result.signal(), result.ruleTrace(), false, null,
+                session.suitabilityStatus());
     }
 
     /** 세션에 기록된 게이트 결과(감사 기준점). 재계산하지 않는다. */
@@ -256,6 +298,18 @@ public class SessionService {
      * 신호등 미리보기. recorded=false 면 아직 감사 기준점이 아니다 — 화면이 이걸 확정으로
      * 보관하면 안 된다. judgedAt 이 null 이면 /judge 가 아직 호출되지 않은 세션이다.
      */
+    /**
+     * 게이트 미리보기.
+     *
+     * <p>{@code suitabilityStatus} 를 함께 싣는 이유: 미리보기는 적합성 모순을 평가하지
+     * <b>않는다.</b> {@code NOT_EVALUATED} 인 채로 계산되므로 R-02·R-02b 가 둘 다 안 걸리고,
+     * 전부 U1 이면 GREEN 이 나온다. 같은 세션에서 {@code /judge} 는 모순을 평가하므로
+     * YELLOW·RED 가 될 수 있다 — <b>미리보기가 판정보다 낙관적</b>이라 나쁜 방향이다.
+     *
+     * <p>신호를 바꾸지 않고 그 사실을 드러낸다. {@code NOT_EVALUATED} 면 화면은
+     * "적합성 미확인" 을 함께 보여야 하고, 이 GREEN 을 최종 통과로 그리면 안 된다.
+     */
     public record GatePreview(Signal signal, List<String> ruleTrace,
-                              boolean recorded, Instant judgedAt) {}
+                              boolean recorded, Instant judgedAt,
+                              SuitabilityStatus suitabilityStatus) {}
 }

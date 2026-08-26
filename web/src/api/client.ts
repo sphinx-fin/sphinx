@@ -1,20 +1,26 @@
 /**
  * API 클라이언트. 기준: `contracts/openapi.yaml` (소유: 강희진).
  *
- * 봉투 해제는 **여기 한 곳**에서만 한다. 화면은 `data`만 받고, 실패는 `ApiRequestError`로
- * 던져진다 — 화면마다 `success` 분기를 복제하지 않기 위해서다.
+ * 봉투 해제는 **여기 한 곳**에서만 한다. 화면은 `data` 만 받고, 실패는 `ApiRequestError` 로
+ * 던져진다 — 화면마다 `success` 분기를 복제하면 규약이 깨지는 게 아니라 **조용히 다르게
+ * 해석**된다 (decision-log 1.14).
  *
- * 과도기 주의: 서버가 아직 전 엔드포인트에 봉투를 씌우지 않았다(PR #16 리뷰 1번).
- * `/sessions`·`/answers`·`/judge`는 `ApiResponse<T>`, `/questions/next`·`/simulate`·
- * `/report`·`/products/*`·`/dashboard/*`는 raw 객체다. 그래서 `unwrap`이 봉투 **모양을
- * 보고** 벗긴다 — 엔드포인트별 분기를 화면으로 새어나가게 하지 않으려는 절충이고,
- * 서버가 통일되면 이 함수만 단순해진다.
+ * ── 모양 추측을 걷어낸 이유 (decision-log 1.1 · 10.18) ──────────────────────
+ *
+ * 예전에는 서버가 일부 엔드포인트에만 봉투를 씌워서(`/simulate`·`/report`·`/products/*` 등이
+ * raw) `unwrap` 이 **응답 모양을 보고** 봉투인지 판별했다. #49 로 raw 반환 10개가 전부
+ * `ApiResponse<T>` 로 통일됐고 `EnvelopeContractTest` 가 새 엔드포인트의 누락을 막는다.
+ *
+ * 모양 추측을 남겨두면 안 되는 이유는 그것이 **틀리는 방식**에 있다. raw 응답이 우연히
+ * `success` 불리언 필드를 갖는 순간 그 응답은 봉투로 오인돼 `data`(=undefined)가 화면으로
+ * 흘러간다. 에러도 로그도 없이 빈 화면이 된다. 지금은 봉투가 아니면 **던진다** — 계약 위반이
+ * 조용한 빈 화면이 아니라 눈에 보이는 실패가 되게.
  */
 import type { ApiError, ApiResponse, ErrorCode } from "./types";
 
 const BASE = "/api";
 
-/** 서버가 내려준 실패 봉투 또는 HTTP 오류. 화면은 `code`로 분기한다. */
+/** 서버가 내려준 실패 봉투 또는 HTTP 오류. 화면은 `code` 로 분기한다. */
 export class ApiRequestError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
@@ -27,20 +33,11 @@ export class ApiRequestError extends Error {
   }
 }
 
-/** 봉투 모양인지 판별 — `success` 불리언 + `data`/`error` 키를 가진 객체. */
-function isEnvelope(body: unknown): body is ApiResponse<unknown> {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    typeof (body as { success?: unknown }).success === "boolean" &&
-    ("data" in body || "error" in body)
-  );
-}
-
+/** 실패 봉투에서 코드를 꺼낸다. 봉투가 아니면(프록시 오류 페이지 등) 내부 오류로 본다. */
 function toApiError(body: unknown, status: number): ApiRequestError {
-  if (isEnvelope(body) && body.error) {
-    const err = body.error as ApiError;
-    return new ApiRequestError(err.code, err.message, status);
+  const error = (body as ApiResponse<unknown> | null)?.error as ApiError | undefined;
+  if (error?.code) {
+    return new ApiRequestError(error.code, error.message, status);
   }
   return new ApiRequestError("INTERNAL_ERROR", `요청 실패 (HTTP ${status})`, status);
 }
@@ -55,15 +52,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   const raw = await res.text();
-  const body: unknown = raw ? JSON.parse(raw) : null;
+  let body: unknown = null;
+  try {
+    body = raw ? JSON.parse(raw) : null;
+  } catch {
+    throw new ApiRequestError("INTERNAL_ERROR", `응답을 해석할 수 없습니다 (HTTP ${res.status})`, res.status);
+  }
 
   if (!res.ok) throw toApiError(body, res.status);
 
-  if (isEnvelope(body)) {
-    if (!body.success) throw toApiError(body, res.status);
-    return body.data as T;
+  // 성공 응답은 예외 없이 봉투다(결정 1.1). 아니면 계약 위반이므로 조용히 넘기지 않는다.
+  const envelope = body as ApiResponse<T> | null;
+  if (typeof envelope?.success !== "boolean") {
+    throw new ApiRequestError(
+      "INTERNAL_ERROR",
+      `봉투가 아닌 응답입니다 (${path}) — contracts/openapi.yaml 위반`,
+      res.status,
+    );
   }
-  return body as T;   // 아직 봉투가 안 씌워진 엔드포인트
+  if (!envelope.success) throw toApiError(body, res.status);
+  return envelope.data as T;
 }
 
 export function get<T>(path: string): Promise<T> {

@@ -16,6 +16,12 @@ package com.sphinxfin.sphinx.evidence;
  */
 public interface ImmutableStore {
 
+    /**
+     * 스트림을 미리 연다(멱등). 상시 경합이 있는 스트림은 이걸로 <b>첫 append 경합 창</b>을
+     * 없앤다 — 그 창에서는 닻 행이 없어 잠글 대상이 없고, 동시에 만들면 하나가 진다.
+     */
+    void openStream(String stream);
+
     /** 직전 항목의 hash를 읽어 이어 붙인다. 반환값은 새로 기록된 항목. */
     HashChain.ChainEntry append(String stream, Object payload);
 
