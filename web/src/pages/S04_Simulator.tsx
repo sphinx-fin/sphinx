@@ -25,11 +25,22 @@
  *    "시뮬레이터 열람 완료 이벤트 → 해당 항목 재검증 트리거. 열람 없이 재검증 진입 불가."
  *    세 카드가 실제로 화면에 보였는지를 IntersectionObserver 로 확인해 CTA 를 연다.
  *    체크박스 한 번으로 통과시키지 않는 이유는, 그게 이 서비스가 비판하는 형식 절차이기 때문이다.
+ *
+ * ⑥ **역사 구간과 스냅샷을 화면에 박는다** (P2 재현성)
+ *    "예상이 아니라 과거에 있었던 일"이라고 말하려면 **어느 구간인지**가 보여야 한다.
+ *    `pathMeta`(계약일·상환일·최저 종목·낙인 여부)와 `timeseriesVersion`(지수 스냅샷)을
+ *    표시한다 — 심사자에게는 "이 수치가 어디서 나왔는가"의 실물 근거가 된다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { RiskItem, SessionResponse, SimScenario, SimulateResponse } from "../api/types";
+import type {
+  PathMeta,
+  RiskItem,
+  SessionResponse,
+  SimulateRequest,
+  SimulateResponse,
+} from "../api/types";
 import { useElderlyMode } from "../hooks/useElderlyMode";
 import { formatKrw, formatPnl } from "../lib/money";
 import { cardId, orderScenarios } from "../lib/scenarios";
@@ -48,7 +59,7 @@ export default function S04Simulator() {
   const { elderly, toggle } = useElderlyMode();
 
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
-  const [scenarios, setScenarios] = useState<SimScenario[] | null>(null);
+  const [sim, setSim] = useState<SimulateResponse | null>(null);
   const [pending, setPending] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);   // E-SIM-01
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +91,12 @@ export default function S04Simulator() {
     async (won: number, signal: AbortSignal) => {
       setPending(true);
       try {
-        const res = await post<SimulateResponse>(`/sessions/${sid}/simulate?amount=${won}`);
+        // 금액은 body 로만 보낸다 — 서버에 기본값이 없다(결정 1.19, PR #59). query 로 보내면
+        // amount 가 누락된 것으로 읽혀 400 이다.
+        const body: SimulateRequest = { amount: won };
+        const res = await post<SimulateResponse>(`/sessions/${sid}/simulate`, body);
         if (signal.aborted) return;
-        setScenarios(res.scenarios ?? []);
+        setSim(res);
         setError(null);
       } catch (e) {
         if (!signal.aborted) setError(describe(e));
@@ -102,8 +116,8 @@ export default function S04Simulator() {
 
   /* ── 열람 완료 관측 ──────────────────────────────────────────────────────── */
   const ordered = useMemo(
-    () => (scenarios ? orderScenarios(scenarios) : null),
-    [scenarios],
+    () => (sim ? orderScenarios(sim.scenarios) : null),
+    [sim],
   );
 
   useEffect(() => {
@@ -195,9 +209,7 @@ export default function S04Simulator() {
                     className={`sm__card ${loss ? "sm__card--loss" : "sm__card--gain"}`}
                   >
                     <h2 className="sm__card-name">{s.name}</h2>
-                    <p className="sm__card-path">
-                      {/* TODO(정세현): 응답에 pathMeta(사용한 지수 구간)가 오면 여기에 표시한다 */}
-                    </p>
+                    <p className="sm__card-path">{describePath(s.pathMeta)}</p>
                     <p className="sm__flow">
                       <span className="sm__flow-from">{formatKrw(amount)}</span>
                       <span className="sm__flow-arrow" aria-hidden="true">→</span>
@@ -220,6 +232,13 @@ export default function S04Simulator() {
                 아무도 알 수 없고, <b>가장 나쁜 경우도 똑같이 일어날 수 있습니다.</b>
               </p>
 
+              {/* P2 재현성 — 어느 상품 조건·어느 지수 스냅샷에서 나온 수치인지 (설계 판단 ⑥) */}
+              {sim && (
+                <p className="sm__pending">
+                  {sim.productName} · 지수 스냅샷 {sim.timeseriesVersion}
+                </p>
+              )}
+
               <button
                 type="button"
                 className="sm__btn"
@@ -236,9 +255,22 @@ export default function S04Simulator() {
   );
 }
 
+/**
+ * 역사 구간 라벨 (명세 8절 S-04). "예상이 아니라 과거에 있었던 일"을 화면에서 증명하는 자리다.
+ * 연·월까지만 쓴다 — 일 단위는 정보가 아니라 노이즈다.
+ */
+function describePath(m: PathMeta): string {
+  const period = `${m.startDate.slice(0, 7)} ~ ${m.endDate.slice(0, 7)}`;
+  const worst = `최저 ${m.worstUnderlying} ${Math.round(m.worstFinal * 1000) / 10}%`;
+  return m.knockedIn ? `${period} · ${worst} · 낙인 하회` : `${period} · ${worst}`;
+}
+
 function describe(e: unknown): string {
   if (e instanceof ApiRequestError) {
     if (e.code === "NOT_FOUND") return "세션을 찾을 수 없습니다. 담당자에게 알려 주세요.";
+    // 시뮬레이터 계산은 server 안(SimulatorService)에서 끝난다 — ai-service 를 타지 않으므로
+    // AI_SERVICE_UNAVAILABLE 은 이 경로로 오지 않는다. 금액 검증 실패만 따로 가른다.
+    if (e.code === "VALIDATION_ERROR") return "가입 금액을 확인해 주세요.";
     return "잠시 후 다시 시도해 주세요.";
   }
   return "알 수 없는 오류입니다. 담당자에게 알려 주세요.";
