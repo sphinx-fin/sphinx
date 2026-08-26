@@ -1,0 +1,84 @@
+name: PR 리뷰 담당자 라벨
+
+# CODEOWNERS 가 배정한 리뷰어를 "리뷰대기: <이름>" 라벨로 PR 목록에 드러낸다.
+# GitHub 은 리뷰가 제출되면 그 사람을 reviewRequests 에서 빼므로, 이 워크플로는
+# "아직 리뷰하지 않은 소유자" 집합을 그대로 라벨에 미러링한다 — 붙는 것도 떨어지는 것도 자동이다.
+#
+# 이 라벨은 표시일 뿐 판단 근거가 아니다. 승인 없는 머지를 막는 것은 pr-review-guard.yml 이다.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, review_requested, review_request_removed, closed]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  pull-requests: write
+  issues: write        # 라벨이 없을 때 생성하기 위해 필요하다 (라벨은 저장소 리소스)
+
+concurrency:
+  # 같은 PR 에 리뷰 이벤트가 몰리면 add/remove 가 서로를 덮어쓴다. PR 단위로 직렬화한다.
+  group: pr-reviewer-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    name: 리뷰 대기 라벨 동기화
+    runs-on: ubuntu-latest
+    steps:
+      - name: 라벨 동기화
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+          PREFIX: "리뷰대기: "
+        run: |
+          set -euo pipefail
+
+          # GitHub 로그인 → 표시 이름. CODEOWNERS 가 로그인으로만 쓰므로 여기서 한 번 옮긴다.
+          # 팀원이 바뀌면 .github/CODEOWNERS 와 이 표를 같이 고친다.
+          name_of() {
+            case "$1" in
+              gitIt-sehyeon) echo "정세현" ;;
+              hd0rable)      echo "강희진" ;;
+              yoonjiseok)    echo "윤지석" ;;
+              junseo2323)    echo "오준서" ;;
+              *)             echo "$1" ;;   # 모르는 계정은 로그인 그대로 — 조용히 빠지는 것보다 낫다
+            esac
+          }
+
+          # 닫힌 PR 에는 대기 라벨을 남기지 않는다. 열려 있으면 현재 리뷰 요청이 곧 대기 집합이다.
+          if [ "$PR_STATE" = "closed" ]; then
+            pending=""
+          else
+            pending=$(gh pr view "$PR" --repo "$REPO" --json reviewRequests \
+              --jq '.reviewRequests[] | (.login // .slug)')
+          fi
+
+          want=""
+          for login in $pending; do
+            want="${want}${PREFIX}$(name_of "$login")"$'\n'
+          done
+          want=$(printf '%s' "$want" | sed '/^$/d' | sort -u)
+
+          have=$(gh pr view "$PR" --repo "$REPO" --json labels \
+            --jq '.labels[].name | select(startswith("리뷰대기: "))' | sort -u)
+
+          echo "대기: ${pending:-(없음)}"
+          echo "현재 라벨: ${have:-(없음)}"
+
+          # 더 이상 대기가 아닌 라벨을 뗀다.
+          comm -13 <(printf '%s\n' "$want" | sed '/^$/d') <(printf '%s\n' "$have" | sed '/^$/d') | while read -r l; do
+            echo "제거: $l"
+            gh pr edit "$PR" --repo "$REPO" --remove-label "$l"
+          done
+
+          # 새로 대기가 된 라벨을 붙인다. 라벨이 저장소에 없으면 만들고 진행한다.
+          comm -23 <(printf '%s\n' "$want" | sed '/^$/d') <(printf '%s\n' "$have" | sed '/^$/d') | while read -r l; do
+            echo "추가: $l"
+            gh label create "$l" --repo "$REPO" --color FBCA04 \
+              --description "${l#$PREFIX} 리뷰 대기 (CODEOWNERS 배정, 리뷰 제출 시 자동 해제)" \
+              >/dev/null 2>&1 || true
+            gh pr edit "$PR" --repo "$REPO" --add-label "$l"
+          done
