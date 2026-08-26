@@ -25,7 +25,9 @@ public class MethodSecurityConfig {
      * (CLAUDE.md F-CMN-002 분담), 그 경계를 지키면 정책 파일과 등록 방식이 서로를 안 건드린다.
      */
     @Bean
-    public AccessPolicy accessPolicy() {
-        return new AccessPolicy();
+    public AccessPolicy accessPolicy(RbacPolicyFile policyFile) {
+        // 정책 파일은 읽기 전용 로더(RbacPolicyFile)가 읽고 해석은 AccessPolicy가 한다.
+        // 두 곳에서 파싱하면 같은 yaml 의 두 해석이 생긴다 — 결정 10.5 구현 시 추가된 의존이다.
+        return new AccessPolicy(policyFile);
     }
 }
