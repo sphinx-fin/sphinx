@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -99,6 +100,35 @@ class SimulateContractTest {
         List<String> severities = new ArrayList<>();
         body.path("data").path("scenarios").forEach(s -> severities.add(s.path("severity").asText()));
         assertThat(severities).containsExactlyInAnyOrder("worst", "mid", "best");
+    }
+
+    @Test
+    @DisplayName("timeseriesVersion 이 data/timeseries/VERSION 의 snapshot 과 같다")
+    void snapshotMatchesVersionFile() throws Exception {
+        // 이 값의 용도가 다른 목값과 다르다 — "이 결과는 이 스냅샷으로 재현된다"는 주장이다.
+        // VERSION 이 바뀌었는데 상수가 안 따라오면 화면이 틀린 근거를 들고 재현 가능하다고
+        // 말한다. 없는 것보다 나쁘다 — 심사자가 그 값으로 대조하면 안 맞는다.
+        // VERSION 은 F-SIM-001 소유자 파일이라 그쪽이 바꿔도 이 코드는 안 따라온다.
+        String snapshot = null;
+        for (String line : Files.readAllLines(Path.of("..", "data", "timeseries", "VERSION"))) {
+            if (line.startsWith("snapshot:")) {
+                snapshot = line.substring("snapshot:".length()).trim();
+                break;
+            }
+        }
+        assertThat(snapshot).as("VERSION 에 snapshot 이 없다").isNotBlank();
+
+        String sid = createSession();
+        JsonNode body = new ObjectMapper().readTree(
+                mvc.perform(post("/sessions/" + sid + "/simulate")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {"amount":50000000}"""))
+                        .andReturn().getResponse().getContentAsString());
+        assertThat(body.path("data").path("timeseriesVersion").asText())
+                .as("응답의 timeseriesVersion 이 VERSION 의 snapshot 과 다르다 — "
+                        + "재현 근거가 거짓이 된다")
+                .isEqualTo(snapshot);
     }
 
     @Test
