@@ -38,6 +38,20 @@ import java.util.Map;
  *
  * <p><b>자기 자신의 hash는 대상에서 빠진다</b> — 자기를 포함하면 계산이 성립하지 않는다.
  * 그래서 {@link ChainEntry#hash()}는 검증할 때 <i>재계산 결과와 대조하는 값</i>이지 입력이 아니다.
+ *
+ * <h2>한계 — 꼬리 절단은 체인만으로 탐지되지 않는다</h2>
+ *
+ * <p>체인이 잡는 것은 <b>남아 있는 항목들 사이의 모순</b>이다. 끝에서부터 잘라내면 남은 부분은
+ * 그 자체로 완전한 체인이라 {@link #verify}가 통과한다. 전부 지우면 빈 체인이 되고 그것도
+ * 통과한다 — 이건 구현 결함이 아니라 해시 체인의 구조적 성질이다.
+ *
+ * <p>그런데 <b>감사에서 실제로 지우고 싶은 것은 대개 최근 기록</b>이다 — 방금 승인한 적색
+ * 오버라이드, 방금 차단당한 접근 시도. 중간을 빼는 것보다 이쪽이 현실적인 조작이라, 체인만
+ * 두고 "손대면 드러난다"고 하면 안 된다.
+ *
+ * <p>막으려면 <b>닻이 체인 밖에 있어야 한다.</b> {@link ImmutableStore}가 스트림별로 머리 hash와
+ * 항목 수를 별도로 들고 검증에 넘기는 자리다(PR #79 리뷰). {@link Verification#checked()}를
+ * 돌려주는 것은 그 대조를 할 수 있게 하려는 것이고, <b>기대값을 주는 쪽은 저장소다.</b>
  */
 public final class HashChain {
 
@@ -53,10 +67,12 @@ public final class HashChain {
             throw new IllegalArgumentException(
                     "prevHash 는 64자 hex 여야 한다(첫 항목은 GENESIS): " + prevHash);
         }
+        // 넣는 순서는 결과에 영향이 없다(JCS 가 키를 정렬한다). 정규화 결과와 같은 순서로 적어
+        // 둬서, 규약 문면과 코드를 나란히 놓고 볼 때 헷갈리지 않게 한다.
         Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("payload", payload);
         envelope.put("prevHash", prevHash);
         envelope.put("seq", seq);
-        envelope.put("payload", payload);
         return sha256Hex(CanonicalJson.bytes(envelope));
     }
 
@@ -100,7 +116,8 @@ public final class HashChain {
      * seq는 저장된 값이고, <b>둘이 어긋나는 것 자체가 정보</b>다(중간이 통째로 빠지면 갈린다).
      *
      * @param ok        전부 통과했는가
-     * @param checked   검사한 항목 수
+     * @param checked   끊긴 지점까지 통과한 항목 수(실패한 항목은 세지 않는다).
+     *                  꼬리 절단을 잡으려면 호출자가 기대 개수와 대조해야 한다 — 클래스 주석의 한계 절 참조
      * @param brokenAt  끊긴 항목의 인덱스(0-based). 통과했으면 -1
      * @param brokenSeq 끊긴 항목에 저장돼 있던 seq. 통과했으면 -1
      * @param reason    끊긴 이유. 통과했으면 빈 문자열

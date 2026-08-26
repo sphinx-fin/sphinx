@@ -202,6 +202,31 @@ class HashChainTest {
         }
 
         @Test
+        @DisplayName("꼬리 절단은 체인만으로 잡히지 않는다 — 닻이 체인 밖에 있어야 한다")
+        void tailTruncationIsNotDetectedByChainAlone() {
+            List<Entry> full = chainOf(
+                    judgment("A", "U3"), judgment("A", "U1"), judgment("B", "U1"),
+                    judgment("C", "U2"), judgment("C", "U1"));
+            assertThat(HashChain.verify(full).checked()).isEqualTo(5);
+
+            // 끝에서 둘을 지운다. 남은 셋은 그 자체로 완전한 체인이다.
+            List<Entry> truncated = new ArrayList<>(full.subList(0, 3));
+            HashChain.Verification result = HashChain.verify(truncated);
+
+            assertThat(result.ok())
+                    .as("해시 체인의 구조적 성질이라 구현으로 못 막는다 — 현재 동작을 박아둔다. "
+                            + "ImmutableStore 가 스트림별 머리·개수를 밖에 들고 대조하면 그때 이 테스트가 바뀐다")
+                    .isTrue();
+            assertThat(result.checked())
+                    .as("호출자가 기대 개수(5)를 알면 여기서 잡을 수 있다 — 기대값을 주는 쪽이 저장소다")
+                    .isEqualTo(3);
+
+            assertThat(HashChain.verify(List.of()).ok())
+                    .as("전부 지운 체인과 빈 체인이 구별되지 않는 것도 같은 한계다")
+                    .isTrue();
+        }
+
+        @Test
         @DisplayName("같은 판정을 두 번 적재해도 체인은 유효하다 — 중복을 흡수하지 않는다 (ADR-004)")
         void allowsDuplicatePayloads() {
             HashChain.Verification result =
