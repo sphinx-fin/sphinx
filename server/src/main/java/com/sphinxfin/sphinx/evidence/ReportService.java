@@ -1,5 +1,18 @@
 package com.sphinxfin.sphinx.evidence;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+
 /**
  * F-GTE-004 이해 기록 리포트. 소유: 정세현
  * ① 불변 JSON(해시 체인) ② PDF ③ 고객 교부용 요약. 원문 응답 보존 기간 정책 포함.
@@ -7,7 +20,177 @@ package com.sphinxfin.sphinx.evidence;
  * 저장·해시는 {@link ImmutableStore}·{@link HashChain}·{@link CanonicalJson}에 위임한다.
  * 이 클래스가 직접 직렬화하거나 해시를 만들면 AuditLog와 갈라진다.
  * 스트림 이름: "report:{sessionId}"
+ *
+ * <h2>리포트는 세션이 아니라 기록에서 만든다</h2>
+ *
+ * <p>내용을 전부 {@link ImmutableStore} 재생에서 조립한다. {@code Session}을 읽지 않는다 —
+ * 세션은 가변이고 항목별 <b>최신</b> 판정만 들고 있어서, 세션에서 만들면 리포트가
+ * <b>"최신"만 낼 수 있고 "왜 황색이었다가 통과했는가"에 답할 수 없다</b>(5.12).
+ * 그리고 세션과 기록이 어긋났을 때 리포트가 어느 쪽을 말하는지 모호해진다.
+ *
+ * <h2>contentHash는 내용의 해시다 — 체인 항목 해시가 아니다</h2>
+ *
+ * <p>{@code sha256(CanonicalJson.bytes(content))}이고 {@code prevHash}·{@code seq}는 안 들어간다.
+ * 이유는 <b>대조하는 사람이 누구인가</b>에 있다. 계약이 요약본에도 *"전문과 같은 해시"*를 싣게
+ * 한 것은 <b>고객이 받은 문서를 나중에 대조할 수 있어야</b> 하기 때문인데, 체인 항목 해시는
+ * 위치(앞 항목·순번)에 의존하므로 <b>문서만 가진 사람은 재계산할 수 없다.</b> ADR-008이 우리
+ * 고유 규칙 대신 RFC 8785를 그대로 쓴 것과 같은 이유다.
+ *
+ * <p>발행 사실은 여전히 체인에 남는다 — 리포트 항목이 스트림에 append되고 그 payload가
+ * contentHash를 담는다. 그래서 검증은 두 층이다: 체인이 온전한가({@code HashChain.verify}),
+ * 그리고 기록에서 다시 조립한 내용이 그 해시를 내는가.
+ *
+ * <p><b>{@code generatedAt}은 내용에 안 들어간다.</b> 들어가면 같은 내용을 두 번 발행할 때마다
+ * 해시가 달라져서 "이 문서가 그 문서인가"를 대조할 수 없다. 발행 시각은 체인 항목의
+ * {@code at}이 갖는다.
  */
+@Service
 public class ReportService {
-    // TODO(정세현)
+
+    /** 리포트 발행 기록의 payload 판별자. 조립 대상에서 스스로를 빼는 데도 쓴다. */
+    static final String REPORT_TYPE = "report";
+
+    private final ImmutableStore store;
+
+    public ReportService(ImmutableStore store) {
+        this.store = store;
+    }
+
+    /** 리포트 메타. 계약 {@code ReportResponse}·{@code ReportSummaryResponse}가 공유하는 부분이다. */
+    public record Report(String reportId, String sessionId, Instant generatedAt, String contentHash) {}
+
+    /**
+     * 기록에서 리포트 내용을 조립한다. <b>부작용이 없다</b> — 미리보기·PDF 렌더·검증이 이걸 쓴다.
+     *
+     * <p>항목별로 판정 <b>이력</b>을 모은다. 재검증이 있었으면 {@code A:U3 → A:U1}이 순서대로
+     * 남는다(5.12). 게이트 신호의 변천과 오버라이드 승인도 각각 시간순으로 담는다.
+     */
+    public Map<String, Object> render(String sessionId) {
+        Map<String, List<Map<String, Object>>> byItem = new TreeMap<>();
+        List<Map<String, Object>> gateHistory = new ArrayList<>();
+        List<Map<String, Object>> overrides = new ArrayList<>();
+
+        for (HashChain.ChainEntry entry : store.replay(StoredEvidenceRecorder.streamOf(sessionId))) {
+            Map<String, Object> payload = asMap(entry.payload());
+            switch (String.valueOf(payload.get("type"))) {
+                case "judgment" -> {
+                    Map<String, Object> judgment = asMap(payload.get("judgment"));
+                    byItem.computeIfAbsent(String.valueOf(judgment.get("itemId")), k -> new ArrayList<>())
+                            .add(judgmentHistoryEntry(judgment, payload));
+                }
+                case "gate" -> gateHistory.add(ordered(
+                        "at", payload.get("at"),
+                        "signal", payload.get("signal"),
+                        "ruleTrace", payload.get("ruleTrace")));
+                case "override" -> overrides.add(ordered(
+                        "at", payload.get("at"),
+                        "approver", payload.get("approver"),
+                        "reason", payload.get("reason")));
+                default -> { /* 리포트 발행 기록은 조립 대상이 아니다 — 자기를 포함하면 순환이다 */ }
+            }
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        byItem.forEach((itemId, history) -> items.add(ordered("itemId", itemId, "history", history)));
+
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("sessionId", sessionId);
+        content.put("items", items);
+        content.put("gateHistory", gateHistory);
+        content.put("overrides", overrides);
+        return content;
+    }
+
+    /** 내용의 해시. 문서만 가진 사람도 재계산할 수 있어야 하므로 위치 정보를 안 섞는다. */
+    public String contentHash(Map<String, Object> content) {
+        return sha256Hex(CanonicalJson.bytes(content));
+    }
+
+    /**
+     * 리포트를 발행한다. <b>내용이 직전 발행과 같으면 다시 발행하지 않고 그것을 돌려준다.</b>
+     *
+     * <p>조회할 때마다 새 항목을 쌓으면 체인이 리포트로 채워지고, 무엇보다 <b>같은 내용의 문서가
+     * 매번 다른 발행 기록을 갖는다.</b> 반대로 내용이 달라졌으면(판정이 더 쌓였으면) 새로
+     * 발행해야 한다 — 그때 이전 리포트를 지우지는 않는다. 두 발행 기록이 나란히 남는 것이
+     * <b>"교부 시점에 무엇이 적혀 있었는가"</b>에 답하는 방법이다.
+     */
+    @Transactional
+    public Report issue(String sessionId, Instant at) {
+        Map<String, Object> content = render(sessionId);
+        String hash = contentHash(content);
+
+        Optional<Report> unchanged = latest(sessionId).filter(r -> r.contentHash().equals(hash));
+        if (unchanged.isPresent()) {
+            return unchanged.get();
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", REPORT_TYPE);
+        payload.put("sessionId", sessionId);
+        payload.put("at", at);
+        payload.put("contentHash", hash);
+        HashChain.ChainEntry recorded = store.append(StoredEvidenceRecorder.streamOf(sessionId), payload);
+
+        return new Report(reportId(sessionId, recorded.seq()), sessionId, at, hash);
+    }
+
+    /** 마지막 발행 기록. 없으면 비어 있다 — 아직 리포트를 낸 적이 없는 세션이다. */
+    public Optional<Report> latest(String sessionId) {
+        Report found = null;
+        for (HashChain.ChainEntry entry : store.replay(StoredEvidenceRecorder.streamOf(sessionId))) {
+            Map<String, Object> payload = asMap(entry.payload());
+            if (REPORT_TYPE.equals(payload.get("type"))) {
+                found = new Report(reportId(sessionId, entry.seq()), sessionId,
+                        Instant.parse(String.valueOf(payload.get("at"))),
+                        String.valueOf(payload.get("contentHash")));
+            }
+        }
+        return Optional.ofNullable(found);
+    }
+
+    /** 발행 기록의 위치에서 유도한다 — 난수를 쓰면 같은 발행이 재현되지 않는다. */
+    static String reportId(String sessionId, long seq) {
+        return "report-" + sessionId + "-" + seq;
+    }
+
+    private static Map<String, Object> judgmentHistoryEntry(Map<String, Object> judgment,
+                                                            Map<String, Object> payload) {
+        Map<String, Object> history = new LinkedHashMap<>();
+        history.put("at", payload.get("at"));
+        history.put("reverifyCount", payload.get("reverifyCount"));
+        history.put("grade", judgment.get("grade"));
+        history.put("confidence", judgment.get("confidence"));
+        history.put("evidence", judgment.get("evidence"));
+        history.put("reason", judgment.get("reason"));
+        history.put("misconceptionType", judgment.get("misconceptionType"));
+        return history;                     // 색은 담지 않는다 (ADR-004 §5)
+    }
+
+    private static Map<String, Object> ordered(Object... keyValues) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            map.put(String.valueOf(keyValues[i]), keyValues[i + 1]);
+        }
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(Object value) {
+        return (Map<String, Object>) value;
+    }
+
+    private static String sha256Hex(byte[] input) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 은 모든 JVM 이 제공해야 한다", e);
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : digest.digest(input)) {
+            hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+            hex.append(Character.forDigit(b & 0xF, 16));
+        }
+        return hex.toString();
+    }
 }
