@@ -197,3 +197,93 @@ def test_variable_template_also_extracts():
 def test_unknown_product_type_raises():
     with pytest.raises(templates.TemplateNotFound):
         _extract(product_type="BOND")
+
+
+# ── 인용 좁히기 구제 (실측 실패 모양) ─────────────────────────────────────────
+#: 실측된 실패는 `ELS-EARLY-REDEMPTION-CONDITION` 이었다. 모델이 조건 문장 뒤에 표 열
+#: 조각을 붙여 긴 인용을 냈고, 그 문자열은 원문에 존재하지 않아 항목이 통째로 실패했다.
+#: 간헐적이라(LLM 비결정) 재현 대신 그 **모양**을 픽스처로 고정한다.
+_TRUE_CONDITION = (
+    "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKKEI225 지수, "
+    "EuroStoxx50 지수의 자동조기상환평가가격이 모두 각각의 최초기준가격의 85%인"
+)
+_TABLE_BLEED = " 조기상환지급일에 자동조기상환되며 상환금액은 원금 × [100%+ 5.50%]"
+
+
+def _early_redemption_expectation() -> dict:
+    return next(e for e in _doc()["_expected_risk_items"]
+                if e["item_id"] == "ELS-EARLY-REDEMPTION-CONDITION")
+
+
+def test_rescue_recovers_the_contract_span_from_a_bleeding_quote():
+    """★ 구제가 계약 샘플의 정답 스팬을 그대로 되찾아야 한다.
+
+    "대충 짧게 잘라 아무 데나 붙었다" 와 "조건 문장을 정확히 찾았다" 를 가르는 유일한
+    검사다 — 좁히기가 엉뚱한 구간에 붙으면 스팬이 달라진다.
+    """
+    doc = _doc()
+    candidate = ExtractedCandidate(
+        item_id="ELS-EARLY-REDEMPTION-CONDITION", page=7,
+        quote=_TRUE_CONDITION + _TABLE_BLEED,
+    )
+    assert extraction._resolve(candidate, doc, []) is None, "이 인용은 원문에 없어야 한다"
+
+    warnings: list[Any] = []
+    span = extraction._rescue(candidate, doc, warnings)
+    expected = _early_redemption_expectation()
+    assert span is not None
+    assert span["source_span"] == expected["source_span"]
+    assert span["value_text"] == expected["value_text"]
+    assert [w.code for w in warnings] == ["QUOTE_NARROWED"]
+
+
+def test_rescue_refuses_to_drop_every_number():
+    """수치가 하나도 안 남는 좁히기는 실패로 남긴다 (P6).
+
+    조건에 숫자가 없는 RiskItem 은 실패보다 나쁘다 — 추출은 성공으로 보이는데 채점
+    프롬프트의 `[상품 조건 원문]` 에 수치가 없어 "수치로 언급" 루브릭이 검증 불가가 된다.
+    """
+    doc = _doc()
+    candidate = ExtractedCandidate(
+        item_id="ELS-NO-LISTING", page=14,
+        quote="본 증권은 상장하지 않을 예정이므로 옆열 999 조각",
+    )
+    warnings: list[Any] = []
+    assert extraction._rescue(candidate, doc, warnings) is None
+    assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
+    assert "999" in warnings[0].message
+
+
+def test_rescue_reports_which_numbers_were_dropped():
+    """표 열 누출은 가짜 수치를 데려온다. 무엇이 떨어졌는지 사람이 볼 수 있어야 한다."""
+    doc = _doc()
+    candidate = ExtractedCandidate(
+        item_id="ELS-EARLY-REDEMPTION-CONDITION", page=7,
+        quote=_TRUE_CONDITION + _TABLE_BLEED,
+    )
+    warnings: list[Any] = []
+    extraction._rescue(candidate, doc, warnings)
+    message = warnings[0].message
+    assert "사람 확인 필요" in message
+    assert "5.50" in message and "100" in message   # 누출 열의 수치
+    assert "85" in message                          # 조건의 수치는 남았다
+
+
+def test_narrowing_keeps_word_boundaries_not_just_sentences():
+    """표 열 누출은 문장부호를 데려오지 않는다 — 문장 경계로만 자르면 못 구제한다."""
+    quote = _TRUE_CONDITION + _TABLE_BLEED
+    assert "." not in quote.replace("5.50", "").replace("S&P500", ""), "이 픽스처엔 마침표가 없다"
+    assert extraction._narrowed_candidates(quote), "어절 단위 후보가 나와야 한다"
+
+
+def test_narrowing_tries_longest_windows_first():
+    """짧은 조각이 먼저 걸리면 조건 문면이 잘려나간다."""
+    candidates = extraction._narrowed_candidates("가 나 다 라 마 바 사 아 자 차 카 타")
+    lengths = [len(c) for c in candidates]
+    assert lengths == sorted(lengths, reverse=True)
+
+
+def test_narrowing_is_bounded():
+    """`loose` 는 낱자마다 `\\s*` 를 끼운 정규식이다. 상한 없이 돌리면 실패 항목마다 느려진다."""
+    long_quote = " ".join(f"토큰{i}" for i in range(60))
+    assert len(extraction._narrowed_candidates(long_quote)) <= extraction.MAX_RESCUE_ATTEMPTS

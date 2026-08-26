@@ -164,6 +164,8 @@ class ExtractionWarning(Strict):
         "LOOSE_MATCH",           # 낱자 사이 개행까지 허용해 찾음 — 거짓 양성 가능, 사람 확인 필요
         "AMBIGUOUS_SPAN",        # 같은 문면이 페이지에 여러 번 — 어느 것인지 확정 불가
         "PAGE_CORRECTED",        # 모델이 지목한 페이지에 없어 다른 페이지에서 찾음
+        "QUOTE_NARROWED",        # 긴 인용이 안 풀려 문장 경계로 좁혀 해소 — 수치는 전부 보존
+        "NARROWING_REFUSED",     # 좁히면 풀리지만 수치가 빠져 거부 (P6) → extraction_failed
         "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
         "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
     ]

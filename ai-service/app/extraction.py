@@ -34,7 +34,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import parsing, templates
+import re
+
+from . import numerics, parsing, templates
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import (
     Condition,
@@ -136,6 +138,8 @@ def _to_risk_item(
     """인용을 원문 스팬으로 해소한다. 못 하면 None — 호출자가 실패 항목으로 만든다."""
     span = _resolve(candidate, doc, warnings)
     if span is None:
+        span = _rescue(candidate, doc, warnings)
+    if span is None:
         warnings.append(ExtractionWarning(
             code="SPAN_UNRESOLVED", item_id=candidate.item_id,
             message=f"인용을 원문에서 찾지 못했다: {candidate.quote[:40]!r}",
@@ -191,6 +195,99 @@ def _resolve(candidate: ExtractedCandidate, doc: dict, warnings: list[Extraction
                 message=f"모델이 p{candidate.page} 라고 했으나 p{page} 에서 찾았다",
             ))
             return span
+    return None
+
+
+# ── 인용 좁히기 구제 (P6 조건부) ──────────────────────────────────────────────
+#: 이보다 짧아지면 어느 조건인지 특정되지 않는다.
+MIN_NARROWED_QUOTE_CHARS = 12
+
+#: 좁히기 시도 상한. `loose` 전략은 낱자마다 `\s*` 를 끼운 정규식이라 페이지 전체 검색이
+#: 싸지 않다. 실패한 항목에만 도는 경로지만 상한을 둔다 — 긴 것부터 보므로 답은 앞에서 나온다.
+MAX_RESCUE_ATTEMPTS = 160
+
+_WS_SPLIT = re.compile(r"\s+")
+
+
+def _narrowed_candidates(quote: str) -> list[str]:
+    """좁힌 인용 후보. **긴 것부터** — 조건 문면을 최대한 남긴다.
+
+    문장 경계로만 자르면 안 된다. 표가 섞인 구간의 열 누출은 **문장부호를 데리고 오지
+    않는다** — 실측 원문이 이렇게 생겼다.
+
+        …최초기준가격의 85%인 / 조기상환지급일에 자동조기상환되며, 상환금액은 (연 11.00%)
+        환 다음과 같습니다.
+
+    `(연 11.00%)` 와 `환` 이 옆 열에서 끼어든 조각이고 그 앞에 마침표가 없다. 그래서
+    **어절 단위 연속 구간**을 본다. 앞에 끼는 경우도 뒤에 끼는 경우도 있어 양쪽을 다 만든다.
+    """
+    tokens = _WS_SPLIT.split(quote.strip())
+    if len(tokens) < 2:
+        return []
+    out: list[str] = []
+    for size in range(len(tokens) - 1, 0, -1):
+        for i in range(len(tokens) - size + 1):
+            window = " ".join(tokens[i:i + size])
+            if len(window) >= MIN_NARROWED_QUOTE_CHARS:
+                out.append(window)
+            if len(out) >= MAX_RESCUE_ATTEMPTS:
+                return out
+    return out
+
+
+def _rescue(candidate: ExtractedCandidate, doc: dict, warnings: list[ExtractionWarning]):
+    """인용이 안 풀릴 때 어절 경계로 좁혀 다시 해소한다. 결정론이다 — LLM 을 다시 부르지 않는다.
+
+    ## 왜 "숫자 전부 보존" 이 아닌가
+
+    처음에는 원 인용의 수치가 하나도 빠지지 않을 때만 받도록 썼다. **그 규칙이 정답을
+    거부한다.** 표 열 누출이 가짜 수치를 데려오기 때문이다 — 위 예에서 `11.00%` 는 옆 열
+    값이고 조건의 수치는 `85%` 다. 전부 보존을 요구하면 `85%` 만 남은 올바른 좁히기가
+    탈락한다.
+
+    ## 실제 규칙 — 수치가 **하나도 안 남는 좁히기는 거부**한다 (P6)
+
+    막아야 하는 것은 `condition.value_text` 에 숫자가 없는 RiskItem 이다. 추출은 성공한
+    것처럼 보이는데
+
+      · 채점 프롬프트의 `[상품 조건 원문]` 에 수치가 없어 "수치로 언급" 을 요구하는 루브릭이
+        검증 불가가 되고 (`VAR-EARLY-SURRENDER-RATIO` 류)
+      · 재설명은 원문에 없는 숫자를 전부 환각으로 처리한다 (`numerics.fabricated`)
+
+    즉 조용히 등급을 망친다. 그건 실패보다 나쁘다 — 실패는 S-01 큐에 뜬다.
+
+    수치가 일부만 남은 경우는 **받되 사람 확인으로 남긴다.** 어느 수치가 떨어졌는지 경고에
+    적는다. 긴 것부터 보므로 첫 성공은 내용이 가장 많이 남은 구간이고, 누출 조각만 남는
+    구간은 짧아서 뒤로 밀린다.
+    """
+    want = set(numerics.numbers(candidate.quote))
+    refused: tuple[str, set[str]] | None = None
+
+    for narrowed in _narrowed_candidates(candidate.quote):
+        probe = candidate.model_copy(update={"quote": narrowed})
+        span = _resolve(probe, doc, [])       # 이 단계의 PAGE_CORRECTED 는 삼킨다
+        if span is None:
+            continue
+        kept = set(numerics.numbers(narrowed))
+        if want and not kept:
+            refused = refused or (narrowed, kept)
+            continue
+        dropped = sorted(want - kept)
+        detail = "수치는 전부 남았다" if not dropped else f"사람 확인 필요: 빠진 수치 {dropped}"
+        warnings.append(ExtractionWarning(
+            code="QUOTE_NARROWED", item_id=candidate.item_id,
+            message=(f"인용을 {len(candidate.quote)}자 → {len(narrowed)}자로 좁혀 해소했다. "
+                     f"{detail}. 남은 수치 {sorted(kept) or '없음'}"),
+        ))
+        return span
+
+    if refused is not None:
+        warnings.append(ExtractionWarning(
+            code="NARROWING_REFUSED", item_id=candidate.item_id,
+            message=(f"좁힌 인용({len(refused[0])}자)은 원문에서 찾았지만 수치가 하나도 남지 "
+                     f"않아 거부했다 — 원 인용 수치 {sorted(want)}. 조건에서 수치가 사라지면 "
+                     f"채점이 조용히 망가진다"),
+        ))
     return None
 
 
