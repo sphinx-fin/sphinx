@@ -21,7 +21,8 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 | `app/main.py` | 엔트리포인트 + PII 입구 미들웨어 + `/healthz` |
 | `app/routes.py` | `/internal/*` 라우트. 얇게 유지 — 기능 로직은 각 모듈의 순수 함수 |
 | `app/schemas.py` | `contracts/*.schema.json`의 pydantic 미러 (계약의 진실은 `contracts/`) |
-| `app/pii.py` | P3 입구 재검사 |
+| `app/pii.py` | P3 입구 재검사 (범위: customer / public_document) |
+| `app/numerics.py` | 조건값 수치 추출·대조 — F-INT-002·F-INT-004 공용 |
 | `app/rubrics.py` | 루브릭 로더 (`status: draft`는 정답지 대조 전) |
 | `app/templates.py` | 상품유형 템플릿 로더 — **F-EXT-003 재현율 분모** |
 | `app/llm_client.py` | LLM 어댑터 (OpenAI 호환 엔드포인트) |

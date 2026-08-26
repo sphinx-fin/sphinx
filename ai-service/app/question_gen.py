@@ -12,7 +12,10 @@
 두 곳에서 가져온다.
 
   1. **루브릭 `required_elements`** — 이해로 인정되려면 고객이 말해야 하는 것. 정의상 정답이다.
-  2. **RiskItem 조건 원문의 수치** — 퍼센트·금액·기간. `amount`·`condition` 유형이 묻는 대상.
+  2. **RiskItem 조건 원문의 숫자** — `amount`·`condition` 유형이 묻는 대상.
+     **단위를 보지 않는다.** 원문이 `45%` 인데 질문이 "45 아래로 떨어지면" 이라고 해도
+     답을 알려준 것이다. 재설명(F-INT-004)은 반대로 단위까지 일치해야 하는데, 그쪽은
+     환각을 막는 것이고 이쪽은 정답 노출을 막는 것이라 규칙이 다르다.
 
 `misconception_conditions` 는 정답이 아니라 오답이므로 검사하지 않는다. 다만 오답을
 질문에 심으면 유도심문이 되므로 그것도 막는다.
@@ -25,11 +28,9 @@
 """
 from __future__ import annotations
 
-import re
-import unicodedata
 from pathlib import Path
 
-from . import rubrics, templates
+from . import numerics, rubrics, templates
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import QuestionDraft, QuestionResponse, RiskItem
 
@@ -39,12 +40,14 @@ PROMPT_VERSION = "F-INT-002_v1"
 QUESTION_TYPES = ("situation", "amount", "condition")
 MAX_ATTEMPTS = 3
 
-#: 조건 원문에서 정답으로 취급하는 수치. 퍼센트·금액·기간·배수.
-_NUMERIC = re.compile(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|원|만원|억|개월|년|영업일|배)")
 #: 정답 어구 대조에 쓰는 최소 길이. 짧은 조각은 우연히 겹친다("원금", "손실").
 MIN_LEAK_NGRAM = 6
 
-_WS = re.compile(r"\s+")
+#: 폴백 질문이 보고하는 유형. 폴백 문장들이 전부 "…어떻게 되는지 말씀해 주시겠어요" 형태의
+#: 상황설명형이라 사실에 맞고, **호출마다 달라지지 않는다.** 이전에는 allowed[0] 을 써서
+#: 같은 문장이 1회차엔 situation, 2회차엔 amount 로 보고돼 유형 커버리지가 조용히 틀렸다
+#: (PR #60 리뷰). `fallback_used=True` 가 유형이 선택된 것이 아님을 알린다.
+FALLBACK_QUESTION_TYPE = "situation"
 
 
 def generate(
@@ -78,15 +81,10 @@ def generate(
             question_type=draft.question_type, fallback_used=False,
         )
 
-    return _fallback(risk_item, template_item, allowed)
+    return _fallback(risk_item, template_item)
 
 
 # ── 정답 노출 검사 ────────────────────────────────────────────────────────────
-def _canonical(text: str) -> str:
-    """대조용 정규화 — NFC + 공백 제거. scoring·mismatch 와 같은 규칙."""
-    return _WS.sub("", unicodedata.normalize("NFC", text))
-
-
 def answer_fragments(risk_item: RiskItem) -> tuple[str, ...]:
     """질문에 들어가면 안 되는 문면 조각.
 
@@ -94,7 +92,7 @@ def answer_fragments(risk_item: RiskItem) -> tuple[str, ...]:
     검사한다 — 루브릭이 없다고 검사를 건너뛰면 그 항목만 유도심문이 통과한다.
     """
     fragments: list[str] = []
-    fragments.extend(_NUMERIC.findall(risk_item.condition.value_text))
+    fragments.extend(numerics.numbers(risk_item.condition.value_text))
     try:
         rubric = rubrics.get(risk_item.item_id)
     except rubrics.RubricNotFound:
@@ -109,12 +107,12 @@ def leaked_fragments(question: str, forbidden: tuple[str, ...]) -> list[str]:
 
     긴 어구는 부분 포함으로도 잡는다 — 루브릭 조항을 그대로 쓰지 않아도 핵심 구절만
     옮기면 답을 알려준 것이다. 짧은 조각(MIN_LEAK_NGRAM 미만)은 우연 일치가 많아
-    수치에 한해서만 본다.
+    숫자에 한해서만 본다 — 숫자는 조사·어미가 붙지 않아 우연 일치가 거의 없다.
     """
-    q = _canonical(question)
+    q = numerics.canonical(question)
     hits = []
     for fragment in forbidden:
-        f = _canonical(fragment)
+        f = numerics.canonical(fragment)
         if not f:
             continue
         if len(f) < MIN_LEAK_NGRAM:
@@ -134,7 +132,7 @@ def _shares_long_run(fragment: str, question: str) -> bool:
 
 # ── 폴백 ──────────────────────────────────────────────────────────────────────
 def _fallback(
-    risk_item: RiskItem, template_item: templates.TemplateItem, allowed: list[str]
+    risk_item: RiskItem, template_item: templates.TemplateItem
 ) -> QuestionResponse:
     if not template_item.fallback_question:
         raise LlmError(
@@ -144,7 +142,7 @@ def _fallback(
     return QuestionResponse(
         item_id=risk_item.item_id,
         question=template_item.fallback_question,
-        question_type=allowed[0],
+        question_type=FALLBACK_QUESTION_TYPE,
         fallback_used=True,
     )
 

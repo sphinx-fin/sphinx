@@ -49,10 +49,14 @@ def _draft(question: str, qtype: str = "situation") -> QuestionDraft:
 
 # ── 정답 노출 검사 ────────────────────────────────────────────────────────────
 def test_numeric_condition_value_is_a_leak():
-    """수치는 amount·condition 유형이 묻는 대상이다. 질문이 먼저 말하면 측정이 무효다."""
+    """수치는 amount·condition 유형이 묻는 대상이다. 질문이 먼저 말하면 측정이 무효다.
+
+    **단위를 보지 않는다.** 원문이 "45%" 인데 질문이 "45 아래로" 라고 해도 답을 알려준 것이다.
+    재설명(F-INT-004)은 반대로 단위까지 일치해야 한다 — 그쪽은 환각을 막고 이쪽은 노출을 막는다.
+    """
     forbidden = qg.answer_fragments(RISK_ITEM)
-    assert "45%" in forbidden and "70%" in forbidden
-    assert qg.leaked_fragments("45% 미만으로 떨어지면 어떻게 되나요?", forbidden) == ["45%"]
+    assert "45" in forbidden and "70" in forbidden
+    assert qg.leaked_fragments("45% 미만으로 떨어지면 어떻게 되나요?", forbidden) == ["45"]
 
 
 def test_rubric_required_element_is_a_leak():
@@ -89,7 +93,7 @@ def test_item_without_rubric_still_checks_numbers():
     그 항목만 유도심문이 통과한다."""
     item = RISK_ITEM.model_copy(update={"item_id": "ELS-KNOCKIN-BARRIER"})
     forbidden = qg.answer_fragments(item)
-    assert "45%" in forbidden
+    assert "45" in forbidden
     assert not any("낙인" in f for f in forbidden)      # 루브릭 없음
 
 
@@ -152,7 +156,7 @@ def test_prompt_does_not_contain_the_condition_text():
     _, llm = _gen(_draft("어떤 경우인지 말씀해 주시겠어요?"))
     prompt = llm.calls[0]["prompt"]
     assert RISK_ITEM.condition.value_text not in prompt
-    assert "45%" in prompt        # 금지 목록으로는 들어간다
+    assert "45" in prompt         # 금지 목록으로는 들어간다
     assert "45% 미만으로 하락한 적이 있고" not in prompt
 
 
@@ -160,3 +164,23 @@ def test_unknown_item_raises():
     item = RISK_ITEM.model_copy(update={"item_id": "ELS-MADE-UP"})
     with pytest.raises(templates.TemplateNotFound):
         _gen(_draft("x"), item=item)
+
+
+# ── 공용 수치 추출기 (PR #60 리뷰 후속) ────────────────────────────────────────
+def test_bare_number_in_question_is_a_leak():
+    """`_NUMERIC` 이 단위를 필수로 요구해서 맨숫자를 놓쳤다 —
+    "45 아래로 떨어지면" 이 누출 검사를 통과했다. reexplain 과 같은 추출기를 쓴다."""
+    forbidden = qg.answer_fragments(RISK_ITEM)
+    assert "45" in forbidden or any(f.startswith("45") for f in forbidden)
+    assert qg.leaked_fragments("45 아래로 떨어지면 어떻게 되나요?", forbidden)
+
+
+def test_fallback_question_type_is_stable():
+    """`allowed[0]` 을 쓰면 같은 문장이 1회차엔 situation, 2회차엔 amount 로 보고돼
+    유형 커버리지가 조용히 틀린다(PR #60 리뷰)."""
+    first, _ = _gen(_draft("45 아래로 떨어지면요?"))
+    second, _ = _gen(_draft("45 아래로 떨어지면요?"), asked=["situation"])
+    third, _ = _gen(_draft("45 아래로 떨어지면요?"), asked=["situation", "amount"])
+    assert first.fallback_used and second.fallback_used and third.fallback_used
+    assert first.question_type == second.question_type == third.question_type
+    assert first.question_type == qg.FALLBACK_QUESTION_TYPE

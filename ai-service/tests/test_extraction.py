@@ -159,11 +159,16 @@ def test_importance_placeholder_is_surfaced_once():
 
 
 def test_oversized_document_is_rejected_not_truncated():
-    """조용히 잘라내면 뒷부분 항목이 전부 미검출로 잡히고 원인이 보이지 않는다."""
+    """조용히 잘라내면 뒷부분 항목이 전부 미검출로 잡히고 원인이 보이지 않는다.
+
+    LlmError 가 아니라 전용 예외다 — 502 로 나가면 Spring 쪽에서 "ai-service 장애"로
+    오진된다(PR #60 리뷰). 문서가 큰 것은 입력 문제다.
+    """
     doc = _doc()
     doc["pages"] = [{"page": 1, "text": "가" * (extraction.MAX_DOCUMENT_CHARS + 1)}]
-    with pytest.raises(LlmError, match="청킹"):
+    with pytest.raises(extraction.DocumentTooLarge, match="청킹"):
         _extract(doc=doc)
+    assert not issubclass(extraction.DocumentTooLarge, LlmError)
 
 
 # ── 공시 문서 PII 범위 (실측 결함에서 나왔다) ─────────────────────────────────

@@ -18,10 +18,9 @@ F-INT-002 는 질문에서 수치를 **금지**한다(정답 노출). F-INT-004 
 """
 from __future__ import annotations
 
-import re
-import unicodedata
 from pathlib import Path
 
+from . import numerics
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, ReexplainResponse, RiskItem, SourceSpan
 
@@ -29,13 +28,6 @@ PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-INT-004_v1.md"
 PROMPT_VERSION = "F-INT-004_v1"
 
 MAX_ATTEMPTS = 3
-
-#: 설명에서 원문 대조 대상으로 보는 수치. 단위가 붙은 것과 순수 숫자를 모두 본다 —
-#: "50" 만 써도 조건값을 옮긴 것일 수 있다.
-_NUMERIC = re.compile(r"\d+(?:[.,]\d+)*\s*(?:%|퍼센트|원|만원|억원|억|개월|년|영업일|배|일)?")
-
-#: 수치로 취급하지 않는 것. 문장 번호·순서는 조건값이 아니다.
-_ORDINALS = frozenset("①②③④⑤⑥⑦⑧⑨⑩")
 
 GRADE_LABELS = {
     Grade.U1: "이해", Grade.U2: "부분이해", Grade.U3: "미이해", Grade.U4: "오해",
@@ -46,9 +38,6 @@ DEFAULT_AUDIENCE_NOTE = (
     "듣는 사람은 60대 이상 고령 고객이라고 가정한다. 비유를 중심으로, 문장을 짧게, "
     "전문용어 없이 쓴다."
 )
-
-_WS = re.compile(r"\s+")
-
 
 def reexplain(
     risk_item: RiskItem,
@@ -83,40 +72,19 @@ def reexplain(
 
 
 # ── P6: 수치 대조 ─────────────────────────────────────────────────────────────
-def _canonical(text: str) -> str:
-    return _WS.sub("", unicodedata.normalize("NFC", text))
-
-
-def source_numerics(risk_item: RiskItem) -> frozenset[str]:
+def source_numerics(risk_item: RiskItem) -> frozenset[tuple[str, str | None]]:
     """조건 원문에 있는 수치. 설명에서 쓸 수 있는 것의 전부다."""
-    return frozenset(_normalize_numeric(m) for m in _NUMERIC.findall(
-        _canonical(risk_item.condition.value_text)) if _normalize_numeric(m))
+    return numerics.source_values(risk_item.condition.value_text)
 
 
-def fabricated_numerics(content: str, allowed: frozenset[str]) -> list[str]:
+def fabricated_numerics(content: str, allowed) -> list[str]:
     """설명에 있는데 원문에는 없는 수치. 비어있어야 통과다.
 
-    환각 수치가 고객에게 노출되면 오해를 잡겠다면서 새 오해를 만드는 것이다.
-    문장 번호(①②)는 조건값이 아니므로 제외한다.
+    **단위 부류까지 본다**(numerics.UNIT_CLASSES). 숫자만 재사용하면 `45%` 배리어를
+    "45년 기다리면 원금을 돌려받는다" 로 바꿔 말하는 것이 통과하고, 그건 오해를 잡겠다면서
+    새 오해를 만드는 것이다(PR #60 리뷰 ③).
     """
-    found = []
-    for raw in _NUMERIC.findall(_canonical(content)):
-        token = _normalize_numeric(raw)
-        if not token or token in _ORDINALS:
-            continue
-        if token not in allowed and _bare(token) not in {_bare(a) for a in allowed}:
-            found.append(raw.strip())
-    return found
-
-
-def _normalize_numeric(raw: str) -> str:
-    return raw.strip().replace(",", "")
-
-
-def _bare(token: str) -> str:
-    """단위를 떼고 숫자만. 원문이 "50%" 인데 설명이 "50 퍼센트" 로 쓴 경우를 흡수한다."""
-    digits = re.match(r"\d+(?:\.\d+)?", token)
-    return digits.group() if digits else token
+    return numerics.fabricated(content, allowed)
 
 
 def _cited_spans(
@@ -127,9 +95,9 @@ def _cited_spans(
     입력이 항목 하나이므로 인용 대상도 그 항목의 스팬 하나다. 수치를 하나라도 옮겨 썼거나
     조건 문면의 긴 조각을 인용했으면 근거로 기록한다.
     """
-    canon_content = _canonical(content)
-    used_number = any(a in canon_content for a in allowed)
-    condition = _canonical(risk_item.condition.value_text)
+    canon_content = numerics.canonical(content)
+    used_number = any(n in canon_content for n, _ in allowed)
+    condition = numerics.canonical(risk_item.condition.value_text)
     used_phrase = any(
         condition[i:i + 12] in canon_content for i in range(max(0, len(condition) - 11))
     )
@@ -138,11 +106,28 @@ def _cited_spans(
 
 # ── 폴백 ──────────────────────────────────────────────────────────────────────
 def _minimal(risk_item: RiskItem) -> ReexplainResponse:
-    """원문 조건을 그대로 제시하는 최소 설명. 정의상 P6 안전하다.
+    """원문 조건을 그대로 제시하는 최소 설명.
 
     재설명을 아예 못 내면 강희진의 재검증 루프가 진행할 것이 없다. 다듬어지지 않은 원문이라도
     보여주는 편이 낫고, 무엇보다 **환각 수치가 섞인 설명보다 낫다.**
+
+    **`extraction_failed` 항목은 원문 인용 형식을 쓰지 않는다** (PR #60 리뷰 ②).
+    그 항목의 `condition.value_text` 는 실패 사유 문면이고 문서에 없는 문장이다. 그것을
+    "설명서에는 이렇게 적혀 있습니다" 로 인용하면
+      - P6 — 상품설명서에 없는 문장을 원문 인용으로 고객 화면에 낸다
+      - P4 — `text[0:0]` 인 빈 슬라이스를 가리키는 근거가 리포트에 남는다
+    `cited_spans` 도 비운다. 이 파일이 *"근거 없는 설명에 스팬을 붙이면 리포트가 거짓 근거를
+    갖는다"* 고 쓰고 있는데 폴백이 그 예외가 되어 있었다.
     """
+    if risk_item.status == "extraction_failed":
+        return ReexplainResponse(
+            item_id=risk_item.item_id,
+            content=(
+                f"{risk_item.name}은(는) 상품 문서에서 해당 내용을 확인하지 못했습니다.\n\n"
+                "담당자에게 이 항목의 조건을 직접 확인해 주세요."
+            ),
+            cited_spans=[],
+        )
     return ReexplainResponse(
         item_id=risk_item.item_id,
         content=(

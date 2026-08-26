@@ -46,6 +46,14 @@ from .schemas import (
     SourceSpan,
 )
 
+class DocumentTooLarge(ValueError):
+    """문서가 한 번에 넣을 수 있는 한도를 넘었다.
+
+    LlmError 로 던지면 라우트가 502 로 매핑하고, Spring 쪽에서 "ai-service 장애" 로
+    오진된다(PR #60 리뷰). 문서가 큰 것은 상류 LLM 장애가 아니라 입력 문제다.
+    """
+
+
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-EXT-002_v1.md"
 PROMPT_VERSION = "F-EXT-002_v1"
 
@@ -70,7 +78,7 @@ def extract(
 
     total = sum(len(p["text"]) for p in doc["pages"])
     if total > MAX_DOCUMENT_CHARS:
-        raise LlmError(
+        raise DocumentTooLarge(
             f"문서가 {total:,}자로 한 번에 넣을 수 있는 한도({MAX_DOCUMENT_CHARS:,})를 넘는다. "
             "청킹 설계가 필요하다 — 조용히 잘라내면 뒷부분 항목이 전부 미검출로 잡힌다."
         )

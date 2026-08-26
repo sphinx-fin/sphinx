@@ -55,7 +55,10 @@ def _reexplain(*contents: str, fail=False, age=None, exper=None):
 
 # ── P6: 수치는 원문에서만 ─────────────────────────────────────────────────────
 def test_source_numerics_are_collected():
-    assert rx.source_numerics(RISK_ITEM) >= {"45%", "45"}
+    """수치는 (숫자, 단위부류) 짝으로 본다 — 숫자만 재사용하면 단위를 바꿔치기할 수 있다."""
+    values = rx.source_numerics(RISK_ITEM)
+    assert ("45", "pct") in values      # "45%"
+    assert ("45", None) in values       # "45/ 45/ 45" 의 맨숫자
 
 
 def test_number_absent_from_source_is_fabricated():
@@ -67,6 +70,20 @@ def test_unit_spelling_difference_is_accepted():
     """원문이 "45%" 인데 설명이 "45 퍼센트" 로 쓴 것은 같은 값이다."""
     allowed = rx.source_numerics(RISK_ITEM)
     assert rx.fabricated_numerics("45 퍼센트 아래로 가면", allowed) == []
+
+
+def test_same_number_with_different_unit_is_fabricated():
+    """PR #60 리뷰 ③ — 숫자만 재사용하면 `45%` 배리어가 "45년 기다리면"으로 통과했다.
+    그건 오해를 잡겠다면서 새 오해를 만드는 것이다."""
+    allowed = rx.source_numerics(RISK_ITEM)
+    assert rx.fabricated_numerics("45년 동안 기다리면 원금을 돌려받습니다", allowed) == ["45년"]
+    assert rx.fabricated_numerics("45만원까지 보장됩니다", allowed) == ["45만원"]
+
+
+def test_bare_number_from_source_is_allowed():
+    """단위 없는 출력은 숫자가 원문에 있으면 허용한다 — 단위를 새로 주장하지 않았다."""
+    allowed = rx.source_numerics(RISK_ITEM)
+    assert rx.fabricated_numerics("45 아래로 내려가면", allowed) == []
 
 
 def test_analogy_without_numbers_passes():
@@ -85,6 +102,22 @@ def test_fabricated_content_is_retried():
     result, llm = _reexplain("30% 떨어지면 손실", "45% 아래로 떨어지면 손실")
     assert "45%" in result.content
     assert len(llm.calls) == 2
+
+
+def test_extraction_failed_item_does_not_quote_as_source():
+    """PR #60 리뷰 ② — extraction_failed 항목의 value_text 는 실패 사유 문면이고 문서에
+    없는 문장이다. 그것을 "설명서에는 이렇게 적혀 있습니다"로 인용하면 P6 위반이고,
+    text[0:0] 인 빈 슬라이스를 가리키는 근거가 리포트에 남으면 P4 위반이다."""
+    failed = RISK_ITEM.model_copy(update={
+        "status": "extraction_failed",
+        "condition": Condition(value_text="(추출 실패 — 문서에서 해당 조건을 찾지 못했다)",
+                               source_span=SourceSpan(page=1, start=0, end=0)),
+    })
+    result = rx._minimal(failed)
+    assert "적혀 있습니다" not in result.content
+    assert "확인하지 못했습니다" in result.content
+    assert failed.condition.value_text not in result.content
+    assert result.cited_spans == []
 
 
 def test_persistent_fabrication_falls_back_to_source_quote():

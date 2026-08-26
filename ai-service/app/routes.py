@@ -72,6 +72,10 @@ def extract(body: ExtractRequest) -> ExtractResponse:
             body.product_id, body.product_type,
             body.parsed_document.model_dump(),
         )
+    except extraction.DocumentTooLarge as exc:
+        # 문서가 큰 것은 상류 LLM 장애가 아니라 입력 문제다 — 502 로 나가면
+        # Spring 쪽에서 "ai-service 장애"로 오진된다 (PR #60 리뷰)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except templates.TemplateNotFound as exc:
         # 템플릿 없는 상품유형은 추출 범위가 정의되지 않았다 — 500 이 아니라 422다
         raise HTTPException(status_code=422, detail=str(exc)) from exc
