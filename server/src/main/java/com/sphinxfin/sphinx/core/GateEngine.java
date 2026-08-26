@@ -55,12 +55,26 @@ public class GateEngine {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
         List<Double> confidences = judgments.stream().map(Judgment::confidence).toList();
         Context ctx = new Context(grades, confidences, suitabilityMismatch, reverifyFailed);
+
+        // 신호는 first-match-wins(파일 순서 = 우선순위). 트레이스는 그 신호를 낸 발화 룰을 전부
+        // 남긴다 — 감사 시점에 "왜 이 신호였나"를 모든 사유로 설명하기 위함(예: YELLOW가
+        // R-04(부분이해)와 R-05(저신뢰)에서 동시에 나오면 둘 다 기록). #10 결정.
+        Signal winning = null;
+        List<String> trace = new ArrayList<>();
         for (Rule rule : rules) {
             if (rule.predicate().test(ctx)) {
-                return new GateResult(rule.signal(), List.of(rule.id()));
+                if (winning == null) {
+                    winning = rule.signal();
+                }
+                if (rule.signal() == winning) {
+                    trace.add(rule.id());
+                }
             }
         }
-        return new GateResult(Signal.RED, List.of(DEFAULT_TRACE));
+        if (winning == null) {
+            return new GateResult(Signal.RED, List.of(DEFAULT_TRACE));   // fail-closed
+        }
+        return new GateResult(winning, List.copyOf(trace));
     }
 
     // ── 룰 로딩·컴파일 ────────────────────────────────────────────────

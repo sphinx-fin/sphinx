@@ -40,6 +40,9 @@ sphinx:
     timeseries-dir: ${SPHINX_TIMESERIES_DIR:../data/timeseries}
   scoring:
     # 신뢰도 임계값은 gate_rules.yaml R-05가 단일 출처(게이트가 황색 강등을 결정, P1).
+    # max-reverify는 gate_rules.yaml R-03(reverifyFailed>=N)의 N과 같아야 한다 —
+    # 이 값(재설명 상한)만큼 실패하면 게이트가 RED로 잡는다. ReverifyThresholdSyncTest가 대조한다.
     max-reverify: 2                      # F-INT-004
+
   retention:
     raw-answer-months: 6                 # 원문 응답 보존 기간 (팀 결정 후 조정)

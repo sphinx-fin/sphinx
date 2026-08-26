@@ -24,6 +24,12 @@ public interface EvidenceRecorder {
     /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
     void appendGate(String sessionId, GateResult result, Instant at);
 
+    /**
+     * F-GTE-002 적색 오버라이드 승인 1건 append. 사유·승인자가 불변 기록으로 남아야 한다
+     * (ADR-002 견제 장치·기획 7-2). 게이트를 뚫고 진행한 사실 자체가 내부통제 증거다.
+     */
+    void appendOverride(String sessionId, String reason, String approver, Instant at);
+
     /** 구현(evidence/) 등록 전까지의 기본값. 삼키는 것을 드러내려고 무명 클래스가 아니라 상수로 둔다. */
     EvidenceRecorder NO_OP = new EvidenceRecorder() {
         @Override
@@ -33,6 +39,11 @@ public interface EvidenceRecorder {
 
         @Override
         public void appendGate(String sessionId, GateResult result, Instant at) {
+            // 위와 같다.
+        }
+
+        @Override
+        public void appendOverride(String sessionId, String reason, String approver, Instant at) {
             // 위와 같다.
         }
     };

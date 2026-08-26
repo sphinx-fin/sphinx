@@ -22,10 +22,12 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 | `app/routes.py` | `/internal/*` 라우트. 얇게 유지 — 기능 로직은 각 모듈의 순수 함수 |
 | `app/schemas.py` | `contracts/*.schema.json`의 pydantic 미러 (계약의 진실은 `contracts/`) |
 | `app/pii.py` | P3 입구 재검사 |
-| `app/rubrics.py` | 루브릭 로더 (`status: draft`는 핵심설명서 대조 전) |
+| `app/rubrics.py` | 루브릭 로더 (`status: draft`는 정답지 대조 전) |
+| `app/templates.py` | 상품유형 템플릿 로더 — **F-EXT-003 재현율 분모** |
 | `app/llm_client.py` | LLM 어댑터 (OpenAI 호환 엔드포인트) |
 | `app/config.py` | `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` |
 | `app/rubrics/` | 채점 루브릭 YAML (공개 의무) |
+| `app/templates/` | 상품유형별 추출 대상 항목 (ELS 13 · 변액 10) |
 | `app/prompts/` | 프롬프트 세트 — 산출물이므로 버전을 올리고 지우지 않는다 |
 
 ## 엔드포인트
@@ -40,7 +42,7 @@ Spring `core/AiServiceClient`가 호출하는 7개. 미구현 기능은 **501**�
 | `POST /internal/question` | F-INT-002 | 501 |
 | `POST /internal/score` | F-SCR-001 | 구현 — LLM 키 필요 |
 | `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
-| `POST /internal/mismatch` | F-DET-002 | 501 |
+| `POST /internal/mismatch` | F-DET-002 | 구현 — LLM 키 필요 |
 | `POST /internal/reexplain` | F-INT-004 | 501 |
 
 F-DET-002는 **7번째 엔드포인트**다(강희진 결정). 모순 판정은 설문 전체 + 세션 발화
@@ -136,7 +138,54 @@ pytest
 가진다(강희진 결정, PR #10). 양쪽에서 하면 이중계산이다 —
 `proposals/F-SCR-001-yellow-downgrade.md` 참고.
 
+## 상품유형 템플릿 — 추출 범위 고정
+
+기획서 5절 통제: *"상품유형 템플릿으로 추출 범위를 고정한다."*
+**템플릿에 없는 항목은 F-EXT-002 가 추출하지 않으므로 이 파일들이 F-EXT-003 재현율의
+분모다**(이슈 #26). 루브릭 유무는 재현율에 영향을 주지 않는다 — 그쪽은 채점 커버리지다.
+
+두 규칙이 테스트로 고정돼 있다.
+
+- **계약 대조**: 항목 집합이 `contracts/samples/*.json` 의 `_expected_risk_items` 와 정확히
+  같아야 한다(ADR-006 정본). 어긋나면 템플릿에만 있는 항목은 오탐이 되고 계약에만 있는
+  항목은 재현율이 구조적으로 깎이는데, 둘 다 예외 없이 조용히 지나간다.
+- **cue 에 숫자 금지**: 특정 회차의 조건값을 박으면 다른 발행사 문서에 붙지 않는다.
+  값은 추출 시점에 원문에서 가져온다(P6).
+
+`importance` 는 미정이다 — 정세현이 23종에 부여하기로 했고(이슈 #26) 그 값이 루브릭 작업
+범위를 정한다. `templates.coverage_report()` 가 분모·부여 현황·루브릭 커버리지를 함께 낸다.
+
+## 적합성 모순 판정 (F-DET-002)
+
+**모순은 양쪽이 다 추적 가능해야 한다**(P4). 발화 인용은 실제 발화에서, 설문 참조는 실제
+설문에서 와야 한다. 한쪽이라도 지어낸 것이면 그 모순을 버린다 — 예외를 던지지 않고 개별로
+걸러낸다. 세션 단위 판정이라 전체를 버리면 실제 모순을 놓친다.
+
+- 입력이 부족하면 `status: insufficient_input`. `mismatch=false` 만 돌려주면 호출자가
+  '적합'으로 읽는다 — 판정 못 한 것과 모순 없는 것은 다르다.
+- `mismatch`·`confidence`·`session_id` 는 **우리가 다시 계산한다.** LLM 이 낸 값을 믿지 않는다.
+- 탐지 자신감 미달(`MISMATCH_CONFIDENCE_FLOOR`) 모순은 **버리지 않고 남긴다.**
+  `mismatch=true` 로만 올리지 않는다 — `direction` 이 코칭 문구를 좌우하고(강희진 결정 ⓒ),
+  조용히 지우면 왜 통과했는지 추적할 수 없다.
+- 취약 요인 가중·코칭 스코어는 하지 않는다 — 서버 소유(ADR-005). `detect()` 시그니처가
+  그 입력을 받지 않는 것을 테스트로 고정했다.
+
+약한 고리: 설문 쪽에서 `axis` 를 주지 않으므로(결정 ⓑ) 문항 키·값의 문면을 모델이 해석해야
+한다. 문항 문면이 바뀌면 판정이 흔들린다.
+
 ## dev set
 
 `tests/fixtures/`는 프롬프트 튜닝용이며 **F-CMN-003 공식 평가셋과 무관하다**
 (윤지석은 프롬프트 당사자로 라벨링 제외). 자세한 내용은 그 디렉토리의 README.
+
+RiskItem 은 픽스처에 두지 않고 `contracts/samples/*.json` 에서 만든다 — 조항 문면을
+복사하면 낡는다. 러너가 실행 전에 계약 규약 등식
+`pages[page].text[start:end] == value_text` 를 검사한다.
+
+```bash
+python tools/run_devset.py            # 상품유형 전체 (ELS 5 + 변액 6)
+python tools/run_devset.py VAR-       # 케이스 id 부분일치
+```
+
+루브릭이 있으면 dev set 케이스도 있어야 한다 — 테스트로 고정했다. 문면만 맞춰둔 루브릭은
+실제로 어떻게 채점되는지 모르는 상태이고, 변액 4종이 한동안 그랬다.
