@@ -227,3 +227,26 @@ def test_no_merge_conflict_markers_are_committed():
             if line.startswith(markers) or line == "=======":
                 hits.append(f"{path.relative_to(root)}:{lineno}")
     assert not hits, f"머지 충돌 마커가 남았다: {hits}"
+
+
+def test_no_duplicate_test_names():
+    """★ 같은 파일에 같은 이름의 테스트가 둘이면 **앞의 것이 조용히 안 돈다.**
+
+    실제로 그랬다 — `test_scoring.py` 에서 슬라이스 편집이 블록을 복제해
+    `test_capped_confidence_records_the_reason` 이 두 번 정의됐고, pytest 는 뒤의 것만
+    수집한다. 개수가 늘어나므로 초록이 오히려 늘어 보인다.
+
+    파서를 들이지 않고 `def test_` 시작 줄만 센다 — 이 검사가 잡아야 하는 것이 그 형태다.
+    """
+    import re
+    from collections import Counter
+    from pathlib import Path
+
+    pattern = re.compile(r"^def (test_\w+)", re.MULTILINE)
+    problems = []
+    for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+        names = pattern.findall(path.read_text(encoding="utf-8"))
+        dupes = [n for n, c in Counter(names).items() if c > 1]
+        if dupes:
+            problems.append(f"{path.name}: {sorted(dupes)}")
+    assert not problems, f"중복 테스트 이름 — 앞의 것이 안 돈다: {problems}"
