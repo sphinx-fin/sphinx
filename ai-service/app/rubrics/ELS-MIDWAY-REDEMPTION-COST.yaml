@@ -1,0 +1,18 @@
+# 소유: 윤지석 — 공개 의무.
+#
+# #100 이 이 항목을 required 로 둔 근거: "급하면 빼면 되죠" 가 M04 와 같은 층의 오해다.
+# ELS-NO-LISTING 과 짝이다 — 상장이 안 돼 팔 수 없고(NO-LISTING), 발행사에 중도상환을
+# 요청하면 차감이 붙는다(이 항목). 둘을 함께 알아야 "중간에 현금화" 그림이 맞다.
+item_id: ELS-MIDWAY-REDEMPTION-COST
+product_type: ELS
+name: 중도상환 원금손실
+status: confirmed
+required_elements:
+  - 중도상환 시 공정가액에서 차감된 금액을 받는다
+  - 그 결과 원금에 미달할 수 있다
+misconception_conditions:
+  - 언제든 넣은 돈을 그대로 뺄 수 있다
+  - 원금은 보장되고 이자만 못 받는다
+  - 손실은 만기에만 난다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE

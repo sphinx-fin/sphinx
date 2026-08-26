@@ -1,0 +1,18 @@
+# 소유: 윤지석 — 공개 의무. status·item_id 근거는 VAR-PRINCIPAL-LOSS.yaml 참고.
+#
+# VAR-PRINCIPAL-LOSS 와 층이 다르다 — 여기는 **무엇에 따라 변하는가**(운용실적 연동),
+# 그쪽은 **얼마를 잃을 수 있는가**(최저보증 부재). 실적 연동을 알면서도 최저보증이 없다는
+# 것을 모르는 답변이 실제로 나오므로 항목을 나눈 계약 쪽 분해가 맞다.
+item_id: VAR-PERFORMANCE-LINKED
+product_type: VARIABLE_INSURANCE
+name: 실적배당형 성격
+status: draft
+required_elements:
+  - 보험금·해약환급금이 특별계정 운용실적에 따라 변동된다
+  - 정해진 금액이 아니라 투자 결과에 달려 있다
+misconception_conditions:
+  - 정해진 이자가 붙는다
+  - 저축이다
+  - 회사가 수익률을 보장한다
+related_misconceptions:
+  - M05-SAVINGS
