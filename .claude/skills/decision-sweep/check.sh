@@ -63,6 +63,68 @@ print(f'ADR 연번    001~{max(nums):03d}' if nums else 'ADR 없음',
       '— 구멍 없음' if not holes else f'— 구멍 {holes}')
 if holes: bad = 1
 
+# ── 5. 미결 담당자 ──────────────────────────────────────────────────────
+# 이름 표는 .github/workflows/pr-reviewer-label.yml 이 정본이다(CLAUDE.md).
+# 여기서 하드코딩하면 또 두 벌이 되고, 팀원이 바뀔 때 한쪽만 고쳐진다.
+wf = '.github/workflows/pr-reviewer-label.yml'
+names = set(re.findall(r'\)\s*echo "([가-힣]{2,4})"', open(wf, encoding='utf-8').read())) \
+        if os.path.exists(wf) else set()
+
+if not names:
+    print('미결 담당자  건너뜀 — 이름 표를 못 찾았다:', wf)
+else:
+    rows, typos, unassigned = 0, [], []
+    section = False
+    for n, l in enumerate(open('docs/decision-log.md', encoding='utf-8'), 1):
+        if l.startswith('## 10.'): section = True; continue
+        if l.startswith('## ') and section: break
+        if not (section and l.startswith('| 10.')): continue
+        c = l.split(' | ')
+        if len(c) < 4: continue
+        rows += 1
+        owner = c[2]
+        found = [t for t in re.findall(r'[가-힣]{3}', owner) if t in names]
+        # 오타는 "유효한 이름과 한 글자만 다른 것" 으로 잡는다. 그냥 3음절 한국어
+        # 낱말까지 잡으면 노이즈가 나서 아무도 안 쓰게 된다.
+        for t in re.findall(r'[가-힣]{3}', owner):
+            if t in names: continue
+            if any(sum(a != b for a, b in zip(t, v)) == 1 for v in names if len(v) == 3):
+                typos.append(f'docs/decision-log.md:{n}  {c[0].strip()}  "{t}" — 오타인가?')
+        if not found and not any(f':{n}  ' in t for t in typos):
+            unassigned.append(f'docs/decision-log.md:{n}  {c[0].strip()}  담당 "{owner}"')
+
+    print(f'미결 담당자  {rows}행 검사', '— 이상 없음' if not typos else '')
+    for t in typos: print('  !!', t)
+    if typos: bad = 1
+    if unassigned:
+        print(f'미결 무주    ? {len(unassigned)}행 — 담당에 이름이 없다. 안 움직여도 이상해 보이지 않는다')
+        for u in unassigned: print('    ', u)
+        if os.environ.get('SWEEP_STRICT') == '1': bad = 1
+    else:
+        print('미결 무주    없음')
+
+# ── 6. 지난 기한 ────────────────────────────────────────────────────────
+import datetime
+today = datetime.date.today()
+past, section = [], False
+for n, l in enumerate(open('docs/decision-log.md', encoding='utf-8'), 1):
+    if l.startswith('## 10.'): section = True; continue
+    if l.startswith('## ') and section: break
+    if not (section and l.startswith('| 10.')): continue
+    c = l.split(' | ')
+    if len(c) < 5: continue
+    for m in re.finditer(r'(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])', c[3]):
+        try: d = datetime.date(today.year, int(m.group(1)), int(m.group(2)))
+        except ValueError: continue
+        if d < today:
+            past.append(f'docs/decision-log.md:{n}  {c[0].strip()}  기한 {m.group(0)} 지남')
+if past:
+    print(f'지난 기한    ? {len(past)}행 — 미룬 것인가 잊은 것인가')
+    for p_ in past: print('    ', p_)
+    if os.environ.get('SWEEP_STRICT') == '1': bad = 1
+else:
+    print('지난 기한    없음')
+
 sys.exit(bad)
 PY
 
