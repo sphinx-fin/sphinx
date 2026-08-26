@@ -15,7 +15,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from . import extraction, misconception, mismatch, question_gen, reexplain, rubrics, scoring
+from . import (extraction, misconception, mismatch, question_gen, reexplain, rubrics,
+               scoring, templates)
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
@@ -67,19 +68,31 @@ def parse(body: ParseRequest) -> dict:
 @router.post("/extract", response_model=ExtractResponse)
 def extract(body: ExtractRequest) -> ExtractResponse:
     try:
-        items = extraction.extract(body.product_id, body.product_type, body.parsed_document)
+        return extraction.extract(
+            body.product_id, body.product_type,
+            body.parsed_document.model_dump(),
+        )
+    except extraction.DocumentTooLarge as exc:
+        # 문서가 큰 것은 상류 LLM 장애가 아니라 입력 문제다 — 502 로 나가면
+        # Spring 쪽에서 "ai-service 장애"로 오진된다 (PR #60 리뷰)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except templates.TemplateNotFound as exc:
+        # 템플릿 없는 상품유형은 추출 범위가 정의되지 않았다 — 500 이 아니라 422다
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError:
         raise _not_implemented("F-EXT-002 추출")
     except LlmError as exc:
         raise _llm_unavailable(exc)
-    return ExtractResponse(items=items)
 
 
 # ── F-INT-002 ─────────────────────────────────────────────────────────────────
 @router.post("/question", response_model=QuestionResponse)
 def question(body: QuestionRequest) -> QuestionResponse:
     try:
-        return question_gen.generate(body.risk_item, body.asked_types)
+        return question_gen.generate(body.risk_item, body.asked_types, body.product_type)
+    except templates.TemplateNotFound as exc:
+        # 템플릿 밖 항목은 인터뷰 대상이 아니다 — 500 이 아니라 422다
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError:
         raise _not_implemented("F-INT-002 질문 생성")
     except LlmError as exc:
@@ -142,7 +155,9 @@ def detect_mismatch(body: MismatchRequest) -> SuitabilityMismatch:
 @router.post("/reexplain", response_model=ReexplainResponse)
 def do_reexplain(body: ReexplainRequest) -> ReexplainResponse:
     try:
-        return reexplain.reexplain(body.risk_item, body.judgment)
+        return reexplain.reexplain(
+            body.risk_item, body.judgment, body.age_band, body.experience_level
+        )
     except NotImplementedError:
         raise _not_implemented("F-INT-004 재설명")
     except LlmError as exc:

@@ -46,6 +46,91 @@ cases:
     expected_misconception: null
     deterministic: false
 
+  # ── required 루브릭 6종 + ISSUER 1종 (#100 importance 부여 대응) ─────────────
+  #
+  # ★ 결정론 매칭을 실측했다 — 7건 중 2건만 오해 라이브러리에 걸린다
+  #   (MATURITY→M04 1.000, TOTAL-LOSS→M03 1.000). 나머지 5건은 LLM+루브릭 단독 판정이다.
+  #   기획서 5절 오판 비대칭(오해→이해 상한 1%)을 결정론 보조 없이 지켜야 하는 구간이라
+  #   여기가 프롬프트 v2 의 실제 위험 지점이다. 라이브러리 패턴 추가는 정세현 영역 —
+  #   이 실측을 근거로 요청한다.
+
+  - id: KNOCKIN-MATURITY-ONLY
+    source: 합성 — 낙인을 만기 시점 판정으로 오인. 하회 "이력"이 조건이라는 점을 놓친다
+    item_id: ELS-KNOCKIN-BARRIER
+    question: 낙인 조건이 어떤 때 성립하는지 본인 말씀으로 설명해 주시겠어요?
+    answer: 만기에만 45% 밑인지 보면 되는 거죠?
+    # 처음 U3 로 라벨했다가 실채점에서 U4 가 나왔고, 모델이 맞다 — 프롬프트 30행이
+    # "모른다는 U3, 틀리게 안다는 U4"다. 이건 틀리게 아는 것이고 misconception_conditions
+    # 의 "만기에만 보면 된다"에 정확히 걸린다.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false
+
+  - id: MATURITY-DEPOSIT-LIKE
+    source: 기획서 4절 오해 목록 — "만기 3년이면 3년 뒤에 원금과 이자" (M04)
+    item_id: ELS-MATURITY-LOSS-CONDITION
+    question: 만기평가일에 어떻게 되는지 말씀해 주시겠어요?
+    answer: 만기 3년이면 3년 뒤에 원금과 이자를 받는 거죠.
+    expected_grade: U4
+    expected_misconception: M04-EARLY-REDEMPTION
+    deterministic: true   # pattern 1.000 실측
+
+  - id: TOTAL-LOSS-FLOOR
+    source: 기획서 4절 오해 목록 — "반토막 날 리가" (M03). 최악을 부분손실로 본다
+    item_id: ELS-TOTAL-LOSS-SCENARIO
+    question: 최악의 경우 얼마를 잃을 수 있는지 금액으로 말씀해 주시겠어요?
+    answer: 반토막 날 리가 있나요, 그 정도가 최악이겠죠.
+    expected_grade: U4
+    expected_misconception: M03-PROBABILITY
+    deterministic: true   # pattern 1.000 실측
+
+  - id: SIMULATION-AS-PROBABILITY
+    source: 기획서 3절 — ELS 사태의 분석기간 문제. 과거 데이터를 확률 보증으로 읽는다
+    item_id: ELS-LOSS-SIMULATION
+    question: 설명서의 모의실험 결과를 어떻게 이해하고 계신가요?
+    answer: 과거에 손실 난 적이 없다니까 확률이 거의 없는 거네요.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ M03 패턴에 안 걸린다 — 라이브러리 공백
+
+  - id: MIDWAY-FULL-WITHDRAWAL
+    source: 합성 — #100 이 required 근거로 든 "급하면 빼면 되죠"
+    item_id: ELS-MIDWAY-REDEMPTION-COST
+    question: 만기 전에 돈이 필요해지면 어떻게 되는지 말씀해 주시겠어요?
+    answer: 급하면 중간에 빼면 되는 거죠, 넣은 돈은 그대로 나올 테고.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ 라이브러리 공백
+
+  - id: NO-LISTING-SELLABLE
+    source: 합성 — 비상장 증권을 주식처럼 매도 가능하다고 본다
+    item_id: ELS-NO-LISTING
+    question: 이 증권을 만기 전에 팔 수 있는지 어떻게 이해하고 계신가요?
+    answer: 주식처럼 팔고 싶을 때 팔면 되는 거 아닌가요?
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ 라이브러리 공백
+
+  # importance 미결(#100 은 recommended, 나는 required 주장). 케이스는 미리 둔다.
+  - id: ISSUER-CREDIT-DISMISSED
+    source: 합성 — 발행사 부도를 원금손실 경로로 인식하지 못한다
+    item_id: ELS-ISSUER-CREDIT-RISK
+    question: 발행한 증권사에 문제가 생기면 어떻게 되는지 말씀해 주시겠어요?
+    answer: 증권사가 망할 리가 있나요, 기초자산만 오르면 되죠.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ 라이브러리 공백 — #100 이 recommended 로 둔 이유와 같은 사실
+
+  # 이해→오해 오판 감시(관리지표 10%). 위 7건이 전부 오해 케이스라 대조군을 함께 둔다.
+  - id: KNOCKIN-UNDERSTOOD
+    source: 합성 — 정상 이해 대조군. 하회 "이력" + "어느 하나라도"를 짚는다
+    item_id: ELS-KNOCKIN-BARRIER
+    question: 낙인 조건이 어떤 때 성립하는지 본인 말씀으로 설명해 주시겠어요?
+    answer: 세 종목 중 하나라도 기간 중에 한 번 그 밑으로 내려간 적이 있으면 걸린다고 들었어요.
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false
+
   # ── 문면 복창 (프롬프트 v2 / 게이트 R-05) ────────────────────────────────────
   # ★ 이 케이스가 R-05(`anyConfidenceBelow 0.7`)를 실제로 발동시키는 유일한 형태다.
   #   ADR-005 가 관측한 대로 R-05 가 판정을 바꿀 수 있는 경우는 **전부 U1 인 세션**뿐이고,

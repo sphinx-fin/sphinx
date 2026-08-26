@@ -43,13 +43,24 @@ def test_all_six_internal_endpoints_are_registered():
         assert "post" in paths[f"/internal/{name}"]
 
 
-def test_unimplemented_features_return_501_not_500():
-    """강희진이 연결할 때 '아직 없음'과 '터짐'이 구분돼야 한다."""
-    resp = client.post("/internal/extract", json={
-        "product_id": "mock-els-001",
-        "parsed_document": {
-            "document_id": "doc-1", "product_type": "ELS", "parser_version": "manual-0",
-            "pages": [{"page": 1, "text": "원금 손실이 발생할 수 있습니다."}],
+def test_unimplemented_features_return_501_not_500(monkeypatch):
+    """연동하는 쪽이 '아직 없음'과 '터짐'을 구분해야 한다.
+
+    특정 엔드포인트를 예시로 쓰면 그 기능이 구현될 때마다 테스트가 낡는다(extract →
+    question 으로 두 번 옮겼다). 매핑 자체를 검증한다.
+    """
+    from app import routes
+
+    def _unimplemented(*_a, **_k):
+        raise NotImplementedError
+
+    monkeypatch.setattr(routes.reexplain, "reexplain", _unimplemented)
+    resp = client.post("/internal/reexplain", json={
+        "risk_item": RISK_ITEM,
+        "judgment": {
+            "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "grade": "U4", "confidence": 0.9,
+            "evidence": {"utterance_quote": "원금은 지켜지는", "rubric_clause": "원금이 보장된다"},
+            "reason": "오해",
         },
     })
     assert resp.status_code == 501, resp.text
@@ -133,3 +144,109 @@ def test_masked_placeholders_pass_through():
     })
     assert resp.status_code == 200  # PII 통과 → 실제 매칭 도달
     assert resp.json()["matches"][0]["type_id"] == "M01-PRINCIPAL-GUARANTEE"
+
+
+# ── PII 검사 범위가 경로별로 맞는지 (공시 문서 vs 고객 텍스트) ──────────────────
+def test_only_document_paths_relax_broad_pii_heuristics():
+    """고객 텍스트가 오는 경로는 하나도 완화되면 안 된다.
+
+    넓은 휴리스틱을 끄는 것은 공시 상품문서에만 해당한다(기획서 7-3). 목록이 잘못 늘어나면
+    고객 발화의 계좌번호·카드번호가 조용히 통과한다.
+    """
+    from app.main import PiiGuardMiddleware
+
+    relaxed = set(PiiGuardMiddleware.PUBLIC_DOCUMENT_PATHS)
+    assert relaxed == {"/internal/parse", "/internal/extract"}
+
+    paths = set(client.get("/openapi.json").json()["paths"])
+    customer_paths = {p for p in paths if p.startswith("/internal/")} - relaxed
+    assert customer_paths == {
+        "/internal/question", "/internal/score",
+        "/internal/misconception", "/internal/mismatch", "/internal/reexplain",
+    }
+
+
+def test_rrn_is_blocked_even_on_document_paths():
+    """공시 문서에 주민번호가 있으면 그건 문서 쪽 사고다 — 좁은 패턴은 어느 범위에서도 검사한다."""
+    resp = client.post("/internal/extract", json={
+        "product_id": "p", "parsed_document": {
+            "document_id": "d", "product_type": "ELS", "parser_version": "x",
+            "pages": [{"page": 1, "text": "가입자 900101-1234567 기재"}]},
+    })
+    assert resp.status_code == 422
+    assert "RRN" in resp.json()["kinds"]
+
+
+def test_corporate_phone_in_document_is_not_blocked(monkeypatch):
+    """발행사 민원부서 번호(02-785-7424)가 ACCOUNT 패턴에 걸려 추출이 멈췄던 실측 사례.
+
+    검증 대상은 미들웨어이므로 핸들러를 대체한다 — 통과시키면 실제 LLM 을 부르고
+    테스트가 네트워크에 의존한다(처음 작성했을 때 65초가 걸렸다).
+    """
+    from app import routes
+    from app.schemas import ExtractResponse
+
+    monkeypatch.setattr(routes.extraction, "extract",
+                        lambda *a, **k: ExtractResponse(items=[], warnings=[]))
+    resp = client.post("/internal/extract", json={
+        "product_id": "p", "parsed_document": {
+            "document_id": "d", "product_type": "ELS", "parser_version": "x",
+            "pages": [{"page": 1, "text": "민원부서(02-785-7424) 또는 홈페이지로 문의"}]},
+    })
+    assert resp.status_code == 200, "공시 문서의 법인 연락처를 막으면 정상 문서가 거부된다"
+
+
+def test_no_merge_conflict_markers_are_committed():
+    """★ 실제로 한 번 통과했다 — docstring 안에 남은 마커는 파서도 테스트도 안 잡는다.
+
+    #60 이 squash 로 머지되면서 스택 하위 브랜치에 `add/add` 충돌이 났고, `question_gen.py`
+    의 `answer_fragments` **docstring 안**에 마커가 남은 채 푸시됐다. 문자열 리터럴이므로
+    `SyntaxError` 가 없고 198건이 전부 초록이었다.
+
+    조용한 실패라 로딩 시점으로 끌어올릴 수도 없다 — 문법상 정상인 문자열이다. 그래서
+    파일을 훑는 검사로 둔다.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    markers = ("<<<<<<< ", ">>>>>>> ")
+    hits = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or ".venv" in path.parts or "__pycache__" in path.parts:
+            continue
+        if path.suffix not in {".py", ".md", ".yaml", ".yml", ".json", ".txt"}:
+            continue
+        # 이 테스트 자신은 마커 문자열을 데이터로 들고 있다
+        if path.resolve() == Path(__file__).resolve():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for lineno, line in enumerate(text.split("\n"), 1):
+            if line.startswith(markers) or line == "=======":
+                hits.append(f"{path.relative_to(root)}:{lineno}")
+    assert not hits, f"머지 충돌 마커가 남았다: {hits}"
+
+
+def test_no_duplicate_test_names():
+    """★ 같은 파일에 같은 이름의 테스트가 둘이면 **앞의 것이 조용히 안 돈다.**
+
+    실제로 그랬다 — `test_scoring.py` 에서 슬라이스 편집이 블록을 복제해
+    `test_capped_confidence_records_the_reason` 이 두 번 정의됐고, pytest 는 뒤의 것만
+    수집한다. 개수가 늘어나므로 초록이 오히려 늘어 보인다.
+
+    파서를 들이지 않고 `def test_` 시작 줄만 센다 — 이 검사가 잡아야 하는 것이 그 형태다.
+    """
+    import re
+    from collections import Counter
+    from pathlib import Path
+
+    pattern = re.compile(r"^def (test_\w+)", re.MULTILINE)
+    problems = []
+    for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+        names = pattern.findall(path.read_text(encoding="utf-8"))
+        dupes = [n for n, c in Counter(names).items() if c > 1]
+        if dupes:
+            problems.append(f"{path.name}: {sorted(dupes)}")
+    assert not problems, f"중복 테스트 이름 — 앞의 것이 안 돈다: {problems}"

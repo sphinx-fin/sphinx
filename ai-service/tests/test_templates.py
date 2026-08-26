@@ -155,3 +155,31 @@ def _fixtures_dir():
     from pathlib import Path
 
     return Path(__file__).resolve().parent / "fixtures"
+
+
+# ── 분모 매핑 (PR #104 로 샘플 파일이 셋이 됐다) ────────────────────────────────
+def test_every_product_type_has_a_denominator_sample():
+    """상품유형마다 분모 샘플이 정확히 하나 매핑돼 있어야 한다."""
+    from app.schemas import PRODUCT_TYPES as CANON
+
+    assert set(templates.CONTRACT_SAMPLE_BY_PRODUCT) == set(CANON)
+
+
+def test_unmapped_product_type_raises_instead_of_skipping():
+    """이전에는 None 을 돌려주고 assert_matches_contract() 가 조용히 통과했다 —
+    새 상품유형을 추가하면 계약 대조가 검사 없이 지나갔다."""
+    with pytest.raises(templates.ContractSampleMissing, match="매핑"):
+        templates.contract_item_ids("BOND")
+
+
+def test_missing_sample_file_raises(monkeypatch):
+    monkeypatch.setitem(templates.CONTRACT_SAMPLE_BY_PRODUCT, "ELS", "없는파일.json")
+    with pytest.raises(templates.ContractSampleMissing, match="파일이 없다"):
+        templates.contract_item_ids("ELS")
+
+
+def test_ops_manual_sample_is_not_the_denominator():
+    """변액은 교차 검증용 운용설명서 샘플이 함께 있다(PR #104). 그건 분모가 아니다."""
+    assert templates.CONTRACT_SAMPLE_BY_PRODUCT["VARIABLE_INSURANCE"] == \
+        "parsed_variable_sample.json"
+    assert len(templates.contract_item_ids("VARIABLE_INSURANCE")) == 10

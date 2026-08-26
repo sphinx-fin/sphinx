@@ -30,6 +30,20 @@ class PiiGuardMiddleware:
 
     GUARDED_METHODS = frozenset({"POST", "PUT", "PATCH"})
 
+    #: 본문이 **공시 상품문서**인 경로. 기획서 7-3: "상품설명서(공시 자료이므로 개인정보가
+    #: 아니다)". 발행사 민원부서 번호 같은 법인 연락처가 인쇄돼 있어 넓은 휴리스틱이 정상
+    #: 문서를 막는다 — 실측으로 `02-785-7424` 가 ACCOUNT 에 걸려 추출이 422 로 거부됐다.
+    #:
+    #: 이 경로에서도 좁은 패턴(RRN·PHONE)은 그대로 검사한다. 공시 문서에 주민번호나 개인
+    #: 휴대번호가 있으면 그건 문서 쪽 사고이므로 막아야 한다.
+    #:
+    #: **고객 텍스트가 오는 경로는 여기 넣지 않는다.** 나머지 전부가 strict 범위임을
+    #: 테스트로 고정했다.
+    PUBLIC_DOCUMENT_PATHS = frozenset({"/internal/parse", "/internal/extract"})
+
+    def _scope(self, path: str) -> str:
+        return "public_document" if path in self.PUBLIC_DOCUMENT_PATHS else "customer"
+
     def __init__(self, app) -> None:
         self.app = app
 
@@ -55,7 +69,7 @@ class PiiGuardMiddleware:
                 payload = None  # JSON이 아니면 FastAPI 검증이 처리한다
             if payload is not None:
                 try:
-                    assert_payload_clean(payload)
+                    assert_payload_clean(payload, scope=self._scope(scope.get("path", "")))
                 except PiiDetected as exc:
                     log.warning("PII 차단: kinds=%s where=%s path=%s",
                                 exc.kinds, exc.where, scope.get("path"))

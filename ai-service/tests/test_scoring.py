@@ -275,20 +275,11 @@ def test_echo_threshold_has_margin_over_real_utterances():
             except r.RubricNotFound:
                 continue
             worst = max(worst, scoring.echo_score(case["answer"], rubric, item))
-    assert worst < scoring.ECHO_THRESHOLD * 0.6, f"여유 부족: 실제 발화 최대 {worst:.3f}"
-
-
-def test_capped_confidence_records_the_reason():
-    """조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다."""
-    rubric, item = _rubric_and_item()
-    verbatim = rubric.required_elements[0] + "."
-    judgment = make_judgment(
-        grade=Grade.U1, confidence=0.95, quote=verbatim, reason="필수 요소를 언급했다",
+    margin = scoring.ECHO_THRESHOLD - worst
+    assert margin >= scoring.ECHO_MARGIN_MIN, (
+        f"여유 부족: 실제 발화 최대 {worst:.3f}, 임계 {scoring.ECHO_THRESHOLD} "
+        f"→ 간격 {margin:.3f} < {scoring.ECHO_MARGIN_MIN}"
     )
-    out = scoring.cap_confidence_if_echoed(judgment, verbatim, rubric, item)
-    assert out.confidence == scoring.ECHO_CONFIDENCE_CAP
-    assert "복창" in out.reason and "포함도" in out.reason
-    assert out.grade == Grade.U1, "등급은 건드리지 않는다"
 
 
 def test_prompt_version_matches_the_file_in_use():
@@ -314,29 +305,31 @@ def test_short_answers_are_not_treated_as_parroting():
         assert scoring.echo_score(short, rubric, item) == 0.0, short
 
 
-def test_the_bigram_floor_sits_below_real_utterances():
-    """하한이 실제 발화 쪽으로 올라오면 진짜 복창을 놓친다."""
-    import sys
-    from pathlib import Path
+def test_short_answers_would_have_scored_high_without_the_floor():
+    """하한이 하는 일이 실제로 있는지 — 없으면 이 발화들이 상한을 받는다.
 
-    import yaml
-
+    `"손실"` 은 조항 문면 그대로라 containment 가 1.000 이다. **우연 일치가 아니다**
+    (원래 주석이 그렇게 적었고 실측이 부정했다). 하한이 막는 것은 우연이 아니라
+    **U1 이 나올 수 없는 길이의 발화** 다.
+    """
     from app import textsim
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-
-    shortest = min(
-        len(textsim.bigrams(textsim.normalize(case["answer"])))
-        for path in sorted((Path(__file__).resolve().parent / "fixtures" / "utterances").glob("*.yaml"))
-        for case in yaml.safe_load(path.read_text(encoding="utf-8"))["cases"]
-    )
-    assert scoring.MIN_ECHO_BIGRAMS < shortest, (
-        f"하한 {scoring.MIN_ECHO_BIGRAMS} ≥ 실제 발화 최단 {shortest}"
-    )
+    rubric, _ = _rubric_and_item()
+    clause = rubric.required_elements[0]
+    assert textsim.containment("손실", clause) == 1.0
+    assert textsim.containment("원금 손실", clause) >= scoring.ECHO_THRESHOLD
 
 
-def test_the_bigram_floor_sits_below_every_rubric_clause():
-    """조항을 그대로 옮긴 복창은 언제나 하한 위여야 한다 — 아니면 복창을 놓친다."""
+def test_the_floor_is_derived_from_the_shortest_clause():
+    """★ 하한은 상수가 아니라 루브릭에서 나온다.
+
+    처음 상수 8 로 박았다가 `#112`(required 루브릭 10종)가 조항 최단을 13bg → 6bg 로 바꾸면서
+    깨졌다. 하한의 유일한 실제 제약은 **가장 짧은 조항을 그대로 옮긴 복창을 놓치지 않는 것**
+    이므로(PR #114 리뷰), 그 값에서 유도하는 것이 맞다.
+
+    이전에는 이 성질을 두 테스트로 나눠 뒀는데 **하나가 다른 하나에 포섭돼 단독으로 깨질 수
+    없었다**(정세현 지적). 유도로 바꾸면서 상방은 이 한 건으로 모은다.
+    """
     from app import rubrics as r
     from app import textsim
 
@@ -345,6 +338,37 @@ def test_the_bigram_floor_sits_below_every_rubric_clause():
         for rubric in r.all_rubrics().values()
         for clause in rubric.required_elements
     )
-    assert scoring.MIN_ECHO_BIGRAMS < shortest, (
-        f"하한 {scoring.MIN_ECHO_BIGRAMS} ≥ 조항 최단 {shortest}"
+    assert scoring.min_echo_bigrams() < shortest, (
+        f"하한 {scoring.min_echo_bigrams()} ≥ 조항 최단 {shortest} — 그 조항 복창을 놓친다"
     )
+
+
+def test_the_shortest_clause_verbatim_is_still_caught():
+    """유도가 맞는지 문면으로 확인한다 — 가장 짧은 조항을 그대로 답하면 잡혀야 한다."""
+    from app import rubrics as r
+    from app import textsim
+
+    shortest = min(
+        ((len(textsim.bigrams(textsim.normalize(c))), item_id, c)
+         for item_id, rubric in r.all_rubrics().items()
+         for c in rubric.required_elements),
+    )
+    _, item_id, clause = shortest
+    rubric = r.get(item_id)
+    probe = RISK_ITEM.model_copy(update={"item_id": item_id})
+    assert scoring.echo_score(clause, rubric, probe) >= scoring.ECHO_THRESHOLD, (
+        f"{item_id} 의 최단 조항 {clause!r} 복창이 안 잡힌다"
+    )
+
+
+def test_capped_confidence_records_the_reason():
+    """조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다."""
+    rubric, item = _rubric_and_item()
+    verbatim = rubric.required_elements[0] + "."
+    judgment = make_judgment(
+        grade=Grade.U1, confidence=0.95, quote=verbatim, reason="필수 요소를 언급했다",
+    )
+    out = scoring.cap_confidence_if_echoed(judgment, verbatim, rubric, item)
+    assert out.confidence == scoring.ECHO_CONFIDENCE_CAP
+    assert "복창" in out.reason and "포함도" in out.reason
+    assert out.grade == Grade.U1, "등급은 건드리지 않는다"
