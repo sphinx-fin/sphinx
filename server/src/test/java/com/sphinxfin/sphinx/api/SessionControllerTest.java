@@ -19,11 +19,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import org.mockito.ArgumentCaptor;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -68,6 +70,13 @@ class SessionControllerTest {
         // 모순 판정 기본 스텁 — 판정 없음. 실패 경로는 별도 테스트에서 본다.
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
                 .thenReturn(SuitabilityStatus.NO_MISMATCH);
+        // 질문 생성(F-INT-002) 기본 스텁 — nextQuestion 이 이제 ai-service 문면을 쓴다.
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition"));
+        // 재설명(F-INT-004) 기본 스텁 — re-explain 콘텐츠가 이제 ai-service 에서 온다.
+        when(aiServiceClient.reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class)))
+                .thenReturn(new AiServiceClient.ReExplanation("다시 쉽게 설명드릴게요.", List.of()));
     }
 
     @Test
@@ -349,6 +358,25 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("다음 질문 문면은 ai-service 가 만든 질문에서 온다 (F-INT-002 배선)")
+    void nextQuestionUsesAiServiceQuestion() throws Exception {
+        // 목 문면("… 본인 말씀으로 설명해 주시겠어요?")이 아니라 ai-service 응답이 실려야 한다.
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), eq("ELS")))
+                .thenReturn(new AiServiceClient.Question("낙인 아래로 떨어지면 어떻게 되나요?", "condition"));
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.question").value("낙인 아래로 떨어지면 어떻게 되나요?"));
+        // 상품유형은 세션에서 온다(하드코딩 아님) — ELS 로 넘어갔는지 직접 확인한다.
+        verify(aiServiceClient).question(any(RiskItem.class), anyList(), eq("ELS"));
+    }
+
+    @Test
     @DisplayName("상품 목록 — id 를 모르는 상태에서 고를 수 있어야 한다 (S-02)")
     void productListIsSelectable() throws Exception {
         mvc.perform(get("/products"))
@@ -388,6 +416,24 @@ class SessionControllerTest {
                 .andExpect(jsonPath("$.data.content").isNotEmpty())
                 .andExpect(jsonPath("$.data.reverifyQuestion").isNotEmpty())
                 .andExpect(jsonPath("$.data.vulnerable").isBoolean());
+    }
+
+    @Test
+    @DisplayName("재설명 콘텐츠는 ai-service 응답에서 온다 (F-INT-004 배선)")
+    void reExplainUsesAiServiceContent() throws Exception {
+        when(aiServiceClient.reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class)))
+                .thenReturn(new AiServiceClient.ReExplanation("ai-service 가 만든 재설명 콘텐츠", List.of()));
+        String sid = sessionWithMisunderstoodItem();
+
+        mvc.perform(post("/sessions/" + sid + "/re-explain").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").value("ai-service 가 만든 재설명 콘텐츠"));
+        // 판정(측정값)과 risk_item 이 실제로 ai-service 로 넘어가야 눈높이 재설명이 가능하다.
+        verify(aiServiceClient).reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class));
     }
 
     @Test

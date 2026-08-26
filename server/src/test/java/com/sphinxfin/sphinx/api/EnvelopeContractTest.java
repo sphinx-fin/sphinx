@@ -1,14 +1,18 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.core.AiServiceClient;
 import com.sphinxfin.sphinx.core.SessionRepository;
 import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.Signal;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,6 +21,10 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.time.Instant;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,6 +47,19 @@ class EnvelopeContractTest {
     private MockMvc mvc;
     @Autowired
     private SessionRepository repository;
+
+    /**
+     * /questions/next 가 ai-service /internal/question 을 호출하므로(F-INT-002 배선) 상류를
+     * 목으로 대신한다. 실제 :8100 에 붙이지 않는다 — 봉투 계약만 보는 테스트다.
+     */
+    @MockBean
+    private AiServiceClient aiServiceClient;
+
+    @BeforeEach
+    void stubQuestion() {
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition"));
+    }
 
     /** 봉투 3요소: success=true · data 존재 · error 없음(null). */
     private void assertEnveloped(ResultActions r) throws Exception {
