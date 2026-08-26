@@ -185,3 +185,34 @@ def test_demo_main_scenario_is_red_without_relying_on_the_llm():
     LLM이 최악으로 틀려도(U1, 확신 0.99) 결과는 U4여야 한다."""
     judgment, _ = _score(make_judgment(grade=Grade.U1, confidence=0.99))
     assert judgment.grade is Grade.U4, "데모의 임계 경로가 LLM 응답에 의존하고 있다"
+
+
+# ── 유니코드 정규화 (ADR-008 검토에서 발견) ────────────────────────────────────
+def test_decomposed_hangul_quote_is_accepted():
+    """한글 조합형(NFD) 인용이 완성형(NFC) 발화와 대조돼야 한다.
+
+    눈으로 같고 바이트가 다르다. 모델이 조합형으로 돌려주면 글자가 같은데도 P4 위반으로
+    거부됐다 — 실측으로 재현한 뒤 고쳤다. ADR-008 이 짚은 그 지점이다.
+    """
+    import unicodedata
+
+    nfd_quote = unicodedata.normalize("NFD", "원금은 지켜지는")
+    assert not unicodedata.is_normalized("NFC", nfd_quote)
+    judgment, _ = _score(make_judgment(quote=nfd_quote))
+    assert judgment.grade is Grade.U4          # 정상 경로로 끝까지 진행
+
+
+def test_decomposed_rubric_clause_is_accepted():
+    """조항 인용도 같다 — 대조 함수를 공유한다."""
+    import unicodedata
+
+    rubric = rubrics.get("ELS-PRINCIPAL-LOSS-WARNING")
+    nfd_clause = unicodedata.normalize("NFD", rubric.required_elements[0])
+    judgment, _ = _score(make_judgment(rubric_clause=nfd_clause))
+    assert judgment.evidence.rubric_clause == nfd_clause   # 저장값은 손대지 않는다
+
+
+def test_fabricated_quote_still_rejected_after_normalization():
+    """정규화가 검증을 무르게 하지 않았음을 고정한다."""
+    with pytest.raises(LlmError, match="P4"):
+        _score(make_judgment(quote="고객이 원금 손실을 이해한다고 답변함"))

@@ -67,6 +67,7 @@ public class Session extends BaseEntity {
     private String experienceLevel;   // 투자 경험 수준 — nullable(@Column 기본값)
     private String amountBand;         // 가입금액대 — nullable(@Column 기본값)
     private String contractRef;        // 계약건 참조번호(비식별) — nullable(@Column 기본값)
+    private String surveySchemaVersion; // 적합성 설문 문항 세트 버전 — 리포트가 어느 세트로 받았는지 안다(F-GTE-004)
 
     @Convert(converter = JsonMapConverter.class)
     @Column(columnDefinition = "TEXT")
@@ -128,6 +129,7 @@ public class Session extends BaseEntity {
                 .experienceLevel(cmd.experienceLevel())
                 .amountBand(cmd.amountBand())
                 .contractRef(cmd.contractRef())
+                .surveySchemaVersion(cmd.surveySchemaVersion())
                 .surveyResult(cmd.surveyResult() == null ? Map.of() : Map.copyOf(cmd.surveyResult()))
                 .build();
     }

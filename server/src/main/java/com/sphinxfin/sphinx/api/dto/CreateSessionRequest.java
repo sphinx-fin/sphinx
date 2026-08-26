@@ -18,11 +18,12 @@ public record CreateSessionRequest(
         String experienceLevel,
         String amountBand,
         String contractRef,
+        String surveySchemaVersion,
         Map<String, Object> surveyResult) {
 
     /** 검증 통과한 요청을 서비스 커맨드로 변환한다. */
     public CreateSessionCommand toCommand() {
         return new CreateSessionCommand(productId, channel, ageBand,
-                experienceLevel, amountBand, contractRef, surveyResult);
+                experienceLevel, amountBand, contractRef, surveySchemaVersion, surveyResult);
     }
 }
