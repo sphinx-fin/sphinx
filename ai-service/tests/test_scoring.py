@@ -301,3 +301,50 @@ def test_v1_prompt_is_kept_for_audit():
     """루브릭·프롬프트는 공개 의무 대상이다. 정의가 바뀐 이전 버전을 지우면 v1 로 측정된
     판정을 나중에 설명할 수 없다."""
     assert (scoring.PROMPT_PATH.parent / "F-SCR-001_v1.md").exists()
+
+
+def test_short_answers_are_not_treated_as_parroting():
+    """분모가 작으면 우연 일치가 점수를 지배한다 (PR #114 리뷰, 정세현).
+
+    `"손실"` 은 바이그램이 1개라 그 하나가 조항에 있으면 containment 가 1.000 이다.
+    복창이 아닌데 상한이 걸린다.
+    """
+    rubric, item = _rubric_and_item()
+    for short in ("손실", "원금", "원금 손실"):
+        assert scoring.echo_score(short, rubric, item) == 0.0, short
+
+
+def test_the_bigram_floor_sits_below_real_utterances():
+    """하한이 실제 발화 쪽으로 올라오면 진짜 복창을 놓친다."""
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    from app import textsim
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(case["answer"])))
+        for path in sorted((Path(__file__).resolve().parent / "fixtures" / "utterances").glob("*.yaml"))
+        for case in yaml.safe_load(path.read_text(encoding="utf-8"))["cases"]
+    )
+    assert scoring.MIN_ECHO_BIGRAMS < shortest, (
+        f"하한 {scoring.MIN_ECHO_BIGRAMS} ≥ 실제 발화 최단 {shortest}"
+    )
+
+
+def test_the_bigram_floor_sits_below_every_rubric_clause():
+    """조항을 그대로 옮긴 복창은 언제나 하한 위여야 한다 — 아니면 복창을 놓친다."""
+    from app import rubrics as r
+    from app import textsim
+
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(clause)))
+        for rubric in r.all_rubrics().values()
+        for clause in rubric.required_elements
+    )
+    assert scoring.MIN_ECHO_BIGRAMS < shortest, (
+        f"하한 {scoring.MIN_ECHO_BIGRAMS} ≥ 조항 최단 {shortest}"
+    )

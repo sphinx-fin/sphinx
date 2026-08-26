@@ -15,6 +15,8 @@
 """
 from __future__ import annotations
 
+import logging
+
 import re
 import unicodedata
 from pathlib import Path
@@ -25,6 +27,8 @@ from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
 PROMPT_VERSION = "F-SCR-001_v2"
+
+log = logging.getLogger(__name__)
 
 #: 이 값 이상이면 발화가 문서·루브릭 문면을 옮긴 것으로 본다. 오해 라이브러리의
 #: `NGRAM_THRESHOLD`(0.62)와 같은 계산이지만 숫자는 따로 둔다 — 저쪽은 "짧은 패턴이 발화에
@@ -39,6 +43,28 @@ PROMPT_VERSION = "F-SCR-001_v2"
 #: 0.6 은 실측 최대의 2.3배이고 부분 복창(0.80) 아래다. 처음 0.85 로 뒀더니 어미가 바뀐
 #: 부분 복창을 놓쳤다 — 복창은 보통 어미를 자기 말로 바꿔 온다.
 ECHO_THRESHOLD = 0.6
+
+#: 복창 판정의 발화 길이 하한(정규화 후 문자 바이그램 개수). 이보다 짧으면 `echo_score` 가
+#: 0.0 을 준다 — 계산이 성립하지 않는 구간이다.
+#:
+#: `containment` 의 분모가 발화 바이그램 수이므로 **분모가 작으면 우연 일치가 점수를
+#: 지배한다.** PR #114 리뷰(정세현)에서 지적됐고 실측으로 재현됐다.
+#:
+#:     발화            바이그램   containment(조항 "투자원금의 손실이 발생할 수 있음")
+#:     "손실"              1개     1.000   ← 복창이 아닌데 상한이 걸린다
+#:     "원금 손실"          3개     0.667   ← 임계 0.6 초과
+#:     "원금이 깎여요"       5개     0.200   안전
+#:
+#: 하한의 근거 — 세 숫자 사이에 둔다.
+#:
+#:     오발동 실측 구간        1 ~ 3개
+#:     dev set 실제 발화 최단   9개  ("낸 돈은 다 돌려받는 거죠?")
+#:     루브릭 조항 최단        13개  → 조항을 옮긴 복창은 언제나 이 하한 위다
+#:
+#: 이 하한은 **관대한 방향**이다(상한을 덜 씌운다). P4·P5 위반이 아닌 이유: 짧은 발화로
+#: U1 을 받으려면 필수 요소를 다 말해야 하는데 그 길이로는 불가능하고, U2 이하는 게이트
+#: R-04 가 이미 YELLOW 로 잡는다. 하한에 걸린 경우는 로그로 남겨 빈도를 본다.
+MIN_ECHO_BIGRAMS = 8
 
 #: 복창일 때 씌우는 confidence 상한. 게이트 R-05(`anyConfidenceBelow 0.7`)가 이걸 받는다.
 #: **임계값 자체는 게이트 소유다**(ADR-005) — 여기 있는 건 측정값의 상한이지 판정 정책이 아니다.
@@ -132,6 +158,9 @@ def echo_score(answer_text: str, rubric: rubrics.Rubric, risk_item: RiskItem) ->
     같은 층이다(`모델 출력을 그대로 믿지 않는다`). 임계값이 숫자로 드러나 재현되고 심사에서
     설명 가능해진다.
 
+    **너무 짧은 발화는 계산하지 않는다** — `MIN_ECHO_BIGRAMS` 참고. 분모가 작으면 우연
+    일치가 점수를 지배해서, 복창이 아닌 두 글자 답변이 1.000 을 받는다.
+
     대조 대상은 **고객이 옮겨 적을 수 있는 문면**이다.
     - `condition.value_text` — 상품문서 원문 조항
     - `rubric.required_elements` — 정답 문면. 루브릭은 공개 의무 대상이라 판매자가 읽을 수 있다
@@ -139,6 +168,14 @@ def echo_score(answer_text: str, rubric: rubrics.Rubric, risk_item: RiskItem) ->
     방향은 `containment(발화, 문면)` 이다 — **발화의 바이그램이 문면에 얼마나 있는지**.
     반대 방향으로 재면 긴 원문을 짧게 인용한 발화가 항상 낮게 나와 복창이 안 잡힌다.
     """
+    grams = len(textsim.bigrams(textsim.normalize(answer_text)))
+    if grams < MIN_ECHO_BIGRAMS:
+        log.info(
+            "복창 판정 생략: 발화 바이그램 %d개 < %d — 우연 일치가 점수를 지배하는 구간이다",
+            grams, MIN_ECHO_BIGRAMS,
+        )
+        return 0.0
+
     references = [risk_item.condition.value_text, *rubric.required_elements]
     return max((textsim.containment(answer_text, ref) for ref in references), default=0.0)
 
