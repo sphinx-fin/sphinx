@@ -10,11 +10,14 @@ import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.security.CurrentActor;
+import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -27,16 +30,20 @@ import java.util.NoSuchElementException;
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
 @RestController
 @RequestMapping("/sessions")
+@Slf4j
 @RequiredArgsConstructor
 public class SessionController {
 
     private final SessionService sessionService;
     private final AiServiceClient aiServiceClient;
+    private final CurrentActor currentActor;
 
-    @PreAuthorize("@accessGuard.can('session:create')")
+    @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
-        Session session = sessionService.create(body.toCommand());
+        // 귀속은 인증 주체에서만 온다 — 본문에 없다(CreateSessionRequest 주석).
+        Session session = sessionService.create(
+                body.toCommand(currentActor.actorId(), currentActor.branchId()));
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
@@ -95,9 +102,40 @@ public class SessionController {
                 .findFirst()
                 .orElseThrow(() -> new NoSuchElementException(
                         "항목을 찾을 수 없다: " + body.itemId()));
-        Judgment measured = aiServiceClient.score(
+        var scored = aiServiceClient.score(
                 item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
-        return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
+        // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
+        return ApiResponse.ok(sessionService.recordJudgment(
+                sid, scored.judgment(), scored.maskedAnswer()));
+    }
+
+    /**
+     * 판정 직전 1회, 적합성 모순을 판정한다 (F-DET-002, 이슈 #65).
+     *
+     * 여기서 부르는 이유: 모순 판정은 항목 단위가 아니라 설문 + 세션 전체 발화가 입력이라
+     * (suitability_mismatch.schema.json) 답변이 다 모인 뒤여야 한다. 이미 판정된 세션은
+     * 다시 부르지 않는다 — /judge 는 멱등이고, 재호출하면 같은 입력에 다른 답이 나올 수 있다.
+     *
+     * ❗ai-service 호출이 실패하면 502 로 올리지 않고 UNKNOWN 으로 적는다. 모순 판정이
+     * 안 됐다고 게이트 판정 자체를 막으면 판매가 멈추는데, 그건 이 실패에 비례하지 않는다.
+     * 대신 UNKNOWN 은 R-02b 로 황색이 되므로 "확인 못 했다"가 통과로 새지 않는다 —
+     * 실패를 은폐하지 않으면서(E-EXT-03) 흐름은 유지하는 자리다.
+     */
+    private void detectSuitabilityMismatch(String sid) {
+        Session session = sessionService.get(sid);
+        if (!session.suitabilityNotEvaluated()) {
+            return;
+        }
+        SuitabilityStatus status;
+        try {
+            status = aiServiceClient.detectMismatch(
+                    sid, session.surveyResult(), session.maskedUtterances(),
+                    session.surveySchemaVersion());
+        } catch (AiServiceException e) {
+            log.warn("적합성 모순 판정 실패 — UNKNOWN 으로 기록한다 (session={})", sid, e);
+            status = SuitabilityStatus.UNKNOWN;
+        }
+        sessionService.recordSuitability(sid, status);
     }
 
     /**
@@ -225,6 +263,7 @@ public class SessionController {
     @PreAuthorize("@accessGuard.can('session:judge', #sid)")
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
+        detectSuitabilityMismatch(sid);
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
         // 감사 기준점을 찍는다 — 되돌릴 수 없다. 신호만 보려면 /gate-preview 를 쓴다.
         return ApiResponse.ok(sessionService.judge(sid));
@@ -234,11 +273,20 @@ public class SessionController {
     /**
      * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
      *
-     * 발행을 GET 에서 분리한 이유는 감사다 — report:read 는 audited action 이라 GET 이
-     * 발행까지 하면 로그에서 "읽었다"와 "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을
-     * 열람하는 것만으로 발행 기록이 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     * 발행을 GET 에서 분리한 이유는 감사다 — GET 이 발행까지 하면 로그에서 "읽었다"와
+     * "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을 열람하는 것만으로 발행 기록이
+     * 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     *
+     * ❗<b>메서드를 가르는 것만으로는 부족하다.</b> AuditInterceptor 는 @PreAuthorize 문면에서
+     * action 을 읽으므로(#76), 두 엔드포인트가 같은 action 이면 감사 로그가 둘을 못 가른다 —
+     * resource(URI)도 같고 HTTP 메서드는 담기지 않는다. 분쟁 시점에 답해야 하는 것은
+     * "언제 누가 교부했는가" 이지 "누가 열어봤는가" 가 아니다.
+     *
+     * report:issue 는 SELLER own_session 만이다(#95). MGR·COMPL 은 감독을 위해 남의 세션을
+     * *읽는* 역할이고 교부는 그 세션을 진행한 창구 직원이 한다 — 조회와 같은 action 이면
+     * COMPL 이 org 전체 세션에 대해 발행할 수 있다.
      */
-    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @PreAuthorize("@accessGuard.can('report:issue', #sid)")
     @PostMapping("/{sid}/report")
     public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
         // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).

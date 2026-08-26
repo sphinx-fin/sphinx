@@ -21,7 +21,8 @@ LLM 파이프라인 전용 내부 서비스. **외부(브라우저)에 노출하
 | `app/main.py` | 엔트리포인트 + PII 입구 미들웨어 + `/healthz` |
 | `app/routes.py` | `/internal/*` 라우트. 얇게 유지 — 기능 로직은 각 모듈의 순수 함수 |
 | `app/schemas.py` | `contracts/*.schema.json`의 pydantic 미러 (계약의 진실은 `contracts/`) |
-| `app/pii.py` | P3 입구 재검사 |
+| `app/pii.py` | P3 입구 재검사 (범위: customer / public_document) |
+| `app/numerics.py` | 조건값 수치 추출·대조 — F-INT-002·F-INT-004 공용 |
 | `app/rubrics.py` | 루브릭 로더 (`status: draft`는 정답지 대조 전) |
 | `app/templates.py` | 상품유형 템플릿 로더 — **F-EXT-003 재현율 분모** |
 | `app/llm_client.py` | LLM 어댑터 (OpenAI 호환 엔드포인트) |
@@ -38,8 +39,8 @@ Spring `core/AiServiceClient`가 호출하는 7개. 미구현 기능은 **501**�
 | 경로 | 기능ID | 상태 |
 |---|---|---|
 | `POST /internal/parse` | F-EXT-001 (정세현) | 501 |
-| `POST /internal/extract` | F-EXT-002 | 501 |
-| `POST /internal/question` | F-INT-002 | 501 |
+| `POST /internal/extract` | F-EXT-002 | 구현 — LLM 키 필요 |
+| `POST /internal/question` | F-INT-002 | 구현 — LLM 키 필요 |
 | `POST /internal/score` | F-SCR-001 | 구현 — LLM 키 필요 |
 | `POST /internal/misconception` | F-DET-001 | 구현 (결정론 단계) |
 | `POST /internal/mismatch` | F-DET-002 | 구현 — LLM 키 필요 |
@@ -62,6 +63,10 @@ F-DET-002는 **7번째 엔드포인트**다(강희진 결정). 모순 판정은 
 마스킹하면 상류의 P3 위반이 조용히 덮인다.
 
 1. **입구** — `PiiGuardMiddleware`가 요청 본문의 모든 문자열을 검사한다(중첩 필드 포함).
+   검사 범위는 경로별이다. `/internal/parse`·`/internal/extract` 는 본문이 **공시 상품문서**라
+   넓은 휴리스틱을 끈다 — 기획서 7-3 이 *"상품설명서(공시 자료이므로 개인정보가 아니다)"* 라고
+   명시하고, 발행사 민원부서 번호(`02-785-7424`)가 ACCOUNT 패턴에 걸려 정상 문서가 422 로
+   거부된 실측 사례가 있다. **좁은 패턴(RRN·PHONE)은 어느 범위에서도 검사한다.**
 2. **출구(최종)** — `llm_client.send()`가 외부로 나가는 모든 프롬프트를 다시 검사한다.
    ai-service에서 망 밖으로 텍스트가 나가는 지점은 이 함수 하나뿐이다.
 
@@ -137,6 +142,20 @@ pytest
 **신뢰도 기반 황색 강등은 여기서 하지 않는다.** 게이트 정책이므로 `gate_rules.yaml`이
 가진다(강희진 결정, PR #10). 양쪽에서 하면 이중계산이다 —
 `proposals/F-SCR-001-yellow-downgrade.md` 참고.
+
+## 추출 (F-EXT-002)
+
+**스팬은 모델에게 묻지 않는다.** 모델은 인용과 페이지만 내고 `[start, end)` 는
+`parsing.resolve_span()`(정세현)이 원문에서 찾는다. 모델 숫자를 믿으면 계약 항등식이 깨질 수
+있고 **깨진 채로도 추출은 성공한 것처럼 보인다.** 우리가 계산하면 항등식이 구성상 성립한다.
+`value_text` 도 모델 인용이 아니라 원문에서 잘라낸 문자열을 쓴다(P6).
+
+실패는 은폐하지 않는다(E-EXT-03) — 못 찾은 항목은 빼지 않고 `status="extraction_failed"` 로
+낸다. 스팬 해소 실패·거짓양성 가능(loose)·모호한 스팬·페이지 정정·템플릿 밖 항목·importance
+자리표시자를 `ExtractionWarning` 으로 노출한다.
+
+문서 전체를 한 번에 넣는다(ELS 13k자·변액 20k자). `MAX_DOCUMENT_CHARS` 를 넘으면 **거부**한다 —
+조용히 잘라내면 뒷부분 항목이 전부 미검출로 잡히고 원인이 보이지 않는다.
 
 ## 상품유형 템플릿 — 추출 범위 고정
 

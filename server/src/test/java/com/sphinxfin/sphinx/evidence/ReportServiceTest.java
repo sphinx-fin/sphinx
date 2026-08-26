@@ -12,6 +12,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -41,17 +42,17 @@ class ReportServiceTest {
     @Autowired
     private TestEntityManager em;
 
-    private static Judgment judgment(String itemId, Grade grade, double confidence) {
-        return new Judgment(itemId, grade, confidence,
+    private static Judgment judgment(String itemId, Grade grade, String confidence) {
+        return new Judgment(itemId, grade, new BigDecimal(confidence),
                 new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"), "사유", null);
     }
 
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, 0.7), 0, T0);
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, T0);
         recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, 0.95), 1, T0.plusSeconds(60));
-        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, 0.9), 0, T0.plusSeconds(90));
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, T0.plusSeconds(60));
+        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, T0.plusSeconds(90));
         recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
         em.flush();
         em.clear();
@@ -152,10 +153,10 @@ class ReportServiceTest {
             String hashHere = reports.contentHash(reports.render(SID));
 
             // 같은 내용을 다른 세션에 쌓으면 체인 위치는 다르지만 내용은 같다.
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, 0.7), 0, T0);
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, T0);
             recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, 0.95), 1, T0.plusSeconds(60));
-            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, 0.9), 0, T0.plusSeconds(90));
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, T0.plusSeconds(60));
+            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, T0.plusSeconds(90));
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
             em.flush();
             em.clear();
@@ -173,7 +174,7 @@ class ReportServiceTest {
             seedSession();
             String before = reports.contentHash(reports.render(SID));
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, 0.6), 0, T0.plusSeconds(150));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, T0.plusSeconds(150));
             em.flush();
             em.clear();
 
@@ -211,7 +212,7 @@ class ReportServiceTest {
             ReportService.Report first = reports.issue(SID, T0.plusSeconds(200));
             em.flush();
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, 0.6), 0, T0.plusSeconds(250));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, T0.plusSeconds(250));
             em.flush();
             em.clear();
 

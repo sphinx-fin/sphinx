@@ -7,6 +7,7 @@ import com.sphinxfin.sphinx.domain.Signal;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,22 +24,78 @@ class GateEngineTest {
 
     private final GateEngine engine = new GateEngine();
 
-    private static Judgment judgment(Grade grade) {
-        return judgment(grade, 0.9);
+    @Test
+    @DisplayName("모순 확인 → RED (R-02)")
+    void mismatchConfirmedIsRed() {
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, false, 0);
+        assertThat(r.signal()).isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).contains("R-02");
     }
 
-    private static Judgment judgment(Grade grade, double confidence) {
+    @Test
+    @DisplayName("❗모순을 판정하지 못함 → YELLOW (R-02b, 결정 10.9) — GREEN 으로 새지 않는다")
+    void mismatchUnknownIsYellowNotGreen() {
+        // 계약이 스스로 경고한 지점이다 — status=insufficient_input 이면 mismatch 는 항상
+        // false 인데, 그 false 를 적합으로 읽으면 판정 실패가 통과가 된다.
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), false, true, 0);
+        assertThat(r.signal())
+                .as("판정하지 못한 것을 통과로 읽으면 안 된다")
+                .isEqualTo(Signal.YELLOW);
+        assertThat(r.ruleTrace()).contains("R-02b");
+    }
+
+    @Test
+    @DisplayName("모순 확인이 판정 못 함보다 먼저 잡힌다 — 확인된 RED > 확인 못 한 YELLOW")
+    void confirmedMismatchWinsOverUnknown() {
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, true, 0);
+        assertThat(r.signal()).isEqualTo(Signal.RED);
+    }
+
+    @Test
+    @DisplayName("모순 없음이 확인되면 통과 — 전 항목 U1 이면 GREEN")
+    void noMismatchIsGreen() {
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), false, false, 0);
+        assertThat(r.signal()).isEqualTo(Signal.GREEN);
+    }
+
+    @Test
+    @DisplayName("R-05 경계 — 임계값과 정확히 같으면 발동하지 않는다 (BigDecimal 전환 후에도)")
+    void confidenceExactlyAtThresholdDoesNotFire() {
+        // gate_rules.yaml 의 anyConfidenceBelow 0.7 은 "미만"이다. double 시절에도 0.7 < 0.7 은
+        // 거짓이었고 BigDecimal 로 바꾼 뒤에도 같아야 한다 — 임계값을 문자열에서 만들지 않고
+        // Double.parseDouble 을 거치면 이 경계가 표현 오차에 걸릴 수 있다.
+        GateResult atThreshold = engine.judge(List.of(judgment(Grade.U1, "0.7")), false, false, 0);
+        assertThat(atThreshold.signal()).isEqualTo(Signal.GREEN);
+
+        GateResult justBelow = engine.judge(List.of(judgment(Grade.U1, "0.69")), false, false, 0);
+        assertThat(justBelow.signal()).isEqualTo(Signal.YELLOW);
+    }
+
+    @Test
+    @DisplayName("자릿수만 다른 같은 신뢰도는 같게 판정한다 — BigDecimal.equals 는 스케일을 본다")
+    void sameConfidenceDifferentScaleJudgesSame() {
+        // ai-service 가 0.70 을 보내도 0.7 과 같아야 한다. equals 로 비교하면 갈린다.
+        assertThat(engine.judge(List.of(judgment(Grade.U1, "0.70")), false, false, 0).signal())
+                .isEqualTo(engine.judge(List.of(judgment(Grade.U1, "0.7")), false, false, 0).signal());
+    }
+
+    private static Judgment judgment(Grade grade) {
+        return judgment(grade, "0.9");
+    }
+
+    /** 신뢰도는 문자열로 받는다 — double 을 거치면 BigDecimal 로 바꾼 의미가 없어진다. */
+    private static Judgment judgment(Grade grade, String confidence) {
         return new Judgment(
                 "ITEM-" + grade,
                 grade,
-                confidence,
+                new BigDecimal(confidence),
                 new Judgment.Evidence("고객 발화 인용", "루브릭 조항"),
                 "판정 사유",
                 null);
     }
 
     private GateResult judge(List<Grade> grades) {
-        return engine.judge(grades.stream().map(GateEngineTest::judgment).toList(), false, 0);
+        return engine.judge(grades.stream().map(GateEngineTest::judgment).toList(), false, false, 0);
     }
 
     // ── 명세 5케이스 ──────────────────────────────────────────────────
@@ -71,7 +128,7 @@ class GateEngineTest {
     @DisplayName("R-05: 전부 U1이어도 신뢰도 낮으면 → YELLOW (통과 안 시킴)")
     void lowConfidence_isYellow() {
         GateResult r = engine.judge(
-                List.of(judgment(Grade.U1, 0.6), judgment(Grade.U1, 0.9)), false, 0);
+                List.of(judgment(Grade.U1, "0.6"), judgment(Grade.U1, "0.9")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
         assertThat(r.ruleTrace()).containsExactly("R-05");
     }
@@ -80,7 +137,7 @@ class GateEngineTest {
     @DisplayName("트레이스: 같은 신호(YELLOW)를 낸 발화 룰을 전부 기록 (부분이해 + 저신뢰 → R-04·R-05)")
     void multipleRulesSameSignal_allTraced() {
         // U2(R-04 YELLOW) + 저신뢰(R-05 YELLOW) 동시 → 신호는 YELLOW, 트레이스엔 둘 다
-        GateResult r = engine.judge(List.of(judgment(Grade.U2, 0.6)), false, 0);
+        GateResult r = engine.judge(List.of(judgment(Grade.U2, "0.6")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
         assertThat(r.ruleTrace()).containsExactly("R-04", "R-05");
     }
@@ -88,7 +145,7 @@ class GateEngineTest {
     @Test
     @DisplayName("U4 예외: 신뢰도 낮아도 U4는 RED (R-01 우선)")
     void lowConfidenceU4_stillRed() {
-        GateResult r = engine.judge(List.of(judgment(Grade.U4, 0.5)), false, 0);
+        GateResult r = engine.judge(List.of(judgment(Grade.U4, "0.5")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).containsExactly("R-01");
     }
@@ -96,7 +153,7 @@ class GateEngineTest {
     @Test
     @DisplayName("R-02: 적합성 설문 vs 발화 모순이면 → RED (등급 무관)")
     void suitabilityMismatch_isRed() {
-        GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, 0);
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).containsExactly("R-02");
     }
@@ -104,7 +161,7 @@ class GateEngineTest {
     @Test
     @DisplayName("R-03: 재검증 2회 실패면 → RED (항목당 최대 2회, 끝내 이해 못 하면 보류)")
     void reverifyFailedTwice_isRed() {
-        GateResult r = engine.judge(List.of(judgment(Grade.U1)), false, 2);
+        GateResult r = engine.judge(List.of(judgment(Grade.U1)), false, false, 2);
         assertThat(r.signal()).isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).containsExactly("R-03");
     }
@@ -122,7 +179,7 @@ class GateEngineTest {
     @Test
     @DisplayName("fail-closed: 판정이 하나도 없으면 → RED (판매 게이트는 보수적으로)")
     void emptyJudgments_failsClosedToRed() {
-        GateResult r = engine.judge(List.of(), false, 0);
+        GateResult r = engine.judge(List.of(), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).containsExactly(GateEngine.DEFAULT_TRACE);
     }

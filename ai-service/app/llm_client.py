@@ -64,11 +64,23 @@ class LlmClient:
         response_format: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         model: str | None = None,
+        pii_scope: str = "customer",
     ) -> str:
-        """원문 응답 문자열을 돌려준다. 외부로 나가는 유일한 경로 (P3)."""
-        pii.assert_clean(prompt, "llm.prompt")
+        """원문 응답 문자열을 돌려준다. 외부로 나가는 유일한 경로 (P3).
+
+        `pii_scope` 는 **무엇을 보내는지** 선언한다. 기본값 `customer` 는 고객 텍스트를
+        전제하고 넓은 휴리스틱까지 적용한다. 공시 상품문서를 보낼 때만 `public_document`
+        를 쓴다 — 기획서 7-3 이 공시 자료를 개인정보가 아니라고 명시하고, 법인 연락처가
+        인쇄돼 있어 넓은 휴리스틱이 정상 문서를 막는다. 좁은 패턴(RRN·PHONE)은 어느
+        범위에서도 검사한다.
+
+        **고객 텍스트를 public_document 로 보내면 안 된다.** 그 경로를 쓰는 곳은
+        F-EXT-002 추출 하나뿐이고, 고객 발화를 다루는 라우트가 그것을 쓰지 않는 것을
+        테스트로 고정했다.
+        """
+        pii.assert_clean(prompt, "llm.prompt", scope=pii_scope)
         if system:
-            pii.assert_clean(system, "llm.system")
+            pii.assert_clean(system, "llm.system", scope=pii_scope)
 
         messages: list[dict[str, str]] = []
         if system:
@@ -107,6 +119,7 @@ class LlmClient:
         system: str | None = None,
         extra_body: dict[str, Any] | None = None,
         model: str | None = None,
+        pii_scope: str = "customer",
     ) -> T:
         """JSON 스키마를 강제하고, 받은 결과를 pydantic으로 재검증해서 반환한다.
 
@@ -126,6 +139,7 @@ class LlmClient:
             response_format=response_format,
             extra_body=extra_body,
             model=model,
+            pii_scope=pii_scope,
         )
         try:
             return model_cls.model_validate(json.loads(raw))

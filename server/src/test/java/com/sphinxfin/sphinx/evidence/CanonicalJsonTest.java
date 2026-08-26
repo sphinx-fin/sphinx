@@ -286,17 +286,11 @@ class CanonicalJsonTest {
                     .hasMessageContaining("담을 수 없는 타입");
         }
 
-        /**
-         * Judgment 와 같은 모양이되 confidence 만 BigDecimal 인 레코드.
-         * 10.32 가 1번(BigDecimal 로 변경)으로 닫히면 Judgment 가 이 모양이 된다.
-         */
-        record JudgmentShaped(String itemId, Grade grade, BigDecimal confidence,
-                              Judgment.Evidence evidence, String reason, String misconceptionType) {}
 
         @Test
-        @DisplayName("Judgment 는 confidence 말고는 전부 담을 수 있다 — enum · 중첩 레코드 · nullable")
-        void judgmentIsSerializableOnceConfidenceIsFixed() {
-            JudgmentShaped judgment = new JudgmentShaped(
+        @DisplayName("Judgment 를 그대로 담을 수 있다 — enum · 중첩 레코드 · nullable · BigDecimal")
+        void judgmentIsSerializable() {
+            Judgment judgment = new Judgment(
                     "ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, new BigDecimal("0.91"),
                     new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
                     "원금 보장으로 오해", null);          // misconceptionType 은 nullable 이다
@@ -313,17 +307,19 @@ class CanonicalJsonTest {
         }
 
         @Test
-        @DisplayName("Judgment 는 confidence 가 double 이라 지금은 해시 대상에 담을 수 없다")
-        void judgmentCannotBeHashedYet() {
-            Judgment judgment = new Judgment("ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, 0.91,
+        @DisplayName("misconceptionType 이 채워진 판정도 담긴다 — 적재 쪽이 Map 으로 풀 필요가 없다")
+        void judgmentWithMisconceptionIsSerializable() {
+            // decision-log 10.32 가 닫혔다(confidence: double → BigDecimal). 예전에는 이 자리에
+            // "아직 담을 수 없다"를 단정하는 테스트가 있었고, 타입이 바뀌면 깨지도록 두었다.
+            // 그 역할이 끝났으므로 담긴다는 쪽으로 뒤집는다.
+            Judgment judgment = new Judgment("ELS-PRINCIPAL-LOSS-WARNING", Grade.U4,
+                    new BigDecimal("0.91"),
                     new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
                     "원금 보장으로 오해", "M01-PRINCIPAL-GUARANTEE");
 
-            assertThatThrownBy(() -> CanonicalJson.serialize(judgment))
-                    .as("ADR-008 과 domain/Judgment 가 부딪히는 지점 — decision-log 10.32 를 보라. "
-                            + "이 테스트가 깨진다면 confidence 타입이 바뀐 것이므로 10.32 를 닫으면 된다")
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("double");
+            assertThat(CanonicalJson.serialize(judgment))
+                    .contains("\"confidence\":0.91")
+                    .contains("\"misconceptionType\":\"M01-PRINCIPAL-GUARANTEE\"");
         }
     }
 

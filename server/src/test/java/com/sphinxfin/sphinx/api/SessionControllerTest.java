@@ -4,7 +4,9 @@ import com.jayway.jsonpath.JsonPath;
 import com.sphinxfin.sphinx.core.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,8 +17,16 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import org.mockito.ArgumentCaptor;
+import java.math.BigDecimal;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -49,10 +59,71 @@ class SessionControllerTest {
     void stubScoring() {
         // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
-                .thenAnswer(inv -> new Judgment(inv.getArgument(0), Grade.U4, 0.91,
-                        new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
-                                "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
-                        "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"));
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.91"),
+                                new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
+                                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                                "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"),
+                        inv.getArgument(2)));
+        // 모순 판정 기본 스텁 — 판정 없음. 실패 경로는 별도 테스트에서 본다.
+        when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
+                .thenReturn(SuitabilityStatus.NO_MISMATCH);
+    }
+
+    @Test
+    @DisplayName("❗ai-service 모순 판정이 죽어도 /judge 는 살아 있고, 결과가 GREEN 으로 새지 않는다")
+    void mismatchFailureBecomesYellowNotGreen() throws Exception {
+        // U1(이해)만 있는 세션이라 원래는 R-06 GREEN 이다. 모순 판정이 실패하면
+        // "확인 못 함"이므로 통과가 아니라 재확인(R-02b YELLOW)이어야 한다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.95"),
+                                new Judgment.Evidence("낙인 하회하면 원금 손실 난다고 들었어요",
+                                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                                "조건을 정확히 진술", null),
+                        inv.getArgument(2)));
+        when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
+                .thenThrow(new AiServiceException("ai-service 다운"));
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 원금 손실 난다고 들었어요"}"""))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(status().isOk())          // 502 로 판매를 멈추지 않는다
+                .andExpect(jsonPath("$.data.signal").value("YELLOW"))
+                .andExpect(jsonPath("$.data.ruleTrace", hasItem("R-02b")));
+    }
+
+    @Test
+    @DisplayName("모순 판정에는 마스킹된 발화가 항목별로 넘어간다 — 근거 스팬만 넘기면 모순이 안 보인다")
+    void utterancesReachMismatchDetection() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"사실 원금 잃으면 큰일 나요"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/" + sid + "/judge")).andExpect(status().isOk());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(aiServiceClient).detectMismatch(eq(sid), anyMap(), captor.capture(),
+                nullable(String.class));
+        assertThat(captor.getValue())
+                .as("발화가 안 넘어가면 판정기가 볼 게 없어 insufficient_input 이 난다")
+                .containsEntry("ELS-PRINCIPAL-LOSS-WARNING", "사실 원금 잃으면 큰일 나요");
     }
 
     @Test
@@ -64,10 +135,12 @@ class SessionControllerTest {
         // 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀리는 종류다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
                 eq("VARIABLE_INSURANCE")))
-                .thenAnswer(inv -> new Judgment(inv.getArgument(0), Grade.U1, 0.9,
-                        new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
-                                "예금자보호 범위: 보호되는 급부와 한도를 인지해야 함"),
-                        "부분 보호 범위를 정확히 진술", null));
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
+                                new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
+                                        "예금자보호 범위: 보호되는 급부와 한도를 인지해야 함"),
+                                "부분 보호 범위를 정확히 진술", null),
+                        inv.getArgument(2)));
 
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""

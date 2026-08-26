@@ -484,7 +484,10 @@ components:
             - REEXPLAIN_NOT_ELIGIBLE   # 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
             - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
             - OVERRIDE_NOT_ELIGIBLE    # 409 오버라이드 전제 위반(적색 아님 또는 요청 없이 승인)
+            - UNAUTHORIZED             # 401 인증되지 않은 요청 — 로그인하면 해소된다
+            - FORBIDDEN                # 403 권한 없음(F-CMN-002) — 로그인해도 해소되지 않는다
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+            - MEASUREMENT_INVALID      # 502 신뢰도 누락·범위(0~1) 이탈 — 상류 ai-service 계약 위반
             - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
@@ -715,7 +718,7 @@ components:
         error:   {type: object, nullable: true}
     GatePreview:
       type: object
-      required: [signal, ruleTrace, recorded]
+      required: [signal, ruleTrace, recorded, suitabilityStatus]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
         ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
@@ -729,6 +732,14 @@ components:
           format: date-time
           nullable: true
           description: "기준점 확정 시각. null 이면 /judge 가 아직 호출되지 않은 세션이다"
+        suitabilityStatus:
+          type: string
+          enum: [NOT_EVALUATED, NO_MISMATCH, MISMATCH, UNKNOWN]
+          description: >
+            적합성 모순 판정 상태 (F-DET-002). ❗미리보기는 모순을 평가하지 않으므로 보통
+            NOT_EVALUATED 다 — 그 상태의 signal 은 모순 평가 전 값이라 /judge 에서
+            YELLOW(UNKNOWN) · RED(MISMATCH) 로 갈릴 수 있다. NOT_EVALUATED 인 GREEN 을
+            최종 통과로 그리면 안 되고, "적합성 미확인" 을 함께 보여야 한다.
     GatePreviewApiResponse:
       type: object
       required: [success, data]

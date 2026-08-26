@@ -1,0 +1,19 @@
+# 소유: 윤지석 — 공개 의무. status·item_id 근거는 VAR-PRINCIPAL-LOSS.yaml 참고.
+#
+# 기획서 4절 오해 목록의 "저축인 줄 알았다"(M05)를 정면으로 다루는 항목이다.
+# VAR-PERFORMANCE-LINKED 가 "무엇에 따라 변하는가"를 묻는다면 여기는 **왜 저축과 다른가** —
+# 위험보장이 함께 들어 있어 낸 돈이 전부 적립되지 않는다는 구조다.
+item_id: VAR-NOT-BANK-SAVINGS
+product_type: VARIABLE_INSURANCE
+name: 은행 저축과 다름
+status: draft
+required_elements:
+  - 위험보장과 저축을 겸비한 제도라서 낸 돈이 전부 적립되지 않는다
+  - 은행 예금과 성격이 다르다
+misconception_conditions:
+  - 은행 적금과 같다
+  - 낸 돈이 그대로 쌓인다
+  - 원금은 보장된다
+related_misconceptions:
+  - M05-SAVINGS
+  - M01-PRINCIPAL-GUARANTEE

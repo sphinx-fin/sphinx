@@ -64,3 +64,48 @@ cases:
     expected_grade: U1
     expected_misconception: null
     deterministic: false
+
+  # ── required 루브릭 3종 (#100 importance 부여 대응) ─────────────────────────
+  # 셋 다 결정론 미매칭이다(실측). M05 패턴이 "그냥 저축인 줄"에 맞춰져 있어 다른 표현은
+  # 안 걸린다 — 라이브러리 패턴 추가 요청 근거.
+
+  - id: VAR-FIXED-INTEREST
+    source: 합성 — 실적배당을 확정이자로 오인. VAR-PRINCIPAL-LOSS 와 층이 다른 오해
+    item_id: VAR-PERFORMANCE-LINKED
+    question: 이 상품의 수익이 어떻게 정해지는지 본인 말씀으로 설명해 주시겠어요?
+    answer: 정해진 이자가 붙어서 나오는 거죠?
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false
+
+  # ★ PR #53 이 만든 케이스다. "보호되지 않는다"가 아니라 **범위**를 요구하는 루브릭이라
+  #   전액보호 오인(U4)과 전액비보호 오인이 둘 다 오답이어야 한다. 후자는 원문 첫 문장만
+  #   읽으면 나오는 답이고, 판매자가 그렇게 설명해도 게이트가 잡아야 한다.
+  - id: VAR-DEPOSIT-FULL
+    source: 합성 — 부분보호를 전액보호로 오인
+    item_id: VAR-PARTIAL-DEPOSIT-INSURANCE
+    question: 이 계약이 예금자보호를 받는 범위를 어떻게 이해하고 계신가요?
+    answer: 보험사도 예금자보호 되니까 낸 돈은 다 보호되는 거죠?
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # M02 는 #57 로 ELS 전용 — 변액은 결정론 보조가 없다
+
+  - id: VAR-DEPOSIT-NONE
+    source: 합성 — 원문 첫 문장만 읽은 반대 방향 오해. 루브릭이 범위를 요구하는 이유
+    item_id: VAR-PARTIAL-DEPOSIT-INSURANCE
+    question: 이 계약이 예금자보호를 받는 범위를 어떻게 이해하고 계신가요?
+    answer: 보험은 예금자보호가 전혀 안 된다고 들었어요.
+    # KNOCKIN-MATURITY-ONLY 와 같은 라벨 오류였다 — 반대 방향이어도 틀리게 아는 것이라 U4.
+    # 이 케이스의 의의는 등급이 아니라 **양방향 오해가 둘 다 걸리는지**다. 걸린다.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false
+
+  - id: VAR-SAME-AS-SAVINGS
+    source: 기획서 4절 오해 목록 — 저축성 오인(M05)의 다른 표현
+    item_id: VAR-NOT-BANK-SAVINGS
+    question: 이 상품이 은행 저축과 어떻게 다른지 말씀해 주시겠어요?
+    answer: 은행 적금이랑 같은 거라고 들었어요.
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false  # ★ M05 패턴 미매칭 실측 — "그냥 저축인 줄"만 걸린다

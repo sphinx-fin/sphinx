@@ -155,13 +155,56 @@ class ExtractRequest(Strict):
         return self.parsed_document.product_type
 
 
+class ExtractionWarning(Strict):
+    """추출을 은폐하지 않고 노출한다 (E-EXT-03). parse_warnings 와 같은 성격이다."""
+
+    code: Literal[
+        "ITEM_NOT_FOUND",        # 템플릿 항목을 문서에서 못 찾음 → status=extraction_failed
+        "SPAN_UNRESOLVED",       # 인용은 받았으나 원문에서 스팬을 해소 못 함
+        "LOOSE_MATCH",           # 낱자 사이 개행까지 허용해 찾음 — 거짓 양성 가능, 사람 확인 필요
+        "AMBIGUOUS_SPAN",        # 같은 문면이 페이지에 여러 번 — 어느 것인지 확정 불가
+        "PAGE_CORRECTED",        # 모델이 지목한 페이지에 없어 다른 페이지에서 찾음
+        "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
+        "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
+    ]
+    item_id: str | None = None
+    message: str
+
+
 class ExtractResponse(Strict):
     items: list[RiskItem]
+    warnings: list[ExtractionWarning] = Field(default_factory=list)
+
+
+# ── F-EXT-002 LLM 초안 (계약 아님 — 내부 타입) ────────────────────────────────
+class ExtractedCandidate(Strict):
+    """모델이 낸 후보. **offset 을 받지 않는다** — 스팬은 우리가 원문에서 계산한다.
+
+    모델이 준 숫자를 믿으면 계약 항등식(`text[start:end] == value_text`)이 깨질 수 있고,
+    깨진 채로도 추출은 성공한 것처럼 보인다. 인용만 받고 위치는 parsing.resolve_span 이
+    찾는다 — 그러면 항등식이 구성상 성립한다.
+    """
+
+    item_id: str
+    page: int = Field(ge=1)
+    quote: str = Field(min_length=1, description="문서에서 그대로 잘라낸 문면")
+
+
+class ExtractionDraft(Strict):
+    candidates: list[ExtractedCandidate]
 
 
 class QuestionRequest(Strict):
     risk_item: RiskItem
     asked_types: list[str] = Field(default_factory=list, description="이미 쓴 유형 — 반복 방지")
+    product_type: ProductType = "ELS"
+
+
+class QuestionDraft(Strict):
+    """F-INT-002 LLM 초안 (계약 아님 — 내부 타입)."""
+
+    question: str = Field(min_length=1)
+    question_type: Literal["situation", "amount", "condition"]
 
 
 class QuestionResponse(Strict):
@@ -202,8 +245,22 @@ class MisconceptionResponse(Strict):
 
 
 class ReexplainRequest(Strict):
+    """F-INT-004 콘텐츠. 루프 오케스트레이션(항목당 최대 2회)은 강희진 소유다.
+
+    `age_band`·`experience_level` 은 **선택**이다. 기획서 4절이 *"고객의 이해 수준과
+    연령·경험에 맞춰 설명을 다시 만든다. 고령 고객에게는 비유 중심으로"* 를 요구하고,
+    기획서 7-3 이 LLM 처리 단계에 남기는 것으로 *"상품코드, 상품 조건, 연령대, 금액구간"*
+    을 명시했다.
+
+    F-DET-002 에서 연령대를 받지 않기로 한 것과 이유가 다르다 — 그쪽은 취약 요인 **가중**이
+    서버 소유라서였고(ADR-005), 이쪽은 콘텐츠 생성에 직접 필요하다. 없으면 고령 고객 기준
+    (기획서 3절이 1순위 대상으로 지정한 층)으로 쓴다.
+    """
+
     risk_item: RiskItem
     judgment: Judgment
+    age_band: str | None = None
+    experience_level: str | None = None
 
 
 class ReexplainResponse(Strict):
