@@ -106,6 +106,10 @@ items:
 
   - item_id: ELS-ISSUER-CREDIT-RISK
     name: 발행사 신용위험
-    importance: recommended    # 원금 전액 손실 경로이지만 분쟁 근거가 없다 — 3.17 대로 근거를 앞세운다
+    importance: required    # M01/M02 와 같은 층 — 윤지석 리뷰(PR #100) 수용. ELS-NO-DEPOSIT-INSURANCE
+    # 의 required_elements 가 발행사 신용위험을 일부러 빼고 "별도 항목(ELS-ISSUER-CREDIT-RISK)
+    # 의 범위" 라고 전제하는데, 그 항목이 recommended 면 "예금자보호 안 됨"은 묻고 "그래서 뭐가
+    # 문제인가"는 안 묻는 상태가 된다 — 쪼갠 이유가 사라진다. M04 를 required 로 둔 근거("급하면
+    # 빼면 되죠"가 오해다)와 같은 구조로, "증권사가 망할 리가"는 M01 의 사촌이다.
     cue: 발행인의 신용으로 발행되는 무보증 증권이라는 고지와 신용등급
     section_hint: 발행사 위험
