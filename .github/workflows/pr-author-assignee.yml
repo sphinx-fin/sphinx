@@ -1,0 +1,45 @@
+name: PR 담당자 자동 지정
+
+# PR 을 올린 사람을 담당자(assignee)로 지정한다. 담당자는 "이 PR 을 끝까지 끌고 갈
+# 사람"이고, 리뷰어와 다르다 — 리뷰어는 CODEOWNERS 가 배정하고 그 상태는
+# pr-reviewer-label.yml 이 라벨로 보여준다.
+#
+# 손으로 붙이는 규칙이었는데 최근 닫힌 PR 20건 중 7건이 비어 있었다. 빈 담당자는
+# 목록에서 "누구 것인지" 를 지워버려, 막힌 PR 을 누가 풀어야 하는지 안 보이게 한다.
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign:
+    name: 작성자를 담당자로
+    runs-on: ubuntu-latest
+    steps:
+      - name: 담당자 지정
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+
+          # 이미 담당자가 있으면 손대지 않는다. 일부러 다른 사람에게 넘긴 PR 을
+          # 작성자로 되돌리면 안 된다.
+          count=$(gh pr view "$PR" --repo "$REPO" --json assignees --jq '.assignees | length')
+          if [ "$count" -gt 0 ]; then
+            echo "::notice::이미 담당자가 있다 — 건드리지 않는다"
+            exit 0
+          fi
+
+          # 저장소 협업자가 아니면 담당자로 지정할 수 없다. 그때는 경고만 남기고
+          # 워크플로를 실패시키지 않는다 — 담당자 지정은 편의지 관문이 아니다.
+          if gh pr edit "$PR" --repo "$REPO" --add-assignee "$AUTHOR" >/dev/null 2>&1; then
+            echo "::notice::담당자 지정 — $AUTHOR"
+          else
+            echo "::warning::담당자 지정 실패 — $AUTHOR (저장소 협업자가 아닐 수 있다)"
+          fi
