@@ -22,6 +22,7 @@ from pathlib import Path
 
 import yaml
 
+from . import textsim
 from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
 
 LIBRARY_PATH = (
@@ -33,9 +34,6 @@ LIBRARY_PATH = (
 NGRAM_THRESHOLD = 0.62
 # 후보 큐 적재 하한 — 임계값에 못 미치지만 무시하기엔 가까운 것
 REVIEW_THRESHOLD = 0.45
-
-_NOISE = re.compile(r"[^0-9가-힣a-zA-Z]+")
-
 
 #: 오해 유형의 근거 종류. 기획서 5절은 "실제로 분쟁까지 간 오해만 라이브러리에 들어간다.
 #: 근거가 조정례와 검사결과라는 뜻이다"라고 못박는다. proposal_example은 그 두 종류가
@@ -74,20 +72,11 @@ class MisconceptionType:
         return "ALL" in self.products or product_type in self.products
 
 
-def _normalize(text: str) -> str:
-    return _NOISE.sub("", text)
-
-
-def _bigrams(text: str) -> set[str]:
-    return {text[i:i + 2] for i in range(len(text) - 1)} or {text}
-
-
-def _containment(pattern: str, text: str) -> float:
-    """패턴의 바이그램이 발화에 얼마나 들어있는지. 발화가 길어도 페널티가 없다."""
-    pb, tb = _bigrams(pattern), _bigrams(text)
-    if not pb:
-        return 0.0
-    return len(pb & tb) / len(pb)
+#: 정규화·바이그램·포함도는 `textsim` 한 벌만 쓴다 — F-SCR-001 복창 판정이 같은 계산을
+#: 쓰므로 두 곳에서 따로 정규화하면 임계값을 서로 비교할 수 없게 된다.
+_normalize = textsim.normalize
+_bigrams = textsim.bigrams
+_containment = textsim.containment
 
 
 def _parse_source(entry: dict) -> SourceRef:

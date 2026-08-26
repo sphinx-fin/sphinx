@@ -125,13 +125,17 @@ def run_spec(spec_path: Path, needle: str) -> tuple[int, int, int]:
             continue
 
         exp_g, exp_m = case.get("expected_grade"), case.get("expected_misconception")
+        # confidence 도 라벨한다 — 프롬프트 v2 부터 게이트 R-05 의 입력이라 등급과 같은 층이다.
+        exp_c = case.get("expected_confidence_max")
         ok = (exp_g is None or j.grade.value == exp_g) and \
-             (exp_m is None or j.misconception_type == exp_m)
+             (exp_m is None or j.misconception_type == exp_m) and \
+             (exp_c is None or j.confidence <= exp_c)
         print(f"  판정   {j.grade.value}  conf={j.confidence:.2f}  type={j.misconception_type}")
         print(f'  근거   "{j.evidence.utterance_quote}"')
         print(f"         ← {j.evidence.rubric_clause}")
         print(f"  사유   {j.reason}")
-        print(f"  {'PASS' if ok else 'FAIL'}  기대 grade={exp_g} type={exp_m}")
+        tail = f" conf<={exp_c}" if exp_c is not None else ""
+        print(f"  {'PASS' if ok else 'FAIL'}  기대 grade={exp_g} type={exp_m}{tail}")
         passed += ok
         failed += not ok
     return passed, failed, errored

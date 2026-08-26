@@ -216,3 +216,88 @@ def test_fabricated_quote_still_rejected_after_normalization():
     """정규화가 검증을 무르게 하지 않았음을 고정한다."""
     with pytest.raises(LlmError, match="P4"):
         _score(make_judgment(quote="고객이 원금 손실을 이해한다고 답변함"))
+
+
+# ── 문면 복창 (프롬프트 v2 / ADR-005 confidence 재정의) ───────────────────────
+def _rubric_and_item():
+    from app import rubrics as r
+    return r.get("ELS-PRINCIPAL-LOSS-WARNING"), RISK_ITEM
+
+
+def test_echo_score_separates_parroting_from_paraphrase():
+    """같은 내용을 자기 순서로 말한 발화와 문면을 옮긴 발화가 갈려야 한다.
+
+    모델은 이걸 못 했다 — 종결어미만 바꿔도 confidence 가 0.90 ↔ 0.30 으로 흔들렸다.
+    """
+    rubric, item = _rubric_and_item()
+    paraphrase = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나온다고 들었어요."
+    verbatim = rubric.required_elements[0] + "."
+    assert scoring.echo_score(paraphrase, rubric, item) < scoring.ECHO_THRESHOLD
+    assert scoring.echo_score(verbatim, rubric, item) >= scoring.ECHO_THRESHOLD
+
+
+def test_sentence_ending_does_not_change_echo_score():
+    """`~라고 들었어요` 는 공손 표현이다. 모델이 여기서 틀렸으므로 계산으로 고정한다."""
+    rubric, item = _rubric_and_item()
+    hearsay = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나온다고 들었어요."
+    plain = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나옵니다."
+    a, b = scoring.echo_score(hearsay, rubric, item), scoring.echo_score(plain, rubric, item)
+    assert abs(a - b) < 0.05, f"어미만 다른데 {a:.3f} vs {b:.3f}"
+
+
+def test_echo_threshold_has_margin_over_real_utterances():
+    """임계값이 실제 발화 쪽으로 내려오면 정상 이해가 황색이 된다(관리지표 10%).
+
+    dev set 전체를 대조한다 — 발화를 추가할 때 여유가 줄면 여기서 걸린다. 복창으로 라벨한
+    케이스(`expected_confidence_max`)는 제외한다. 그건 걸려야 하는 쪽이다.
+    """
+    import yaml
+
+    from app import rubrics as r
+
+    worst = 0.0
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from run_devset import load_risk_items
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "utterances"
+    for path in sorted(fixtures.glob("*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        items = load_risk_items(spec["product_type"])
+        for case in spec["cases"]:
+            item = items.get(case["item_id"])
+            if item is None or case.get("expected_confidence_max") is not None:
+                continue
+            try:
+                rubric = r.get(case["item_id"])
+            except r.RubricNotFound:
+                continue
+            worst = max(worst, scoring.echo_score(case["answer"], rubric, item))
+    assert worst < scoring.ECHO_THRESHOLD * 0.6, f"여유 부족: 실제 발화 최대 {worst:.3f}"
+
+
+def test_capped_confidence_records_the_reason():
+    """조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다."""
+    rubric, item = _rubric_and_item()
+    verbatim = rubric.required_elements[0] + "."
+    judgment = make_judgment(
+        grade=Grade.U1, confidence=0.95, quote=verbatim, reason="필수 요소를 언급했다",
+    )
+    out = scoring.cap_confidence_if_echoed(judgment, verbatim, rubric, item)
+    assert out.confidence == scoring.ECHO_CONFIDENCE_CAP
+    assert "복창" in out.reason and "포함도" in out.reason
+    assert out.grade == Grade.U1, "등급은 건드리지 않는다"
+
+
+def test_prompt_version_matches_the_file_in_use():
+    """상수와 파일이 어긋나면 `/healthz` 가 거짓말을 한다 — 그리고 아무도 모른다."""
+    assert scoring.PROMPT_PATH.name == f"{scoring.PROMPT_VERSION}.md"
+    assert scoring.PROMPT_PATH.exists()
+
+
+def test_v1_prompt_is_kept_for_audit():
+    """루브릭·프롬프트는 공개 의무 대상이다. 정의가 바뀐 이전 버전을 지우면 v1 로 측정된
+    판정을 나중에 설명할 수 없다."""
+    assert (scoring.PROMPT_PATH.parent / "F-SCR-001_v1.md").exists()
