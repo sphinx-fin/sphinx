@@ -1,0 +1,21 @@
+# 소유: 윤지석 — 공개 의무. item_id 근거는 ADR-006(_expected_risk_items 정본).
+#
+# ADR-006 이 원금손실을 셋으로 쪼갠 이유가 이 항목이다 — 뭉쳐두면 "낙인만 말하고 만기 조건을
+# 빼먹은 답변이 U1 로 통과한다." 여기는 **하회 이력**만 묻고, 만기 조건은
+# ELS-MATURITY-LOSS-CONDITION 이 묻는다. 둘 다 충족돼야 손실이므로 하나만 아는 것은 부분이해다.
+#
+# 배리어 비율(이 회차 45%)을 루브릭에 박지 않는다 — 상품마다 다르고 조건값은 프롬프트의
+# [상품 조건 원문]으로 들어간다(P6).
+item_id: ELS-KNOCKIN-BARRIER
+product_type: ELS
+name: 낙인 배리어
+status: confirmed
+required_elements:
+  - 기초자산 종가가 낙인구간 미만으로 하락한 적이 있는지를 본다
+  - 기초자산 중 어느 하나라도 해당하면 조건이 성립한다
+misconception_conditions:
+  - 만기에만 보면 된다
+  - 평균이 유지되면 괜찮다
+  - 모든 기초자산이 함께 떨어져야 문제가 된다
+related_misconceptions:
+  - M04-EARLY-REDEMPTION

@@ -1,0 +1,17 @@
+# 소유: 윤지석 — 공개 의무.
+# ELS-KNOCKIN-BARRIER 와 짝이다. 낙인 하회 이력이 있어도 만기평가일 기준을 넘으면 손실이
+# 확정되지 않는다 — 그 순서를 아는 것이 이 항목의 이해다.
+item_id: ELS-MATURITY-LOSS-CONDITION
+product_type: ELS
+name: 만기 손실조건
+status: confirmed
+required_elements:
+  - 만기평가일에 기준가격 비율 미만이면 손실이 발생한다
+  - 손실 규모는 기초자산 하락률에 연동된다
+misconception_conditions:
+  - 만기까지 두면 원금과 이자를 받는다
+  - 낙인을 건드리면 무조건 손실이 확정된다
+  - 손실은 정해진 금액만큼만 난다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE
+  - M04-EARLY-REDEMPTION

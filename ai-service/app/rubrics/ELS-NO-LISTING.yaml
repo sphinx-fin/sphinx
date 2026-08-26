@@ -1,0 +1,13 @@
+# 소유: 윤지석 — 공개 의무. ELS-MIDWAY-REDEMPTION-COST 와 짝이다.
+item_id: ELS-NO-LISTING
+product_type: ELS
+name: 환금성 제약(비상장)
+status: confirmed
+required_elements:
+  - 거래소에 상장되지 않아 시장에서 팔 수 없다
+  - 만기 전 현금화는 발행사에 중도상환을 요청하는 방법뿐이다
+misconception_conditions:
+  - 주식처럼 팔 수 있다
+  - 급하면 시장에 내놓으면 된다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE

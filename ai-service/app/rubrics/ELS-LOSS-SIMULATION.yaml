@@ -1,0 +1,17 @@
+# 소유: 윤지석 — 공개 의무.
+#
+# 모의실험 결과를 **확률 보증으로 읽는 것**이 이 항목의 오해다. 기획서 3절이 ELS 사태의
+# 핵심으로 지목한 것이 분석기간에서 2008년을 뺀 것이었다 — 과거 데이터가 미래를 보장하지
+# 않는다는 이해가 이 항목이다.
+item_id: ELS-LOSS-SIMULATION
+product_type: ELS
+name: 과거 데이터 수익률 모의실험
+status: confirmed
+required_elements:
+  - 모의실험은 과거 데이터에 기초한 것이고 미래 수익을 보장하지 않는다
+misconception_conditions:
+  - 과거에 손실이 없었으니 앞으로도 없다
+  - 모의실험 수익률이 예상 수익률이다
+  - 확률이 낮으니 일어나지 않는다
+related_misconceptions:
+  - M03-PROBABILITY

@@ -1,0 +1,19 @@
+# 소유: 윤지석 — 공개 의무.
+#
+# 기획서 4절: "확률이 아니라 본인이 넣을 금액으로 환산해서 보여준다. 사람은 확률을 잘
+# 이해하지 못하지만 금액은 이해한다." 그래서 이 항목은 **금액으로 답하는 것**을 요구한다.
+# 최대손실률(이 회차 -100%)을 루브릭에 박지 않는다 — 원문 인용에서 온다(P6).
+item_id: ELS-TOTAL-LOSS-SCENARIO
+product_type: ELS
+name: 전액손실 사례
+status: confirmed
+required_elements:
+  - 최악의 경우 투자원금 전액을 잃을 수 있다
+  - 본인이 넣는 금액으로 환산해 말한다
+misconception_conditions:
+  - 원금의 일부만 잃는다
+  - 최소한 얼마는 돌려받는다
+  - 반토막 정도가 최악이다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE
+  - M03-PROBABILITY
