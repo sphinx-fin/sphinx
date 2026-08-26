@@ -152,12 +152,58 @@ public class SessionController {
     @PostMapping("/{sid}/simulate")
     public ApiResponse<Map<String, Object>> simulate(@PathVariable String sid,
                                                      @Valid @RequestBody SimulateRequest body) {
-        // 금액은 body로만 받는다(기본값 없음, #48). long amount = body.amount();
-        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2)
-        return ApiResponse.ok(Map.of("scenarios", List.of(
-                Map.of("name", "최선(6개월 조기상환)", "payout", 51_500_000, "pnl", 1_500_000),
-                Map.of("name", "중간(3년 만기상환)", "payout", 59_000_000, "pnl", 9_000_000),
-                Map.of("name", "최악(2008년 경로)", "payout", 32_000_000, "pnl", -18_000_000))));
+        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2).
+        // 목이지만 **계약(SimulateApiResponse)의 필수 필드를 전부 채운다.** 빠뜨리면 S-04가
+        // 백지가 되고, 특히 severity 가 없으면 카드가 최선→중간→최악 순으로 서서 기획서
+        // 4절이 요구하는 것("최선만 강조하는 관행의 정반대")과 반대가 된다.
+        //
+        // 수치는 기획서 7-2 표 확정본이다(낙인 45%·쿠폰 연 11.00%·만기 3년). 가입금액이
+        // 5,000만 원이 아니면 표 비율로 환산한다 — 목이라도 슬라이더를 움직였을 때 금액이
+        // 안 바뀌면 시뮬레이터로 안 보인다.
+        long amount = body.amount();
+        return ApiResponse.ok(Map.of(
+                "timeseriesVersion", TIMESERIES_SNAPSHOT,
+                "productName", "A증권 제4181회 ELS (원금비보장형)",
+                "scenarios", List.of(
+                        scenario("worst", "loss", "낙인 45% 하회 후 만기 손실", amount, 0.5066, 0.029,
+                                "2007-10-31", "2010-10-29", "eurostoxx50", 0.507, true),
+                        scenario("mid", "early_1", "6개월 뒤 첫 조기상환", amount, 1.055, 0.857,
+                                "2012-05-02", "2012-11-01", "nikkei225", 1.031, false),
+                        scenario("best", "maturity", "조기상환 없이 만기 상환", amount, 1.33, 0.015,
+                                "2013-01-04", "2016-01-04", "sp500", 1.142, false))));
+    }
+
+    /** data/timeseries/VERSION 의 snapshot. 화면에 표시해 P2 재현성의 근거를 보인다. */
+    private static final String TIMESERIES_SNAPSHOT = "2026-08-24";
+
+    /**
+     * 계약(SimScenario)의 필수 6필드를 채운 목 시나리오.
+     *
+     * severity 는 화면 배치·정렬 키이지 표시 라벨이 아니다 — 기획서 7-2 표가 평가어를 버리고
+     * 금액 순으로 간 이유가 스텝다운은 조기상환 시점과 무관하게 연 수익률이 같아서
+     * "가장 자주 일어나는 전개(85.7%)가 금액으로는 중간"이기 때문이다. 사람에게 보일 문면은
+     * name 을 쓴다.
+     */
+    private static Map<String, Object> scenario(String severity, String result, String name,
+                                                long amount, double payoutRatio, double share,
+                                                String startDate, String endDate,
+                                                String worstUnderlying, double worstFinal,
+                                                boolean knockedIn) {
+        long payout = Math.round(amount * payoutRatio);
+        return Map.of(
+                "severity", severity,
+                "result", result,
+                "name", name,
+                "payout", payout,
+                "pnl", payout - amount,
+                "share", share,
+                "pathMeta", Map.of(
+                        "startDate", startDate,
+                        "endDate", endDate,
+                        "underlyings", List.of("sp500", "nikkei225", "eurostoxx50"),
+                        "worstUnderlying", worstUnderlying,
+                        "worstFinal", worstFinal,
+                        "knockedIn", knockedIn));
     }
 
     /**
