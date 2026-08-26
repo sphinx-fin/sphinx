@@ -58,7 +58,8 @@ public class SecurityConfig {
      */
     @Bean
     @Profile("prod")
-    public SecurityFilterChain prodFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain prodFilterChain(HttpSecurity http,
+                                               ApiSecurityErrorHandlers errors) throws Exception {
         http
             // 세션 쿠키를 쓰지 않는 REST API 라 CSRF 토큰이 성립하지 않는다.
             // 쿠키 인증을 도입하면 이 줄부터 다시 봐야 한다.
@@ -69,6 +70,11 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers(PUBLIC_PATHS).permitAll()
                     .anyRequest().authenticated())
+            // 필터 단계에서 끊긴 요청도 같은 봉투로 답한다. 기본값이면 빈 본문·HTML 이 나가
+            // 화면 파싱이 그 경로에서만 깨진다.
+            .exceptionHandling(ex -> ex
+                    .authenticationEntryPoint(errors.entryPoint())
+                    .accessDeniedHandler(errors.accessDeniedHandler()))
             .httpBasic(basic -> {});
         return http.build();
     }

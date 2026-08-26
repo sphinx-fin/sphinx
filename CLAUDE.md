@@ -107,9 +107,12 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 - **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
   `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
-  `ILLEGAL_STATE_TRANSITION`(409)·`EVIDENCE_REQUIRED`(502)·`INTERNAL_ERROR`(500).
+  `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`UNAUTHORIZED`(401)·
+  `FORBIDDEN`(403)·`EVIDENCE_REQUIRED`(502)·`MEASUREMENT_INVALID`(502)·
+  `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
+  세 벌(핸들러·openapi·이 문단)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부 대조한다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
@@ -137,10 +140,40 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 
 작업 브랜치: `feat/<기능ID>-설명`.
 
+PR 담당자(assignee)는 `.github/workflows/pr-author-assignee.yml`이 **작성자로 자동
+지정**한다. 이미 담당자가 있으면 손대지 않으므로, 일부러 다른 사람에게 넘긴 PR은
+그대로 유지된다. 담당자는 "이 PR을 끝까지 끌고 갈 사람"이고 리뷰어와 다르다.
+
+### PR 리뷰 라벨은 자동이다 — 손으로 붙이지 않는다
+
+`.github/workflows/pr-reviewer-label.yml`이 리뷰가 지금 **누구 손에 있는지**를 라벨로
+붙이고 뗀다. 행동이 필요한 상태에만 라벨이 있고, 끝난 것은 라벨이 없다.
+
+| 라벨 | 뜻 |
+|---|---|
+| `리뷰어 미배정` (회색) | 배정도 리뷰도 하나도 없다. 리뷰어를 붙이는 게 다음 할 일 |
+| `리뷰대기: <이름>` (노랑) | 배정됐고 아직 아무것도 제출하지 않았다 |
+| `리뷰중: <이름>` (주황) | 코멘트·변경요청을 냈고 아직 승인하지 않았다 |
+| (라벨 없음) | 관련된 사람이 모두 승인했다 |
+
+완료 상태에 라벨을 두지 않는 이유는 두 가지다. `pr-review-guard`의 초록 체크가 PR
+목록에서 이미 같은 사실을 말하고, 종착역 라벨은 떼는 사건이 없어 영원히 눌어붙는다.
+
+**이 워크플로와 `pr-review-guard.yml`은 한 쌍이다.** 승인 유효성 판단(`COMMENTED`는
+승인을 취소하지 않는다 · 사용자별 최신 상태만 본다 · 배정 여부와 무관하게 모든 리뷰를
+센다)을 두 파일이 똑같이 구현하고 있어서, 한쪽만 고치면 **가드는 머지를 막는데 라벨은
+비어 있는** 상태가 된다. 실제로 이 어긋남으로 결함이 두 번 났다(PR #90 · #91).
+
+로그인→이름 표도 이 워크플로 안에 있다. 팀원이 바뀌면 `.github/CODEOWNERS`와 같이 고친다.
+
 ## 설계 결정 기록
 
 `docs/adr/`에 있다. 코드가 왜 이런지의 근거이므로, 관련 코드를 고치기 전에 해당 ADR을 읽는다.
 **결정이 바뀌면 새 ADR을 추가하고 기존 문서는 상태만 갱신한다 — 삭제·수정하지 않는다.**
+
+ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계약·규약·배선 결정은
+[`docs/decision-log.md`](docs/decision-log.md)에 전수로 모여 있다 — 자기 영역을 건드리기 전에
+해당 절을 먼저 본다. 남은 미결이 누구 몫이고 언제까지인지도 그 문서 10절에 있다.
 
 ## 알려진 문서 불일치
 

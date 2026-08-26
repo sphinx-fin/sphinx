@@ -1,14 +1,35 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.core.AiServiceException;
+import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import org.mockito.ArgumentCaptor;
+import java.math.BigDecimal;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,12 +46,141 @@ class SessionControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    /**
+     * ai-service(F-SCR-001)는 이 통합 테스트의 대상이 아니라 상류 의존성이다 — 실제
+     * HTTP(:8100)에 붙이지 않고 목으로 대신한다. 채점 결과는 예전 컨트롤러 목과 동일하게
+     * U4(오해)로 고정해 이 파일의 기존 단정(U4·RED·R-01·재검증 상한)을 그대로 유지한다.
+     * AiServiceClient 자체의 HTTP 계약(snake_case·PII 마스킹·실패 매핑)은 AiServiceClientTest가 검증한다.
+     */
+    @MockBean
+    private AiServiceClient aiServiceClient;
+
+    @BeforeEach
+    void stubScoring() {
+        // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.91"),
+                                new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
+                                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                                "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE"),
+                        inv.getArgument(2)));
+        // 모순 판정 기본 스텁 — 판정 없음. 실패 경로는 별도 테스트에서 본다.
+        when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
+                .thenReturn(SuitabilityStatus.NO_MISMATCH);
+    }
+
+    @Test
+    @DisplayName("❗ai-service 모순 판정이 죽어도 /judge 는 살아 있고, 결과가 GREEN 으로 새지 않는다")
+    void mismatchFailureBecomesYellowNotGreen() throws Exception {
+        // U1(이해)만 있는 세션이라 원래는 R-06 GREEN 이다. 모순 판정이 실패하면
+        // "확인 못 함"이므로 통과가 아니라 재확인(R-02b YELLOW)이어야 한다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.95"),
+                                new Judgment.Evidence("낙인 하회하면 원금 손실 난다고 들었어요",
+                                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                                "조건을 정확히 진술", null),
+                        inv.getArgument(2)));
+        when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
+                .thenThrow(new AiServiceException("ai-service 다운"));
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 원금 손실 난다고 들었어요"}"""))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(status().isOk())          // 502 로 판매를 멈추지 않는다
+                .andExpect(jsonPath("$.data.signal").value("YELLOW"))
+                .andExpect(jsonPath("$.data.ruleTrace", hasItem("R-02b")));
+    }
+
+    @Test
+    @DisplayName("모순 판정에는 마스킹된 발화가 항목별로 넘어간다 — 근거 스팬만 넘기면 모순이 안 보인다")
+    void utterancesReachMismatchDetection() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"사실 원금 잃으면 큰일 나요"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/" + sid + "/judge")).andExpect(status().isOk());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(aiServiceClient).detectMismatch(eq(sid), anyMap(), captor.capture(),
+                nullable(String.class));
+        assertThat(captor.getValue())
+                .as("발화가 안 넘어가면 판정기가 볼 게 없어 insufficient_input 이 난다")
+                .containsEntry("ELS-PRINCIPAL-LOSS-WARNING", "사실 원금 잃으면 큰일 나요");
+    }
+
+    @Test
+    @DisplayName("변액 세션은 VARIABLE_INSURANCE로 채점된다 — ELS로 하드코딩하면 M02가 오판한다")
+    void productTypeComesFromSession() throws Exception {
+        // product_type은 ai-service에서 오해 유형 필터의 입력이다(misconception.applies_to).
+        // PR #57(결정 10.24)이 M02-DEPOSIT-INSURANCE를 products:[ELS]로 좁힌 이유가 변액에서의
+        // 이해→오해 오판이었는데, 호출부가 변액 세션에도 "ELS"를 보내면 라이브러리에서 닫은
+        // 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀리는 종류다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                eq("VARIABLE_INSURANCE")))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
+                                new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
+                                        "예금자보호 범위: 보호되는 급부와 한도를 인지해야 함"),
+                                "부분 보호 범위를 정확히 진술", null),
+                        inv.getArgument(2)));
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-var-samsung-b2601","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.grade").value("U1"));
+
+        // 하드코딩이면 "ELS" 스텁이 잡혀 U4가 나온다 — 넘어간 값을 직접 확인한다.
+        verify(aiServiceClient).score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                eq("VARIABLE_INSURANCE"));
+    }
+
+    @Test
+    @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
+    void unknownProductTypeFailsLoudly() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-unknown-9999","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"원금은 지켜지죠"}"""))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+    }
+
     @Test
     @DisplayName("생성 성공 → 200 + 봉투(success:true, data.state=CREATED)")
     void createSuccess() throws Exception {
         mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대","contractRef":"CT-1"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대","contractRef":"CT-1"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.sessionId").isNotEmpty())
@@ -62,9 +212,30 @@ class SessionControllerTest {
     void invalidChannel() throws Exception {
         mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"대면","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"대면","ageBand":"60대"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MALFORMED_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("/simulate는 amount를 body로 받고 기본값이 없다")
+    void simulateBodyRequired() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"ELS-001","channel":"MOBILE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = com.jayway.jsonpath.JsonPath.read(created, "$.data.sessionId");
+
+        // body로 금액 → 200
+        mvc.perform(post("/sessions/" + sid + "/simulate").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50000000}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.scenarios").isArray());
+
+        // 금액 누락 → 400 (기본값으로 조용히 덮이지 않음)
+        mvc.perform(post("/sessions/" + sid + "/simulate").contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -72,7 +243,7 @@ class SessionControllerTest {
     void answerThenJudge_isRed() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -111,7 +282,7 @@ class SessionControllerTest {
     void judgmentsAreRetrievable() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -149,7 +320,7 @@ class SessionControllerTest {
     void nextQuestionCarriesProgress() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
@@ -195,7 +366,7 @@ class SessionControllerTest {
     private String sessionWithMisunderstoodItem() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"productId":"ELS-001","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
         mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)

@@ -1,0 +1,109 @@
+package com.sphinxfin.sphinx.evidence;
+
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
+import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.Judgment;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * {@link EvidenceRecorder} 구현. 소유: 정세현
+ *
+ * <p>인터페이스는 {@code core}, 구현은 여기다 — {@code core}는 {@code evidence}를 모른다.
+ * 등록되면 {@code SessionService}·{@code OverrideService}의 {@code NO_OP}을 대체한다.
+ *
+ * <h2>세 종류를 한 스트림에 쌓는다</h2>
+ *
+ * <p>스트림은 {@code report:{sessionId}} 하나이고 판정·게이트·오버라이드가 모두 여기 들어간다.
+ * <b>세션에서 일어난 일의 순서가 하나의 사슬로 남아야</b> "황색이었다가 재설명 후 통과했고 그
+ * 뒤에 오버라이드가 승인됐다"를 기록만으로 재구성할 수 있다. 종류별로 스트림을 나누면 각 사슬은
+ * 온전한데 <b>사이의 순서가 사라진다</b> — 그게 이해 기록에서 제일 중요한 정보다.
+ *
+ * <p>그래서 payload에 {@code type} 판별자를 둔다. 하나의 스트림을 재생할 때 무엇이 무엇인지
+ * 구별되어야 하고, 그 구별이 저장 시점에 박혀 있어야 나중에 필드 모양으로 추측하지 않는다.
+ *
+ * <p>{@code sessionId}는 스트림 이름에도 있지만 payload에도 담는다. <b>기록 한 건이 스스로
+ * 어느 세션인지 말할 수 없으면 증거로 약하다</b> — 재생 맥락 밖으로 나가는 순간 미아가 된다.
+ *
+ * <h2>중복을 흡수하지 않는다 (ADR-004)</h2>
+ *
+ * <p>같은 항목을 재검증하면 판정이 두 건 쌓인다. 세션은 최신만 들고 있으므로
+ * (<code>judgmentsByItem</code>이 Map이다) <b>덮어쓰기 전 값 — "처음에 황색이었다" — 는 여기에만
+ * 남는다.</b> 기획서 174행이 이해 기록의 구성요소로 못박은 "재설명 이력"이 그것이다.
+ */
+@Component
+public class StoredEvidenceRecorder implements EvidenceRecorder {
+
+    /** 세션 이해 기록 스트림. 이슈 #54의 2번이 정한 이름이다. */
+    static String streamOf(String sessionId) {
+        return "report:" + sessionId;
+    }
+
+    private final ImmutableStore store;
+
+    public StoredEvidenceRecorder(ImmutableStore store) {
+        this.store = store;
+    }
+
+    @Override
+    @Transactional
+    public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at) {
+        Map<String, Object> payload = envelope("judgment", sessionId, at);
+        payload.put("reverifyCount", reverifyCount);
+        payload.put("judgment", judgmentPayload(judgment));
+        store.append(streamOf(sessionId), payload);
+    }
+
+    @Override
+    @Transactional
+    public void appendGate(String sessionId, GateResult result, Instant at) {
+        Map<String, Object> payload = envelope("gate", sessionId, at);
+        payload.put("signal", result.signal());
+        payload.put("ruleTrace", result.ruleTrace());
+        store.append(streamOf(sessionId), payload);
+    }
+
+    @Override
+    @Transactional
+    public void appendOverride(String sessionId, String reason, String approver, Instant at) {
+        Map<String, Object> payload = envelope("override", sessionId, at);
+        payload.put("reason", reason);
+        payload.put("approver", approver);
+        store.append(streamOf(sessionId), payload);
+    }
+
+    private static Map<String, Object> envelope(String type, String sessionId, Instant at) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", type);
+        payload.put("sessionId", sessionId);
+        payload.put("at", at);          // CanonicalJson이 ADR-008 형식(UTC·밀리초 3자리)으로 적는다
+        return payload;
+    }
+
+    /**
+     * 판정을 담을 수 있는 형태로 편다.
+     *
+     * <p><b>색은 담지 않는다</b>(ADR-004 §5) — {@code grade} 원값과 근거만 담는다. 표시 관례가
+     * 바뀌면 같은 판정의 해시가 달라지고 교차 검증이 무너진다.
+     *
+     * <p>레코드를 통째로 넘기지 않고 여기서 펴는 이유는 <b>담는 것을 골라야 하기</b> 때문이다 —
+     * 위의 색 규약이 그것이고, {@code misconceptionType} 을 null 이어도 생략하지 않는 것도 여기서
+     * 정한다. {@link CanonicalJson} 은 이제 {@code Judgment} 를 직접 순회할 수도 있다
+     * (CanonicalJsonTest 의 {@code judgmentIsSerializableOnceConfidenceIsFixed} 가 확인한다).
+     * 그래도 펴는 쪽을 남긴다: <b>무엇을 담는지가 이 파일에 보여야</b> 한다.
+     */
+    private static Map<String, Object> judgmentPayload(Judgment judgment) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("itemId", judgment.itemId());
+        item.put("grade", judgment.grade());
+        item.put("confidence", judgment.confidence());
+        item.put("evidence", judgment.evidence());
+        item.put("reason", judgment.reason());
+        item.put("misconceptionType", judgment.misconceptionType());   // nullable — 생략하지 않는다
+        return item;
+    }
+}

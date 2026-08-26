@@ -28,20 +28,31 @@
  *    고객 답변을 대신 입력하는 흐름이 자연스러워진다 — F-INT-003 의 대필 방지와 정면으로
  *    어긋난다. 그래서 생성 후에는 멈춰서 세션 번호를 보여주고, "고객에게 넘겨주세요" 를
  *    명시한 뒤 시작 버튼을 누르게 한다.
+ *
+ * ⑤ **가입금액 구간을 화면에서 필수로 건다 — 계약은 nullable 그대로.**
+ *    `amountBand` 는 계약상 선택이지만 취약 가중의 입력이다. 데모 고객(65세·5,000만 원)이
+ *    `ageBand"60대"`3 + `amountBand"5천만원대"`1 = **정확히 임계값 4** 라서, 이 칸을
+ *    건너뛰면 3점이 되어 **취약으로 분류되지 않는다** — 고령자 모드가 안 켜지고 재설명이
+ *    일반 문면으로 나간다. 에러도 로그도 없고 시연만 밋밋해진다(decision-log 10.12).
+ *    화면이 계약보다 엄격한 것은 흔하고, 여기서는 그게 맞다.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiRequestError, post } from "../api/client";
-import type { Channel, CreateSessionRequest, SessionResponse } from "../api/types";
+import { ApiRequestError, get, post } from "../api/client";
+import type {
+  Channel,
+  CreateSessionRequest,
+  ProductSummary,
+  SessionResponse,
+} from "../api/types";
 import { detectPii } from "../lib/pii";
+import { AGE_BANDS, AMOUNT_BANDS, CHANNELS, EXPERIENCE_LEVELS } from "../lib/sessionAttrs";
 import {
-  AGE_BANDS,
-  AMOUNT_BANDS,
-  CHANNELS,
-  DEMO_PRODUCTS,
-  EXPERIENCE_LEVELS,
-} from "../lib/sessionAttrs";
-import { DEMO_SURVEY_ANSWERS, SURVEY_QUESTIONS, toSurveyResult } from "../lib/survey";
+  DEMO_SURVEY_ANSWERS,
+  SURVEY_QUESTIONS,
+  SURVEY_SCHEMA_VERSION,
+  toSurveyResult,
+} from "../lib/survey";
 import "./S02_SessionStart.css";
 
 type Phase = "editing" | "creating" | "created";
@@ -49,7 +60,8 @@ type Phase = "editing" | "creating" | "created";
 export default function S02SessionStart() {
   const navigate = useNavigate();
 
-  const [productId, setProductId] = useState<string>(DEMO_PRODUCTS[0].id);
+  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [productId, setProductId] = useState<string>("");
   const [channel, setChannel] = useState<Channel>("FACE_TO_FACE");
   const [ageBand, setAgeBand] = useState("");
   const [experienceLevel, setExperienceLevel] = useState("");
@@ -61,9 +73,31 @@ export default function S02SessionStart() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /* ── 상품 목록 (`GET /products`) ─────────────────────────────────────────
+     상수로 들고 있으면 가명 표기가 서버와 두 벌이 된다(lib/sessionAttrs.ts 주석). */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const list = await get<ProductSummary[]>("/products");
+        if (!alive) return;
+        setProducts(list ?? []);
+        setProductId((prev) => prev || list?.[0]?.productId || "");
+      } catch (e) {
+        if (alive) setError(describe(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   const refPii = useMemo(() => detectPii(contractRef), [contractRef]);
   const unanswered = SURVEY_QUESTIONS.filter((q) => !answers[q.id]).length;
-  const canSubmit = ageBand !== "" && unanswered === 0 && phase === "editing";
+  const canSubmit =
+    productId !== "" &&
+    ageBand !== "" &&
+    amountBand !== "" &&   // 설계 판단 ⑤ — 계약은 nullable 이지만 화면에서 필수로 건다
+    unanswered === 0 &&
+    phase === "editing";
 
   function applyDemoPreset() {
     setAgeBand("60대");            // 기획서 7-2 ③ "65세 고객"
@@ -84,6 +118,8 @@ export default function S02SessionStart() {
       experienceLevel: experienceLevel || null,
       amountBand: amountBand || null,
       contractRef: contractRef.trim() || null,
+      // 세트 버전은 typed 필드로 나간다 — surveyResult 맵에 얹던 우회를 걷었다(10.8, #61).
+      surveySchemaVersion: SURVEY_SCHEMA_VERSION,
       surveyResult: toSurveyResult(answers),
     };
     try {
@@ -135,7 +171,7 @@ export default function S02SessionStart() {
 
   /* ── 입력 ───────────────────────────────────────────────────────────────── */
   const busy = phase === "creating";
-  const product = DEMO_PRODUCTS.find((p) => p.id === productId);
+  const product = products.find((p) => p.productId === productId);
 
   return (
     <main className="ss">
@@ -157,21 +193,27 @@ export default function S02SessionStart() {
             <label className="ss__label" htmlFor="product">
               대상 상품
             </label>
-            {/* TODO: `GET /products` 가 없어 데모 2종을 상수로 둔다 (lib/sessionAttrs.ts). */}
             <select
               id="product"
               className="ss__control"
               value={productId}
-              disabled={busy}
+              disabled={busy || products.length === 0}
               onChange={(e) => setProductId(e.target.value)}
             >
-              {DEMO_PRODUCTS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
+              {products.length === 0 && <option value="">상품 목록을 불러오는 중…</option>}
+              {products.map((p) => (
+                <option key={p.productId} value={p.productId}>
+                  {p.name}
                 </option>
               ))}
             </select>
-            {product && <p className="ss__hint">{product.note}</p>}
+            {/* 파싱 실패는 은폐하지 않는다 (E-EXT-03) — 조건을 못 읽은 상품은 검증도 못 한다. */}
+            {product?.status === "parse_failed" && (
+              <p className="ss__hint" role="alert">
+                <b>이 상품은 문서를 아직 읽어내지 못했습니다.</b> 조건이 불완전해 이해도 검증
+                결과를 신뢰할 수 없습니다.
+              </p>
+            )}
           </div>
 
           <div className="ss__field">
@@ -223,7 +265,7 @@ export default function S02SessionStart() {
 
             <div className="ss__field">
               <label className="ss__label" htmlFor="amount">
-                가입금액 구간
+                가입금액 구간 <span className="ss__req">필수</span>
               </label>
               <select
                 id="amount"
@@ -329,7 +371,9 @@ export default function S02SessionStart() {
         <div className="ss__foot">
           {!canSubmit && phase === "editing" && (
             <p className="ss__hint">
+              {productId === "" && "상품을 선택해 주세요. "}
               {ageBand === "" && "연령대를 선택해 주세요. "}
+              {amountBand === "" && "가입금액 구간을 선택해 주세요. "}
               {unanswered > 0 && `설문 ${unanswered}개 문항이 남았습니다.`}
             </p>
           )}

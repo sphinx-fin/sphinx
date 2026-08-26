@@ -48,22 +48,32 @@ export default function S03Interview() {
   const [items, setItems] = useState<RiskItem[]>([]);
   const [question, setQuestion] = useState<NextQuestion | null>(null);
   const [text, setText] = useState("");
-  const [answeredIds, setAnsweredIds] = useState<string[]>([]);
   const [shortWarned, setShortWarned] = useState(false);
   const [idlePrompt, setIdlePrompt] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  /* ── 검증 대상 항목 ──────────────────────────────────────────────────────
-     추출 실패 항목(E-EXT-03)은 조건값이 없어 되말하기 질문을 만들 수 없으므로 분모에서 뺀다.
-     빼되 숨기지는 않는다 — 실패 항목의 가시화는 S-01 의 책임이다. */
-  const targets = useMemo(() => items.filter((i) => i.status === "extracted"), [items]);
-  const total = targets.length;
-  const answeredCount = answeredIds.length;
+  /* ── 진행 상태는 서버가 준다 (계약 `NextQuestion.index·total·done`) ──────
+     예전에는 risk-items 개수로 분모를 보완했는데, **서버가 물어볼 항목 수와 추출 항목 수는
+     다를 수 있다**(계약 주석의 경고 그대로). 어긋나면 에러 없이 진행률만 틀리고, 고객은
+     "몇 개 남았는지"를 잘못 안 채로 인터뷰를 한다. 그래서 분모·분자를 모두 서버 값으로 둔다.
+     세션을 이어서 열었을 때도 맞는다는 이점이 따라온다 — 로컬 카운트는 0 부터 다시 셌다. */
+  const total = question?.total ?? 0;
+  const answeredCount = (() => {
+    if (!question) return 0;
+    if (question.done) return question.total;
+    // index 는 "지금 묻고 있는 항목의 1-based 번호"다. 아직 답하기 전이면 그 앞까지가 완료분이고,
+    // 답을 기록한 직후(phase="answered")에는 이 항목까지 완료다. 다음 질문을 받을 때까지
+    // 기다리면 "답변이 기록되었습니다" 옆에서 카운터가 0 으로 남아 화면이 자기 말을 뒤집는다.
+    return phase === "answered" ? question.index : question.index - 1;
+  })();
+
+  /* 항목명 표시용. 추출 실패 항목(E-EXT-03)은 서버가 애초에 묻지 않지만, 숨기지는 않는다 —
+     실패 항목의 가시화는 S-01 의 책임이다. */
   const currentItem = useMemo(
-    () => targets.find((i) => i.item_id === question?.itemId) ?? null,
-    [targets, question],
+    () => items.find((i) => i.itemId === question?.itemId) ?? null,
+    [items, question],
   );
 
   const charCount = text.replace(/\s/g, "").length;
@@ -119,7 +129,7 @@ export default function S03Interview() {
 
   /* ── 제출 ───────────────────────────────────────────────────────────────── */
   async function submit() {
-    if (!question) return;
+    if (!question?.itemId) return;   // done=true 면 itemId 가 null 이다
 
     // E-INT-02: 극단적 단답은 1회만 되묻는다. 두 번째는 그대로 받는다 —
     // 계속 막으면 "모르겠다"는 응답 자체가 기록되지 못하고 세션이 멎는다(U3 도 판정이다).
@@ -138,9 +148,6 @@ export default function S03Interview() {
         text,
         inputMeta: meta.snapshot(text, elderly),
       });
-      setAnsweredIds((prev) =>
-        prev.includes(question.itemId) ? prev : [...prev, question.itemId],
-      );
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -150,7 +157,7 @@ export default function S03Interview() {
 
   /** E-INT-03 건너뛰기 — 서버가 U3(미이해)로 처리하도록 빈 응답을 명시적으로 보낸다. */
   async function skip() {
-    if (!question) return;
+    if (!question?.itemId) return;
     setPhase("submitting");
     try {
       await post<Judgment>(`/sessions/${sid}/answers`, {
@@ -158,9 +165,6 @@ export default function S03Interview() {
         text: "(응답하지 않음)",
         inputMeta: meta.snapshot("", elderly),
       });
-      setAnsweredIds((prev) =>
-        prev.includes(question.itemId) ? prev : [...prev, question.itemId],
-      );
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -204,8 +208,6 @@ export default function S03Interview() {
         <div className="iv__top">
           <div className="iv__progress">
             <span className="iv__progress-label">
-              {/* TODO(강희진, PR #16 리뷰 2번): 서버가 index/total/done 을 주면 그 값을 쓴다.
-                  지금은 검증 대상 항목 수로 분모를 보완하고 있다. */}
               검증 항목 <b>{total}</b>개 중 <b>{answeredCount}</b>개 응답 완료
             </span>
             <div
@@ -243,7 +245,7 @@ export default function S03Interview() {
           <section className="iv__card" aria-live="polite">
             <h1 className="iv__question">답변이 기록되었습니다.</h1>
             <p className="iv__alert iv__alert--info">
-              {answeredCount >= total && total > 0
+              {question?.done
                 ? "모든 항목에 응답하셨습니다. 담당자가 결과를 확인합니다."
                 : "다음 항목으로 넘어가시겠어요?"}
             </p>
@@ -362,6 +364,12 @@ function describe(e: unknown): string {
       case "VALIDATION_ERROR":
       case "MALFORMED_REQUEST":
         return "입력을 다시 확인해 주세요.";
+      // 아래 둘은 채점 경로(server → ai-service)의 상류 실패다. 답변은 화면에 그대로 남으므로
+      // 재시도가 가능하고, 재시도가 의미 있는지가 서로 다르다.
+      case "AI_SERVICE_UNAVAILABLE":
+        return "채점 서비스가 잠시 응답하지 않습니다. 다시 제출해 주세요.";
+      case "EVIDENCE_REQUIRED":
+        return "채점 결과를 기록할 수 없었습니다. 담당자에게 알려 주세요.";
       default:
         return "잠시 후 다시 시도해 주세요.";
     }

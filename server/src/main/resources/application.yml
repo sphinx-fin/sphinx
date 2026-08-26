@@ -40,6 +40,16 @@ sphinx:
     timeseries-dir: ${SPHINX_TIMESERIES_DIR:../data/timeseries}
   scoring:
     # 신뢰도 임계값은 gate_rules.yaml R-05가 단일 출처(게이트가 황색 강등을 결정, P1).
+    # max-reverify는 gate_rules.yaml R-03(reverifyFailed>=N)의 N과 같아야 한다 —
+    # 이 값(재설명 상한)만큼 실패하면 게이트가 RED로 잡는다. ReverifyThresholdSyncTest가 대조한다.
     max-reverify: 2                      # F-INT-004
+
   retention:
+    # 기획서 437행 "원문 발화는 보관기간을 한정하고, 이후에는 판정 결과만 남긴다".
+    # 지우는 것은 발화 전문(session_utterance)이고, 판정과 그 근거 인용은 남는다 —
+    # 인용을 지우면 P4(근거 없는 판정은 무효)가 깨지고 해시 체인도 끊긴다.
+    # 근거와 한계는 evidence/RetentionService 주석.
     raw-answer-months: 6                 # 원문 응답 보존 기간 (팀 결정 후 조정)
+    # 되돌릴 수 없는 삭제라 기본은 꺼둔다. 꺼져 있으면 기동 로그에 남긴다 —
+    # 조용히 안 돌면 "정책이 있다"고 착각하게 된다(security.enforce 와 같은 이유).
+    enforce: false

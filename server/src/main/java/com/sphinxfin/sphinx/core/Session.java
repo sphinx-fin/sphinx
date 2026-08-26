@@ -4,8 +4,10 @@ import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.OverrideStatus;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.Signal;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -68,6 +70,22 @@ public class Session extends BaseEntity {
     private String amountBand;         // 가입금액대 — nullable(@Column 기본값)
     private String contractRef;        // 계약건 참조번호(비식별) — nullable(@Column 기본값)
 
+    /**
+     * 이 세션을 진행한 창구 직원과 그 지점. rbac_policy.yaml 의 scope 를 평가할 근거다 —
+     * own_session 은 sellerId 를, branch 는 branchId 를 행위자와 비교한다.
+     *
+     * <p><b>인증 주체에서만 채워진다</b>(CurrentActor). 요청 본문에 이 필드가 없는 것이
+     * 요지다 — 본문으로 받으면 자기가 아닌 사람을 소유자로 적을 수 있고 own_session 이
+     * 견제가 아니라 자기 신고가 된다.
+     *
+     * <p>계정 분리(결정 10.5) 전에는 null 이고, 그러면 정책이 "판단할 수 없다" 로 <b>거부</b>
+     * 한다 — 통과가 아니라 거부라 안전한 방향이다. 지금 필드를 두는 이유는, 계정이 생긴 뒤에
+     * 붙이면 <b>그 사이 세션이 영원히 주인 없는 상태</b>로 남아 아무도 못 읽게 되기 때문이다.
+     */
+    private String sellerId;           // nullable — 10.5 전까지
+    private String branchId;           // nullable — 10.5 전까지
+    private String surveySchemaVersion; // 적합성 설문 문항 세트 버전 — 리포트가 어느 세트로 받았는지 안다(F-GTE-004)
+
     @Convert(converter = JsonMapConverter.class)
     @Column(columnDefinition = "TEXT")
     @Builder.Default
@@ -85,16 +103,40 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, Integer> reverifyCounts = new HashMap<>();
 
+    /**
+     * 항목별 **마스킹된** 발화(F-DET-002 입력). 원문은 저장하지 않는다.
+     *
+     * 모순 판정은 항목 하나가 아니라 세션 전체 발화가 입력이라(suitability_mismatch.schema.json)
+     * 판정 시점에 지난 답변이 남아 있어야 한다. 여기 없으면 판정기에 넣을 게 근거 스팬뿐인데,
+     * 스팬은 루브릭에 걸린 조각이라 "사실 원금 잃으면 안 돼요" 같은 모순 문장이 통째로 빠진다 —
+     * 그러면 모순이 없어서가 아니라 안 보여서 insufficient_input 이 나온다.
+     *
+     * 마스킹된 값만 들어온다. 마스킹은 AiServiceClient 경계 안에서만 일어나고(P3),
+     * 이 필드는 그 결과를 받아 적을 뿐 mask() 를 새로 부르지 않는다.
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "session_utterance", joinColumns = @JoinColumn(name = "session_id"))
+    @MapKeyColumn(name = "item_id")
+    @Column(name = "masked_text", columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, String> maskedUtterancesByItem = new HashMap<>();
+
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
     @Column(columnDefinition = "TEXT")
     @Builder.Default
     private Map<String, Judgment> judgmentsByItem = new HashMap<>();
 
-    // 적합성 설문 vs 발화 모순 여부(F-DET-002). 감지되면 게이트 R-02로 RED.
+    /**
+     * 적합성 설문 vs 발화 모순 판정 상태(F-DET-002).
+     *
+     * 불리언이 아닌 이유는 SuitabilityStatus 주석에 있다 — "모순 없음" 과 "판정하지 못함" 이
+     * 같은 값이 되면 게이트가 후자를 GREEN 으로 흘린다.
+     */
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
-    private boolean suitabilityMismatch = false;
+    private SuitabilityStatus suitabilityStatus = SuitabilityStatus.NOT_EVALUATED;
 
     // F-DET-002 코칭 메타 — 취약 가중치 합산 점수·취약 여부. 게이트 신호 아님(코칭·리포트용).
     @Column(nullable = false)
@@ -115,6 +157,16 @@ public class Session extends BaseEntity {
     private List<String> gateRuleTrace;
     private Instant judgedAt;              // 판정 시각
 
+    // F-GTE-002 적색 오버라이드 — 적색 판정 세션을 관리자 승인으로 진행한 사실·사유·승인자.
+    // 게이트 신호는 그대로 RED로 남긴다(오버라이드는 신호를 바꾸는 게 아니라 진행을 예외 허가한다).
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @Builder.Default
+    private OverrideStatus overrideStatus = OverrideStatus.NONE;
+    private String overrideReason;        // 판매자가 적은 진행 사유(30자 이상) — 승인 전에도 기록
+    private String overrideApprover;      // 승인한 MGR 식별자(ADR-002) — 승인 전이면 null
+    private Instant overrideDecidedAt;    // 승인 시각 — 승인 전이면 null
+
     /**
      * 세션 생성 팩토리. ID 발급·기본 상태·설문 null 방어 등 생성 불변식은 도메인이 소유한다.
      * (서비스는 이 결과를 저장만 한다.)
@@ -128,6 +180,9 @@ public class Session extends BaseEntity {
                 .experienceLevel(cmd.experienceLevel())
                 .amountBand(cmd.amountBand())
                 .contractRef(cmd.contractRef())
+                .sellerId(cmd.sellerId())
+                .branchId(cmd.branchId())
+                .surveySchemaVersion(cmd.surveySchemaVersion())
                 .surveyResult(cmd.surveyResult() == null ? Map.of() : Map.copyOf(cmd.surveyResult()))
                 .build();
     }
@@ -157,6 +212,16 @@ public class Session extends BaseEntity {
         judgmentsByItem.put(judgment.itemId(), judgment);
     }
 
+    /** 마스킹된 발화를 항목별로 기록(재검증 시 덮어씀). */
+    public void recordUtterance(String itemId, String maskedText) {
+        maskedUtterancesByItem.put(itemId, maskedText);
+    }
+
+    /** F-DET-002 입력용 — 항목별 마스킹 발화(항목 순서 무관, 없으면 빈 맵). */
+    public Map<String, String> maskedUtterances() {
+        return Map.copyOf(maskedUtterancesByItem);
+    }
+
     /** 게이트 입력용 — 항목별 최신 판정 목록. */
     public List<Judgment> judgments() {
         return new ArrayList<>(judgmentsByItem.values());
@@ -184,9 +249,32 @@ public class Session extends BaseEntity {
         return max;
     }
 
-    /** F-DET-002 모순 감지 결과 반영. */
-    public void flagSuitabilityMismatch(boolean mismatch) {
-        this.suitabilityMismatch = mismatch;
+    /** F-DET-002 모순 판정 결과 반영. ai-service 의 status·mismatch 를 그대로 옮긴다. */
+    public void recordSuitability(SuitabilityStatus status) {
+        // null 을 넣으면 이후 suitabilityMismatch()/suitabilityUnknown() 이 NPE 로 터지는데,
+        // 그 자리는 판정 한참 뒤라 원인이 안 보인다. 넣는 자리에서 막는다.
+        java.util.Objects.requireNonNull(status, "적합성 판정 상태는 null 일 수 없다");
+        this.suitabilityStatus = status;
+    }
+
+    /**
+     * 게이트 입력 — 모순이 **확인됐는가**(R-02).
+     *
+     * 판정하지 못한 경우(UNKNOWN)는 false 다. 그 false 를 "적합" 으로 읽으면 안 되며,
+     * 그건 suitabilityUnknown() 이 별도로 답한다.
+     */
+    /** 적합성 모순을 아직 판정하지 않았는지 — 판정 직전에 한 번만 부르기 위한 조건. */
+    public boolean suitabilityNotEvaluated() {
+        return suitabilityStatus == SuitabilityStatus.NOT_EVALUATED;
+    }
+
+    public boolean suitabilityMismatch() {
+        return suitabilityStatus.isMismatch();
+    }
+
+    /** 게이트 입력 — 판정을 시도했으나 확인하지 못했는가(R-02b, 결정 10.9). */
+    public boolean suitabilityUnknown() {
+        return suitabilityStatus.isUnknown();
     }
 
     /** F-DET-002 코칭 스코어·취약 여부 반영(세션 메타). */
@@ -200,5 +288,23 @@ public class Session extends BaseEntity {
         this.gateSignal = result.signal();
         this.gateRuleTrace = List.copyOf(result.ruleTrace());
         this.judgedAt = judgedAt;
+    }
+
+    /** 게이트 판정이 적색인지 — 오버라이드는 적색 세션에만 허용된다(F-GTE-002). */
+    public boolean isRedGate() {
+        return gateSignal == Signal.RED;
+    }
+
+    /** F-GTE-002 오버라이드 요청 — 사유를 기록하고 승인 대기로 둔다. 적색 가드는 서비스가 건다. */
+    public void requestOverride(String reason) {
+        this.overrideStatus = OverrideStatus.PENDING_APPROVAL;
+        this.overrideReason = reason;
+    }
+
+    /** F-GTE-002 오버라이드 승인 — 승인자·시각을 기록한다(불변 기록은 evidence로 별도 append). */
+    public void approveOverride(String approver, Instant at) {
+        this.overrideStatus = OverrideStatus.APPROVED;
+        this.overrideApprover = approver;
+        this.overrideDecidedAt = at;
     }
 }

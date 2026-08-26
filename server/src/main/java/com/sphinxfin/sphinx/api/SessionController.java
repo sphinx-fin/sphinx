@@ -5,31 +5,49 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
+import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
+import com.sphinxfin.sphinx.api.dto.SimulateRequest;
+import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.security.CurrentActor;
+import com.sphinxfin.sphinx.core.AiServiceException;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.NoSuchElementException;
 
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
 @RestController
 @RequestMapping("/sessions")
+@Slf4j
 @RequiredArgsConstructor
 public class SessionController {
 
     private final SessionService sessionService;
+    private final AiServiceClient aiServiceClient;
+    private final CurrentActor currentActor;
 
+    @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
-        Session session = sessionService.create(body.toCommand());
+        // 귀속은 인증 주체에서만 온다 — 본문에 없다(CreateSessionRequest 주석).
+        Session session = sessionService.create(
+                body.toCommand(currentActor.actorId(), currentActor.branchId()));
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @GetMapping("/{sid}")
     public ApiResponse<SessionResponse> get(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
@@ -43,11 +61,13 @@ public class SessionController {
      * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
      * grade → 색 매핑은 표시 관례이며 판정이 아니다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {
         return ApiResponse.ok(JudgmentsResponse.of(sessionService.get(sid)));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/questions/next")
     public ApiResponse<NextQuestionResponse> nextQuestion(@PathVariable String sid) {
         // TODO(강희진): ai-service /internal/question 프록시 (F-INT-002, 윤지석)
@@ -62,22 +82,97 @@ public class SessionController {
         var next = items.get(answered);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
-                "이 상품에서 '" + next.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?",
+                questionFor(next),
                 answered + 1, items.size()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:answer', #sid)")
     @PostMapping("/{sid}/answers")
     public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
-        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment
-        // TODO: ai-service 채점 연결(F-SCR-001, 윤지석) — 지금은 목 판정을 세션에 기록만 한다.
+        // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment (F-SCR-001).
+        // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
-        Judgment measured = new Judgment(body.itemId(), Grade.U4, 0.91,
-                new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
-                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
-                "원금이 보장된다고 진술하여 오해로 판정", "M01-PRINCIPAL-GUARANTEE");
-        return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
+        //
+        // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
+        // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
+        // 쌓인 항목·질문으로 교체한다.
+        Session session = sessionService.get(sid);
+        RiskItem item = MockData.RISK_ITEMS.stream()
+                .filter(r -> r.itemId().equals(body.itemId()))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException(
+                        "항목을 찾을 수 없다: " + body.itemId()));
+        var scored = aiServiceClient.score(
+                item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
+        // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
+        return ApiResponse.ok(sessionService.recordJudgment(
+                sid, scored.judgment(), scored.maskedAnswer()));
     }
 
+    /**
+     * 판정 직전 1회, 적합성 모순을 판정한다 (F-DET-002, 이슈 #65).
+     *
+     * 여기서 부르는 이유: 모순 판정은 항목 단위가 아니라 설문 + 세션 전체 발화가 입력이라
+     * (suitability_mismatch.schema.json) 답변이 다 모인 뒤여야 한다. 이미 판정된 세션은
+     * 다시 부르지 않는다 — /judge 는 멱등이고, 재호출하면 같은 입력에 다른 답이 나올 수 있다.
+     *
+     * ❗ai-service 호출이 실패하면 502 로 올리지 않고 UNKNOWN 으로 적는다. 모순 판정이
+     * 안 됐다고 게이트 판정 자체를 막으면 판매가 멈추는데, 그건 이 실패에 비례하지 않는다.
+     * 대신 UNKNOWN 은 R-02b 로 황색이 되므로 "확인 못 했다"가 통과로 새지 않는다 —
+     * 실패를 은폐하지 않으면서(E-EXT-03) 흐름은 유지하는 자리다.
+     */
+    private void detectSuitabilityMismatch(String sid) {
+        Session session = sessionService.get(sid);
+        if (!session.suitabilityNotEvaluated()) {
+            return;
+        }
+        SuitabilityStatus status;
+        try {
+            status = aiServiceClient.detectMismatch(
+                    sid, session.surveyResult(), session.maskedUtterances(),
+                    session.surveySchemaVersion());
+        } catch (AiServiceException e) {
+            log.warn("적합성 모순 판정 실패 — UNKNOWN 으로 기록한다 (session={})", sid, e);
+            status = SuitabilityStatus.UNKNOWN;
+        }
+        sessionService.recordSuitability(sid, status);
+    }
+
+    /**
+     * 질문 문면 — nextQuestion과 submitAnswer가 **같은 문자열**을 써야 한다.
+     *
+     * 두 곳에 복제하면 한쪽만 바뀌었을 때 ai-service가 채점하는 질문과 고객이 화면에서 실제로
+     * 본 질문이 갈린다. 그러면 근거(evidence)가 "묻지 않은 질문에 대한 답"을 인용하게 되는데,
+     * verify_quote_is_verbatim은 답변 인용만 보므로 못 잡고 리포트(F-GTE-004)까지 그대로 간다.
+     * TODO(강희진): F-INT-002 프록시가 붙으면 두 곳 다 그쪽으로 대체된다.
+     */
+    private static String questionFor(RiskItem item) {
+        return "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+    }
+
+    /**
+     * 세션의 상품에서 상품유형을 끌어온다. **하드코딩하면 안 되는 값이다.**
+     *
+     * product_type은 ai-service에서 그냥 흘러가는 값이 아니라 오해 유형 필터의 입력이다
+     * (misconception.applies_to). PR #57이 M02(예금자보호 오해)를 products:[ELS]로 좁힌 이유가
+     * 변액에서의 오판이었는데 — 변액은 최저사망지급금·특약에 한하여 부분 보호라(#53)
+     * "예금자보호 되는 줄 알았어요"가 부분적으로 참이다 — 호출부가 변액 세션에도 "ELS"를
+     * 보내면 라이브러리에서 닫은 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀린다.
+     *
+     * TODO(강희진): 추출(F-EXT-002)이 붙으면 세션 필드로 옮긴다. 지금은 MockData의 상품 목록에서
+     *   productId로 찾는다 — 목록에 없으면 404(NoSuchElementException)로 드러낸다. 기본값을 두면
+     *   위 오판이 조용히 되살아나므로 폴백을 만들지 않는다.
+     */
+    private static String productTypeOf(Session session) {
+        return MockData.PRODUCTS.stream()
+                .filter(p -> p.productId().equals(session.productId()))
+                .findFirst()
+                .map(ProductSummary::productType)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "상품유형을 알 수 없다(상품 목록에 없음): " + session.productId()));
+    }
+
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/re-explain")
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
@@ -85,6 +180,7 @@ public class SessionController {
         return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/abort")
     public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.abort(sid)));
@@ -96,12 +192,59 @@ public class SessionController {
      */
     @PostMapping("/{sid}/simulate")
     public ApiResponse<Map<String, Object>> simulate(@PathVariable String sid,
-                                                     @RequestParam(defaultValue = "50000000") long amount) {
-        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2)
-        return ApiResponse.ok(Map.of("scenarios", List.of(
-                Map.of("name", "최선(6개월 조기상환)", "payout", 51_500_000, "pnl", 1_500_000),
-                Map.of("name", "중간(3년 만기상환)", "payout", 59_000_000, "pnl", 9_000_000),
-                Map.of("name", "최악(2008년 경로)", "payout", 32_000_000, "pnl", -18_000_000))));
+                                                     @Valid @RequestBody SimulateRequest body) {
+        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2).
+        // 목이지만 **계약(SimulateApiResponse)의 필수 필드를 전부 채운다.** 빠뜨리면 S-04가
+        // 백지가 되고, 특히 severity 가 없으면 카드가 최선→중간→최악 순으로 서서 기획서
+        // 4절이 요구하는 것("최선만 강조하는 관행의 정반대")과 반대가 된다.
+        //
+        // 수치는 기획서 7-2 표 확정본이다(낙인 45%·쿠폰 연 11.00%·만기 3년). 가입금액이
+        // 5,000만 원이 아니면 표 비율로 환산한다 — 목이라도 슬라이더를 움직였을 때 금액이
+        // 안 바뀌면 시뮬레이터로 안 보인다.
+        long amount = body.amount();
+        return ApiResponse.ok(Map.of(
+                "timeseriesVersion", TIMESERIES_SNAPSHOT,
+                "productName", "A증권 제4181회 ELS (원금비보장형)",
+                "scenarios", List.of(
+                        scenario("worst", "loss", "낙인 45% 하회 후 만기 손실", amount, 0.5066, 0.029,
+                                "2007-10-31", "2010-10-29", "eurostoxx50", 0.507, true),
+                        scenario("mid", "early_1", "6개월 뒤 첫 조기상환", amount, 1.055, 0.857,
+                                "2012-05-02", "2012-11-01", "nikkei225", 1.031, false),
+                        scenario("best", "maturity", "조기상환 없이 만기 상환", amount, 1.33, 0.015,
+                                "2013-01-04", "2016-01-04", "sp500", 1.142, false))));
+    }
+
+    /** data/timeseries/VERSION 의 snapshot. 화면에 표시해 P2 재현성의 근거를 보인다. */
+    private static final String TIMESERIES_SNAPSHOT = "2026-08-24";
+
+    /**
+     * 계약(SimScenario)의 필수 6필드를 채운 목 시나리오.
+     *
+     * severity 는 화면 배치·정렬 키이지 표시 라벨이 아니다 — 기획서 7-2 표가 평가어를 버리고
+     * 금액 순으로 간 이유가 스텝다운은 조기상환 시점과 무관하게 연 수익률이 같아서
+     * "가장 자주 일어나는 전개(85.7%)가 금액으로는 중간"이기 때문이다. 사람에게 보일 문면은
+     * name 을 쓴다.
+     */
+    private static Map<String, Object> scenario(String severity, String result, String name,
+                                                long amount, double payoutRatio, double share,
+                                                String startDate, String endDate,
+                                                String worstUnderlying, double worstFinal,
+                                                boolean knockedIn) {
+        long payout = Math.round(amount * payoutRatio);
+        return Map.of(
+                "severity", severity,
+                "result", result,
+                "name", name,
+                "payout", payout,
+                "pnl", payout - amount,
+                "share", share,
+                "pathMeta", Map.of(
+                        "startDate", startDate,
+                        "endDate", endDate,
+                        "underlyings", List.of("sp500", "nikkei225", "eurostoxx50"),
+                        "worstUnderlying", worstUnderlying,
+                        "worstFinal", worstFinal,
+                        "knockedIn", knockedIn));
     }
 
     /**
@@ -111,22 +254,69 @@ public class SessionController {
      * 판매자가 황색을 보려고 /judge 를 부르면 JUDGED 로 전이되고, 거기서 RE_EXPLAIN 으로
      * 갈 수 없어 재설명 흐름 자체가 막힌다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/gate-preview")
     public ApiResponse<SessionService.GatePreview> gatePreview(@PathVariable String sid) {
         return ApiResponse.ok(sessionService.previewGate(sid));
     }
 
+    @PreAuthorize("@accessGuard.can('session:judge', #sid)")
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
+        detectSuitabilityMismatch(sid);
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
         // 감사 기준점을 찍는다 — 되돌릴 수 없다. 신호만 보려면 /gate-preview 를 쓴다.
         return ApiResponse.ok(sessionService.judge(sid));
     }
 
     /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
+    /**
+     * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
+     *
+     * 발행을 GET 에서 분리한 이유는 감사다 — GET 이 발행까지 하면 로그에서 "읽었다"와
+     * "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을 열람하는 것만으로 발행 기록이
+     * 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     *
+     * ❗<b>메서드를 가르는 것만으로는 부족하다.</b> AuditInterceptor 는 @PreAuthorize 문면에서
+     * action 을 읽으므로(#76), 두 엔드포인트가 같은 action 이면 감사 로그가 둘을 못 가른다 —
+     * resource(URI)도 같고 HTTP 메서드는 담기지 않는다. 분쟁 시점에 답해야 하는 것은
+     * "언제 누가 교부했는가" 이지 "누가 열어봤는가" 가 아니다.
+     *
+     * report:issue 는 SELLER own_session 만이다(#95). MGR·COMPL 은 감독을 위해 남의 세션을
+     * *읽는* 역할이고 교부는 그 세션을 진행한 창구 직원이 한다 — 조회와 같은 action 이면
+     * COMPL 이 org 전체 세션에 대해 발행할 수 있다.
+     */
+    @PreAuthorize("@accessGuard.can('report:issue', #sid)")
+    @PostMapping("/{sid}/report")
+    public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
+        // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
+        // 목이지만 계약의 필수 필드를 채운다 — previewUrl·downloadUrl 은 PDF 생성 전까지
+        // null 이 계약이다(채우면 404 나는 경로를 계약이 보장하게 된다).
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /**
+     * 발행된 리포트 조회. 상태를 바꾸지 않는다.
+     * 발행한 적 없으면 404 — "아직 교부하지 않았다"와 "교부했다"는 감사에서 구별돼야 한다.
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
-    public ApiResponse<Map<String, String>> report(@PathVariable String sid) {
-        // TODO(정세현): ReportService (F-GTE-004)
-        return ApiResponse.ok(Map.of("reportId", "mock-report-001"));
+    public ApiResponse<Map<String, Object>> report(@PathVariable String sid) {
+        // TODO(정세현): ReportService.latest(sid) 연결. 목은 발행 여부를 모르므로 항상 돌려준다.
+        sessionService.get(sid);
+        return ApiResponse.ok(reportPayload(sid));
+    }
+
+    /** 계약(ReportResponse)의 필수 4필드를 채운 목. URL 둘은 PDF 전까지 null 이 계약이다. */
+    private static Map<String, Object> reportPayload(String sid) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("reportId", "mock-report-001");
+        out.put("sessionId", sid);
+        out.put("generatedAt", Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());
+        out.put("contentHash", "0".repeat(64));
+        out.put("previewUrl", null);
+        out.put("downloadUrl", null);
+        return out;
     }
 }
