@@ -2,7 +2,14 @@ name: PR 리뷰 확인
 
 # 현재 org 플랜(free + private)에서는 브랜치 보호를 쓸 수 없어 머지를 강제로 막지 못한다.
 # 이 워크플로는 승인 없는 PR에 빨간 X를 띄워 실수 머지를 눈에 보이게 만드는 용도다.
-# Team 플랜으로 올리면 이 체크를 required status check으로 걸어 실제 차단이 된다.
+# Team 플랜으로 올리면 이 커밋 상태를 required status check으로 걸어 실제 차단이 된다.
+#
+# 판정 결과는 잡의 종료 코드가 아니라 `소유자 승인 여부` 커밋 상태로 낸다.
+# 종료 코드로 내면 이벤트마다 별도 체크 런이 생겨 옛 실패가 덮이지 않는다 —
+# PR 을 열 때 pull_request 로 돈 실패가 남고, 나중에 승인이 와서
+# pull_request_review 로 성공해도 다른 체크라서 빨간 X 가 그대로 있었다.
+# 새 커밋을 푸시해야만 사라졌다. 커밋 상태는 context 가 같으면 어떤 이벤트에서
+# 왔든 덮어쓰므로 줄이 하나만 남고 승인 순간 빨강→초록으로 뒤집힌다.
 
 on:
   pull_request:
@@ -12,17 +19,25 @@ on:
 
 permissions:
   pull-requests: read
+  statuses: write
+
+concurrency:
+  # 리뷰 이벤트가 몰릴 때 늦게 시작한 실행이 먼저 끝나 옛 결과로 상태를 덮으면 안 된다.
+  group: pr-review-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   require-approval:
-    name: 소유자 승인 여부
+    name: 승인 집계
     runs-on: ubuntu-latest
     steps:
-      - name: 승인 집계
+      - name: 승인 집계 후 커밋 상태 기록
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -52,13 +67,26 @@ jobs:
           echo "리뷰 대기: ${pending:-(없음)}"
 
           if [ -n "$changes" ]; then
-            echo "::error::변경 요청이 해소되지 않았습니다 ($changes). 머지하지 마세요."
-            exit 1
+            state=failure
+            desc="변경 요청이 해소되지 않았습니다 ($changes). 머지하지 마세요."
+          elif [ -z "$approvers" ]; then
+            state=failure
+            desc="승인이 0건입니다. CODEOWNERS 기준 소유자 리뷰 후 머지하세요."
+          else
+            state=success
+            desc="승인 확인 — $approvers"
           fi
 
-          if [ -z "$approvers" ]; then
-            echo "::error::승인이 0건입니다. .github/CODEOWNERS 기준 소유자 리뷰 후 머지하세요 (README 개발 규칙 1)."
-            exit 1
-          fi
+          # description 은 140자 제한이 있다.
+          desc=$(printf '%s' "$desc" | cut -c1-140)
+          echo "::notice::$desc"
 
-          echo "::notice::승인 확인 — $approvers"
+          # context 가 같은 상태는 서로를 덮어쓴다 — 이벤트가 달라도 줄은 하나만 남는다.
+          gh api --method POST "/repos/$REPO/statuses/$SHA" \
+            -f state="$state" \
+            -f context="소유자 승인 여부" \
+            -f description="$desc" \
+            -f target_url="$RUN_URL" >/dev/null
+
+          # 잡 자체는 항상 성공으로 끝낸다. 빨강/초록은 위 커밋 상태가 전달한다 —
+          # 여기서 exit 1 하면 없애려던 "덮이지 않는 옛 실패"가 그대로 되돌아온다.
