@@ -288,3 +288,63 @@ def test_unknown_survey_question_is_422_not_502():
     })
     assert resp.status_code == 422
     assert "SUIT-CRYPTO-EXPERIENCE" in resp.json()["detail"]
+
+
+# ── 세션 단위 dev set (LLM 없이 픽스처 계약만 본다) ──────────────────────────
+def _session_specs():
+    import yaml
+
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parent / "fixtures" / "sessions"
+    return [(p, yaml.safe_load(p.read_text(encoding="utf-8"))) for p in sorted(d.glob("*.yaml"))]
+
+
+def test_session_devset_exists():
+    """모순은 세션 단위 판정이다. 항목 단위 dev set 으로는 검증할 수 없었다."""
+    assert _session_specs(), "세션 dev set 이 없다"
+
+
+def test_session_devset_survey_keys_are_known():
+    """모르는 `SUIT-` 키가 있으면 dev set 이 422 로 죽는다 — 라벨이 아니라 오류다."""
+    for path, spec in _session_specs():
+        for case in spec["cases"]:
+            questions = {k for k in case["survey"] if k.startswith(mismatch.QUESTION_KEY_PREFIX)}
+            unknown = questions - set(mismatch.AXIS_BY_QUESTION)
+            assert not unknown, f"{path.name}/{case['id']}: {sorted(unknown)}"
+
+
+def test_session_devset_covers_every_axis():
+    """축 하나가 한 번도 안 나오면 그 문항의 매핑이 틀렸는지 알 수 없다."""
+    covered = {a for _, spec in _session_specs()
+               for case in spec["cases"] for a in (case.get("expected_axes") or [])}
+    missing = sorted(set(mismatch.AXIS_BY_QUESTION.values()) - covered)
+    assert not missing, f"기대 라벨에 안 나오는 축: {missing}"
+
+
+def test_session_devset_covers_both_directions():
+    """`survey_understates_tolerance` 쪽이 하나도 없으면 그 값은 검증되지 않은 채 남는다."""
+    directions = {case.get("expected_direction") for _, spec in _session_specs()
+                  for case in spec["cases"]} - {None}
+    assert directions == {"survey_overstates_tolerance", "survey_understates_tolerance"}
+
+
+def test_session_devset_labels_are_self_consistent():
+    """`mismatch=false` 인데 축을 기대하거나, `insufficient_input` 인데 모순을 기대하면
+    스키마 불변식과 부딪혀 무엇이 틀렸는지 헷갈린다."""
+    for path, spec in _session_specs():
+        for case in spec["cases"]:
+            axes = case.get("expected_axes") or []
+            where = f"{path.name}/{case['id']}"
+            assert bool(axes) == case["expected_mismatch"], where
+            if case["expected_status"] == "insufficient_input":
+                assert not case["expected_mismatch"] and not axes, where
+            if not case["expected_mismatch"]:
+                assert case.get("expected_direction") is None, where
+
+
+def test_session_devset_has_a_consistent_control():
+    """전부 모순 케이스면 억지 모순(정상 계약 차단)을 감시할 대조군이 없다."""
+    clean = [case for _, spec in _session_specs() for case in spec["cases"]
+             if case["expected_status"] == "evaluated" and not case["expected_mismatch"]]
+    assert clean, "모순 없음이 정답인 케이스가 없다"
