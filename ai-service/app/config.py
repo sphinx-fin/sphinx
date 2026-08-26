@@ -41,6 +41,25 @@ DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 MODEL_POLICY_SUBSTRING = "flash-lite"
 
+#: 로그 레벨. **기본이 INFO 다** — 우리 코드의 관측 기록이 전부 `log.info` 이고, 파이썬
+#: 기본값(WARNING)이면 그게 하나도 안 찍힌다.
+#:
+#: PR #113·#114 리뷰(정세현)에서 걸렸다. 두 PR 이 *"빈도를 로그로 본다"* 를 근거로 관측을
+#: 약속했는데 `basicConfig`·`dictConfig`·`setLevel` 이 레포에 하나도 없었다 — **약속한
+#: 관측 경로가 아예 없었다.** 조용한 실패의 한 형태다: 코드는 남기려 하고 아무도 못 본다.
+LOG_LEVEL_ENV = "SPHINX_LOG_LEVEL"
+DEFAULT_LOG_LEVEL = "INFO"
+
+#: 우리 로거의 루트. `app.*` 만 설정하고 root 는 건드리지 않는다 — uvicorn 이 자기 핸들러를
+#: root 에 붙이므로 `basicConfig(force=True)` 로 덮으면 access 로그 형식까지 바뀐다.
+APP_LOGGER = "app"
+
+#: 우리가 붙인 핸들러임을 표시한다. `if not logger.handlers` 로 판단하면 **남이 붙인
+#: 핸들러가 하나라도 있을 때 우리 것을 안 붙인다** — pytest 가 `app` 로거에 캡처 핸들러
+#: 넷을 붙이는 것으로 실측했다(전체 실행에서 5개). 운영에서는 uvicorn 이 `uvicorn.*` 만
+#: 설정하므로 안 겹치지만, "남의 것이 있으면 내 것을 안 붙인다" 는 조용한 실패다.
+HANDLER_MARK = "_sphinx_app_handler"
+
 log = logging.getLogger(__name__)
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]   # ai-service/
@@ -71,6 +90,7 @@ class Settings:
     llm_model: str
     llm_timeout_sec: float
     env_files: tuple[str, ...]
+    log_level: str
 
     @property
     def llm_configured(self) -> bool:
@@ -93,4 +113,41 @@ def settings() -> Settings:
         llm_model=model,
         llm_timeout_sec=float(os.getenv("LLM_TIMEOUT_SEC", "60")),
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),
+        log_level=(os.getenv(LOG_LEVEL_ENV) or DEFAULT_LOG_LEVEL).upper(),
     )
+
+
+def configure_logging() -> str:
+    """`app.*` 로거에 레벨과 핸들러를 붙인다. 실제로 적용된 레벨 이름을 돌려준다.
+
+    **root 를 건드리지 않는 이유**: uvicorn 이 root 에 자기 핸들러를 붙이므로
+    `basicConfig(force=True)` 로 덮으면 access 로그 형식까지 바뀐다. 우리 관측만 켜는 것이
+    목적이라 범위를 `app` 으로 좁힌다.
+
+    핸들러를 붙이고 `propagate=False` 로 둔다 — root 에도 핸들러가 있으면 같은 줄이 두 번
+    찍힌다. **한 줄이 두 번 나오면 빈도 관측이 정확히 두 배로 틀린다.**
+
+    알 수 없는 레벨 이름은 조용히 무시하지 않고 기본값으로 내려가면서 경고를 남긴다 —
+    `SPHINX_LOG_LEVEL=INFOO` 같은 오타가 관측을 끄는데 그게 안 보이면 안 된다.
+
+    여러 번 불려도 핸들러가 쌓이지 않는다(테스트가 반복 호출한다).
+    """
+    requested = settings().log_level
+    level = getattr(logging, requested, None)
+    if not isinstance(level, int):
+        log.warning(
+            "%s 값을 알 수 없어 %s 로 내려간다: %r",
+            LOG_LEVEL_ENV, DEFAULT_LOG_LEVEL, requested,
+        )
+        requested = DEFAULT_LOG_LEVEL
+        level = getattr(logging, DEFAULT_LOG_LEVEL)
+
+    logger = logging.getLogger(APP_LOGGER)
+    logger.setLevel(level)
+    if not any(getattr(h, HANDLER_MARK, False) for h in logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)-7s %(name)s  %(message)s"))
+        setattr(handler, HANDLER_MARK, True)
+        logger.addHandler(handler)
+    logger.propagate = False
+    return requested

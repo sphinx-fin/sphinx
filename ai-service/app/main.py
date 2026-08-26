@@ -8,10 +8,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import routes
-from .config import settings
+from .config import configure_logging, settings
 from .pii import PiiDetected, assert_payload_clean
 
 log = logging.getLogger(__name__)
+
+# 엔트리포인트에서 한 번 켠다. lifespan 이 아니라 모듈 수준인 이유: `TestClient(app)` 을
+# context manager 로 쓰지 않으면 lifespan 이 돌지 않고, 그러면 테스트에서 관측이 꺼진다.
+configure_logging()
 
 # starlette 버전에 따라 상수명이 UNPROCESSABLE_ENTITY/CONTENT로 갈린다 — 리터럴로 고정
 HTTP_422 = 422
@@ -119,4 +123,5 @@ def healthz() -> dict:
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
+        "log_level": cfg.log_level,         # 관측이 켜져 있는지 (PR #113·#114 리뷰)
     }
