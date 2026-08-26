@@ -45,4 +45,11 @@ sphinx:
     max-reverify: 2                      # F-INT-004
 
   retention:
+    # 기획서 437행 "원문 발화는 보관기간을 한정하고, 이후에는 판정 결과만 남긴다".
+    # 지우는 것은 발화 전문(session_utterance)이고, 판정과 그 근거 인용은 남는다 —
+    # 인용을 지우면 P4(근거 없는 판정은 무효)가 깨지고 해시 체인도 끊긴다.
+    # 근거와 한계는 evidence/RetentionService 주석.
     raw-answer-months: 6                 # 원문 응답 보존 기간 (팀 결정 후 조정)
+    # 되돌릴 수 없는 삭제라 기본은 꺼둔다. 꺼져 있으면 기동 로그에 남긴다 —
+    # 조용히 안 돌면 "정책이 있다"고 착각하게 된다(security.enforce 와 같은 이유).
+    enforce: false
