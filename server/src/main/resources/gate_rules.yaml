@@ -7,6 +7,9 @@ rules:
   - id: R-02
     if: "suitabilityMismatch == true"
     then: RED
+  # 재검증 상한 도달·실패 → RED. 임계값은 application.yml sphinx.scoring.max-reverify와
+  # 같은 논리값이어야 한다(상한만큼 실패하면 게이트가 잡는다). 어긋나면 ReverifyThresholdSyncTest가
+  # 실패시킨다 — 한쪽만 바꾸면 상한과 게이트가 따로 논다.
   - id: R-03
     if: "reverifyFailed >= 2"
     then: RED

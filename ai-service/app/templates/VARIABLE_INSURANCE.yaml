@@ -31,19 +31,16 @@ items:
   # 운용설명서 p1 은 같은 내용을 긍정형으로만 쓴다. 두 문서가 충돌한 것이 아니라
   # **인용을 어디서 끊었는지**의 문제였다.
   #
-  # ⏳ item_id 는 PR #53 이 `VAR-PARTIAL-DEPOSIT-INSURANCE` 로 개칭한다. 여기서 미리 바꾸면
-  #    계약 샘플(아직 옛 이름)과 어긋나 assert_matches_contract() 가 깨진다 — 그 검사가
-  #    정확히 이 어긋남을 막으려고 있는 것이라 **#53 머지 후에 함께 바꾼다.**
-  #    그때 name·cue 도 "어디까지 보호되는가"를 요구하는 쪽으로 올린다(ADR-007 부수 발견).
-  #    오해 라이브러리 M02 는 PR #57 로 ELS 전용이 됐다 — 변액에서 "예금자보호 되는 줄"은
-  #    부분적으로 참이라 결정론 상향이 오판이었다.
-  - item_id: VAR-NO-DEPOSIT-INSURANCE
+  # item_id 는 계약 샘플(PR #53)에 맞춰 개칭 완료. name·cue 는 "어디까지 보호되는가"를
+  # 요구하는 쪽으로 이미 올라가 있다(ADR-007 부수 발견).
+  # 오해 라이브러리 M02 는 PR #57 로 ELS 전용이 됐다 — 변액에서 "예금자보호 되는 줄"은
+  # 부분적으로 참이라 결정론 상향이 오판이었다.
+  - item_id: VAR-PARTIAL-DEPOSIT-INSURANCE
     name: 예금자보호 범위
     importance: null
     cue: 예금자보호가 적용되는 급부의 범위와 보호 한도
     section_hint: 표지 · 유의사항
     found_in: [상품요약서, 운용설명서]
-    conflict: "PR #53 개칭 대기 — 정답은 부분 보호로 확정됐고 item_id·문면만 남았다"
 
   - item_id: VAR-WITHDRAWAL-FEE
     name: 중도인출 수수료
