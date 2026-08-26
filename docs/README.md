@@ -42,3 +42,4 @@
 | [005](adr/005-threshold-ownership.md) | 판정을 바꾸는 임계값은 게이트가 소유하고, 측정 자신감은 ai-service 가 소유한다 | Accepted |
 | [006](adr/006-item-id-canonical-form.md) | `item_id` 정본은 `_expected_risk_items` 긴 형식이다 | Accepted |
 | [007](adr/007-extraction-answer-set.md) | F-EXT-003 정답지는 공시문서 집합이다 — 핵심설명서는 확보 불가 | Accepted |
+| [008](adr/008-canonical-json.md) | `CanonicalJson` 은 RFC 8785 를 따르고, 정규화는 직렬화기가 하지 않는다 | Accepted |
