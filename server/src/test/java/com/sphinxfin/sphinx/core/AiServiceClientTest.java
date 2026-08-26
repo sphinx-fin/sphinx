@@ -36,10 +36,9 @@ class AiServiceClientTest {
     private MockRestServiceServer server;
     private AiServiceClient client;
 
-    private static final RiskItem ITEM = new RiskItem(
+    private static final RiskItem ITEM = RiskItem.extracted(
             "ELS-PRINCIPAL-LOSS-WARNING", "mock-els-001", "원금손실 조건", "required",
-            new RiskItem.Condition("만기평가일에 …(원문 인용)", new RiskItem.SourceSpan(3, 120, 210)),
-            "extracted");
+            new RiskItem.Condition("만기평가일에 …(원문 인용)", new RiskItem.SourceSpan(3, 120, 210)));
 
     @BeforeEach
     void setUp() {
