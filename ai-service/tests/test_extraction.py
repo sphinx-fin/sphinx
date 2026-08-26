@@ -229,7 +229,7 @@ def test_rescue_recovers_the_contract_span_from_a_bleeding_quote():
     assert extraction._resolve(candidate, doc, []) is None, "이 인용은 원문에 없어야 한다"
 
     warnings: list[Any] = []
-    span = extraction._rescue(candidate, doc, warnings)
+    span = extraction._rescue(candidate, doc, _tpl(candidate.item_id), warnings)
     expected = _early_redemption_expectation()
     assert span is not None
     assert span["source_span"] == expected["source_span"]
@@ -249,7 +249,7 @@ def test_rescue_refuses_to_drop_every_number():
         quote="본 증권은 상장하지 않을 예정이므로 옆열 999 조각",
     )
     warnings: list[Any] = []
-    assert extraction._rescue(candidate, doc, warnings) is None
+    assert extraction._rescue(candidate, doc, _tpl(candidate.item_id), warnings) is None
     assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
     assert "999" in warnings[0].message
 
@@ -262,7 +262,7 @@ def test_rescue_reports_which_numbers_were_dropped():
         quote=_TRUE_CONDITION + _TABLE_BLEED,
     )
     warnings: list[Any] = []
-    extraction._rescue(candidate, doc, warnings)
+    extraction._rescue(candidate, doc, _tpl(candidate.item_id), warnings)
     message = warnings[0].message
     assert "사람 확인 필요" in message
     assert "5.50" in message and "100" in message   # 누출 열의 수치
@@ -287,3 +287,97 @@ def test_narrowing_is_bounded():
     """`loose` 는 낱자마다 `\\s*` 를 끼운 정규식이다. 상한 없이 돌리면 실패 항목마다 느려진다."""
     long_quote = " ".join(f"토큰{i}" for i in range(60))
     assert len(extraction._narrowed_candidates(long_quote)) <= extraction.MAX_RESCUE_ATTEMPTS
+
+
+def _tpl(item_id: str):
+    product = "ELS" if item_id.startswith("ELS-") else "VARIABLE_INSURANCE"
+    return next(i for i in templates.get(product).items if i.item_id == item_id)
+
+
+# ── 역방향 픽스처 (#118 리뷰, 정세현) ────────────────────────────────────────
+#: **정세현 지적이 재현된 케이스다.** 이전 규칙("수치가 하나라도 남으면 통과 + 첫 성공 즉시
+#: 반환")은 *"누출 열이 진짜 조건문보다 짧다"* 는 암묵 가정에 의존했다. 여기서 깨진다 —
+#: 같은 페이지의 각주(45자)가 진짜 조건(23자)보다 22자 길다.
+#:
+#: 재현 당시 결과: 각주 스팬(p2 665~711)을 조건으로 잡고 정답(501~524)을 놓쳤다.
+#: `65` 가 빠지고 `100`·`20` 이 남았는데 통과했다.
+_ELDERLY_TRUE = "숙려제도 대상 투자자(65세이상 고령투자자"
+_ELDERLY_BLEED = "고난도금융투자상품: 최대원금손실 가능금액이 원금의 100분의 20을 초과하는 상품"
+
+
+def test_rescue_prefers_the_cue_matching_window_not_the_longest():
+    """★ 누출 조각이 진짜 조건보다 **길** 때도 정답을 골라야 한다.
+
+    누출 조각도 원문에 실재한다 — 원 인용이 해소에 실패한 것은 두 열이 이어붙은 문자열이
+    원문에 없어서지 각 조각이 없어서가 아니다. 그래서 "원문에서 찾았다" 만으로는 진짜
+    조건과 구별되지 않고, 무엇이 그 항목의 조건인지는 `cue` 만 말해준다.
+    """
+    doc = _doc()
+    expected = next(e for e in doc["_expected_risk_items"]
+                    if e["item_id"] == "ELS-ELDERLY-COOLING")
+    candidate = ExtractedCandidate(
+        item_id="ELS-ELDERLY-COOLING", page=2,
+        quote=f"{_ELDERLY_TRUE} {_ELDERLY_BLEED}",
+    )
+    assert len(_ELDERLY_BLEED) > len(_ELDERLY_TRUE), "역방향 픽스처가 아니다"
+    assert extraction._resolve(candidate, doc, []) is None, "이 인용은 원문에 없어야 한다"
+
+    warnings: list[Any] = []
+    span = extraction._rescue(candidate, doc, _tpl("ELS-ELDERLY-COOLING"), warnings)
+    assert span is not None
+    assert span["source_span"] == expected["source_span"], "각주를 조건으로 잡았다"
+    assert span["value_text"] == expected["value_text"]
+
+
+def test_bleed_fragment_alone_would_have_resolved():
+    """픽스처가 실제로 함정인지 — 누출 조각만으로도 원문에서 해소된다.
+
+    이게 아니면 위 테스트는 "안 풀리는 것을 안 골랐다" 는 시시한 사실만 확인한다.
+    """
+    doc = _doc()
+    bleed_only = ExtractedCandidate(
+        item_id="ELS-ELDERLY-COOLING", page=2, quote=_ELDERLY_BLEED,
+    )
+    span = extraction._resolve(bleed_only, doc, [])
+    assert span is not None, "누출 조각이 원문에서 안 풀리면 함정이 성립하지 않는다"
+    expected = next(e for e in doc["_expected_risk_items"]
+                    if e["item_id"] == "ELS-ELDERLY-COOLING")
+    assert span["source_span"] != expected["source_span"], "다른 구간을 가리켜야 한다"
+
+
+def test_off_cue_window_is_refused():
+    """cue 와 무관한 창만 남으면 좁히지 않고 실패로 둔다."""
+    doc = _doc()
+    candidate = ExtractedCandidate(
+        item_id="ELS-ELDERLY-COOLING", page=2,
+        quote=f"{_ELDERLY_BLEED} 그리고 발행인의 재무현황 및 신용등급 파악",
+    )
+    warnings: list[Any] = []
+    assert extraction._rescue(candidate, doc, _tpl("ELS-ELDERLY-COOLING"), warnings) is None
+    assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
+    assert "cue" in warnings[0].message
+
+
+def test_cue_threshold_separates_the_two_groups():
+    """임계값이 실측 두 군 사이에 있어야 한다.
+
+    `cue` 에는 **상품별 수치**(백분율·큰 수)가 없다(`test_cue_is_product_agnostic`). 그래서
+    회차마다 달라지는 값에 휘둘리지 않는다 — 제도 상수(`65세` 등)는 남아 있고 무해하다.
+    """
+    import re
+
+    from app import textsim
+
+    product_specific = re.compile(r"\d+\s*%|\d{3,}")
+    pairs = [
+        ("ELS-ELDERLY-COOLING", _ELDERLY_TRUE, _ELDERLY_BLEED),
+        ("ELS-EARLY-REDEMPTION-CONDITION", _TRUE_CONDITION, _TABLE_BLEED.strip()),
+    ]
+    for item_id, true_text, bleed in pairs:
+        cue = _tpl(item_id).cue
+        assert not product_specific.search(cue), f"{item_id}: cue 에 상품별 수치 — {cue}"
+        hit = textsim.containment(cue, true_text)
+        miss = textsim.containment(cue, bleed)
+        assert miss < extraction.CUE_CONTAINMENT_MIN <= hit, (
+            f"{item_id}: 진짜 {hit:.3f} · 누출 {miss:.3f} · 임계 {extraction.CUE_CONTAINMENT_MIN}"
+        )

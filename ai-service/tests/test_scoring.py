@@ -275,7 +275,11 @@ def test_echo_threshold_has_margin_over_real_utterances():
             except r.RubricNotFound:
                 continue
             worst = max(worst, scoring.echo_score(case["answer"], rubric, item))
-    assert worst < scoring.ECHO_THRESHOLD * 0.6, f"여유 부족: 실제 발화 최대 {worst:.3f}"
+    margin = scoring.ECHO_THRESHOLD - worst
+    assert margin >= scoring.ECHO_MARGIN_MIN, (
+        f"여유 부족: 실제 발화 최대 {worst:.3f}, 임계 {scoring.ECHO_THRESHOLD} "
+        f"→ 간격 {margin:.3f} < {scoring.ECHO_MARGIN_MIN}"
+    )
 
 
 def test_capped_confidence_records_the_reason():
