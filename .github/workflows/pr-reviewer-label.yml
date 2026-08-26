@@ -89,9 +89,14 @@ jobs:
                 if ($2 == "APPROVED" || $2 == "CHANGES_REQUESTED" || $2 == "DISMISSED") eff[$3] = $2
               }
               END {
+                # 배정된 사람과 리뷰를 낸 사람의 합집합을 본다. pr-review-guard 는
+                # 배정 여부와 무관하게 모든 리뷰를 세므로, 배정된 사람만 보면
+                # 배정 없이 변경요청을 낸 리뷰어를 놓쳐 가드와 어긋난다(#60).
+                for (u in req) if (req[u] == "review_requested") people[u] = 1
+                for (u in submitted) people[u] = 1
+
                 n = 0
-                for (u in req) {
-                  if (req[u] != "review_requested") continue    # 배정이 취소된 사람
+                for (u in people) {
                   n++
                   if (eff[u] == "APPROVED") continue            # 승인이 유효하다 — 라벨 없음
                   if (submitted[u]) print "리뷰중: \t" u        # 뭔가 냈지만 승인은 아니다
