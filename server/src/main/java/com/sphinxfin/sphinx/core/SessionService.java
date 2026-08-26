@@ -4,6 +4,7 @@ import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -68,7 +69,19 @@ public class SessionService {
      */
     @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment) {
+        return recordJudgment(sessionId, judgment, null);
+    }
+
+    /**
+     * 마스킹된 발화까지 함께 기록한다. 발화는 F-DET-002(세션 전체 발화 입력)에서 다시 쓴다.
+     * maskedAnswer 가 null 이면 발화를 남기지 않는다 — 판정만 넣는 기존 경로용이다.
+     */
+    @Transactional
+    public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer) {
         Session session = get(sessionId);
+        if (maskedAnswer != null) {
+            session.recordUtterance(judgment.itemId(), maskedAnswer);
+        }
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.START)) {
             session.fire(SessionFsm.Event.START);
         }
@@ -89,6 +102,27 @@ public class SessionService {
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
         return judgment;
+    }
+
+    /**
+     * F-DET-002 모순 판정 반영. ai-service 의 status·mismatch 를 세션 상태로 옮기고
+     * **코칭 스코어를 다시 계산한다.**
+     *
+     * 재계산이 필요한 이유: 생성 시점에는 모순을 모르므로 mismatch=false 로 점수를 냈다
+     * (PR #24 의 한계). 모순이 확인되면 vulnerability_weights.yaml 의 mismatch-bonus 가
+     * 붙어야 하는데, 안 붙이면 취약 임계값을 넘겨야 할 고객이 안 넘고 고령자 모드 재설명이
+     * 안 걸린다 — 에러도 로그도 없이 시연만 밋밋해진다(결정 10.12 와 같은 실패 양식).
+     *
+     * UNKNOWN 일 때는 가산하지 않는다. 모순이 확인된 게 아니므로 코칭 가중의 근거가 없다 —
+     * 게이트가 R-02b 로 황색을 내서 재확인을 요구하는 것이 그 상태에 맞는 처리다.
+     */
+    @Transactional
+    public Session recordSuitability(String sessionId, SuitabilityStatus status) {
+        Session session = get(sessionId);
+        session.recordSuitability(status);
+        var coaching = coachingScoreService.score(session, status.isMismatch());
+        session.applyCoaching(coaching.score(), coaching.vulnerable());
+        return repository.save(session);
     }
 
     /**
@@ -192,7 +226,8 @@ public class SessionService {
         }
 
         GateResult result = gateEngine.judge(
-                session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
+                session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
+                session.failedReverifyCount());
         Instant judgedAt = Instant.now();
         session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.JUDGE)) {
@@ -225,7 +260,8 @@ public class SessionService {
             return new GatePreview(recorded.signal(), recorded.ruleTrace(), true, session.judgedAt());
         }
         GateResult result = gateEngine.judge(
-                session.judgments(), session.suitabilityMismatch(), session.failedReverifyCount());
+                session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
+                session.failedReverifyCount());
         return new GatePreview(result.signal(), result.ruleTrace(), false, null);
     }
 

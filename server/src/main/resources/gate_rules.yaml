@@ -16,6 +16,16 @@ rules:
   - id: R-04
     if: "anyGrade in ['U2','U3']"
     then: YELLOW
+  # 적합성 모순을 **판정하지 못한** 경우 → 황색 (결정 10.9).
+  # RED 가 아닌 이유: 모순이 확인된 게 아니라 확인하지 못한 것이다. 판매 보류가 아니라
+  # 재확인이 비례하고, 황색이면 F-INT-004 루프가 설문을 다시 받는다.
+  # GREEN 이 아닌 이유: 계약(suitability_mismatch.schema.json)이 스스로 경고한 지점이다 —
+  # status=insufficient_input 이면 mismatch 는 항상 false 인데, 그 false 를 적합으로 읽으면
+  # 판정 실패가 통과가 된다. R-02 앞이 아니라 뒤에 두는 것은 모순이 확인된 경우가 먼저
+  # 잡혀야 하기 때문이다(확인된 RED > 확인 못 한 YELLOW).
+  - id: R-02b
+    if: "suitabilityUnknown == true"
+    then: YELLOW
   # 신뢰도 기반 황색 강등 — 이해했다지만 채점 신뢰도가 낮으면 통과시키지 않는다.
   # U4 예외는 순서로 보장(R-01이 U4를 이미 RED로 잡음). 임계값의 단일 출처는 여기다.
   - id: R-05
