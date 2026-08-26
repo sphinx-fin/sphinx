@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -24,6 +25,7 @@ public class OverrideController {
     public record OverrideRequest(@Size(min = 30) String reason) {}
 
     /** 판매자의 적색 진행 요청(사유 포함). 적색이 아니면 409 OVERRIDE_NOT_ELIGIBLE. */
+    @PreAuthorize("@accessGuard.can('override:request', #sid)")
     @PostMapping
     public ApiResponse<OverrideResponse> request(@PathVariable String sid,
                                                  @Valid @RequestBody OverrideRequest body) {
@@ -36,6 +38,7 @@ public class OverrideController {
      * 승인자는 인증 주체에서 얻는다. 역할 제약(MGR, ADR-002)은 F-CMN-002에서 action
      * 'override:approve' 어노테이션으로 붙는다 — 지금 SecurityConfig는 permitAll(목)이다.
      */
+    @PreAuthorize("@accessGuard.can('override:approve', #sid)")
     @PostMapping("/approve")
     public ApiResponse<OverrideResponse> approve(@PathVariable String sid, Authentication auth) {
         // TODO(강희진): 역할별 계정 분리(10.5, 8/29 설계 예정)가 붙으면 이 폴백을 **실패로

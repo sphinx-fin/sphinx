@@ -56,11 +56,10 @@ jobs:
               --jq '.reviewRequests[] | (.login // .slug)')
           fi
 
-          want=""
-          for login in $pending; do
-            want="${want}${PREFIX}$(name_of "$login")"$'\n'
-          done
-          want=$(printf '%s' "$want" | sed '/^$/d' | sort -u)
+          # 개행으로만 나눈다 — 셸의 IFS 설정에 기대지 않는다.
+          want=$(printf '%s\n' "$pending" | sed '/^$/d' | while IFS= read -r login; do
+            printf '%s%s\n' "$PREFIX" "$(name_of "$login")"
+          done | sort -u)
 
           have=$(gh pr view "$PR" --repo "$REPO" --json labels \
             --jq '.labels[].name | select(startswith("리뷰대기: "))' | sort -u)

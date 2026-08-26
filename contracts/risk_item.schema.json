@@ -1,14 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RiskItem",
-  "description": "F-EXT-002: 상품문서에서 추출된 필수 이해항목",
+  "description": "F-EXT-002: 상품문서에서 추출된 필수 이해항목. condition 은 원문에서 뽑은 조건이므로 추출에 실패하면 존재하지 않는다 — status 로 구분하고 값을 지어내지 않는다 (P6·E-EXT-03).",
   "type": "object",
   "required": [
     "item_id",
     "product_id",
     "name",
     "importance",
-    "condition",
     "status"
   ],
   "properties": {
@@ -30,7 +29,10 @@
       ]
     },
     "condition": {
-      "type": "object",
+      "type": [
+        "object",
+        "null"
+      ],
       "required": [
         "value_text",
         "source_span"
@@ -59,14 +61,53 @@
             }
           }
         }
-      }
+      },
+      "description": "원문에서 뽑은 조건. status=extracted 면 필수이고, extraction_failed 면 null 이다. 실패를 사유 문면으로 채우면 안 된다 — value_text 는 원문 인용만 허용하므로(P6) 지어낸 문장이 들어가는 순간 pages[page].text[start:end] == value_text 항등식이 깨지고, JSON Schema 는 구조만 보므로 그 어긋남을 잡지 못한다."
     },
     "status": {
       "enum": [
         "extracted",
         "extraction_failed"
       ],
-      "description": "실패는 은폐하지 않고 노출 (E-EXT-03)"
+      "description": "실패는 은폐하지 않고 노출 (E-EXT-03). extraction_failed 면 condition 은 null 이다."
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "추출 실패 사유(사람이 읽는 문면). status=extraction_failed 일 때만 채운다. condition 안에 넣지 않는 이유는 그 자리가 원문 인용 전용이기 때문이다."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "extracted"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "condition"
+        ],
+        "properties": {
+          "condition": {
+            "type": "object"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "condition": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
 }
