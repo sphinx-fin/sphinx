@@ -60,7 +60,14 @@ export default function S03Interview() {
      "몇 개 남았는지"를 잘못 안 채로 인터뷰를 한다. 그래서 분모·분자를 모두 서버 값으로 둔다.
      세션을 이어서 열었을 때도 맞는다는 이점이 따라온다 — 로컬 카운트는 0 부터 다시 셌다. */
   const total = question?.total ?? 0;
-  const answeredCount = question ? (question.done ? question.total : question.index - 1) : 0;
+  const answeredCount = (() => {
+    if (!question) return 0;
+    if (question.done) return question.total;
+    // index 는 "지금 묻고 있는 항목의 1-based 번호"다. 아직 답하기 전이면 그 앞까지가 완료분이고,
+    // 답을 기록한 직후(phase="answered")에는 이 항목까지 완료다. 다음 질문을 받을 때까지
+    // 기다리면 "답변이 기록되었습니다" 옆에서 카운터가 0 으로 남아 화면이 자기 말을 뒤집는다.
+    return phase === "answered" ? question.index : question.index - 1;
+  })();
 
   /* 항목명 표시용. 추출 실패 항목(E-EXT-03)은 서버가 애초에 묻지 않지만, 숨기지는 않는다 —
      실패 항목의 가시화는 S-01 의 책임이다. */
