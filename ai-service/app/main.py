@@ -111,7 +111,15 @@ async def _pii_handler(request: Request, exc: PiiDetected) -> JSONResponse:
 
 @app.get("/healthz")
 def healthz() -> dict:
-    """키 유무를 노출하지만 값은 절대 노출하지 않는다."""
+    """키 유무를 노출하지만 값은 절대 노출하지 않는다.
+
+    `prompt_versions` 는 **어느 프롬프트로 측정 중인지**다. 프롬프트 v2 에서 `confidence` 의
+    정의가 바뀌어(등급 확신도 → 채점 재현 가능성) v1 과 v2 의 숫자를 섞어 비교할 수 없게
+    됐는데, `Judgment` 에 프롬프트 버전 필드가 없어 판정 기록만 봐서는 어느 정의인지 모른다.
+    계약 변경(강희진 승인)이 필요한 사안이라 우선 실행 중인 값을 여기서 볼 수 있게 한다.
+    """
+    from . import mismatch, scoring
+
     cfg = settings()
     return {
         "status": "ok",
@@ -119,4 +127,8 @@ def healthz() -> dict:
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
+        "prompt_versions": {
+            "F-SCR-001": scoring.PROMPT_VERSION,
+            "F-DET-002": mismatch.PROMPT_VERSION,
+        },
     }
