@@ -16,5 +16,6 @@ public record CreateSessionCommand(
         String experienceLevel,
         String amountBand,
         String contractRef,
+        String surveySchemaVersion,
         Map<String, Object> surveyResult) {
 }

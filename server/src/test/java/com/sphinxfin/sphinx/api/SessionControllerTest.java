@@ -145,6 +145,27 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("/simulate는 amount를 body로 받고 기본값이 없다")
+    void simulateBodyRequired() throws Exception {
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"ELS-001","channel":"MOBILE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = com.jayway.jsonpath.JsonPath.read(created, "$.data.sessionId");
+
+        // body로 금액 → 200
+        mvc.perform(post("/sessions/" + sid + "/simulate").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":50000000}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.scenarios").isArray());
+
+        // 금액 누락 → 400 (기본값으로 조용히 덮이지 않음)
+        mvc.perform(post("/sessions/" + sid + "/simulate").contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("데모 흐름: 세션 생성 → U4 답변 기록 → /judge가 RED(R-01)")
     void answerThenJudge_isRed() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)

@@ -1,0 +1,66 @@
+# 변액보험 dev set. 라벨 출처는 각 케이스의 source 필드.
+#
+# 루브릭 4종을 실제 채점으로 검증하려고 만들었다 — 그전까지는 문면만 맞춰둔 상태였다.
+# 조건 원문은 계약 샘플(parsed_variable_sample.json)에서 오므로 여기 복사하지 않는다.
+product_type: VARIABLE_INSURANCE
+cases:
+  # ── 결정론: 오해 라이브러리가 잡는 것 ──────────────────────────────────────
+  - id: VAR-SAVINGS-MISCONCEPTION
+    source: 기획서 4절 [핵심 엔진] 오해 목록 — "저축인 줄 알았다" (M05)
+    item_id: VAR-PRINCIPAL-LOSS
+    question: 이 상품에서 낸 돈이 어떻게 되는지 본인 말씀으로 설명해 주시겠어요?
+    answer: 그냥 저축인 줄 알고 넣었는데요.
+    expected_grade: U4
+    expected_misconception: M05-SAVINGS
+    deterministic: true
+
+  - id: VAR-FULL-REFUND-MISCONCEPTION
+    source: 기획서 4절 [핵심 엔진] 오해 목록 — "낸 돈은 다 돌려받는 거죠" (M06)
+    item_id: VAR-SURRENDER-BELOW-PREMIUM
+    question: 중도에 해지하시면 얼마를 돌려받는지 어떻게 이해하고 계신가요?
+    answer: 낸 돈은 다 돌려받는 거죠?
+    expected_grade: U4
+    expected_misconception: M06-SURRENDER-VALUE
+    deterministic: true
+
+  # ── LLM 의존: 라이브러리에 패턴이 없는 오해 ────────────────────────────────
+  - id: VAR-FEE-UNAWARE
+    source: 합성 — 월공제액 차감을 모르는 진술. 라이브러리 패턴 없음
+    item_id: VAR-FEE-DEDUCTION
+    question: 납입하신 보험료가 어디에 쓰이는지 말씀해 주시겠어요?
+    answer: 낸 돈 전부가 펀드에 들어가서 굴려지는 거 아닌가요?
+    expected_grade: U4
+    expected_misconception: null
+    deterministic: false
+
+  # ★ 이 케이스가 VAR-EARLY-SURRENDER 분리 결정(ADR-006)의 근거를 검증한다.
+  #   합쳐두면 "환급률이 낮다"는 일반론만 요구하고 수치를 못 짚는 답변이 통과한다.
+  #   분리 후에는 required_elements 가 "제시된 환급률 수준을 수치로 언급"을 요구하므로
+  #   이 답변이 U1 로 통과하면 안 된다.
+  - id: VAR-RATIO-VAGUE
+    source: 합성 — 분리 결정 검증. 손해는 인지하지만 수치를 못 짚는다
+    item_id: VAR-EARLY-SURRENDER-RATIO
+    question: 3개월 만에 해지하시면 환급률이 어떻게 되는지 말씀해 주시겠어요?
+    answer: 일찍 해지하면 좀 손해가 나겠죠.
+    expected_grade: U2
+    expected_misconception: null
+    deterministic: false
+
+  # ── 정상 이해 대조군: 이해→오해 오판 감시 ──────────────────────────────────
+  - id: VAR-PRINCIPAL-UNDERSTOOD
+    source: 합성 — 정상 이해 대조군
+    item_id: VAR-PRINCIPAL-LOSS
+    question: 이 상품에서 낸 돈이 어떻게 되는지 본인 말씀으로 설명해 주시겠어요?
+    answer: 펀드 실적에 따라 변하고 최저보증이 없어서 중도해지하면 원금보다 적게 받을 수 있다고 들었어요.
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false
+
+  - id: VAR-RATIO-UNDERSTOOD
+    source: 합성 — 수치를 짚는 정상 이해. VAR-RATIO-VAGUE 와 짝
+    item_id: VAR-EARLY-SURRENDER-RATIO
+    question: 3개월 만에 해지하시면 환급률이 어떻게 되는지 말씀해 주시겠어요?
+    answer: 3개월이면 낸 돈의 58% 정도만 돌아온다고 표에서 봤어요.
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false

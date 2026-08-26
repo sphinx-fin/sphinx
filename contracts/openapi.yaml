@@ -478,7 +478,8 @@ components:
           description: 가입금액대(비식별). ageBand 와 같은 이유로 enum 고정.
           enum: ["1천만원미만", "1천만원대", "3천만원대", "5천만원대", "1억원대", "3억원대이상"]
         contractRef:     {type: string, nullable: true, description: "계약건 참조번호(비식별)"}
-        surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과"}
+        surveySchemaVersion: {type: string, nullable: true, description: "적합성 설문 문항 세트 버전 — 리포트가 어느 세트로 받았는지 판별(F-GTE-004)"}
+        surveyResult:    {type: object, nullable: true, additionalProperties: true, description: "적합성 설문 결과(문항 식별자→답변)"}
     # data 의 모양을 소유자가 아직 정하지 않은 응답용 봉투. 봉투만 계약하고 안은 열어 둔다.
     # 프론트는 success 로 분기하고 data 는 해당 화면이 아는 형태로 읽는다.
     OpaqueApiResponse:
@@ -734,7 +735,7 @@ components:
         서버가 임의 기본값을 갖고 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
       required: [amount]
       properties:
-        amount: {type: integer, format: int64, minimum: 0, description: "가입금액(원)"}
+        amount: {type: integer, format: int64, minimum: 1, description: "가입금액(원, 양수)"}
     SimulateResponse:
       type: object
       required: [scenarios, timeseriesVersion, productName]

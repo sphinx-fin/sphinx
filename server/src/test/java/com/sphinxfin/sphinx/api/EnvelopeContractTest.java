@@ -65,7 +65,8 @@ class EnvelopeContractTest {
         assertEnveloped(mvc.perform(get("/sessions/" + sid)));
         assertEnveloped(mvc.perform(get("/sessions/" + sid + "/judgments")));
         assertEnveloped(mvc.perform(post("/sessions/" + sid + "/questions/next")));
-        assertEnveloped(mvc.perform(post("/sessions/" + sid + "/simulate")));
+        assertEnveloped(mvc.perform(post("/sessions/" + sid + "/simulate")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":50000000}")));
         assertEnveloped(mvc.perform(get("/sessions/" + sid + "/report")));
     }
 

@@ -8,6 +8,7 @@ import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
 import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
+import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.AiServiceClient;
 import com.sphinxfin.sphinx.core.Session;
 import com.sphinxfin.sphinx.core.SessionService;
@@ -142,7 +143,8 @@ public class SessionController {
      */
     @PostMapping("/{sid}/simulate")
     public ApiResponse<Map<String, Object>> simulate(@PathVariable String sid,
-                                                     @RequestParam(defaultValue = "50000000") long amount) {
+                                                     @Valid @RequestBody SimulateRequest body) {
+        // 금액은 body로만 받는다(기본값 없음, #48). long amount = body.amount();
         // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2)
         return ApiResponse.ok(Map.of("scenarios", List.of(
                 Map.of("name", "최선(6개월 조기상환)", "payout", 51_500_000, "pnl", 1_500_000),

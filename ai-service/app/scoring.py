@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 from . import misconception, rubrics
@@ -111,14 +112,29 @@ def _drop_llm_misconception_type(judgment: Judgment) -> Judgment:
     return judgment.model_copy(update={"misconception_type": None})
 
 
+def _canonical(text: str) -> str:
+    """대조용 정규화 — 유니코드 NFC + 공백 제거.
+
+    NFC 를 여기서 하는 이유(ADR-008): 한글은 완성형(NFC)과 조합형(NFD)이 **눈으로 같고
+    바이트가 다르다.** 모델이 조합형으로 인용을 돌려주면 글자가 같은데도 P4 위반으로
+    거부된다 — 실측으로 재현했다.
+
+    ADR-008 은 `CanonicalJson` 이 직렬화 중에 정규화하지 않기로 정했다(직렬화가 내용을
+    바꾸면 저장된 원문과 해시 대상이 갈린다). 그 결정은 **저장**에 관한 것이고, 여기는
+    **대조**다. 원문을 고쳐 저장하는 것이 아니라 비교할 때만 같은 형태로 맞춘다 —
+    `judgment.evidence.utterance_quote` 자체는 손대지 않는다.
+    """
+    return _WS.sub("", unicodedata.normalize("NFC", text))
+
+
 def verify_quote_is_verbatim(judgment: Judgment, answer_text: str) -> None:
     """근거 인용이 실제 발화에서 나온 것인지 대조한다 (P4).
 
     지어낸 인용은 근거가 없는 것보다 나쁘다 — 감사 시점에 검증할 수 없는 기록이 남는다.
-    공백만 정규화하고, 그 외의 변형은 허용하지 않는다.
+    유니코드 정규화와 공백만 흡수하고, 그 외의 변형은 허용하지 않는다.
     """
-    quote = _WS.sub("", judgment.evidence.utterance_quote)
-    if quote and quote in _WS.sub("", answer_text):
+    quote = _canonical(judgment.evidence.utterance_quote)
+    if quote and quote in _canonical(answer_text):
         return
     raise LlmError(
         f"근거 인용이 발화에 없음 (P4 위반): item_id={judgment.item_id} "
@@ -138,11 +154,11 @@ def verify_rubric_clause_is_published(judgment: Judgment, rubric: rubrics.Rubric
     구분자·공백뿐이면 통과다. 잔여에 내용이 남으면 루브릭 밖의 문장을 만든 것이다.
     """
     published = tuple(rubric.required_elements) + tuple(rubric.misconception_conditions)
-    cited = _WS.sub("", judgment.evidence.rubric_clause)
+    cited = _canonical(judgment.evidence.rubric_clause)
 
     residual = cited
     for clause in sorted(published, key=len, reverse=True):
-        residual = residual.replace(_WS.sub("", clause), "")
+        residual = residual.replace(_canonical(clause), "")
     if not _CLAUSE_JOINERS.sub("", residual):
         return
 

@@ -10,7 +10,8 @@ def extract(product_id: str, product_type: str, parsed_document: ParsedDocument)
     """파싱된 문서 → 필수 이해항목.
 
     TODO(윤지석):
-      1. 상품유형 템플릿(ELS/변액)으로 후보 항목 프롬프트 구성
+      1. templates.get(product_type) 로 추출 대상 항목을 고정한다 —
+         템플릿에 없는 항목은 뽑지 않는다(기획서 5절 통제, F-EXT-003 분모)
       2. llm_client.complete_json(model_cls=...)로 항목 추출
       3. **원문 스팬 검증 후처리** — 계약 규약의 항등식으로 검사한다 (P6):
          parsed_document.page_text(page)[start:end] == value_text
