@@ -8,6 +8,8 @@
 
 - **ELS** — 키움증권 제4181회 간이투자설명서 (금투협, 자동 수집)
 - **변액보험** — 삼성생명 삼성 탄탄한 변액연금보험(B2601) 상품요약서 (생보협, 수동 취득)
+- **변액보험 운용설명서** — 같은 상품의 두 번째 공시문서 (ADR-007 이 정답지를 두 문서의
+  합집합으로 정했다). **재현율 분모가 아니다** — 아래 참조.
 
 `_expected_risk_items`는 계약에 포함되지 않는다(`_` 접두어). F-EXT-002(윤지석)가 이 문서에서
 뽑아야 할 정답과 원문 스팬이고, F-EXT-003 정답 세트의 출발점이다. 오프셋을 손으로 쓰면 반드시
@@ -28,6 +30,7 @@ from app import parsing  # noqa: E402
 DOCS = ROOT / "data" / "documents"
 ELS_PDF = DOCS / "els_kiwoom_4181_simple_prospectus.pdf"
 VAR_PDF = DOCS / "var_samsung_b2601_product_summary.pdf"
+VAR_OPS_PDF = DOCS / "var_samsung_b2601_operations_manual.pdf"
 
 
 def nfc(s):
@@ -187,10 +190,72 @@ def build_variable():
     return doc
 
 
+# --- 변액 운용설명서: 실문서 파싱 -------------------------------------------------
+# ADR-007 이 정답지를 "상품요약서 + 운용설명서" 합집합으로 정했는데, 운용설명서를 파싱한
+# 샘플이 없어서 **그 합집합이 ADR 본문에만 존재했다.** 이 샘플이 그걸 재현 가능하게 만든다.
+#
+# ❗재현율 분모가 아니다. 분모는 그대로 parsed_variable_sample.json 의 10종이다.
+#   운용설명서에서 **항목 고유 문장으로 답할 수 있는 것은 3종**이고(실측 — 아래 주석),
+#   나머지 7종은 이 문서에 없다. 이 샘플의 값은 커버리지가 아니라 **교차 검증**이다 —
+#   같은 항목을 다른 문면으로 재진술한 두 번째 출처.
+#
+# ⚠️ ADR-007 의 "이해항목 10종 중 6종만" 은 주제어 수준 계산이다. 실제로 세어 보면
+#   단어는 6종에서 걸리는데(원금손실·예금자보호·계약체결비용·저축·해약환급금·실적배당)
+#   **항목 고유 진술은 3종뿐**이다:
+#     - VAR-NOT-BANK-SAVINGS       "은행 저축과 다름" 진술이 없다 (p14 의 '저축성 변액보험'
+#                                  은 공시 안내 문맥이다)
+#     - VAR-SURRENDER-BELOW-PREMIUM "납입보험료보다 적을 수 있다" 진술이 없다
+#     - VAR-CONTRACT-COST          p9 의 '일정비율' 은 특별계정 보수이고 계약체결비용 정의가 아니다
+#   ADR 은 수정하지 않는다(결정이 바뀐 게 아니라 근거 수치가 틀렸다). 정정은
+#   docs/decision-log.md 10.21 에 적었다 — 합집합이라는 결론은 그대로 서고, 이유가
+#   "커버리지" 가 아니라 "같은 항목의 두 문면" 으로 바뀐다.
+VAR_OPS_ITEMS = [
+    ("VAR-PERFORMANCE-LINKED", "실적배당형 성격", 1,
+     "이 보험계약은 실적배당형 상품이므로 보험금 및 해약환급금이 특별계정의 운용실적에 "
+     "따라 변동됩니다"),
+    ("VAR-PRINCIPAL-LOSS", "원금손실 가능성", 1,
+     "중도해지시 해약환급금에 대한 최저보증이 없으므로 원금손실이 발생할 수 있으며, "
+     "그 손실은 모두 계약자에게 귀속됩니다"),
+    # 상품요약서와 **문면이 뒤집혀 있다.** 요약서는 "보호되지 않습니다. 다만 …" 이고
+    # 여기는 처음부터 긍정형이다. #53 이 손으로 한 대조가 이 샘플로 재현 가능해진다 —
+    # 짧게 끊으면 뜻이 반대가 되는 그 항목이라 두 출처를 나란히 두는 값이 제일 크다.
+    ("VAR-PARTIAL-DEPOSIT-INSURANCE", "예금자보호 부분 대상(최저보증·특약 한정)", 1,
+     "이 보험계약은 약관에서 정한 최저사망지급금, 최저실적배당종신연금 및 특약에 한하여 "
+     "예금자보호법에 따라 보호됩니다"),
+]
+
+
+def build_variable_ops():
+    if not VAR_OPS_PDF.exists():
+        sys.exit(
+            f"FAIL: {VAR_OPS_PDF.relative_to(ROOT)} 가 없다 (레포에 있어야 한다 — git 추적 대상).\n"
+            f"      생보협 공시실에서 수동 취득해야 한다: "
+            f"python3 scripts/fetch_documents.py var-b2601"
+        )
+    doc = parsing.parse_document(
+        str(VAR_OPS_PDF),
+        document_id="doc-var-samsung-b2601-ops",
+        product_type="VARIABLE_INSURANCE",
+        parsed_at="2026-08-24T00:00:00Z",
+    )
+    doc["_source"] = {
+        "note": "생명보험협회 공시실 > 상품비교공시 > 변액보험 > 변액운용설명서. "
+                "상품요약서와 같은 상품(B2601)의 두 번째 공시문서다. 원본은 data/documents/ 에 있다.",
+        "fetch_key": "var-b2601",
+        "original_file": "운용설명서 — 삼성 탄탄한 변액연금보험(B2601)(무배당)[최저연금보증형]",
+        "sha256": "dc0410514382193bf83aa7b0e6446d35e37b3618b58dee57eaf4acdf924398c6",
+    }
+    # 이 목록은 정답 세트가 아니라 **이 문서에서 답할 수 있는 항목**이다. 분모는
+    # parsed_variable_sample.json 이 갖는다 — 위 주석 참고.
+    doc["_expected_risk_items"] = resolve_items(doc, VAR_OPS_ITEMS)
+    return doc
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, obj in [("parsed_els_sample.json", build_els()),
-                      ("parsed_variable_sample.json", build_variable())]:
+                      ("parsed_variable_sample.json", build_variable()),
+                      ("parsed_variable_ops_sample.json", build_variable_ops())]:
         (OUT / name).write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n",
                                encoding="utf-8")
         print(f"wrote {name}: pages={obj['page_count']} "
