@@ -286,6 +286,32 @@ class CanonicalJsonTest {
                     .hasMessageContaining("담을 수 없는 타입");
         }
 
+        /**
+         * Judgment 와 같은 모양이되 confidence 만 BigDecimal 인 레코드.
+         * 10.32 가 1번(BigDecimal 로 변경)으로 닫히면 Judgment 가 이 모양이 된다.
+         */
+        record JudgmentShaped(String itemId, Grade grade, BigDecimal confidence,
+                              Judgment.Evidence evidence, String reason, String misconceptionType) {}
+
+        @Test
+        @DisplayName("Judgment 는 confidence 말고는 전부 담을 수 있다 — enum · 중첩 레코드 · nullable")
+        void judgmentIsSerializableOnceConfidenceIsFixed() {
+            JudgmentShaped judgment = new JudgmentShaped(
+                    "ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, new BigDecimal("0.91"),
+                    new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
+                    "원금 보장으로 오해", null);          // misconceptionType 은 nullable 이다
+
+            assertThat(CanonicalJson.serialize(judgment))
+                    .as("적재 쪽이 Map 으로 풀지 않고 레코드를 그대로 넘겨도 된다는 확인이다 "
+                            + "— Grade(enum) · Evidence(중첩 레코드) · null 이 전부 지원 타입이다")
+                    .isEqualTo("{\"confidence\":0.91,"
+                            + "\"evidence\":{\"rubricClause\":\"원금손실 조건\",\"utteranceQuote\":\"원금은 지켜지죠\"},"
+                            + "\"grade\":\"U4\","
+                            + "\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\","
+                            + "\"misconceptionType\":null,"
+                            + "\"reason\":\"원금 보장으로 오해\"}");
+        }
+
         @Test
         @DisplayName("Judgment 는 confidence 가 double 이라 지금은 해시 대상에 담을 수 없다")
         void judgmentCannotBeHashedYet() {
