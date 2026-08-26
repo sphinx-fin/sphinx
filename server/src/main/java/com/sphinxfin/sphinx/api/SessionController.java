@@ -5,6 +5,7 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
+import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.core.AiServiceClient;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 /** 세션·인터뷰·게이트 API. 소유: 강희진 */
 @RestController
@@ -64,7 +66,7 @@ public class SessionController {
         var next = items.get(answered);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
-                "이 상품에서 '" + next.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?",
+                questionFor(next),
                 answered + 1, items.size()));
     }
 
@@ -77,15 +79,49 @@ public class SessionController {
         // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
         // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
         // 쌓인 항목·질문으로 교체한다.
+        Session session = sessionService.get(sid);
         RiskItem item = MockData.RISK_ITEMS.stream()
                 .filter(r -> r.itemId().equals(body.itemId()))
                 .findFirst()
-                .orElseThrow(() -> new java.util.NoSuchElementException(
+                .orElseThrow(() -> new NoSuchElementException(
                         "항목을 찾을 수 없다: " + body.itemId()));
-        String question = "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
         Judgment measured = aiServiceClient.score(
-                item.itemId(), question, body.text(), item, "ELS");
+                item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
         return ApiResponse.ok(sessionService.recordJudgment(sid, measured));
+    }
+
+    /**
+     * 질문 문면 — nextQuestion과 submitAnswer가 **같은 문자열**을 써야 한다.
+     *
+     * 두 곳에 복제하면 한쪽만 바뀌었을 때 ai-service가 채점하는 질문과 고객이 화면에서 실제로
+     * 본 질문이 갈린다. 그러면 근거(evidence)가 "묻지 않은 질문에 대한 답"을 인용하게 되는데,
+     * verify_quote_is_verbatim은 답변 인용만 보므로 못 잡고 리포트(F-GTE-004)까지 그대로 간다.
+     * TODO(강희진): F-INT-002 프록시가 붙으면 두 곳 다 그쪽으로 대체된다.
+     */
+    private static String questionFor(RiskItem item) {
+        return "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+    }
+
+    /**
+     * 세션의 상품에서 상품유형을 끌어온다. **하드코딩하면 안 되는 값이다.**
+     *
+     * product_type은 ai-service에서 그냥 흘러가는 값이 아니라 오해 유형 필터의 입력이다
+     * (misconception.applies_to). PR #57이 M02(예금자보호 오해)를 products:[ELS]로 좁힌 이유가
+     * 변액에서의 오판이었는데 — 변액은 최저사망지급금·특약에 한하여 부분 보호라(#53)
+     * "예금자보호 되는 줄 알았어요"가 부분적으로 참이다 — 호출부가 변액 세션에도 "ELS"를
+     * 보내면 라이브러리에서 닫은 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀린다.
+     *
+     * TODO(강희진): 추출(F-EXT-002)이 붙으면 세션 필드로 옮긴다. 지금은 MockData의 상품 목록에서
+     *   productId로 찾는다 — 목록에 없으면 404(NoSuchElementException)로 드러낸다. 기본값을 두면
+     *   위 오판이 조용히 되살아나므로 폴백을 만들지 않는다.
+     */
+    private static String productTypeOf(Session session) {
+        return MockData.PRODUCTS.stream()
+                .filter(p -> p.productId().equals(session.productId()))
+                .findFirst()
+                .map(ProductSummary::productType)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "상품유형을 알 수 없다(상품 목록에 없음): " + session.productId()));
     }
 
     @PostMapping("/{sid}/re-explain")
