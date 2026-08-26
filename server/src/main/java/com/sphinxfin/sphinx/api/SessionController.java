@@ -15,6 +15,7 @@ import com.sphinxfin.sphinx.core.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
@@ -29,12 +30,14 @@ public class SessionController {
     private final SessionService sessionService;
     private final AiServiceClient aiServiceClient;
 
+    @PreAuthorize("@accessGuard.can('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
         Session session = sessionService.create(body.toCommand());
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @GetMapping("/{sid}")
     public ApiResponse<SessionResponse> get(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
@@ -48,11 +51,13 @@ public class SessionController {
      * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
      * grade → 색 매핑은 표시 관례이며 판정이 아니다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {
         return ApiResponse.ok(JudgmentsResponse.of(sessionService.get(sid)));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/questions/next")
     public ApiResponse<NextQuestionResponse> nextQuestion(@PathVariable String sid) {
         // TODO(강희진): ai-service /internal/question 프록시 (F-INT-002, 윤지석)
@@ -71,6 +76,7 @@ public class SessionController {
                 answered + 1, items.size()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:answer', #sid)")
     @PostMapping("/{sid}/answers")
     public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
         // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment (F-SCR-001).
@@ -125,6 +131,7 @@ public class SessionController {
                         "상품유형을 알 수 없다(상품 목록에 없음): " + session.productId()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/re-explain")
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
@@ -132,6 +139,7 @@ public class SessionController {
         return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
     }
 
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/abort")
     public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.abort(sid)));
@@ -159,11 +167,13 @@ public class SessionController {
      * 판매자가 황색을 보려고 /judge 를 부르면 JUDGED 로 전이되고, 거기서 RE_EXPLAIN 으로
      * 갈 수 없어 재설명 흐름 자체가 막힌다.
      */
+    @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/gate-preview")
     public ApiResponse<SessionService.GatePreview> gatePreview(@PathVariable String sid) {
         return ApiResponse.ok(sessionService.previewGate(sid));
     }
 
+    @PreAuthorize("@accessGuard.can('session:judge', #sid)")
     @PostMapping("/{sid}/judge")
     public ApiResponse<GateResult> judge(@PathVariable String sid) {
         // 세션에 쌓인 판정 + 모순 + 재검증 횟수 → GateEngine (F-GTE-001).
@@ -172,6 +182,7 @@ public class SessionController {
     }
 
     /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
     public ApiResponse<Map<String, String>> report(@PathVariable String sid) {
         // TODO(정세현): ReportService (F-GTE-004)
