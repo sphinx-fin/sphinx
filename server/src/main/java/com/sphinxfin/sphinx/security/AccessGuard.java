@@ -49,9 +49,11 @@ public class AccessGuard {
     /**
      * action이 허용되는가. resourceId는 세션 ID(없는 action이면 null).
      *
-     * enforce=false면 정책을 부르지 않고 통과시킨다 — AccessPolicy.permits()가 아직
-     * 미구현이라 부르면 UnsupportedOperationException이 난다. 요청마다 예외를 삼키는
-     * 대신 스위치를 명시적으로 둔다(삼키면 "막고 있다"와 "안 막고 있다"가 구별되지 않는다).
+     * enforce=false면 정책을 부르지 않고 통과시킨다. 스위치를 둔 원래 이유
+     * (AccessPolicy.permits() 미구현)는 #99 로 해소됐고, 지금 남은 이유는 **역할별 계정이
+     * 아직 없다는 것**이다(결정 10.5) — 계정이 하나뿐인 상태로 켜면 모든 요청이 같은
+     * 역할로 판단돼 차단이 의미를 잃는다. 스위치를 명시적으로 두는 것은 그대로다:
+     * 조용히 통과시키면 "막고 있다"와 "안 막고 있다"가 구별되지 않는다.
      */
     public boolean can(String action, String resourceId) {
         if (!enforce) {
