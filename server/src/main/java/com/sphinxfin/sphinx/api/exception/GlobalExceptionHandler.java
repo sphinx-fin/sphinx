@@ -9,10 +9,12 @@ import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.core.SessionFsm;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.MeasurementInvalidException;
+import com.sphinxfin.sphinx.security.AccessGuard;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -132,6 +134,42 @@ public class GlobalExceptionHandler {
     }
 
     /** 그 외 예기치 못한 예외 → 500. 원인은 로그에 남기고(삼키지 않음), 응답엔 노출하지 않는다. */
+    /**
+     * 인증되지 않은 요청 → 401.
+     *
+     * <p>403 과 가른다. <b>"누구인지 모른다"와 "권한이 없다"는 다른 상태다</b> — 전자는
+     * 로그인하면 되고 후자는 안 된다. 화면이 같은 코드를 받으면 로그인 유도와 권한 안내를
+     * 구별할 수 없고, 감사 로그에서도 미인증 접근 시도와 권한 위반이 섞인다.
+     */
+    @ExceptionHandler(AccessGuard.AccessDeniedNotAuthenticatedException.class)
+    public ResponseEntity<ApiResponse<Void>> unauthenticated(
+            AccessGuard.AccessDeniedNotAuthenticatedException e) {
+        log.warn("미인증 접근: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.fail(ApiError.of("UNAUTHORIZED", "인증이 필요합니다")));
+    }
+
+    /**
+     * 권한 없는 접근 → 403 (F-CMN-002).
+     *
+     * <p><b>이 핸들러가 없으면 차단이 500 으로 떨어진다.</b> 아래 catch-all 이 잡아
+     * {@code INTERNAL_ERROR} 를 내는데, 그러면 두 가지가 동시에 망가진다 — 화면에는 막힌 게
+     * 아니라 <b>서버가 고장 난 것</b>으로 보이고, {@code AuditInterceptor} 가
+     * {@code resultCode=500} 으로 기록해서 <b>차단 시도가 서버 오류 더미에 섞인다.</b>
+     * 기획 7-4 2단계가 보려는 것이 차단당한 시도의 반복인데 그게 안 보이게 된다.
+     * ({@code enforce=true} 로 띄워 실측한 결과다 — PR #74 리뷰)
+     *
+     * <p>사유는 응답에 싣지 않는다. {@code AccessPolicy.Decision.reason} 은 "다른 지점의
+     * 세션이다" 처럼 <b>존재를 알려주는</b> 문면이라, 없는 세션(404)과 남의 지점 세션(403)을
+     * 구별해 주면 지점 경계 너머로 세션 존재 여부가 샌다. 진단은 서버 로그에 남긴다.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> forbidden(AccessDeniedException e) {
+        log.warn("접근 차단: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(ApiError.of("FORBIDDEN", "이 작업을 수행할 권한이 없습니다")));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> unexpected(Exception e) {
         log.error("처리되지 않은 예외", e);

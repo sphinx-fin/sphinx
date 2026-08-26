@@ -105,12 +105,9 @@ class AccessControlWiringTest {
                 .sorted()
                 .toList();
         // 아직 엔드포인트가 없는 기능(F-GTE-003 신호 큐, 감사 조회, 계정 관리)은 제외한다.
-        // report:issue 는 정책이 먼저 생긴 경우다 — POST /report 가 아직 report:read 를 달고
-        // 있어서, 어노테이션을 report:issue 로 바꾸는 순간 이 줄을 빼면 된다(PR #94 리뷰).
-        // 정책보다 배선이 늦으면 여기 남고, 배선이 따라오면 목록이 줄어든다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
-                "admin:role:assign", "aggregate:indicator:read", "report:issue");
+                "admin:role:assign", "aggregate:indicator:read");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
                         + "'접근이 없었다'로 읽힌다. 기능이 아직 없으면 예외 목록에 넣고 이유를 적어라")
