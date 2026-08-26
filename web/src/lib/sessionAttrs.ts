@@ -23,8 +23,13 @@
  * 가중 대상이 아닌 값(20~40대, 소액, 3년이상)은 YAML 에 없는 게 정상이다 — 0점이 맞는
  * 값과, 오타라서 0점이 된 값을 구분하려고 `weighted` 로 표시해 둔다.
  *
- * ⚠️ 이 대조는 지금 **사람이 눈으로 맞춘 것**이다. YAML 이 바뀌면 여기는 조용히 어긋난다.
- *    허용값을 `contracts/openapi.yaml` 의 enum 으로 올려달라고 요청해 둔 상태다.
+ * ⚠️ 요청했던 enum 승격은 **#43 으로 들어왔다** — `openapi.yaml` 의 `CreateSessionRequest`
+ *    가 `ageBand`·`experienceLevel`·`amountBand` 를 enum 으로 고정한다. 그래서 오타는 이제
+ *    서버에서 400 으로 걸린다(조용한 0점이 아니라).
+ *
+ *    남은 구멍은 **enum ↔ YAML** 이다. 그 둘이 어긋나면 값은 유효한데 가중치만 사라져서
+ *    여전히 조용히 0점이 된다. `VulnerabilityWeightsContractTest`(#59)가 `channel` 은 막지만
+ *    나머지 셋은 아직 사람이 맞추고 있다 — PR #59 리뷰에서 확대를 요청해 뒀다.
  */
 
 /** 선택지 하나. `weighted`=true 면 취약 가중 대상(YAML 에 키가 있는 값). */
@@ -82,28 +87,15 @@ export const CHANNELS = [
 ] as const;
 
 /**
- * 데모 대상 상품 2종 (F-EXT-001 타임박스 — 파서가 이 2종만 다룬다).
+ * 상품 목록은 **`GET /products` 로 받는다** — 상수를 두지 않는다.
  *
- * ⚠️ **상품 목록 조회 엔드포인트가 계약에 없다.** `openapi.yaml` 에는
- * `POST /products/documents` · `POST /products/{id}/extract` · `GET /products/{id}/risk-items`
- * 뿐이라 화면이 "고를 수 있는 상품"을 물어볼 곳이 없다. 그래서 데모 2종을 여기 고정한다.
- * `GET /products` 가 생기면 이 상수를 지우고 그걸 부른다.
+ * 예전에는 계약에 목록 조회 경로가 없어(`POST /products/documents` · `POST /products/{id}/extract`
+ * · `GET /products/{id}/risk-items` 뿐이라 전부 id 를 이미 알아야 부를 수 있었다) 데모 2종을
+ * 여기 상수로 고정했다. #49 로 `GET /products` 가 생겨 상수를 지웠다 (decision-log 10.18).
  *
- * **표기는 가명이다.** 기획서: "데모와 제출물에서는 상품명과 발행사를 가명 처리하고 조건만
- * 인용한다." 공시 문서라 열람은 자유롭지만 제출물에 실명을 싣는 건 다른 문제다.
- * `id` 는 파싱 산출물(`contracts/samples/*.json` 의 `document_id`)과 맞춰야 하므로 그대로 쓴다.
+ * 지우는 게 중요한 이유는 **가명 표기** 때문이다. 기획서가 "데모와 제출물에서는 상품명과
+ * 발행사를 가명 처리한다"로 못박았고 서버 `MockData.PRODUCTS` 도 같은 문면을 쓰는데, 같은
+ * 문자열이 두 곳에 있으면 한쪽만 고쳐진다. 목록을 서버에서 받으면 문면의 출처가 하나가 된다.
+ *
+ * 타입은 `api/types.ts` 의 `ProductSummary`.
  */
-export const DEMO_PRODUCTS = [
-  {
-    id: "doc-els-kiwoom-4181",
-    label: "A증권 제4181회 ELS (원금비보장형)",
-    type: "ELS",
-    note: "2등급 · 높은위험 · 예금자보호 비대상",
-  },
-  {
-    id: "doc-var-samsung-b2601",
-    label: "B생명 변액연금보험 (최저연금보증형)",
-    type: "VARIABLE_INSURANCE",
-    note: "실적배당형 · 해약환급금 최저보증 없음",
-  },
-] as const;

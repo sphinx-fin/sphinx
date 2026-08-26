@@ -22,10 +22,14 @@
  *      문면이 없다. `"손실이 나더라도 감수할 수 있다"` 로 보내야 `"원금은 지켜지는 거죠?"`
  *      와 나란히 놓고 모순을 말할 수 있다 — P4 의 근거(무엇과 무엇이 모순인가)가 된다.
  *
- * **키 규약**: `SUIT-` 로 시작하는 키만 문항이다. 그 외(`_` 시작)는 메타데이터이므로
- * 모순 판정에서 건너뛴다. 지금은 `_surveySchemaVersion` 하나뿐이다.
- * (`MismatchRequest.survey_schema_version` 자리가 이미 있는데 `CreateSessionRequest` 에
- *  대응 필드가 없어서 맵에 얹었다. typed 필드가 생기면 이 키를 지운다.)
+ * **키 규약**: `surveyResult` 에는 `SUIT-` 로 시작하는 **문항만** 들어간다. 메타데이터는
+ * 섞지 않는다.
+ *
+ * 문항 세트 버전은 예전에 `_surveySchemaVersion` 키로 이 맵에 얹어 우회했었다 —
+ * `MismatchRequest.survey_schema_version` 자리는 있는데 `CreateSessionRequest` 에 대응
+ * 필드가 없어서였다. **#61 로 typed 필드가 생겨 우회를 걷었다**(decision-log 10.8).
+ * 이제 버전은 `CreateSessionRequest.surveySchemaVersion` 으로 나가고, 이 맵은 문항만
+ * 담는다 — `mismatch.py` 가 `_` 접두어를 걸러내야 할 이유 자체가 없어졌다.
  *
  * ── 왜 이 6개인가 ────────────────────────────────────────────────────────────
  *
@@ -123,13 +127,17 @@ export const DEMO_SURVEY_ANSWERS: Readonly<Record<string, string>> = {
   "SUIT-PRODUCT-EXPERIENCE": "없다",
 };
 
-/** 화면 상태(문항ID → 답변) → `CreateSessionRequest.surveyResult` 맵. */
+/**
+ * 화면 상태(문항ID → 답변) → `CreateSessionRequest.surveyResult` 맵.
+ *
+ * **문항만 담는다.** 세트 버전은 `SURVEY_SCHEMA_VERSION` 을 `surveySchemaVersion` 필드로
+ * 따로 보낸다(10.8). 정의에 없는 문항 키는 넣지 않는다 — 화면 상태에 남은 옛 문항이 그대로
+ * 나가면 `mismatch.py` 가 세트에 없는 축을 해석하려 든다.
+ */
 export function toSurveyResult(
   answers: Readonly<Record<string, string>>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {
-    _surveySchemaVersion: SURVEY_SCHEMA_VERSION,
-  };
+): Record<string, string> {
+  const result: Record<string, string> = {};
   for (const q of SURVEY_QUESTIONS) {
     const answer = answers[q.id];
     if (answer) result[q.id] = answer;
