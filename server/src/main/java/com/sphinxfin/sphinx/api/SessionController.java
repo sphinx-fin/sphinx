@@ -269,11 +269,20 @@ public class SessionController {
     /**
      * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
      *
-     * 발행을 GET 에서 분리한 이유는 감사다 — report:read 는 audited action 이라 GET 이
-     * 발행까지 하면 로그에서 "읽었다"와 "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을
-     * 열람하는 것만으로 발행 기록이 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     * 발행을 GET 에서 분리한 이유는 감사다 — GET 이 발행까지 하면 로그에서 "읽었다"와
+     * "발행했다"가 구별되지 않고, MGR·COMPL 이 남의 세션을 열람하는 것만으로 발행 기록이
+     * 생긴다. 프리페치·재시도·중복 클릭도 상태를 바꾼다.
+     *
+     * ❗<b>메서드를 가르는 것만으로는 부족하다.</b> AuditInterceptor 는 @PreAuthorize 문면에서
+     * action 을 읽으므로(#76), 두 엔드포인트가 같은 action 이면 감사 로그가 둘을 못 가른다 —
+     * resource(URI)도 같고 HTTP 메서드는 담기지 않는다. 분쟁 시점에 답해야 하는 것은
+     * "언제 누가 교부했는가" 이지 "누가 열어봤는가" 가 아니다.
+     *
+     * report:issue 는 SELLER own_session 만이다(#95). MGR·COMPL 은 감독을 위해 남의 세션을
+     * *읽는* 역할이고 교부는 그 세션을 진행한 창구 직원이 한다 — 조회와 같은 action 이면
+     * COMPL 이 org 전체 세션에 대해 발행할 수 있다.
      */
-    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @PreAuthorize("@accessGuard.can('report:issue', #sid)")
     @PostMapping("/{sid}/report")
     public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
         // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
