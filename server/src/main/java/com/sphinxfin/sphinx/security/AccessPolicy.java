@@ -44,16 +44,42 @@ public class AccessPolicy {
     /** 요청 주체. actorId는 감사 로그의 행위자와 같은 값이어야 한다. */
     public record Actor(String actorId, Role role, String branchId) {}
 
-    /** 접근 대상의 귀속. 개별 세션이 아닌 집계 요청은 sessionId·ownerId가 없다. */
-    public record Target(String sessionId, String ownerId, String branchId) {
+    /**
+     * 접근 대상의 귀속. 개별 세션이 아닌 집계 요청은 sessionId·ownerId가 없다.
+     *
+     * <p><b>종류를 값의 모양으로 추론하지 않는다.</b> 전에는 세 필드가 모두 null 이면 집계로
+     * 봤는데, 그러면 <b>조회 실패한 세션이 집계와 구별되지 않는다</b> — 그리고 집계는
+     * {@code branch} 그랜트에서 통과하므로 <b>실재하지 않는 세션이 실재하는 남의 지점 세션보다
+     * 더 허용되는</b> 역전이 생긴다(PR #99 리뷰에서 실측). 이 클래스가 세운 원칙("판단할 수
+     * 없으면 거부")이 거기서만 반대로 적용됐다.
+     *
+     * <p>그래서 {@link Kind} 를 명시적으로 든다. 값이 우연히 같아지는 일이 없어진다.
+     */
+    public record Target(String sessionId, String ownerId, String branchId, Kind kind) {
+
+        /** 대상의 종류. 불리언보다 이쪽이 낫다 — 호출부에서 무엇을 뜻하는지 읽힌다. */
+        public enum Kind { SESSION, AGGREGATE }
+
+        /**
+         * 세션 대상. 필드가 비어 있어도 <b>집계가 되지 않는다</b> — 비어 있으면 판단 불가이고
+         * 판단 불가는 거부다. 기존 3-인자 호출을 그대로 두기 위한 생성자이기도 하다.
+         */
+        public Target(String sessionId, String ownerId, String branchId) {
+            this(sessionId, ownerId, branchId, Kind.SESSION);
+        }
+
+        /** 세션 대상. 의도를 드러내려면 이 쪽을 쓴다. */
+        public static Target session(String sessionId, String ownerId, String branchId) {
+            return new Target(sessionId, ownerId, branchId, Kind.SESSION);
+        }
 
         /** 집계 요청 — 귀속 주체가 없다. scope: org 인 action에만 허용된다. */
         public static Target aggregate() {
-            return new Target(null, null, null);
+            return new Target(null, null, null, Kind.AGGREGATE);
         }
 
         boolean isAggregate() {
-            return sessionId == null && ownerId == null && branchId == null;
+            return kind == Kind.AGGREGATE;
         }
     }
 

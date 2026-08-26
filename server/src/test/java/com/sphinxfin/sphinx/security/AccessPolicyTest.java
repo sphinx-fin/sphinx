@@ -35,7 +35,7 @@ class AccessPolicyTest {
     }
 
     private static Target session(String ownerId, String branchId) {
-        return new Target("S-1", ownerId, branchId);
+        return Target.session("S-1", ownerId, branchId);
     }
 
     @Nested
@@ -148,6 +148,35 @@ class AccessPolicyTest {
                     .as("통과시키면 '지점으로 제한했다' 가 거짓이 된다. 대신 MGR 기능이 전부 403 이 "
                             + "되므로 사유로 구별한다")
                     .contains("소속 지점을 알 수 없어", "10.5");
+        }
+    }
+
+    @Nested
+    @DisplayName("집계는 종류로 가른다 — 값의 모양으로 추론하지 않는다")
+    class AggregateIsExplicit {
+
+        @Test
+        @DisplayName("❗조회 실패한 세션이 집계로 오인되지 않는다 — MGR 이 남의 지점 ID 를 찔러도 거부")
+        void unresolvedSessionIsNotAggregate() {
+            // AccessGuard.targetOf 는 없는 세션을 (null, null, null) 로 접는다.
+            Target unresolved = new Target(null, null, null);
+
+            AccessPolicy.Decision decision = policy.decide(mgr("BR-9"), "report:read", unresolved);
+
+            assertThat(decision.allowed())
+                    .as("전에는 이 값이 집계로 보여 branch 그랜트가 통과시켰다 — 실재하지 않는 세션이 "
+                            + "실재하는 남의 지점 세션보다 더 허용되는 역전이었다 (PR #99 리뷰)")
+                    .isFalse();
+            assertThat(decision.reason()).contains("판단할 수 없다");
+        }
+
+        @Test
+        @DisplayName("집계는 팩토리로만 만들어진다")
+        void aggregateOnlyViaFactory() {
+            assertThat(policy.permits(mgr("BR-1"), "aggregate:heatmap:read", Target.aggregate())).isTrue();
+            assertThat(policy.permits(mgr("BR-1"), "aggregate:heatmap:read", new Target(null, null, null)))
+                    .as("같은 필드 값이어도 세션 대상이면 집계 그랜트로 통과하지 않는다")
+                    .isFalse();
         }
     }
 
