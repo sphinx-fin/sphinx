@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,11 +56,11 @@ class EvidenceWiringTest {
                 "CT-1", "SUIT-v1", Map.of()));
 
         sessions.recordJudgment(session.id(), new Judgment(
-                "ELS-PRINCIPAL-LOSS-WARNING", Grade.U3, 0.7,
+                "ELS-PRINCIPAL-LOSS-WARNING", Grade.U3, new BigDecimal("0.7"),
                 new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
                 "부분 이해", null));
         sessions.recordJudgment(session.id(), new Judgment(
-                "ELS-PRINCIPAL-LOSS-WARNING", Grade.U1, 0.95,
+                "ELS-PRINCIPAL-LOSS-WARNING", Grade.U1, new BigDecimal("0.95"),
                 new Judgment.Evidence("원금이 깨질 수 있다고 들었어요", "원금손실 조건"),
                 "이해함", null));
 

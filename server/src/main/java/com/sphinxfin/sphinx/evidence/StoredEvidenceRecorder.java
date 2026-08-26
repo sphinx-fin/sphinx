@@ -6,7 +6,6 @@ import com.sphinxfin.sphinx.domain.Judgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -91,42 +90,20 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
      * <p><b>색은 담지 않는다</b>(ADR-004 §5) — {@code grade} 원값과 근거만 담는다. 표시 관례가
      * 바뀌면 같은 판정의 해시가 달라지고 교차 검증이 무너진다.
      *
-     * <p>{@code Judgment} 레코드를 통째로 넘기지 않고 여기서 펴는 이유는 {@link #confidenceOf}
-     * 하나 때문이다. 그것만 아니면 {@link CanonicalJson}이 레코드를 직접 순회할 수 있다
-     * (CanonicalJsonTest의 {@code judgmentIsSerializableOnceConfidenceIsFixed}가 확인한다).
+     * <p>레코드를 통째로 넘기지 않고 여기서 펴는 이유는 <b>담는 것을 골라야 하기</b> 때문이다 —
+     * 위의 색 규약이 그것이고, {@code misconceptionType} 을 null 이어도 생략하지 않는 것도 여기서
+     * 정한다. {@link CanonicalJson} 은 이제 {@code Judgment} 를 직접 순회할 수도 있다
+     * (CanonicalJsonTest 의 {@code judgmentIsSerializableOnceConfidenceIsFixed} 가 확인한다).
+     * 그래도 펴는 쪽을 남긴다: <b>무엇을 담는지가 이 파일에 보여야</b> 한다.
      */
     private static Map<String, Object> judgmentPayload(Judgment judgment) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("itemId", judgment.itemId());
         item.put("grade", judgment.grade());
-        item.put("confidence", confidenceOf(judgment));
+        item.put("confidence", judgment.confidence());
         item.put("evidence", judgment.evidence());
         item.put("reason", judgment.reason());
         item.put("misconceptionType", judgment.misconceptionType());   // nullable — 생략하지 않는다
         return item;
-    }
-
-    /**
-     * ⚠️ <b>10.32가 닫힐 때까지의 임시 다리다.</b>
-     *
-     * <p>ADR-008은 해시 대상에 {@code double}을 담지 않기로 했는데 {@code Judgment.confidence}가
-     * 아직 {@code double}이라, 그대로 넘기면 {@link CanonicalJson}이 거부한다. 그래서 여기서
-     * {@code BigDecimal}로 바꾼다.
-     *
-     * <p><b>이것은 내가 10.32에서 반대한 (2)번 안이다</b> — *"담지 않는다"를 담는 쪽에서 우회하는
-     * 모양*이고, 한 번 허용하면 다음 {@code double} 필드에서 또 한다. 영구 해법은 여전히 (1)번
-     * (도메인 타입을 {@code BigDecimal}로)이고 그 PR은 강희진이 올린다.
-     *
-     * <p>그때까지 이 다리가 없으면 <b>모든 답변 제출이 500으로 실패한다</b> —
-     * {@code SessionService.recordJudgment}가 매 건 append하기 때문이다. 그래서 두되,
-     * <b>잊히지 않게 만든다</b>: {@code StoredEvidenceRecorderTest}가 {@code confidence}의 타입이
-     * {@code double}인 동안만 이 메서드가 필요하다는 것을 단정하므로, 타입이 바뀌는 순간 그
-     * 테스트가 깨져서 여기를 지우라고 알려준다.
-     *
-     * <p>{@code BigDecimal.valueOf}를 쓴다. {@code new BigDecimal(double)}은 이진 근사를 그대로
-     * 펼쳐 {@code 0.9100000000000000355...}가 되고, 그러면 같은 판정이 다른 해시를 낸다.
-     */
-    private static BigDecimal confidenceOf(Judgment judgment) {
-        return BigDecimal.valueOf(judgment.confidence());
     }
 }
