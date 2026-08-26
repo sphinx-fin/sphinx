@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -75,6 +76,31 @@ class OverrideControllerTest {
                         .content("{\"reason\":\"" + REASON + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("OVERRIDE_NOT_ELIGIBLE"));
+    }
+
+    @Test
+    @DisplayName("사유 null(본문 {}) → 400 VALIDATION_ERROR (@NotBlank로 우회 차단)")
+    void nullReasonRejected() throws Exception {
+        String id = seed(Signal.RED);
+
+        // @Size만 있으면 null이 통과해 사유 없는 승인이 남는다(오준서 #68 리뷰) — @NotBlank가 막는다.
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("요청 후 GET /sessions/{id}가 오버라이드 사유·상태를 노출 (S-06 승인 화면 입력)")
+    void sessionResponseExposesOverride() throws Exception {
+        String id = seed(Signal.RED);
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"" + REASON + "\"}"));
+
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overrideStatus").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.data.overrideReason").value(REASON));
     }
 
     /** 지정 신호로 판정 기록된 세션을 저장하고 id를 반환한다. */

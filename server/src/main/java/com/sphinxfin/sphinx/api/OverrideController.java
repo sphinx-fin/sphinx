@@ -5,6 +5,7 @@ import com.sphinxfin.sphinx.api.dto.OverrideResponse;
 import com.sphinxfin.sphinx.core.OverrideService;
 import com.sphinxfin.sphinx.core.Session;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -22,7 +23,10 @@ public class OverrideController {
 
     private final OverrideService overrideService;
 
-    public record OverrideRequest(@Size(min = 30) String reason) {}
+    // @NotBlank 없이 @Size만 두면 jakarta 규약상 null이 유효로 통과한다("null elements are
+    // considered valid") — 사유 없는 오버라이드가 200으로 승인 기록에 남는다(오준서 #68 리뷰).
+    // 사유는 ADR-002 견제 장치의 핵심이라 null·공백을 입구에서 막는다.
+    public record OverrideRequest(@NotBlank @Size(min = 30) String reason) {}
 
     /** 판매자의 적색 진행 요청(사유 포함). 적색이 아니면 409 OVERRIDE_NOT_ELIGIBLE. */
     @PreAuthorize("@accessGuard.can('override:request', #sid)")

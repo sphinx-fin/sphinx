@@ -639,12 +639,17 @@ components:
 
     SessionResponse:
       type: object
-      required: [sessionId, state, productId]
+      required: [sessionId, state, productId, overrideStatus]
       properties:
         sessionId:   {type: string}
         state:       {type: string, enum: [CREATED, IN_PROGRESS, RE_EXPLAIN, RE_VERIFY, JUDGED, CLOSED, ABORTED]}
         productId:   {type: string}
         contractRef: {type: string, nullable: true}
+        # F-GTE-002 적색 오버라이드 — S-06 승인 화면이 사유·승인 대기 여부·승인자를 읽는다.
+        overrideStatus:    {type: string, enum: [NONE, PENDING_APPROVAL, APPROVED], description: "오버라이드 없으면 NONE"}
+        overrideReason:    {type: string, nullable: true, description: "판매자가 적은 진행 사유(30자 이상). 요청 전이면 null"}
+        overrideApprover:  {type: string, nullable: true, description: "승인한 MGR. 승인 전이면 null"}
+        overrideDecidedAt: {type: string, format: date-time, nullable: true, description: "승인 시각. 승인 전이면 null"}
     SessionApiResponse:
       type: object
       required: [success, data]
