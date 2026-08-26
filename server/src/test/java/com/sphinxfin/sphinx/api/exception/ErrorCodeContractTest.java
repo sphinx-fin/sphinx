@@ -36,6 +36,38 @@ class ErrorCodeContractTest {
                 .isEqualTo(contractCodes());
     }
 
+    @Test
+    @DisplayName("❗CLAUDE.md 의 코드 목록도 같다 — 테스트가 안 보던 세 번째 사본이다")
+    void claudeMdListMatchesContract() throws Exception {
+        // 이 목록이 세 번 낡았다(#67 · #68 · #105). 두 번은 리뷰에서 잡혔고 한 번은 놓쳤다.
+        // 같은 방식으로 세 번 낡았으면 사람이 기억하는 방식이 안 되는 것이다. CLAUDE.md 가
+        // 스스로 "openapi 의 enum 과 같아야 한다" 고 적어놓았으므로 그 문장을 테스트로 만든다.
+        assertThat(claudeMdCodes())
+                .as("CLAUDE.md 「api/」 절의 코드 목록이 핸들러·openapi 와 어긋난다. "
+                        + "규약을 적어둔 문서가 낡으면 다음 사람이 낡은 규약을 따른다")
+                .isEqualTo(contractCodes());
+    }
+
+    /**
+     * CLAUDE.md 「api/」 절이 나열하는 코드. {@code `CODE`(상태)} 형태만 센다.
+     *
+     * <p>백틱 안의 대문자만 보므로 산문에 코드 이름이 등장해도 걸리지 않는다 — 상태 코드가
+     * 괄호로 붙은 것이 목록 항목의 형태다.
+     */
+    private Set<String> claudeMdCodes() throws Exception {
+        String doc = Files.readString(REPO_ROOT.resolve("CLAUDE.md"));
+        Set<String> codes = new TreeSet<>();
+        Matcher m = Pattern.compile("`([A-Z_]{4,})`\\(\\d{3}\\)").matcher(doc);
+        while (m.find()) {
+            codes.add(m.group(1));
+        }
+        assertThat(codes)
+                .as("CLAUDE.md 에서 코드를 하나도 못 읽었다 — 목록 형태가 바뀌었으면 "
+                        + "이 정규식도 같이 고쳐야 한다")
+                .isNotEmpty();
+        return codes;
+    }
+
     /** GlobalExceptionHandler가 실제로 내보내는 코드. */
     private Set<String> handlerCodes() throws Exception {
         String src = Files.readString(REPO_ROOT.resolve(
