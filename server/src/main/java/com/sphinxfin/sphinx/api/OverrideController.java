@@ -38,6 +38,11 @@ public class OverrideController {
      */
     @PostMapping("/approve")
     public ApiResponse<OverrideResponse> approve(@PathVariable String sid, Authentication auth) {
+        // TODO(강희진): 역할별 계정 분리(10.5, 8/29 설계 예정)가 붙으면 이 폴백을 **실패로
+        //   바꾼다.** 지금은 SecurityConfig 가 permitAll() 이라 미인증이 정상 상태이고,
+        //   가짜 이름 대신 미인증임을 말하는 문자열을 남기는 게 정직하다. 계정 분리 후에는
+        //   auth == null 이 데모 상태가 아니라 설정 사고이며, 승인자를 특정할 수 없는 승인이
+        //   지워지지 않는 기록으로 남으면 ADR-002 의 견제 장치가 무력해진다.
         String approver = (auth != null) ? auth.getName() : "MGR(데모-미인증)";
         Session session = overrideService.approve(sid, approver);
         return ApiResponse.ok(new OverrideResponse(session.overrideStatus().name()));

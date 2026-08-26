@@ -107,7 +107,8 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 - **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
   `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
-  `ILLEGAL_STATE_TRANSITION`(409)·`EVIDENCE_REQUIRED`(502)·`INTERNAL_ERROR`(500).
+  `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`EVIDENCE_REQUIRED`(502)·
+  `INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로

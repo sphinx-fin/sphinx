@@ -119,6 +119,41 @@ class OverrideServiceTest {
                 .isInstanceOf(OverrideNotEligibleException.class);
     }
 
+    @Test
+    @DisplayName("승인 후 재요청 → OVERRIDE_NOT_ELIGIBLE, 승인 상태가 되돌려지지 않는다")
+    void requestAfterApproveRejected() {
+        String id = save(Signal.RED).id();
+        service.request(id, REASON);
+        service.approve(id, "mgr-01");
+
+        // 오버라이드가 승인돼도 세션은 여전히 적색이라 requireRed 만으로는 막히지 않는다.
+        // 중복 클릭이든 사유 수정이든, 재요청이 통과하면 상태가 PENDING_APPROVAL 로 돌아가고
+        // 승인자·승인 시각은 그대로 남아 "승인 대기인데 승인자가 있는" 모순이 저장된다.
+        assertThatThrownBy(() -> service.request(id, "사유를 고쳐서 다시 올립니다. 고객이 충분히 이해했다고 판단합니다."))
+                .isInstanceOf(OverrideNotEligibleException.class);
+
+        Session after = repository.findById(id).orElseThrow();
+        assertThat(after.overrideStatus()).isEqualTo(OverrideStatus.APPROVED);
+        assertThat(after.overrideApprover()).isEqualTo("mgr-01");
+        assertThat(after.overrideReason()).isEqualTo(REASON);
+        // 불변 기록은 승인 1건 그대로 — 세션과 evidence 가 어긋나지 않는다.
+        assertThat(evidence.overrides).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("승인 전 재요청은 허용 — 사유 수정이고 모순이 생기지 않는다")
+    void requestAgainBeforeApproveAllowed() {
+        String id = save(Signal.RED).id();
+        service.request(id, REASON);
+        String fixed = "사유를 고쳐서 다시 올립니다. 고객이 손실 조건을 이해했음을 확인했습니다.";
+
+        Session s = service.request(id, fixed);
+
+        assertThat(s.overrideStatus()).isEqualTo(OverrideStatus.PENDING_APPROVAL);
+        assertThat(s.overrideReason()).isEqualTo(fixed);
+        assertThat(s.overrideApprover()).isNull();
+    }
+
     /** 지정 신호로 판정 기록된 세션을 저장한다. */
     private Session save(Signal signal) {
         Session s = Session.create(cmd());
