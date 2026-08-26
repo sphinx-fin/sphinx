@@ -50,21 +50,111 @@ class ConfidencePrecisionTest {
                     .filter(p -> p.toString().endsWith(".java"))
                     // 이 테스트 자체는 금지 사례를 일부러 담고 있다
                     .filter(p -> !p.getFileName().toString().equals("ConfidencePrecisionTest.java"))
-                    .flatMap(p -> {
-                        try {
-                            List<String> lines = Files.readAllLines(p);
-                            return java.util.stream.IntStream.range(0, lines.size())
-                                    .filter(i -> lines.get(i).matches(".*new BigDecimal\\(\\s*[-+]?\\d+\\.\\d+.*"))
-                                    .mapToObj(i -> p + ":" + (i + 1) + "  " + lines.get(i).trim());
-                        } catch (IOException e) {
-                            throw new java.io.UncheckedIOException(e);
-                        }
-                    })
+                    .flatMap(ConfidencePrecisionTest::offendingLines)
                     .toList();
         }
         assertThat(offenders)
                 .as("new BigDecimal(double) 은 이진 근사값을 옮긴다. "
-                        + "문자열 생성자나 BigDecimal.valueOf 를 쓴다 (ADR-008)")
+                        + "문자열 생성자나 BigDecimal.valueOf 를 쓴다 (ADR-008). "
+                        + "리터럴 형태만 본다 — new BigDecimal(someDouble) 처럼 변수를 넘기면 "
+                        + "여기서 안 잡힌다")
                 .isEmpty();
+    }
+
+    private static Stream<String> offendingLines(Path file) {
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(file);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        List<String> found = new java.util.ArrayList<>();
+        boolean inBlockComment = false;
+        for (int i = 0; i < lines.size(); i++) {
+            String raw = lines.get(i);
+            String code = stripNonCode(raw, inBlockComment);
+            inBlockComment = blockCommentStateAfter(raw, inBlockComment);
+            if (code.matches(".*new BigDecimal\\(\\s*[-+]?\\d+\\.\\d+.*")) {
+                found.add(file + ":" + (i + 1) + "  " + raw.trim());
+            }
+        }
+        return found.stream();
+    }
+
+    /**
+     * 주석과 문자열 리터럴을 지우고 코드만 남긴다.
+     *
+     * 원문 그대로 훑으면 <b>금지 사례를 설명하는 문장이 위반으로 잡힌다.</b> 실제로
+     * {@code .as("new BigDecimal(0.91) 이었으면 …")} 같은 단정문 메시지에서 걸렸다 — 그리고
+     * 그런 문장은 좋은 주석일수록 자주 쓴다. 오탐이 나기 시작하면 다음 사람이 이 테스트를
+     * 예외 목록으로 덮거나 지운다. 막으려던 것을 못 막게 되는 경로가 그쪽이다.
+     */
+    private static String stripNonCode(String line, boolean inBlockComment) {
+        StringBuilder out = new StringBuilder();
+        boolean inString = false;
+        boolean block = inBlockComment;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            char next = i + 1 < line.length() ? line.charAt(i + 1) : '\0';
+            if (block) {
+                if (c == '*' && next == '/') {
+                    block = false;
+                    i++;
+                }
+                continue;
+            }
+            if (inString) {
+                if (c == '\\') {
+                    i++;                       // 이스케이프 다음 문자는 건너뛴다
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '/' && next == '/') {
+                break;                         // 줄 주석 — 이후는 코드가 아니다
+            }
+            if (c == '/' && next == '*') {
+                block = true;
+                i++;
+                continue;
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    /** 다음 줄이 블록 주석 안인지. 문자열 안의 "/*" 는 세지 않는다. */
+    private static boolean blockCommentStateAfter(String line, boolean inBlockComment) {
+        boolean block = inBlockComment;
+        boolean inString = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            char next = i + 1 < line.length() ? line.charAt(i + 1) : '\0';
+            if (block) {
+                if (c == '*' && next == '/') {
+                    block = false;
+                    i++;
+                }
+            } else if (inString) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inString = false;
+                }
+            } else if (c == '"') {
+                inString = true;
+            } else if (c == '/' && next == '/') {
+                break;
+            } else if (c == '/' && next == '*') {
+                block = true;
+                i++;
+            }
+        }
+        return block;
     }
 }

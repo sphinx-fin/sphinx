@@ -8,6 +8,7 @@ import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
 import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.core.SessionFsm;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
+import com.sphinxfin.sphinx.domain.MeasurementInvalidException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -89,6 +90,18 @@ public class GlobalExceptionHandler {
      * P4 위반 — 근거 없는 판정 → 502. 우리 서버 버그(500)가 아니라 상류(ai-service) 계약
      * 위반이므로 구분한다. 차단 사실을 로그로 남긴다(감사 로그 F-CMN-002 붙기 전까지의 최소 기록).
      */
+    /**
+     * 측정값이 계약을 벗어난 판정 — 근거 누락(P4)과 같은 502 지만 코드를 가른다.
+     * 상류에 무엇을 고치라고 말하려면 "근거가 없다"와 "신뢰도가 없다"가 달라야 한다.
+     */
+    @ExceptionHandler(MeasurementInvalidException.class)
+    public ResponseEntity<ApiResponse<Void>> measurementInvalid(MeasurementInvalidException e) {
+        log.warn("측정값 계약 위반: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ApiError.of("MEASUREMENT_INVALID",
+                        "신뢰도가 없거나 계약 범위를 벗어난 판정은 처리할 수 없습니다")));
+    }
+
     @ExceptionHandler(EvidenceRequiredException.class)
     public ResponseEntity<ApiResponse<Void>> evidenceRequired(EvidenceRequiredException e) {
         log.warn("P4 차단 — 근거 없는 판정 거부: {}", e.getMessage());
