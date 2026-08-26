@@ -209,7 +209,7 @@ export default function S04Simulator() {
                     className={`sm__card ${loss ? "sm__card--loss" : "sm__card--gain"}`}
                   >
                     <h2 className="sm__card-name">{s.name}</h2>
-                    <p className="sm__card-path">{describePath(s.pathMeta)}</p>
+                    <p className="sm__card-path">{describePath(s.pathMeta) ?? ""}</p>
                     <p className="sm__flow">
                       <span className="sm__flow-from">{formatKrw(amount)}</span>
                       <span className="sm__flow-arrow" aria-hidden="true">→</span>
@@ -233,7 +233,7 @@ export default function S04Simulator() {
               </p>
 
               {/* P2 재현성 — 어느 상품 조건·어느 지수 스냅샷에서 나온 수치인지 (설계 판단 ⑥) */}
-              {sim && (
+              {sim?.productName && sim?.timeseriesVersion && (
                 <p className="sm__pending">
                   {sim.productName} · 지수 스냅샷 {sim.timeseriesVersion}
                 </p>
@@ -258,8 +258,16 @@ export default function S04Simulator() {
 /**
  * 역사 구간 라벨 (명세 8절 S-04). "예상이 아니라 과거에 있었던 일"을 화면에서 증명하는 자리다.
  * 연·월까지만 쓴다 — 일 단위는 정보가 아니라 노이즈다.
+ *
+ * `pathMeta` 는 계약상 required 지만 **서버 목이 아직 안 준다**. 없을 때 던지면 고객 화면이
+ * 통째로 백지가 되므로 라벨만 비운다 — 리허설 중에 이 화면이 사라지는 것보다 낫다.
+ * 대신 조용히 넘기지 않고 콘솔에 계약 위반으로 남긴다.
  */
-function describePath(m: PathMeta): string {
+function describePath(m: PathMeta | undefined): string | null {
+  if (!m?.startDate) {
+    console.warn("[S-04] 계약 위반: SimScenario.pathMeta 가 없다 (openapi.yaml required). 역사 구간 라벨을 생략한다.");
+    return null;
+  }
   const period = `${m.startDate.slice(0, 7)} ~ ${m.endDate.slice(0, 7)}`;
   const worst = `최저 ${m.worstUnderlying} ${Math.round(m.worstFinal * 1000) / 10}%`;
   return m.knockedIn ? `${period} · ${worst} · 낙인 하회` : `${period} · ${worst}`;
