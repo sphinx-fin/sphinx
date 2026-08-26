@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from pathlib import Path
@@ -30,6 +31,8 @@ from .schemas import Contradiction, SuitabilityMismatch
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-DET-002_v1.md"
 PROMPT_VERSION = "F-DET-002_v1"
+
+log = logging.getLogger(__name__)
 
 #: 이 값 미만의 모순은 `mismatch=true` 로 올리지 않는다. 다만 **버리지 않고 남긴다** —
 #: 코칭 스코어·리포트가 근접 사례를 볼 수 있어야 하고(direction 이 코칭 문구를 좌우한다),
@@ -159,10 +162,23 @@ def _pin_axis(contradiction: Contradiction) -> Contradiction:
     """축을 `question_id` 에서 고정한다 — 모델이 낸 값을 쓰지 않는다.
 
     `_is_traceable` 이 먼저 `question_id` 가 걸러진 맵에 있는지 확인하므로 조회는 안전하다.
+
+    **불일치를 로그로 남긴다.** 판정에는 영향이 없다(계산값이 이긴다) — 이건 프롬프트 품질
+    신호다. PR #113 리뷰(정세현)에서 *"덮어쓰기만 하고 비교하지 않는다"* 로 지적됐다.
+
+      · 불일치가 잦으면 프롬프트 규칙 5의 매핑 표가 읽히지 않고 있다는 뜻이다
+      · 0 이면 모델이 키에서 축을 정확히 읽는다는 뜻이고, 계산은 안전망으로만 남는다
+
+    `Contradiction` 이나 `SuitabilityMismatch` 에 필드를 늘리지 않는다 — 판정 근거가 아니라
+    관측이고, 계약 면적을 늘릴 값이 아니다.
     """
-    return contradiction.model_copy(
-        update={"axis": AXIS_BY_QUESTION[contradiction.survey_ref.question_id]}
-    )
+    pinned = AXIS_BY_QUESTION[contradiction.survey_ref.question_id]
+    if contradiction.axis != pinned:
+        log.info(
+            "축 불일치: 모델=%s 계산=%s (question_id=%s) — 계산값을 쓴다",
+            contradiction.axis, pinned, contradiction.survey_ref.question_id,
+        )
+    return contradiction.model_copy(update={"axis": pinned})
 
 
 # ── 입력 판단 ─────────────────────────────────────────────────────────────────
