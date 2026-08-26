@@ -278,6 +278,7 @@ ADR 에 있는 것은 **번호만 가리키고 본문을 복제하지 않는다.
 | 10.29 | **`core` 패키지 분리는 열린 core PR 이 다 머지된 뒤 단독 PR 로.** #59 · #67 · #70 이 머지됐고 **`#68` 하나만 남았다** — 그것까지 들어가면 착수할 수 있다 | 강희진 | core PR 정리 후 | 이슈 #66 |
 | 10.30 | **`suitability_mismatch` 스키마의 `contracts/` 승격이 남았다.** #58 로 구현은 들어왔는데 스키마가 아직 `proposals/` 다. 승격은 `contracts/` 소유자 몫이고, 모순 배선(#65)이 그 위에 선다 | 강희진 | 배선(#65) 전 | 이슈 #65 · #58 |
 | 10.31 | **추출 실패 항목의 `value_text` 가 계약 문면과 어긋난다.** #60 `_failed_item` 이 `"(추출 실패 …)"` 를 넣는데 `risk_item.schema.json` 은 그 필드를 *"원문 인용만 허용 (P6)"* 로 못박고 있고, 항등식 `pages[page].text[start:end] == value_text` 도 깨진다(`text[0:0]` 은 빈 문자열). **화면이 문서에 없는 문장을 원문으로 표시한다.** `status=extraction_failed` 일 때 `condition` 을 nullable 로 둘지, 실패 사유를 별도 필드로 뺄지 | 강희진(계약) | #60 머지 전 | #60 리뷰 |
+| 10.32 | ❗ **`Judgment.confidence` 가 `double` 이라 판정을 해시 대상에 담을 수 없다.** ADR-008 은 *"해시 대상에 double/float 를 담지 않는다 — 금액은 원 단위 long, **비율은 BigDecimal**"* 인데 `confidence` 는 비율이고 `double` 이다. `EvidenceRecorder.appendJudgment` 가 이 레코드를 그대로 받으므로 **적재 시점에 던진다**(PR #78 `judgmentCannotBeHashedYet` 로 현재 동작을 고정해 뒀다 — 실패로 두면 잊히고, 타입이 바뀌면 그 테스트가 깨져서 알려준다). 선택지: (1) `Judgment.confidence` 를 `BigDecimal` 로 — 계약(`type: number`)은 안 바뀌고 Java 타입만 바뀐다. 게이트 R-05(`anyConfidenceBelow 0.7`) 비교가 같이 바뀐다 · (2) 적재 payload 에서만 변환 — 도메인은 안 건드리지만 *"담지 않는다"* 를 담는 쪽에서 우회하는 모양이다 · (3) ADR-008 을 새 ADR 로 뒤집는다. **정세현 의견은 (1)** — (2)는 우회를 한 번 허용하면 다음 double 필드에서 또 한다. 다만 `domain/` 과 R-05 비교 경로가 강희진 소유라 판단은 그쪽 | 강희진(`domain/` · 계약) | **evidence 적재 배선 전**(8/29) | PR #78 · ADR-008 · 이슈 #54 |
 ---
 
 ## 11. ADR 로 승격할 후보
