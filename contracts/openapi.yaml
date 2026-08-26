@@ -715,7 +715,7 @@ components:
         error:   {type: object, nullable: true}
     GatePreview:
       type: object
-      required: [signal, ruleTrace, recorded]
+      required: [signal, ruleTrace, recorded, suitabilityStatus]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
         ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
@@ -729,6 +729,14 @@ components:
           format: date-time
           nullable: true
           description: "기준점 확정 시각. null 이면 /judge 가 아직 호출되지 않은 세션이다"
+        suitabilityStatus:
+          type: string
+          enum: [NOT_EVALUATED, NO_MISMATCH, MISMATCH, UNKNOWN]
+          description: >
+            적합성 모순 판정 상태 (F-DET-002). ❗미리보기는 모순을 평가하지 않으므로 보통
+            NOT_EVALUATED 다 — 그 상태의 signal 은 모순 평가 전 값이라 /judge 에서
+            YELLOW(UNKNOWN) · RED(MISMATCH) 로 갈릴 수 있다. NOT_EVALUATED 인 GREEN 을
+            최종 통과로 그리면 안 되고, "적합성 미확인" 을 함께 보여야 한다.
     GatePreviewApiResponse:
       type: object
       required: [success, data]
