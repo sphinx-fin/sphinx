@@ -277,7 +277,10 @@ paths:
   /sessions/{id}/override:
     post:
       summary: 적색 진행 요청 (F-GTE-002)
-      description: 사유 30자 미만은 거부한다(400 VALIDATION_ERROR).
+      description: >
+        판매자가 사유를 붙여 적색 진행을 요청한다. status=PENDING_APPROVAL 로 돌아온다.
+        적색 판정 세션에만 허용된다(그 외 409 OVERRIDE_NOT_ELIGIBLE). 사유 30자 미만은
+        400 VALIDATION_ERROR.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       requestBody:
@@ -287,7 +290,7 @@ paths:
             schema: {$ref: '#/components/schemas/OverrideRequest'}
       responses:
         '200':
-          description: 오버라이드 상태
+          description: 오버라이드 상태(PENDING_APPROVAL)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/OverrideApiResponse'}
@@ -296,23 +299,32 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '409':
+          description: OVERRIDE_NOT_ELIGIBLE — 적색 판정 세션이 아니다
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /sessions/{id}/override/approve:
     post:
-      summary: 관리자 승인/반려 (F-GTE-002)
+      summary: 관리자(MGR) 승인 (F-GTE-002)
+      description: >
+        MGR이 승인한다(ADR-002). 사유는 요청 시 이미 기록됐으므로 본문이 없다. 승인자는 인증
+        주체에서 얻는다. 승인 시 불변 기록 append + COMPL 자동 통보가 일어난다. status=APPROVED.
+        승인 대기(PENDING_APPROVAL) 상태가 아니면 409 OVERRIDE_NOT_ELIGIBLE.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/OverrideRequest'}
       responses:
         '200':
-          description: 오버라이드 상태
+          description: 오버라이드 상태(APPROVED)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/OverrideApiResponse'}
+        '409':
+          description: OVERRIDE_NOT_ELIGIBLE — 적색 아님 또는 요청 없이 승인
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /sessions/{id}/report:
     get:
@@ -439,6 +451,7 @@ components:
             - ILLEGAL_STATE_TRANSITION # 409 허용되지 않은 세션 상태 전이
             - REEXPLAIN_NOT_ELIGIBLE   # 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
             - REVERIFY_EXHAUSTED       # 400 재검증 상한 도달 — 판정으로 진행
+            - OVERRIDE_NOT_ELIGIBLE    # 409 오버라이드 전제 위반(적색 아님 또는 요청 없이 승인)
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
             - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
