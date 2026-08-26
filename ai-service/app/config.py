@@ -64,6 +64,12 @@ def _load_env_files() -> list[Path]:
     return loaded
 
 
+#: 오해 라이브러리·지수 스냅샷이 있는 디렉토리. 레포에서는 `data/` 지만 컨테이너에서는
+#: 마운트 지점이 달라진다 — 상대경로 하드코딩이면 이미지 안에서 파일을 못 찾는다
+#: (결정로그 10.7 · 이슈 #37). 강희진 몫(`application.yml` 시계열 주입)은 #50 으로 끝났다.
+DATA_DIR_ENV = "SPHINX_DATA_DIR"
+
+
 @dataclass(frozen=True)
 class Settings:
     llm_base_url: str
@@ -71,6 +77,7 @@ class Settings:
     llm_model: str
     llm_timeout_sec: float
     env_files: tuple[str, ...]
+    data_dir: Path
 
     @property
     def llm_configured(self) -> bool:
@@ -93,4 +100,5 @@ def settings() -> Settings:
         llm_model=model,
         llm_timeout_sec=float(os.getenv("LLM_TIMEOUT_SEC", "60")),
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),
+        data_dir=Path(os.getenv(DATA_DIR_ENV) or (REPO_ROOT / "data")).expanduser(),
     )

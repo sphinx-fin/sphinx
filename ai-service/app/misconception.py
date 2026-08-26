@@ -23,11 +23,25 @@ from pathlib import Path
 import yaml
 
 from . import textsim
+from .config import DATA_DIR_ENV, settings
 from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
 
-LIBRARY_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "misconception_library" / "misconceptions.yaml"
-)
+#: 라이브러리 파일의 `data_dir` 기준 상대 위치. 절대경로를 여기 박지 않는다 —
+#: 결정로그 10.7. 디렉토리는 `SPHINX_DATA_DIR` 로 주입한다.
+LIBRARY_RELPATH = Path("misconception_library") / "misconceptions.yaml"
+
+
+class MisconceptionLibraryMissing(FileNotFoundError):
+    """라이브러리 파일이 없다. 컨테이너에서 `data/` 를 안 마운트한 경우가 이것이다."""
+
+
+def library_path() -> Path:
+    """오해 라이브러리 경로. 상수가 아니라 함수인 이유는 `SPHINX_DATA_DIR` 주입 때문이다.
+
+    상수로 두면 import 시점에 값이 굳어 환경변수를 나중에 넣어도 반영되지 않는다. 테스트가
+    경로를 갈아끼울 수 없다는 뜻이기도 하다.
+    """
+    return settings().data_dir / LIBRARY_RELPATH
 
 # 문자 바이그램 포함도 임계값. 이 숫자가 설명 가능한 형태로 드러나 있어야 한다
 # (기획서 5절: 라이브러리 기반 재현성). 튜닝 시 dev set으로 재측정한다.
@@ -101,10 +115,26 @@ def _parse_source(entry: dict) -> SourceRef:
     raise ValueError(f"{entry.get('id')}: source 형태를 알 수 없다: {type(raw).__name__}")
 
 
+def _read_library() -> dict:
+    path = library_path()
+    if not path.is_file():
+        raise MisconceptionLibraryMissing(
+            f"오해 라이브러리가 없다: {path}  "
+            f"({DATA_DIR_ENV} 로 data 디렉토리를 지정한다. 지금 값: {settings().data_dir})"
+        )
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
 @lru_cache(maxsize=1)
 def library() -> tuple[MisconceptionType, ...]:
-    raw = yaml.safe_load(LIBRARY_PATH.read_text(encoding="utf-8")) or {}
-    return tuple(
+    """파일을 읽고 **읽은 자리에서 검증한다.**
+
+    `assert_products_are_canonical` 은 docstring 이 *"로딩 시점에 터뜨린다"* 고 적었지만
+    실제로는 테스트에서만 불렸다 — 즉 테스트를 안 돌린 환경에서는 그 조용한 실패가 그대로
+    남았다. 검증을 로더 안으로 옮겨 문면과 동작을 맞춘다(PR #113 리뷰에서 스스로 찾은 것).
+    """
+    raw = _read_library()
+    types = tuple(
         MisconceptionType(
             type_id=entry["id"],
             label=entry.get("label", entry["id"]),
@@ -115,16 +145,26 @@ def library() -> tuple[MisconceptionType, ...]:
         )
         for entry in (raw.get("types") or [])
     )
+    _assert_products_are_canonical(types)
+    return types
 
 
 def assert_products_are_canonical() -> None:
+    """공개 진입점. `library()` 가 로딩 때 이미 부르므로 여기는 명시적 재확인용이다."""
+    _assert_products_are_canonical(library())
+
+
+def _assert_products_are_canonical(types: tuple[MisconceptionType, ...]) -> None:
     """라이브러리의 products 값이 계약(PRODUCT_TYPES)을 벗어나지 않는지 확인한다.
 
     값이 어긋나면 match()가 예외도 로그도 없이 빗나가고 해당 상품 오해가 하나도 잡히지
     않는다. 그 조용한 실패를 막기 위해 로딩 시점에 터뜨린다.
+
+    `library()` 안에서 불리므로 여기서 `library()` 를 부르면 재귀가 된다 — 파싱된 튜플을
+    인자로 받는다.
     """
     allowed = set(PRODUCT_TYPES) | {"ALL"}
-    for mtype in library():
+    for mtype in types:
         unknown = set(mtype.products) - allowed
         if unknown:
             raise ValueError(
@@ -144,8 +184,7 @@ def types_without_citable_source() -> tuple[str, ...]:
 
 
 def library_version() -> int:
-    raw = yaml.safe_load(LIBRARY_PATH.read_text(encoding="utf-8")) or {}
-    return int(raw.get("version", 0))
+    return int(_read_library().get("version", 0))
 
 
 def match(text: str, product_type: str = "ELS") -> MisconceptionResponse:
