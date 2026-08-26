@@ -8,9 +8,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -39,6 +41,29 @@ class OwnershipEnforcementTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(created, "$.data.sessionId");
+    }
+
+    /** @WithMockUser 는 메서드 단위라 못 갈아탄다. 한 테스트에서 두 사람을 쓰려면 이쪽이다. */
+    private static RequestPostProcessor seller(String id) {
+        return user(id).roles("SELLER");
+    }
+
+    @Test
+    @DisplayName("❗남의 세션은 못 읽는다 — own_session 이 실제로 막는지는 이것만 본다")
+    void otherSellersSessionIsForbidden() throws Exception {
+        // 허용만 거는 테스트로는 **과허용 변이**가 안 잡힌다. targetOf 가 요청자를 소유자로
+        // 쳐 주도록 바꿔도(= own_session 무력화) 다른 테스트는 전부 통과한다 — 접근 통제에서
+        // 무서운 쪽은 덜 허용하는 변이가 아니라 더 허용하는 변이다.
+        String created = mvc.perform(post("/sessions").with(seller("seller-01"))
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(get("/sessions/" + sid + "/report").with(seller("seller-01")))
+                .andExpect(status().isOk());
+        mvc.perform(get("/sessions/" + sid + "/report").with(seller("seller-02")))
+                .andExpect(status().isForbidden());
     }
 
     @Test

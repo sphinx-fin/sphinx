@@ -83,8 +83,13 @@ public class AccessGuard {
      * 생성 요청 — 대상이 <b>아직</b> 없다. 만들어질 세션은 지금 요청한 사람의 것이므로
      * 자기 자신을 귀속으로 두고 판단한다. {@code own_session} 그랜트가 그대로 성립한다.
      *
-     * <p>집계와 달리 이건 "주인 없는 대상" 이 아니라 "주인이 정해진 대상" 이다. 익명이면
-     * {@code actorId} 가 null 이라 정책이 "판단할 수 없다" 로 거부한다 — 통과가 아니다.
+     * <p>집계와 달리 이건 "주인 없는 대상" 이 아니라 "주인이 정해진 대상" 이다.
+     *
+     * <p>❗익명 요청은 <b>정책에 닿지 않는다.</b> 익명도 {@code isAuthenticated()} 는 true 지만
+     * 권한이 {@code ROLE_ANONYMOUS} 라 {@code Role.valueOf} 가 실패해서 {@link #currentActor()}
+     * 가 먼저 던지고, {@code GlobalExceptionHandler} 가 <b>401</b> 로 매핑한다(#105). 403 이
+     * 아닌 것이 맞다 — 로그인하면 해소되는 상태다. 거부가 어디서 나는지를 적어두는 이유는,
+     * 401·403 이 갈리는 지점이라 문면이 틀리면 다음 사람이 잘못된 층에서 원인을 찾는다.
      */
     public boolean canCreate(String action) {
         if (!enforce) {
@@ -120,14 +125,16 @@ public class AccessGuard {
                 .findFirst()
                 .orElseThrow(() -> new AccessDeniedNotAuthenticatedException(
                         "Role enum에 없는 권한이다: " + auth.getAuthorities()));
-        return new AccessPolicy.Actor(auth.getName(), role, branchOf(auth));
+        return new AccessPolicy.Actor(auth.getName(), role, branchOf());
     }
 
     /**
-     * 소속 지점. {@link CurrentActor} 와 같은 출처를 써야 한다 — 세션에 적히는 지점과
+     * 소속 지점. {@link CurrentActor} 와 <b>같은 출처</b>를 써야 한다 — 세션에 적히는 지점과
      * 인가 판단에 쓰는 지점이 갈리면, 자기가 만든 세션을 자기가 못 읽는 상태가 난다.
+     * 그래서 {@code Authentication} 을 인자로 받지 않는다. 받으면 여기서 따로 읽어도 되는
+     * 것처럼 보이고, 그 순간 출처가 둘이 된다.
      */
-    private String branchOf(Authentication auth) {
+    private String branchOf() {
         return actorSource.branchId();
     }
 
