@@ -31,6 +31,18 @@ BROAD: dict[str, re.Pattern[str]] = {
 
 PATTERNS: dict[str, re.Pattern[str]] = {**SPECIFIC, **BROAD}
 
+#: 검사 범위. 무엇을 보내는지에 따라 넓은 휴리스틱의 의미가 달라진다.
+#:
+#: - `customer`        고객 발화·설문. **기본값.** 좁은 패턴 + 넓은 휴리스틱 전부.
+#:                     거짓양성은 상류(P3) 버그 신호이므로 비용이 낮다.
+#: - `public_document` 공시 상품문서. 기획서 7-3 이 *"상품설명서(공시 자료이므로 개인정보가
+#:                     아니다)"* 라고 명시한 대상이다. 발행사 민원부서 번호처럼 법인 연락처가
+#:                     인쇄돼 있어 넓은 휴리스틱이 **정상 문서를 막는다** — 실제로
+#:                     `02-785-7424` 가 ACCOUNT 패턴에 걸려 F-EXT-002 추출이 멈췄다.
+#:                     좁은 패턴(RRN·PHONE)은 그대로 검사한다. 공시 문서에 주민번호나
+#:                     개인 휴대번호가 있다면 그건 문서 쪽 사고이므로 막아야 한다.
+SCOPES = ("customer", "public_document")
+
 
 class PiiDetected(Exception):
     """상류(P3) 위반. 요청을 거부하고 어떤 패턴인지 알린다 — 원문은 절대 담지 않는다."""
@@ -41,8 +53,10 @@ class PiiDetected(Exception):
         super().__init__(f"PII detected: {', '.join(kinds)}" + (f" at {where}" if where else ""))
 
 
-def detect(text: str) -> list[str]:
+def detect(text: str, scope: str = "customer") -> list[str]:
     """걸린 패턴 이름 목록. 자리표시자는 제거한 뒤 검사한다."""
+    if scope not in SCOPES:
+        raise ValueError(f"알 수 없는 검사 범위 {scope!r}. 허용: {list(SCOPES)}")
     if not text:
         return []
     stripped = PLACEHOLDER.sub("", text)
@@ -53,12 +67,13 @@ def detect(text: str) -> list[str]:
         if pat.search(residual):
             kinds.append(name)
             residual = pat.sub(" ", residual)
-    kinds.extend(name for name, pat in BROAD.items() if pat.search(residual))
+    if scope == "customer":
+        kinds.extend(name for name, pat in BROAD.items() if pat.search(residual))
     return kinds
 
 
-def assert_clean(text: str, where: str = "") -> None:
-    kinds = detect(text)
+def assert_clean(text: str, where: str = "", scope: str = "customer") -> None:
+    kinds = detect(text, scope)
     if kinds:
         raise PiiDetected(kinds, where)
 
@@ -74,7 +89,7 @@ def _walk_strings(node: Any, path: str = "") -> Iterator[tuple[str, str]]:
             yield from _walk_strings(v, f"{path}[{i}]")
 
 
-def assert_payload_clean(payload: Any) -> None:
+def assert_payload_clean(payload: Any, scope: str = "customer") -> None:
     """요청 본문 전체의 모든 문자열을 검사한다. 필드 추가를 깜빡해도 새는 곳이 없게."""
     for path, text in _walk_strings(payload):
-        assert_clean(text, path)
+        assert_clean(text, path, scope=scope)

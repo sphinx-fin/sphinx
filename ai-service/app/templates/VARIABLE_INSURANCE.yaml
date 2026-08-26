@@ -11,11 +11,18 @@ version: 1
 answer_set_documents:
   - 상품요약서
   - 변액보험 운용설명서
+# `fallback_question` (F-INT-002)
+#   LLM 없이 쓰는 항목별 기본 질문이다. 생성 질문이 정답 노출 검사를 MAX_ATTEMPTS 회 통과하지
+#   못하면 이걸 낸다 — 인터뷰가 멈추면 세션 자체가 진행되지 않으므로 폴백이 없으면 안 된다.
+#   **질문 안에 정답이 없어야 한다**(기획서 5절: "질문 안에 정답이 노출되지 않게 한다").
+#   그래서 수치·조건값을 쓰지 않고 "어떻게 되는지 말씀해 주시겠어요" 형태로만 묻는다.
+#   항목 레지스트리를 두 벌 만들지 않으려고 여기 둔다 — 별 파일로 빼면 23종 목록이 갈라진다.
 items:
   - item_id: VAR-PERFORMANCE-LINKED
     name: 실적배당형 성격
     importance: null
     cue: 실적배당형이므로 보험금·해약환급금이 특별계정 운용실적에 따라 변동된다는 고지
+    fallback_question: 이 보험에서 받게 되는 돈이 무엇에 따라 달라지는지 말씀해 주시겠어요?
     section_hint: 상품의 성격
     found_in: [상품요약서, 운용설명서]
 
@@ -23,6 +30,7 @@ items:
     name: 원금손실 가능성
     importance: null
     cue: 해약환급금에 최저보증이 없어 원금손실이 계약자에게 귀속된다는 고지
+    fallback_question: 이 상품에 낸 돈이 어떻게 될 수 있는지 본인 말씀으로 설명해 주시겠어요?
     section_hint: 상품의 성격 · 유의사항
     found_in: [상품요약서, 운용설명서]
 
@@ -41,6 +49,7 @@ items:
     name: 예금자보호 범위
     importance: null
     cue: 예금자보호가 적용되는 급부의 범위와 보호 한도
+    fallback_question: 이 계약이 예금자보호를 받는지, 받는다면 어디까지인지 말씀해 주시겠어요?
     section_hint: 표지 · 유의사항
     found_in: [상품요약서, 운용설명서]
 
@@ -48,6 +57,7 @@ items:
     name: 중도인출 수수료
     importance: null
     cue: 중도인출 시 부과되는 수수료율·한도
+    fallback_question: 중간에 돈을 일부 빼 쓰려면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 중도인출
     found_in: [상품요약서]
 
@@ -55,6 +65,7 @@ items:
     name: 계약체결·관리비용 정의
     importance: null
     cue: 계약체결비용·계약관리비용이 보험료 중 일정비율로 책정된다는 정의
+    fallback_question: 낸 보험료에서 회사가 떼는 비용이 있다고 들으셨나요? 어떤 비용인지 말씀해 주시겠어요?
     section_hint: 비용 · 수수료
     found_in: [상품요약서]
 
@@ -62,6 +73,7 @@ items:
     name: 월공제액 차감 구조
     importance: null
     cue: 월공제액(위험보험료·계약체결관리비용·보증비용) 및 미상각신계약비 차감 구조
+    fallback_question: 낸 보험료가 전부 투자되는지, 아니면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 해약환급금 산출
     found_in: [상품요약서]
 
@@ -69,6 +81,7 @@ items:
     name: 은행 저축과 다름
     importance: null
     cue: 보험이 은행 저축과 달리 위험보장과 저축을 겸비한 제도라는 고지
+    fallback_question: 이 상품이 은행 저축과 어떻게 다른지 말씀해 주시겠어요?
     section_hint: 해약환급금 · 유의사항
     found_in: [상품요약서]
 
@@ -76,6 +89,7 @@ items:
     name: 해약환급금이 납입보험료보다 적을 수 있음
     importance: null
     cue: 중도해지 시 해약환급금이 납입 보험료보다 적거나 없을 수 있다는 고지
+    fallback_question: 중간에 해지하시면 낸 돈을 얼마나 돌려받는지 말씀해 주시겠어요?
     section_hint: 해약환급금
     found_in: [상품요약서]
 
@@ -83,6 +97,7 @@ items:
     name: 조기해지 환급률
     importance: null
     cue: 경과기간별 해약환급금 예시표의 **초기 시점** 환급률 수치
+    fallback_question: 가입 초기에 해지하면 낸 돈의 어느 정도가 돌아오는지 말씀해 주시겠어요?
     section_hint: 해약환급금 예시표
     found_in: [상품요약서]
 
@@ -90,5 +105,6 @@ items:
     name: 장기 경과 환급률
     importance: null
     cue: 경과기간별 해약환급금 예시표의 **장기 시점** 환급률 수치
+    fallback_question: 오래 유지한 뒤에 해지하면 낸 돈의 어느 정도가 돌아오는지 말씀해 주시겠어요?
     section_hint: 해약환급금 예시표
     found_in: [상품요약서]

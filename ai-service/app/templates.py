@@ -24,6 +24,19 @@ CONTRACT_SAMPLES = Path(__file__).resolve().parents[2] / "contracts" / "samples"
 
 IMPORTANCE_VALUES = ("required", "recommended")
 
+#: 상품유형 → **재현율 분모가 되는** 계약 샘플. 상품유형마다 정확히 하나다.
+#:
+#: 샘플 파일이 여럿 있을 수 있다 — 변액은 `parsed_variable_ops_sample.json`(운용설명서)가
+#: 교차 검증용으로 함께 있다(PR #104). **그건 분모가 아니다.** 여기 적힌 것만 분모다.
+#:
+#: 이 표에 없는 상품유형이나 없어진 파일을 만나면 **터진다.** 이전에는 None 을 돌려주고
+#: assert_matches_contract() 가 조용히 통과했다 — 새 상품유형을 추가하면 계약 대조가
+#: 검사 없이 지나가고, 그건 이 함수가 막으려는 실패 그 자체다.
+CONTRACT_SAMPLE_BY_PRODUCT = {
+    "ELS": "parsed_els_sample.json",
+    "VARIABLE_INSURANCE": "parsed_variable_sample.json",
+}
+
 
 @dataclass(frozen=True)
 class TemplateItem:
@@ -40,6 +53,9 @@ class TemplateItem:
     section_hint: str | None = None
     found_in: tuple[str, ...] = ()
     conflict: str | None = None
+    #: F-INT-002 — 생성 질문이 정답 노출 검사를 통과하지 못할 때 쓰는 기본 질문.
+    #: 인터뷰가 멈추면 세션이 진행되지 않으므로 폴백이 없으면 안 된다.
+    fallback_question: str | None = None
 
     @property
     def importance_assigned(self) -> bool:
@@ -81,7 +97,7 @@ def _parse(path: Path) -> ProductTemplate:
     items = []
     seen: set[str] = set()
     for entry in raw["items"]:
-        for key in ("item_id", "name", "cue"):
+        for key in ("item_id", "name", "cue", "fallback_question"):
             if not entry.get(key):
                 raise ValueError(f"{path.name}: {entry.get('item_id')} 에 {key!r} 없음")
         importance = entry.get("importance")
@@ -99,6 +115,7 @@ def _parse(path: Path) -> ProductTemplate:
                 importance=importance, section_hint=entry.get("section_hint"),
                 found_in=tuple(entry.get("found_in") or ()),
                 conflict=entry.get("conflict"),
+                fallback_question=entry.get("fallback_question"),
             )
         )
     return ProductTemplate(
@@ -142,14 +159,25 @@ def all_templates() -> dict[str, ProductTemplate]:
 
 
 # ── 계약 대조 ─────────────────────────────────────────────────────────────────
-def contract_item_ids(product_type: str) -> tuple[str, ...] | None:
-    """계약 샘플의 `_expected_risk_items` item_id 목록. 샘플이 없으면 None."""
-    stem = {"ELS": "els", "VARIABLE_INSURANCE": "variable"}.get(product_type)
-    if stem is None:
-        return None
-    path = CONTRACT_SAMPLES / f"parsed_{stem}_sample.json"
+class ContractSampleMissing(FileNotFoundError):
+    """분모가 되는 계약 샘플을 찾을 수 없다. 조용히 넘기지 않는다."""
+
+
+def contract_item_ids(product_type: str) -> tuple[str, ...]:
+    """계약 샘플의 `_expected_risk_items` item_id 목록 — **재현율 분모**.
+
+    매핑에 없는 상품유형이거나 파일이 없으면 예외다. None 을 돌려주면 호출자가 "검사할 것이
+    없다"로 읽고 대조를 건너뛴다.
+    """
+    name = CONTRACT_SAMPLE_BY_PRODUCT.get(product_type)
+    if name is None:
+        raise ContractSampleMissing(
+            f"{product_type} 의 계약 샘플 매핑이 없다 — CONTRACT_SAMPLE_BY_PRODUCT 에 추가해야 "
+            "재현율 분모가 정해진다"
+        )
+    path = CONTRACT_SAMPLES / name
     if not path.is_file():
-        return None
+        raise ContractSampleMissing(f"계약 샘플 파일이 없다: {path}")
     raw = json.loads(path.read_text(encoding="utf-8"))
     return tuple(i["item_id"] for i in raw.get("_expected_risk_items", []))
 
@@ -162,8 +190,6 @@ def assert_matches_contract(product_type: str) -> None:
     어느 쪽도 예외를 던지지 않으므로 여기서 대조한다.
     """
     contract = contract_item_ids(product_type)
-    if contract is None:
-        return
     template = set(get(product_type).item_ids)
     expected = set(contract)
     only_template = sorted(template - expected)
@@ -184,7 +210,7 @@ def coverage_report() -> dict[str, dict[str, object]]:
     for product_type, tpl in _all().items():
         out[product_type] = {
             "template_items": len(tpl.items),
-            "contract_items": len(contract_item_ids(product_type) or ()),
+            "contract_items": len(contract_item_ids(product_type)),
             "importance_assigned": len(tpl.items) - len(tpl.items_without_importance()),
             "required": len(tpl.required_items()),
             "rubric_covered": sum(1 for i in tpl.item_ids if i in have_rubric),
