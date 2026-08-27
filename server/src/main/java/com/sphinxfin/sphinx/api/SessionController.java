@@ -11,6 +11,7 @@ import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.security.CurrentActor;
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionService;
@@ -115,12 +116,13 @@ public class SessionController {
         Session session = sessionService.get(sid);
         RiskItem item = riskItemOf(body.itemId());
         // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
-        String asked = askedQuestionFor(session, item);
+        // 문면과 출처를 한 값으로 묶은 것도 같은 이유다: 둘을 따로 구하면 한쪽만 폴백이 된다.
+        AskedQuestion asked = askedQuestionFor(session, item);
         var scored = aiServiceClient.score(
-                item.itemId(), asked, body.text(), item, productTypeOf(session));
+                item.itemId(), asked.text(), body.text(), item, productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         return ApiResponse.ok(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer(), asked));
+                sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source()));
     }
 
     /**
@@ -181,18 +183,26 @@ public class SessionController {
      * <p>저장된 질문이 없으면 목 문면으로 떨어진다 — 화면을 거치지 않고 {@code /answers} 를
      * 직접 부른 경우(테스트·직접 호출)다. 그때는 채점을 막는 것보다 진행시키는 편이 낫다:
      * 질문 맥락이 없다고 답변을 버리면 세션 데이터가 사라진다(명세 10절).
-     * <b>다만 막지 않는 것과 남기지 않는 것은 다르다</b> — 어느 경로로 갔는지가 레코드에
-     * 안 남으므로 최소한 로그로 빈도가 보이게 한다.
+     * <b>다만 막지 않는 것과 남기지 않는 것은 다르다</b> — 이제 그 사실이 로그가 아니라
+     * 불변 기록에 {@code SERVER_FALLBACK} 으로 남는다(#136 3항). 로그는 운영 중 빈도를 보는
+     * 용도로 남겨 둔다 — 로그는 지워지고 감사는 기록만 본다.
      */
-    private String askedQuestionFor(Session session, RiskItem item) {
+    private AskedQuestion askedQuestionFor(Session session, RiskItem item) {
         String asked = session.askedQuestion(item.itemId());
         if (asked != null) {
-            return asked;
+            return new AskedQuestion(asked, EvidenceRecorder.QuestionSource.DISPLAYED);
         }
         log.warn("표시 질문이 없어 목 문면으로 채점한다 — /questions/next 를 거치지 않았다 "
-                + "(session={} item={}). Q_ai 로 잰 판정과 레코드에서 구별되지 않는다.",
+                + "(session={} item={}). 기록에는 SERVER_FALLBACK 으로 남는다.",
                 session.id(), item.itemId());
-        return questionFor(item);
+        return new AskedQuestion(questionFor(item), EvidenceRecorder.QuestionSource.SERVER_FALLBACK);
+    }
+
+    /**
+     * 채점에 넘긴 질문 문면과 그 출처. <b>한 값으로 묶어 둔다</b> — 따로 구하면 문면은 폴백인데
+     * 출처는 정상으로 남는 경로가 생기고, 그건 아예 안 남기는 것보다 나쁘다(#137 리뷰와 같은 모양).
+     */
+    private record AskedQuestion(String text, EvidenceRecorder.QuestionSource source) {
     }
 
     /**

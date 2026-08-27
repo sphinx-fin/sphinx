@@ -52,12 +52,14 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
     @Override
     @Transactional
     public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                               String askedQuestion, Instant at) {
+                               String askedQuestion, QuestionSource questionSource, Instant at) {
         Map<String, Object> payload = envelope("judgment", sessionId, at);
         payload.put("reverifyCount", reverifyCount);
         // 판정을 만든 질문. null 은 "이 필드가 생기기 전 레코드" 하나만 뜻한다 —
         // 생략하지 않는 이유는 misconceptionType 과 같다(없음과 미기재를 가른다). 이슈 #136.
         payload.put("askedQuestion", askedQuestion);
+        // 문면만으로는 폴백을 못 가른다 — 목 문면도 질문처럼 생겼다 (#136 3항).
+        payload.put("questionSource", questionSource);
         payload.put("judgment", judgmentPayload(judgment));
         store.append(streamOf(sessionId), payload);
     }

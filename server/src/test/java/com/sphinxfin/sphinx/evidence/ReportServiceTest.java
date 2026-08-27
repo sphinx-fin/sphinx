@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.evidence;
 
 import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.Signal;
@@ -58,10 +59,10 @@ class ReportServiceTest {
 
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", T0);
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
         recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", T0.plusSeconds(60));
-        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", T0.plusSeconds(90));
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
+        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
         recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
         em.flush();
         em.clear();
@@ -165,10 +166,10 @@ class ReportServiceTest {
             String hashHere = reports.contentHash(reports.render(SID));
 
             // 같은 내용을 다른 세션에 쌓으면 체인 위치는 다르지만 내용은 같다.
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", T0);
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", T0.plusSeconds(60));
-            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", T0.plusSeconds(90));
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
+            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
             em.flush();
             em.clear();
@@ -186,7 +187,7 @@ class ReportServiceTest {
             seedSession();
             String before = reports.contentHash(reports.render(SID));
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", T0.plusSeconds(150));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(150));
             em.flush();
             em.clear();
 
@@ -224,7 +225,7 @@ class ReportServiceTest {
             ReportService.Report first = reports.issue(SID, T0.plusSeconds(200));
             em.flush();
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", T0.plusSeconds(250));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(250));
             em.flush();
             em.clear();
 
@@ -264,9 +265,9 @@ class ReportServiceTest {
         @Test
         @DisplayName("❗판정마다 그때 물은 질문이 따로 남는다 — 세션 테이블은 마지막 것만 갖는다")
         void eachJudgmentKeepsItsOwnQuestion() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "첫 질문", T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "첫 질문", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1,
-                    "다시 여쭙는 질문", T0.plusSeconds(60));
+                    "다시 여쭙는 질문", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
             em.flush();
             em.clear();
 
@@ -282,7 +283,7 @@ class ReportServiceTest {
         @DisplayName("❗confidence 옆에 그 정의(promptVersion)가 같이 온다")
         void confidenceCarriesItsDefinition() {
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.65", "F-SCR-001_v2"),
-                    0, "질문 문면", T0);
+                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             em.flush();
             em.clear();
 
@@ -296,9 +297,50 @@ class ReportServiceTest {
         }
 
         @Test
+        @DisplayName("❗고객이 못 본 문면은 SERVER_FALLBACK 으로 구별된다 — 문면은 똑같이 생겼다")
+        void questionSourceSeparatesFallbackFromDisplayed() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0,
+                    "같은 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 1,
+                    "같은 문면", EvidenceRecorder.QuestionSource.SERVER_FALLBACK, T0.plusSeconds(60));
+            em.flush();
+            em.clear();
+
+            List<Map<String, Object>> history = historyOf(list(reports.render(SID), "items").get(0));
+
+            assertThat(history).extracting(h -> h.get("askedQuestion"))
+                    .as("문면이 같으니 문면만으로는 두 판정이 구별되지 않는다 — 그래서 출처가 필요하다")
+                    .containsExactly("같은 문면", "같은 문면");
+            assertThat(history).extracting(h -> h.get("questionSource"))
+                    .as("고객이 보고 답한 질문으로 잰 판정과, 서버가 지어낸 맥락으로 잰 판정을 "
+                            + "감사 시점에 갈라야 한다 (#136 3항)")
+                    .containsExactly("DISPLAYED", "SERVER_FALLBACK");
+        }
+
+        @Test
+        @DisplayName("❗출처가 바뀌면 contentHash 가 바뀐다")
+        void questionSourceIsPartOfTheHashedContent() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0,
+                    "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            em.flush();
+            em.clear();
+
+            Map<String, Object> content = reports.render(SID);
+            Map<String, Object> entry = historyOf(list(content, "items").get(0)).get(0);
+            assertThat(entry).containsEntry("questionSource", "DISPLAYED");
+
+            String before = reports.contentHash(content);
+            entry.put("questionSource", "SERVER_FALLBACK");
+
+            assertThat(reports.contentHash(content))
+                    .as("해시에 안 실리면 문서를 받은 사람이 폴백 판정으로 바뀐 것을 대조로 못 잡는다")
+                    .isNotEqualTo(before);
+        }
+
+        @Test
         @DisplayName("❗질문이 바뀌면 contentHash 가 바뀐다 — 안 그러면 대조로 못 잡는다")
         void questionIsPartOfTheHashedContent() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, "물은 질문 A", T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             em.flush();
             em.clear();
 
@@ -323,7 +365,7 @@ class ReportServiceTest {
         @Test
         @DisplayName("null 을 생략하지 않는다 — 없음과 미기재를 가른다")
         void nullsAreWrittenNotOmitted() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, null, T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, null, EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             em.flush();
             em.clear();
 
@@ -353,7 +395,7 @@ class ReportServiceTest {
                             new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",
                                     "끼워팔기 인지 실패"),
                             "판매자 발화 인용", "M08-TYING"),
-                    0, "질문 문면", T0);
+                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             em.flush();
             em.clear();
             return reports.render(SID);

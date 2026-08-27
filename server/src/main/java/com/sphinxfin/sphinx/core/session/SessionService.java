@@ -92,7 +92,8 @@ public class SessionService {
      */
     @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer) {
-        return recordJudgment(sessionId, judgment, maskedAnswer, null);
+        return recordJudgment(sessionId, judgment, maskedAnswer, null,
+                EvidenceRecorder.QuestionSource.DISPLAYED);
     }
 
     /**
@@ -106,7 +107,8 @@ public class SessionService {
      */
     @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer,
-                                   String askedQuestion) {
+                                   String askedQuestion,
+                                   EvidenceRecorder.QuestionSource questionSource) {
         Session session = get(sessionId);
         if (maskedAnswer != null) {
             session.recordUtterance(judgment.itemId(), maskedAnswer);
@@ -133,7 +135,7 @@ public class SessionService {
         // 대한 답을 잰 것인가" 에 답할 수 없다 (#136).
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()),
-                askedQuestion, Instant.now());
+                askedQuestion, questionSource, Instant.now());
         publishIfUnfairSales(sessionId, judgment);
         return judgment;
     }

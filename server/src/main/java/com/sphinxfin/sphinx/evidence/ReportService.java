@@ -196,6 +196,8 @@ public class ReportService {
         history.put("at", payload.get("at"));
         history.put("reverifyCount", payload.get("reverifyCount"));
         history.put("askedQuestion", payload.get("askedQuestion"));   // 봉투 층 — 서버가 채운다
+        // 문면 바로 뒤다 — 고객이 그 문면을 봤는지가 문면의 뜻을 바꾼다 (#136 3항).
+        history.put("questionSource", payload.get("questionSource"));
         history.put("grade", judgment.get("grade"));
         history.put("confidence", judgment.get("confidence"));
         history.put("promptVersion", judgment.get("promptVersion"));  // confidence 의 정의다

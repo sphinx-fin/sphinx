@@ -122,7 +122,8 @@ class SessionServiceTest {
     void askedQuestionReachesTheEvidenceRecord() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U1), null,
-                "원금이 줄어드는 조건을 말씀해 주시겠어요?");
+                "원금이 줄어드는 조건을 말씀해 주시겠어요?",
+                EvidenceRecorder.QuestionSource.DISPLAYED);
 
         assertThat(evidence.askedQuestions)
                 .as("서비스가 세션 맵을 다시 읽으면 값을 두 곳에서 구하게 되고, 폴백처럼 "
@@ -134,10 +135,12 @@ class SessionServiceTest {
     @DisplayName("재검증하면 각 판정에 그때의 질문이 따로 남는다 — 세션 맵은 마지막 것만 갖는다")
     void reaskedQuestionGoesWithItsOwnJudgment() {
         Session s = service.create(cmd(null));
-        service.recordJudgment(s.id(), j("A", Grade.U3), null, "첫 질문");
+        service.recordJudgment(s.id(), j("A", Grade.U3), null, "첫 질문",
+                EvidenceRecorder.QuestionSource.DISPLAYED);
 
         service.reExplain(s.id(), "A", riskItem("A"));
-        service.recordJudgment(s.id(), j("A", Grade.U1), null, "다시 여쭙는 질문");
+        service.recordJudgment(s.id(), j("A", Grade.U1), null, "다시 여쭙는 질문",
+                EvidenceRecorder.QuestionSource.DISPLAYED);
 
         assertThat(evidence.askedQuestions)
                 .as("세션 맵은 덮어쓰지만 불변 기록에는 판정마다 그 질문이 남아야 한다 (#136)")
@@ -266,12 +269,15 @@ class SessionServiceTest {
         private final List<String> judgments = new ArrayList<>();
         private final List<Signal> gates = new ArrayList<>();
         private final List<String> askedQuestions = new ArrayList<>();
+        private final List<EvidenceRecorder.QuestionSource> questionSources = new ArrayList<>();
 
         @Override
         public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                                   String askedQuestion, Instant at) {
+                                   String askedQuestion, QuestionSource questionSource,
+                                   Instant at) {
             judgments.add(judgment.itemId() + ":" + judgment.grade() + ":" + reverifyCount);
             askedQuestions.add(askedQuestion);
+            questionSources.add(questionSource);
         }
 
         @Override

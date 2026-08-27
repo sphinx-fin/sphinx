@@ -33,10 +33,33 @@ public interface EvidenceRecorder {
      *
      * <p>null 로 "폴백이었다" 를 뜻하게 하지 않는다 — 그러면 폴백 경로에 한해 위 전제를 다시
      * 들여오는 것이고, 목 문면 한 줄이 바뀌는 순간 조용히 깨진다. null 은 <b>이 필드가 생기기
-     * 전 레코드</b> 하나만 가리킨다.
+     * 전 레코드</b> 하나만 가리킨다. 폴백이었다는 사실은 {@code questionSource} 가 따로 낸다.
+     *
+     * <p>{@code questionSource} 는 그 문면을 <b>고객이 실제로 봤는지</b>다. 문면만으로는 못
+     * 가른다 — 폴백도 사람이 읽을 수 있는 질문 한 줄이라 레코드에서 Q_ai 와 똑같이 생겼다.
+     * 그러면 감사 시점에 <i>"고객은 이 질문을 보고 답한 것인가"</i> 에 답할 수 없고, 경계
+     * 사례의 채점이 어긋난 판정을 정상 판정과 구별할 방법이 없다(이슈 #136 3항).
      */
     void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                        String askedQuestion, Instant at);
+                        String askedQuestion, QuestionSource questionSource, Instant at);
+
+    /**
+     * 기록된 질문 문면이 어디서 왔는가.
+     *
+     * <p>{@code EvidenceRecorder} 안에 둔다 — 불변 기록의 어휘이고, 세션·게이트 어디에도
+     * 속하지 않아 {@code core/} 하위 패키지에 새 자리를 만들 이유가 없다.
+     */
+    enum QuestionSource {
+        /** {@code /questions/next} 로 화면에 나갔고 고객이 그것을 보고 답했다. 정상 경로. */
+        DISPLAYED,
+        /**
+         * 표시 질문이 없어 서버가 목 문면을 지어내 채점 맥락으로 썼다 — <b>고객은 이 문면을
+         * 본 적이 없다.</b> {@code /answers} 를 화면 없이 직접 부른 경우다. 채점을 막지 않는
+         * 것은 답변을 버리지 않으려는 것이고(명세 10절), 여기 남기는 것은 그 판정을 나중에
+         * 정상 판정과 구별하려는 것이다. <b>막지 않는 것과 남기지 않는 것은 다르다.</b>
+         */
+        SERVER_FALLBACK
+    }
 
     /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
     void appendGate(String sessionId, GateResult result, Instant at);
@@ -51,7 +74,7 @@ public interface EvidenceRecorder {
     EvidenceRecorder NO_OP = new EvidenceRecorder() {
         @Override
         public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                                   String askedQuestion, Instant at) {
+                                   String askedQuestion, QuestionSource questionSource, Instant at) {
             // F-GTE-004 미착수 — 구현 등록 시 자동으로 대체된다.
         }
 
