@@ -50,6 +50,9 @@ class SessionServiceTest {
 
     private SessionService service;
     private RecordingEvidence evidence;
+    /** 발행된 사건을 모은다 — F-GTE-003 신호가 실제로 나가는지 본다. */
+    private final List<Object> published = new ArrayList<>();
+    private final org.springframework.context.ApplicationEventPublisher events = published::add;
     private AiServiceClient aiClient;
 
     /** ai-service 재설명 콘텐츠 기본값 — 테스트별로 필요하면 재스텁한다. */
@@ -58,6 +61,7 @@ class SessionServiceTest {
     @BeforeEach
     void setUp() {
         evidence = new RecordingEvidence();
+        published.clear();
         aiClient = mock(AiServiceClient.class);
         // 재설명 배선(F-INT-004): 콘텐츠는 이제 ai-service 가 만든다. 상류 의존성이라 목으로 대신하고,
         // HTTP 계약(snake_case·파싱·실패 매핑)은 AiServiceClientTest 가 따로 검증한다.
@@ -65,7 +69,7 @@ class SessionServiceTest {
                 nullable(String.class), nullable(String.class)))
                 .thenReturn(new AiServiceClient.ReExplanation(AI_REEXPLAIN, List.of()));
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
-                Optional.of(evidence), aiClient, 2);
+                Optional.of(evidence), aiClient, events, 2);
     }
 
     /** 서비스의 3-arg reExplain 을 감싼다 — 항목 id 로 목 risk_item 을 만들어 넘긴다. */
@@ -133,6 +137,70 @@ class SessionServiceTest {
         assertThat(evidence.askedQuestions)
                 .as("세션 맵은 덮어쓰지만 불변 기록에는 판정마다 그 질문이 남아야 한다 (#136)")
                 .containsExactly("첫 질문", "다시 여쭙는 질문");
+    }
+
+    // ── F-GTE-003 불공정영업 신호 (이슈 #63) ──────────────────────────
+
+    /** 꺾기 판정 — misconceptionType 이 M08-TYING 이다. */
+    private static Judgment tying(String itemId) {
+        return new Judgment(itemId, Grade.U4, new BigDecimal("0.9"),
+                new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요", "구속행위 금지"),
+                "꺾기 정황", "M08-TYING");
+    }
+
+    @Test
+    @DisplayName("❗꺾기 판정이면 COMPL 로 사건이 나간다 — 기획 [기능2]")
+    void tyingPublishesUnfairSignal() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), tying("A"));
+
+        assertThat(published).filteredOn(e -> e instanceof UnfairSalesSignalEvent).hasSize(1);
+        UnfairSalesSignalEvent e = (UnfairSalesSignalEvent) published.stream()
+                .filter(x -> x instanceof UnfairSalesSignalEvent).findFirst().orElseThrow();
+        assertThat(e.sessionId()).isEqualTo(s.id());
+        assertThat(e.misconceptionType()).isEqualTo("M08-TYING");
+        assertThat(e.utteranceQuote())
+                .as("컴플라이언스가 판단하려면 고객이 실제로 한 말이 필요하다")
+                .isEqualTo("대출받으려면 이것도 들어야 한다고 해서요");
+    }
+
+    @Test
+    @DisplayName("다른 오해는 사건이 안 나간다 — 모든 U4 가 불공정영업은 아니다")
+    void otherMisconceptionsDoNotSignal() {
+        Session s = service.create(cmd(null));
+        Judgment other = new Judgment("A", Grade.U4, new BigDecimal("0.9"),
+                new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
+                "원금 보장 오해", "M01-PRINCIPAL-GUARANTEE");
+        service.recordJudgment(s.id(), other);
+
+        assertThat(published).filteredOn(e -> e instanceof UnfairSalesSignalEvent).isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗판정 응답에는 신호가 안 실린다 — 판매자가 알면 문면만 바꿔 우회한다")
+    void signalIsNotExposedInJudgmentResponse() {
+        Session s = service.create(cmd(null));
+        Judgment returned = service.recordJudgment(s.id(), tying("A"));
+
+        // 응답은 ai-service 가 준 판정 그대로다. 발행 여부를 알려주는 필드가 없어야 한다.
+        assertThat(returned).isEqualTo(tying("A"));
+        assertThat(Judgment.class.getRecordComponents())
+                .as("판정에 신호 관련 필드가 생기면 판매자 화면까지 흘러간다 (기획 7-4)")
+                .noneMatch(c -> c.getName().toLowerCase().contains("unfair")
+                        || c.getName().toLowerCase().contains("escalate")
+                        || c.getName().toLowerCase().contains("signal"));
+    }
+
+    @Test
+    @DisplayName("불변 기록 append 뒤에 낸다 — 근거 없는 알림이 먼저 가면 안 된다")
+    void signalComesAfterEvidenceAppend() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), tying("A"));
+
+        assertThat(evidence.judgments)
+                .as("append 가 실패하면 같은 트랜잭션이라 여기까지 안 온다")
+                .isNotEmpty();
+        assertThat(published).filteredOn(e -> e instanceof UnfairSalesSignalEvent).hasSize(1);
     }
 
     // ── F-DET-002 모순 배선 (이슈 #65 · 결정 10.9) ─────────────────────
@@ -453,7 +521,7 @@ class SessionServiceTest {
     @DisplayName("evidence 구현이 없어도(NO_OP) 세션 루프는 그대로 돈다")
     void worksWithoutEvidenceRecorder() {
         SessionService bare = new SessionService(repository, new GateEngine(),
-                new CoachingScoreService(), Optional.empty(), aiClient, 2);
+                new CoachingScoreService(), Optional.empty(), aiClient, events, 2);
         Session s = bare.create(cmd(null));
         bare.recordJudgment(s.id(), j("A", Grade.U1));
         assertThat(bare.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
