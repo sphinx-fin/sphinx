@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from app import numerics
 from app import question_gen as qg, templates
 from app.llm_client import LlmClient, LlmError
 from app.schemas import Condition, QuestionDraft, RiskItem, SourceSpan
@@ -89,12 +90,26 @@ def test_short_common_words_are_not_leaks():
 
 
 def test_item_without_rubric_still_checks_numbers():
-    """루브릭 커버리지가 7/23 이다(이슈 #26). 루브릭이 없다고 검사를 건너뛰면
-    그 항목만 유도심문이 통과한다."""
-    item = RISK_ITEM.model_copy(update={"item_id": "ELS-KNOCKIN-BARRIER"})
+    """루브릭이 없다고 검사를 건너뛰면 그 항목만 유도심문이 통과한다(이슈 #26).
+
+    대상 item_id 를 박아 두지 않는다 — 루브릭을 채울 때마다 이 테스트가 깨졌다.
+    루브릭 없는 항목을 코드에서 고르고, 다 채워지면 가상 ID 로 같은 경로를 검사한다.
+    """
+    from app import rubrics, templates
+
+    covered = set(rubrics.all_rubrics())
+    uncovered = [
+        i.item_id
+        for pt in ("ELS", "VARIABLE_INSURANCE")
+        for i in templates.get(pt).items
+        if i.item_id not in covered
+    ]
+    probe_id = uncovered[0] if uncovered else "ELS-RUBRIC-ABSENT-PROBE"
+
+    item = RISK_ITEM.model_copy(update={"item_id": probe_id})
     forbidden = qg.answer_fragments(item)
-    assert "45" in forbidden
-    assert not any("낙인" in f for f in forbidden)      # 루브릭 없음
+    assert "45" in forbidden                      # 조건 원문의 수치는 그대로 막힌다
+    assert set(forbidden) == set(numerics.numbers(item.condition.value_text))
 
 
 # ── 재시도와 폴백 ─────────────────────────────────────────────────────────────

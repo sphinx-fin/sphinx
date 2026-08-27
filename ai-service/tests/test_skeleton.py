@@ -194,3 +194,36 @@ def test_corporate_phone_in_document_is_not_blocked(monkeypatch):
             "pages": [{"page": 1, "text": "민원부서(02-785-7424) 또는 홈페이지로 문의"}]},
     })
     assert resp.status_code == 200, "공시 문서의 법인 연락처를 막으면 정상 문서가 거부된다"
+
+
+def test_no_merge_conflict_markers_are_committed():
+    """★ 실제로 한 번 통과했다 — docstring 안에 남은 마커는 파서도 테스트도 안 잡는다.
+
+    #60 이 squash 로 머지되면서 스택 하위 브랜치에 `add/add` 충돌이 났고, `question_gen.py`
+    의 `answer_fragments` **docstring 안**에 마커가 남은 채 푸시됐다. 문자열 리터럴이므로
+    `SyntaxError` 가 없고 198건이 전부 초록이었다.
+
+    조용한 실패라 로딩 시점으로 끌어올릴 수도 없다 — 문법상 정상인 문자열이다. 그래서
+    파일을 훑는 검사로 둔다.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    markers = ("<<<<<<< ", ">>>>>>> ")
+    hits = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or ".venv" in path.parts or "__pycache__" in path.parts:
+            continue
+        if path.suffix not in {".py", ".md", ".yaml", ".yml", ".json", ".txt"}:
+            continue
+        # 이 테스트 자신은 마커 문자열을 데이터로 들고 있다
+        if path.resolve() == Path(__file__).resolve():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for lineno, line in enumerate(text.split("\n"), 1):
+            if line.startswith(markers) or line == "=======":
+                hits.append(f"{path.relative_to(root)}:{lineno}")
+    assert not hits, f"머지 충돌 마커가 남았다: {hits}"

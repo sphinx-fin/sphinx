@@ -1,0 +1,23 @@
+# 소유: 윤지석 — 공개 의무.
+#
+# ⚠️ importance 미결 — #100 은 recommended 로 뒀고 나는 required 를 주장했다(#100 리뷰).
+#    근거: M02(예금자보호)가 required 인데 "예금자보호가 안 되면 뭐가 문제냐"의 답이 이
+#    항목이다. 루브릭을 미리 써둔다 — 어느 쪽으로 정해져도 이 항목은 인터뷰 대상이 될 수 있고,
+#    recommended 로 남아도 루브릭이 있는 것이 해가 되지 않는다.
+#
+# ELS-NO-DEPOSIT-INSURANCE 와 짝이다. 그쪽 루브릭에서 발행사 신용위험을 일부러 뺐고
+# (주석에 "별도 항목의 범위"라고 적었다) 그 별도 항목이 여기다.
+item_id: ELS-ISSUER-CREDIT-RISK
+product_type: ELS
+name: 발행사 신용위험
+status: confirmed
+required_elements:
+  - 발행사의 신용으로 발행되는 무보증 증권이다
+  - 발행사 부도 시 원금을 돌려받지 못할 수 있다
+misconception_conditions:
+  - 증권사가 망할 리 없다
+  - 기초자산만 오르면 안전하다
+  - 예금자보호로 보전된다
+related_misconceptions:
+  - M01-PRINCIPAL-GUARANTEE
+  - M02-DEPOSIT-INSURANCE
