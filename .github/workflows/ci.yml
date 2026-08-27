@@ -1,0 +1,286 @@
+name: 테스트 (3모듈)
+
+# 이슈 #73 · 역할표 §인프라 8.9. 소유: 오준서
+#
+# 이 워크플로가 생기기 전까지 세 모듈의 테스트는 CI 에서 한 번도 돌지 않았다.
+#
+# ── 설계에서 가장 중요한 두 가지 ─────────────────────────────────────────────
+#
+# ① **skip 을 실패로 취급한다.** 이 레포의 테스트에는 데이터 파일이 없으면 조용히
+#    건너뛰는 것들이 있다(`Assumptions.assumeTrue`, `pytest.mark.skipif`). 로컬에서는
+#    그게 옳다 — `fetch_timeseries.py` 를 안 돌린 사람을 막지 않으려는 것이다. **CI 에서는
+#    정반대다.** data/ 4종이 전부 커밋돼 있으므로(timeseries·misconception_library·
+#    documents·dispute_cases) 러너에서 skip 이 나온다는 것은 "검산이 안 돌았다"는 뜻이고,
+#    그런데도 로그는 초록으로 남는다. 이슈 #73 이 *"지금 초록이 초록이 아니다"* 라고 부른
+#    상태가 이것이다. 그래서 개별 테스트를 고치라고 하는 대신 **CI 가 skip 수를 세서
+#    막는다** — 이러면 앞으로 누가 어떤 이유로 skip 을 추가해도 같은 그물에 걸린다.
+#
+# ② **경로 필터는 모듈 경계와 다르다.** 문서만 고친 PR 이 3모듈을 다 돌 이유는 없지만,
+#    "server/ 를 안 고쳤으니 server 테스트를 건너뛴다"는 틀렸다. 세 모듈의 테스트가
+#    자기 디렉토리 밖을 읽는다.
+#
+#      server    ← contracts/**  · CLAUDE.md  (build.gradle 이 test 의 inputs 로 선언)
+#                  data/timeseries/**
+#      ai-service ← contracts/** · data/**
+#                  web/src/lib/survey.ts   ← 교차 언어 검사(test_survey_contract.py)
+#      web        ← web/** 만
+#
+#    특히 마지막 줄이 조용하다. `web/src/lib/survey.ts` 의 문항 문면이 바뀌면 ai-service 의
+#    `AXIS_BY_QUESTION` 과 어긋나 **에러 없이 틀린 축으로 판정**될 수 있고, 그걸 잡는
+#    테스트가 ai-service 쪽에 있다. web 만 고친 PR 에서 ai-service 를 건너뛰면 그 검사가
+#    안 돈다. 그 테스트 주석이 *"CI 가 없어서 교차 언어 검사를 CI 에 넣을 수 없다"* 고
+#    적어둔 자리가 여기다.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# 린터는 넣지 않는다 — 역할표 §인프라 가 3주 타임박스에서 범위 밖으로 정했고 뒤집을 근거가
+# 아직 없다. `pr-review-guard.yml` 은 별개다(승인 집계, 테스트와 무관).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  # 같은 PR 에 새 커밋이 오면 옛 실행은 의미가 없다. pr-review-guard 와 반대로 여기서는
+  # 취소가 옳다 — 저건 커밋 상태를 쓰므로 늦게 끝난 옛 실행이 새 결과를 덮을 수 있지만,
+  # 이건 체크 런이라 최신 실행만 표시된다.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  변경감지:
+    name: 변경 모듈 판별
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      ai-service: ${{ steps.filter.outputs.ai-service }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # push(main)·수동 실행은 판별 대상이 없다 — 전부 돈다.
+          if [ -z "${PR:-}" ]; then
+            echo "PR 이 아니다 — 3모듈 전부 실행"
+            { echo "server=true"; echo "ai-service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 변경 파일은 API 로 받는다. git diff 로 하면 merge-base 를 얻으려고 전체 히스토리를
+          # 받아야 하고(fetch-depth: 0), 이 판별만 하려고 그 비용을 낼 이유가 없다.
+          files=$(gh api "/repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          echo "── 변경 파일 ──"; printf '%s\n' "$files"
+
+          # 워크플로 자신이 바뀌면 판별을 믿을 수 없다 — 전부 돈다.
+          if printf '%s\n' "$files" | grep -qE '^\.github/workflows/ci\.yml$'; then
+            echo "워크플로 변경 — 3모듈 전부 실행"
+            { echo "server=true"; echo "ai-service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          hit() { printf '%s\n' "$files" | grep -qE "$1"; }
+
+          # 각 모듈이 **실제로 읽는** 경로다. 파일 위치가 아니라 의존을 기준으로 적었다 —
+          # 근거는 이 파일 상단 ②.
+          server=false;    hit '^(server/|contracts/|data/timeseries/|CLAUDE\.md$)' && server=true
+          ai=false;        hit '^(ai-service/|contracts/|data/|web/src/lib/survey\.ts$)' && ai=true
+          web=false;       hit '^web/' && web=true
+
+          echo "── 판별 ── server=$server ai-service=$ai web=$web"
+          { echo "server=$server"; echo "ai-service=$ai"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
+
+  server:
+    name: server · JUnit
+    needs: 변경감지
+    if: needs.변경감지.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # data/ 는 전부 커밋돼 있으므로 checkout 만으로 충분하다(이슈 #37 코멘트 ②).
+        # LFS 도 서브모듈도 쓰지 않는다.
+
+      - name: JDK 17 고정
+        uses: actions/setup-java@v4
+        with:
+          # build.gradle 이 toolchain languageVersion=17 로 박아두는데 그 값이 README·
+          # CLAUDE.md 어디에도 없었다. 러너에서는 여기가 그 근거다. 21 로 올리면
+          # 툴체인이 17 JDK 를 찾다가 실패한다 — 버전을 올릴 거면 build.gradle 과 함께 올린다.
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      - name: 테스트
+        working-directory: server
+        run: ./gradlew test --console=plain
+
+      - name: skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
+        if: always()
+        working-directory: server
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          total = failed = errors = skipped = 0
+          names = []
+          for p in glob.glob("build/test-results/test/*.xml"):
+              r = ET.parse(p).getroot()
+              total   += int(r.get("tests", 0))
+              failed  += int(r.get("failures", 0))
+              errors  += int(r.get("errors", 0))
+              skipped += int(r.get("skipped", 0))
+              for tc in r.iter("testcase"):
+                  if tc.find("skipped") is not None:
+                      names.append(f"{tc.get('classname','').split('.')[-1]}.{tc.get('name')}")
+          print(f"총 {total}건 · 실패 {failed} · 에러 {errors} · skip {skipped}")
+          if skipped:
+              print("::error::건너뛴 테스트가 있다 — data/ 는 커밋돼 있으므로 러너에서 skip 은 "
+                    "'검산이 안 돌았다'는 뜻이다. 아래 테스트의 전제 조건을 확인한다.")
+              for n in names:
+                  print(f"::error::skip → {n}")
+              sys.exit(1)
+          if total == 0:
+              print("::error::테스트 결과가 비어 있다 — test 태스크가 실제로 돌았는지 확인한다.")
+              sys.exit(1)
+          PY
+
+      - name: 기동 스모크 — GET /products 200
+        working-directory: server
+        run: |
+          set -uo pipefail
+          # `./gradlew test` 가 전부 초록인데 서버가 안 뜨는 상태가 실제로 있었다(#82).
+          # 원인이 devtools 의 리소스 경로 변환기였고 devtools 는 developmentOnly 라
+          # **테스트 클래스패스에 없다** — ApplicationBootTest 를 넣어도 그 결함을 못 잡는다.
+          # bootRun 은 developmentOnly 를 포함하므로 여기서만 잡힌다(강희진 #73 코멘트).
+          # /products 200 까지 보면 컨텍스트 초기화와 요청 처리를 둘 다 덮는다.
+          ./gradlew bootRun --console=plain > bootrun.log 2>&1 &
+          GRADLE_PID=$!
+          ok=0
+          for _ in $(seq 1 90); do
+            if curl -fsS -o /dev/null http://localhost:8000/products; then ok=1; break; fi
+            kill -0 "$GRADLE_PID" 2>/dev/null || break   # 기동 중 죽었으면 더 기다리지 않는다
+            sleep 2
+          done
+          # gradle 을 끊어도 포크된 java 가 남을 수 있어 셋 다 건다. 러너는 곧 사라지지만
+          # 다음 스텝이 8000 을 다시 쓸 수 있으므로 여기서 정리한다.
+          kill "$GRADLE_PID" 2>/dev/null || true
+          pkill -f 'SphinxApplication' 2>/dev/null || true
+          ./gradlew --stop >/dev/null 2>&1 || true
+
+          if [ "$ok" != 1 ]; then
+            echo "::error::서버가 기동하지 못했거나 GET /products 가 200 이 아니다. 아래는 기동 로그 끝부분."
+            tail -n 80 bootrun.log
+            exit 1
+          fi
+          grep -q "Started SphinxApplication" bootrun.log \
+            && echo "기동 확인 — Started SphinxApplication · GET /products 200" \
+            || echo "GET /products 200 (기동 로그 문구는 못 찾음)"
+
+      - name: 실패 시 리포트 보존
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-results
+          path: |
+            server/build/reports/tests/test/
+            server/build/test-results/test/
+            server/bootrun.log
+          retention-days: 7
+
+  ai-service:
+    name: ai-service · pytest
+    needs: 변경감지
+    if: needs.변경감지.outputs.ai-service == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 로컬 실측 기준이다(3.11 에서 244건 통과). requirements 에 상한이 없어서
+          # 러너 기본 파이썬을 따라가면 어느 날 조용히 버전이 올라가는데, pdfplumber·
+          # reportlab 은 새 파이썬에서 휠이 늦다 — 그날 CI 만 깨지고 아무도 안 고쳤다.
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            ai-service/requirements.txt
+            ai-service/requirements-dev.txt
+
+      - name: 의존성 설치
+        working-directory: ai-service
+        # requirements-dev.txt 가 첫 줄에서 requirements.txt 를 당긴다. 테스트 전용
+        # 의존성(jsonschema·reportlab)을 런타임과 섞지 않으려는 분리다.
+        run: pip install -r requirements-dev.txt
+
+      - name: 테스트
+        working-directory: ai-service
+        # LLM 키 없이 돌아야 한다 — 외부 호출이 있는 테스트는 그 자체로 결함이다.
+        run: pytest -q --junitxml=pytest-results.xml
+
+      - name: skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
+        if: always()
+        working-directory: ai-service
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys, xml.etree.ElementTree as ET, pathlib
+          p = pathlib.Path("pytest-results.xml")
+          if not p.exists():
+              print("::error::pytest 결과 파일이 없다 — 수집 단계에서 죽었는지 확인한다.")
+              sys.exit(1)
+          r = ET.parse(p).getroot()
+          s = r if r.tag == "testsuite" else r.find("testsuite")
+          total = int(s.get("tests", 0)); skipped = int(s.get("skipped", 0))
+          print(f"총 {total}건 · skip {skipped}")
+          if skipped:
+              print("::error::건너뛴 테스트가 있다. data/documents/ 는 커밋돼 있으므로 "
+                    "러너에서 실문서 테스트가 skip 될 이유가 없다(#37 코멘트 ②).")
+              for tc in s.iter("testcase"):
+                  if tc.find("skipped") is not None:
+                      print(f"::error::skip → {tc.get('classname')}::{tc.get('name')}")
+              sys.exit(1)
+          PY
+
+      - name: 실패 시 리포트 보존
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-service-test-results
+          path: ai-service/pytest-results.xml
+          retention-days: 7
+
+  web:
+    name: web · tsc
+    needs: 변경감지
+    if: needs.변경감지.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 의존성 설치
+        working-directory: web
+        # npm ci 다 — package-lock.json 이 커밋돼 있고, install 은 락을 갱신해 버려서
+        # "러너에서만 다른 버전"이 생긴다.
+        run: npm ci
+
+      - name: 타입 검사
+        working-directory: web
+        # 여기서 보는 것은 타입뿐이다. 계약 타입이 camelCase 로 정합한지(#25),
+        # 봉투 해제 계층이 서 있는지가 이 검사에 걸린다.
+        run: npx tsc --noEmit
