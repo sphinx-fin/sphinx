@@ -54,6 +54,22 @@ class OverrideControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
+
+        // 승인 뒤의 노출까지 본다. 이 둘이 S-07 리포트("오버라이드로 진행됨")가 쓸 값인데,
+        // PENDING_APPROVAL 까지만 걸어두면 승인 경로에서 빠져도 안 드러난다 (#116 리뷰).
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overrideStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.overrideReason").value(REASON))
+                // ❗값으로 박는다. isNotEmpty() 는 "누가" 를 안 봐서, 승인자를 요청자로
+                // 바꿔치기해도 전체가 초록이다(변이로 확인 — #125 리뷰). S-07 이 쓰는 것은
+                // 필드의 존재가 아니라 누가 승인했는가이고, 그게 ADR-002 견제 장치의 전부다.
+                //
+                // 부수 효과가 하나 더 있다 — 10.5(역할별 계정)가 붙어 이 폴백이 실제 주체로
+                // 바뀌는 순간 이 테스트가 깨진다. 그 작업을 하는 사람이 여기를 반드시 연다.
+                // TODO 주석은 안 읽혀도 빨간 테스트는 읽힌다.
+                .andExpect(jsonPath("$.data.overrideApprover").value("MGR(데모-미인증)"))
+                .andExpect(jsonPath("$.data.overrideDecidedAt").isNotEmpty());
     }
 
     @Test
