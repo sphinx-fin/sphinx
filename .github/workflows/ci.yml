@@ -54,12 +54,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  변경감지:
+  # job id 는 ASCII 다 — `[A-Za-z_][A-Za-z0-9_-]*` 를 벗어나면 워크플로 스키마 검증에서
+  # 걸리고, 그 실패는 **잡 0건 · 로그 없음 · 목록에서 name 자리에 파일 경로**로 나타난다
+  # (정세현 #130 리뷰). YAML 은 정상이라 로컬 파서로는 안 잡힌다. `name:` 과 스텝 이름은
+  # 제약이 없어서 이 레포의 다른 워크플로 셋이 한글로 돌고 있다 — id 만 규칙이 다르다.
+  changes:
     name: 변경 모듈 판별
     runs-on: ubuntu-latest
     outputs:
       server: ${{ steps.filter.outputs.server }}
-      ai-service: ${{ steps.filter.outputs.ai-service }}
+      ai-service: ${{ steps.filter.outputs['ai-service'] }}
       web: ${{ steps.filter.outputs.web }}
     steps:
       - id: filter
@@ -102,8 +106,8 @@ jobs:
 
   server:
     name: server · JUnit
-    needs: 변경감지
-    if: needs.변경감지.outputs.server == 'true'
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -199,8 +203,8 @@ jobs:
 
   ai-service:
     name: ai-service · pytest
-    needs: 변경감지
-    if: needs.변경감지.outputs.ai-service == 'true'
+    needs: changes
+    if: needs.changes.outputs['ai-service'] == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -260,9 +264,9 @@ jobs:
           retention-days: 7
 
   web:
-    name: web · tsc
-    needs: 변경감지
-    if: needs.변경감지.outputs.web == 'true'
+    name: web · tsc + build
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -279,8 +283,11 @@ jobs:
         # "러너에서만 다른 버전"이 생긴다.
         run: npm ci
 
-      - name: 타입 검사
+      - name: 타입 검사 + 빌드
         working-directory: web
-        # 여기서 보는 것은 타입뿐이다. 계약 타입이 camelCase 로 정합한지(#25),
-        # 봉투 해제 계층이 서 있는지가 이 검사에 걸린다.
-        run: npx tsc --noEmit
+        # `npm run build` 가 `tsc --noEmit && vite build` 다. 타입만 보면 **빌드 단계에서만
+        # 나는 실패**(에셋 해석·번들 크기·플러그인)가 안 걸린다 — #81 이 폰트를 자체
+        # 호스팅으로 바꾸면서 CSS 가 12KB → 250KB 가 됐는데 그런 변경은 tsc 를 안 탄다
+        # (강희진 #130 리뷰). 타입 쪽은 그대로다: 계약 타입이 camelCase 로 정합한지(#25),
+        # 봉투 해제 계층이 서 있는지가 앞단 tsc 에 걸린다.
+        run: npm run build
