@@ -40,6 +40,8 @@ class ReportServiceTest {
     @Autowired
     private StoredEvidenceRecorder recorder;
     @Autowired
+    private ImmutableStore store;
+    @Autowired
     private TestEntityManager em;
 
     private static Judgment judgment(String itemId, Grade grade, String confidence) {
@@ -116,7 +118,10 @@ class ReportServiceTest {
 
             Map<String, Object> first = historyOf(list(reports.render(SID), "items").get(0)).get(0);
             assertThat(first.keySet()).doesNotContain("signal", "color", "severity");
-            assertThat(first.keySet()).contains("grade", "evidence", "misconceptionType");
+            // misconceptionType 은 여기 있었다. 이슈 #144 로 뺐다 — 그 값이 불공정영업 신호
+            // 그 자체라 판매자가 읽는 문서에 있으면 안 된다. 이 단정이 그것을 붙들고 있어서
+            // 누출이 초록으로 남아 있었다.
+            assertThat(first.keySet()).contains("grade", "evidence", "reason");
         }
 
         @Test
@@ -331,6 +336,77 @@ class ReportServiceTest {
                     .containsKeys("askedQuestion", "promptVersion");
             assertThat(entry.get("askedQuestion")).isNull();
             assertThat(entry.get("promptVersion")).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("불공정영업 신호가 리포트로 새지 않는다 (이슈 #144)")
+    class UnfairSignalDoesNotLeak {
+
+        /** 키 이름이 아니라 렌더된 내용 전체를 본다 — 누출은 내가 상상 못 한 이름으로 난다. */
+        private static final List<String> LEAK_WORDS = List.of(
+                "unfair", "escalate", "compliance", "compl", "tying", "m08", "signal",
+                "꺾기", "불공정");
+
+        private Map<String, Object> reportWithTyingJudgment() {
+            recorder.appendJudgment(SID, new Judgment("ELS-A", Grade.U4, new BigDecimal("0.9"),
+                            new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",
+                                    "끼워팔기 인지 실패"),
+                            "판매자 발화 인용", "M08-TYING"),
+                    0, "질문 문면", T0);
+            em.flush();
+            em.clear();
+            return reports.render(SID);
+        }
+
+        @Test
+        @DisplayName("❗판정 유형이 리포트 본문에 없다 — 그 값이 신호 그 자체다")
+        void misconceptionTypeIsNotInTheReport() {
+            Map<String, Object> entry =
+                    historyOf(list(reportWithTyingJudgment(), "items").get(0)).get(0);
+
+            assertThat(entry)
+                    .as("signal:unfair:read 를 COMPL 로 좁혀도 판매자는 report:read 로 "
+                            + "자기 세션 리포트를 연다 — 같은 값이 다른 action 으로 새면 "
+                            + "그 좁힘이 무의미하다(기획 7-4)")
+                    .doesNotContainKey("misconceptionType");
+        }
+
+        @Test
+        @DisplayName("❗렌더된 내용 어디에도 신호 어휘가 없다 — 키 이름만 보면 놓친다")
+        void noSignalVocabularyAnywhereInTheContent() {
+            String rendered = reportWithTyingJudgment().toString().toLowerCase();
+
+            assertThat(rendered)
+                    .as("이 단정이 의미를 가지려면 리포트가 비어 있지 않아야 한다")
+                    .contains("els-a").contains("u4");
+            assertThat(LEAK_WORDS)
+                    .as("누출은 필드를 하나 지운다고 끝나지 않는다 — reason 이나 "
+                            + "rubricClause 로도 같은 값이 나갈 수 있다")
+                    .noneMatch(rendered::contains);
+        }
+
+        @Test
+        @DisplayName("어휘 목록이 실제로 거르는지 잰다 — 비었거나 대소문자가 어긋나면 위가 공짜다")
+        void theLeakWordListActuallyMatches() {
+            assertThat(LEAK_WORDS).isNotEmpty();
+            assertThat(LEAK_WORDS)
+                    .as("목록의 어휘가 실제 값에 걸려야 한다 — M08-TYING 은 소문자로 "
+                            + "'m08' 과 'tying' 둘 다에 걸린다")
+                    .anyMatch("m08-tying"::contains);
+        }
+
+        @Test
+        @DisplayName("감사 경로는 그대로다 — 불변 기록에는 남는다")
+        void theImmutableChainStillHasIt() {
+            reportWithTyingJudgment();
+
+            String chain = store.replay(StoredEvidenceRecorder.streamOf(SID)).toString();
+
+            assertThat(chain)
+                    .as("리포트는 기록이 아니라 기록에서 만든 문서다. 값을 지운 게 아니라 "
+                            + "그 문서에 안 실은 것이고, COMPL 은 audit:read 로 체인을 읽는다")
+                    .contains("M08-TYING");
         }
     }
 }
