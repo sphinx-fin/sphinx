@@ -16,9 +16,23 @@ name: PR 리뷰 담당자 라벨
 # 사용자별 최신 상태만 본다)을 그대로 맞춘다. 라벨은 표시일 뿐이고 머지를 막는
 # 것은 여전히 pr-review-guard 다.
 
+# ❗`synchronize` 는 라벨을 바꾸는 사건이 아니라 **복구 경로**다 (이슈 #135).
+#
+# PR 이 충돌 상태이면 `pull_request_review` 이벤트가 통째로 유실된다 — 승인이 들어와도
+# 이 워크플로가 아예 안 돌고, 라벨은 `리뷰대기: <이름>`(= 아직 아무것도 제출하지 않았다)
+# 인 채로 남는다. API 는 그 사이에도 `reviewDecision: APPROVED` 를 말하므로 **라벨만
+# 거짓말을 한다.**
+#
+# `pr-review-guard` 는 같은 이벤트를 같이 잃지만 `synchronize` 가 있어서 다음 푸시에
+# 다시 집계하고 스스로 낫는다. 그 비대칭이 증상이 라벨 쪽에만 오래 남는 이유였다.
+# 여기에 `synchronize` 를 넣는 것은 **가드와 복구 경로를 같게 맞추는 것**이다.
+#
+# 푸시가 라벨을 바꾸지 않는다는 것은 맞다 — 그래서 이 트리거는 대개 아무 일도 하지
+# 않는다. 아래 계산이 이벤트 페이로드가 아니라 timeline·reviews API 를 매번 새로 읽으므로
+# 재실행이 언제나 안전하고, 결과가 같으면 add/remove 가 한 건도 안 나간다.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, converted_to_draft, review_requested, review_request_removed, closed]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, review_requested, review_request_removed, closed]
   pull_request_review:
     types: [submitted, dismissed]
 
