@@ -129,6 +129,11 @@ public class Session extends BaseEntity {
      * 루브릭 기반이라 명백한 오해는 그대로 잡히지만 경계 사례에서 맥락이 어긋난다. 그리고
      * 그 어긋남은 <b>근거(evidence)가 "묻지 않은 질문에 대한 답"을 인용하게</b> 만드는데,
      * 인용 대조는 답변만 보므로 못 잡고 리포트까지 그대로 간다.
+     *
+     * <p>{@code EAGER} 인 이유: 채점 경로가 {@code SessionService.get()} 이 돌려준
+     * <b>분리된(detached) 엔티티</b>에서 이 맵을 읽는다. LAZY 로 바꾸면
+     * {@code LazyInitializationException} 이 난다 — {@code AskedQuestionTest} 가 잡긴 하지만
+     * 이유를 적어두면 거기까지 안 간다.
      */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "session_asked_question", joinColumns = @JoinColumn(name = "session_id"))
