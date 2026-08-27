@@ -95,6 +95,9 @@ public class SessionController {
         String question = aiServiceClient
                 .question(next, List.of(), productTypeOf(session))
                 .question();
+        // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
+        // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
+        sessionService.recordAskedQuestion(sid, next.itemId(), question);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
                 question,
@@ -108,16 +111,16 @@ public class SessionController {
         // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
         //
-        // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
-        // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
-        // 쌓인 항목·질문으로 교체한다.
+        // risk_item 은 아직 목이다 — 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 교체한다.
         Session session = sessionService.get(sid);
         RiskItem item = riskItemOf(body.itemId());
+        // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
+        String asked = askedQuestionFor(session, item);
         var scored = aiServiceClient.score(
-                item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
+                item.itemId(), asked, body.text(), item, productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         return ApiResponse.ok(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer()));
+                sid, scored.judgment(), scored.maskedAnswer(), asked));
     }
 
     /**
@@ -161,6 +164,35 @@ public class SessionController {
      */
     private static String questionFor(RiskItem item) {
         return "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+    }
+
+    /**
+     * 채점에 넘길 질문 — <b>고객이 실제로 본 것</b>을 쓴다 (이슈 #120).
+     *
+     * <p>전에는 여기서 {@link #questionFor} 로 목 문면을 새로 만들었다. 그런데 화면에 나간
+     * 질문은 ai-service 가 생성한 것이라 <b>둘이 다르다</b> — 고객은 Q_ai 에 답했는데 채점은
+     * Q_mock 맥락으로 돈다. 루브릭 기반이라 명백한 오해(U4)는 그대로 잡히고, 어긋나는 것은
+     * <b>경계 사례의 채점</b>이다.
+     *
+     * <p>근거(evidence)는 오염되지 않는다 — {@code Evidence(utteranceQuote, rubricClause)} 에
+     * 질문이 들어가지 않고 인용은 고객 답변에서 잘라낸 것이라 그대로 유효하다(#133 리뷰에서
+     * 확인). 어긋난 것은 근거가 아니라 <b>판정의 맥락</b>이다.
+     *
+     * <p>저장된 질문이 없으면 목 문면으로 떨어진다 — 화면을 거치지 않고 {@code /answers} 를
+     * 직접 부른 경우(테스트·직접 호출)다. 그때는 채점을 막는 것보다 진행시키는 편이 낫다:
+     * 질문 맥락이 없다고 답변을 버리면 세션 데이터가 사라진다(명세 10절).
+     * <b>다만 막지 않는 것과 남기지 않는 것은 다르다</b> — 어느 경로로 갔는지가 레코드에
+     * 안 남으므로 최소한 로그로 빈도가 보이게 한다.
+     */
+    private String askedQuestionFor(Session session, RiskItem item) {
+        String asked = session.askedQuestion(item.itemId());
+        if (asked != null) {
+            return asked;
+        }
+        log.warn("표시 질문이 없어 목 문면으로 채점한다 — /questions/next 를 거치지 않았다 "
+                + "(session={} item={}). Q_ai 로 잰 판정과 레코드에서 구별되지 않는다.",
+                session.id(), item.itemId());
+        return questionFor(item);
     }
 
     /**

@@ -18,8 +18,25 @@ import java.time.Instant;
  */
 public interface EvidenceRecorder {
 
-    /** 항목 판정 1건 append. 재검증분도 매 건 들어온다(덮어쓰기 전 값이 아니라 발생 순서 전부). */
-    void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at);
+    /**
+     * 항목 판정 1건 append. 재검증분도 매 건 들어온다(덮어쓰기 전 값이 아니라 발생 순서 전부).
+     *
+     * <p>{@code askedQuestion} 은 그 판정을 만든 <b>실제 질문 문면</b>이다 — ai-service 가
+     * 생성한 것이든 폴백 목 문면이든 {@code score()} 에 넘어간 값 그대로. 분기와 무관하게
+     * 항상 채운다.
+     *
+     * <p>이유: 질문이 <b>항목의 순수 함수였을 때는</b> 기록에 없어도 {@code item_id} 로
+     * 되만들 수 있었다. #133 이 ai-service 생성 질문으로 바꾸면서 그 성질이 없어졌고, 값은
+     * {@code session_asked_question} — <b>재질문 시 덮어쓰는 가변 테이블</b>에만 남는다.
+     * 그러면 <i>"이 판정은 어느 질문에 대한 답을 잰 것인가"</i> 에 답할 수 없다. append-only
+     * 기록 옆의 결정 요인이 덮어쓰기 가능한 곳에 있으면 안 된다(이슈 #136 · ADR-004).
+     *
+     * <p>null 로 "폴백이었다" 를 뜻하게 하지 않는다 — 그러면 폴백 경로에 한해 위 전제를 다시
+     * 들여오는 것이고, 목 문면 한 줄이 바뀌는 순간 조용히 깨진다. null 은 <b>이 필드가 생기기
+     * 전 레코드</b> 하나만 가리킨다.
+     */
+    void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
+                        String askedQuestion, Instant at);
 
     /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
     void appendGate(String sessionId, GateResult result, Instant at);
@@ -33,7 +50,8 @@ public interface EvidenceRecorder {
     /** 구현(evidence/) 등록 전까지의 기본값. 삼키는 것을 드러내려고 무명 클래스가 아니라 상수로 둔다. */
     EvidenceRecorder NO_OP = new EvidenceRecorder() {
         @Override
-        public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Instant at) {
+        public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
+                                   String askedQuestion, Instant at) {
             // F-GTE-004 미착수 — 구현 등록 시 자동으로 대체된다.
         }
 
