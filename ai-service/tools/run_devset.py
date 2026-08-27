@@ -16,7 +16,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import misconception, scoring, templates  # noqa: E402
+from app import misconception, mismatch, scoring, templates  # noqa: E402
 from app.llm_client import LlmError  # noqa: E402
 from app.schemas import Condition, RiskItem, SourceSpan  # noqa: E402
 
@@ -141,8 +141,66 @@ def run_spec(spec_path: Path, needle: str) -> tuple[int, int, int]:
     return passed, failed, errored
 
 
+# ── F-DET-002 세션 단위 ───────────────────────────────────────────────────────
+def run_session_spec(spec_path: Path, needle: str = "") -> tuple[int, int, int]:
+    """설문 + 세션 내 발화 전체 → 모순 판정.
+
+    항목 단위 dev set 과 형태가 다르다 — 입력이 세션 하나이고 기대값이 축 집합이다.
+    그래서 같은 루프에 끼우지 않고 블록을 따로 둔다.
+    """
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    version = spec.get("survey_schema_version")
+    passed = failed = errored = 0
+
+    print(f"\n{'═' * 78}\n세션 단위 (F-DET-002) — {spec_path.name}  세트={version}\n{'═' * 78}")
+    for case in spec["cases"]:
+        if needle and needle not in case["id"]:
+            continue
+        print(f"\n{case['id']}")
+        print(f"  근거   {case['source']}")
+        questions = {k: v for k, v in case["survey"].items() if k.startswith("SUIT-")}
+        print(f"  설문   문항 {len(questions)}건 / 맵 {len(case['survey'])}키")
+        for u in case["utterances"]:
+            print(f"  발화   [{u.get('item_id') or '항목미지정'}] {u['text']}")
+
+        try:
+            out = mismatch.detect(
+                f"DEVSET-{case['id']}", case["survey"], case["utterances"], version,
+            )
+        except LlmError as exc:
+            print(f"  ERROR  {type(exc).__name__}: {str(exc)[:200]}")
+            errored += 1
+            continue
+        except mismatch.UnknownSurveyQuestion as exc:
+            print(f"  ERROR  UnknownSurveyQuestion: {exc}")
+            errored += 1
+            continue
+
+        axes = sorted({c.axis for c in out.contradictions
+                       if c.confidence >= mismatch.MISMATCH_CONFIDENCE_FLOOR})
+        print(f"  판정   status={out.status} mismatch={out.mismatch} "
+              f"conf={out.confidence:.2f} 축={axes or '없음'}")
+        for c in out.contradictions:
+            print(f'  근거   설문 "{c.survey_ref.question_id}: {c.survey_ref.recorded_answer}"')
+            print(f'         발화 "{c.utterance_quote}"')
+            print(f"         {c.axis} · {c.direction} · conf={c.confidence:.2f}")
+        print(f"  사유   {out.reason}")
+
+        exp_axes = sorted(case.get("expected_axes") or [])
+        exp_dir = case.get("expected_direction")
+        ok = (out.status == case["expected_status"]
+              and out.mismatch == case["expected_mismatch"]
+              and axes == exp_axes
+              and (exp_dir is None or any(c.direction == exp_dir for c in out.contradictions)))
+        print(f"  {'PASS' if ok else 'FAIL'}  기대 status={case['expected_status']} "
+              f"mismatch={case['expected_mismatch']} 축={exp_axes or '없음'}")
+        passed += ok
+        failed += not ok
+    return passed, failed, errored
+
+
 def main() -> int:
-    """인자가 없으면 모든 상품유형을 돈다. 인자는 케이스 id 부분일치 필터다."""
+    """인자가 없으면 모든 상품유형 + 세션 단위를 돈다. 인자는 케이스 id 부분일치 필터다."""
     needle = sys.argv[1] if len(sys.argv) > 1 else ""
     specs = sorted((FIXTURES / "utterances").glob("*.yaml"))
     if not specs:
@@ -152,6 +210,10 @@ def main() -> int:
     total = [0, 0, 0]
     for spec_path in specs:
         result = run_spec(spec_path, needle)
+        total = [a + b for a, b in zip(total, result)]
+
+    for spec_path in sorted((FIXTURES / "sessions").glob("*.yaml")):
+        result = run_session_spec(spec_path, needle)
         total = [a + b for a, b in zip(total, result)]
 
     print("═" * 78)
