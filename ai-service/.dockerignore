@@ -1,0 +1,11 @@
+# 테스트·캐시·비밀은 런타임 이미지에 들어갈 이유가 없다.
+tests
+tools
+proposals
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+.env
+.env.*
+!.env.example
