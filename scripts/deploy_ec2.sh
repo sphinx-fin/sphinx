@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# SphinX 배포 — EC2 에서 SSM Parameter Store 의 비밀을 받아 compose 를 띄운다.
+# 소유: 오준서 (인프라 R). 이슈 #41 ④ · 결정로그 10.3.
+#
+# ── 왜 스크립트인가 ─────────────────────────────────────────────────────────
+#
+# `.env` 평문 파일을 EC2 에 두지 않기 위해서다. compose 의 `env_file:` 을 쓰면 키가 디스크에
+# 남고, 그 인스턴스에 들어올 수 있는 사람 전부가 읽는다. 여기서는 SSM 에서 받아 **이 프로세스의
+# 환경변수로만** 넘기므로 파일로 떨어지지 않는다.
+#
+# 키를 이미지에 굽지도 않는다 — 이미지 레이어는 지워도 히스토리에 남는다.
+#
+#   사용:  ./scripts/deploy_ec2.sh            # 받아서 띄운다
+#          ./scripts/deploy_ec2.sh --check    # 값을 받아 확인만 하고 띄우지 않는다
+#
+# EC2 인스턴스 역할에 해당 파라미터의 ssm:GetParameter + kms:Decrypt 가 있어야 한다.
+# 자세한 것은 docs/deployment.md.
+
+set -euo pipefail
+
+# 리전은 서울로 고정한다. 기획서 416·422행이 "국내 처리와 온프레미스 배포 옵션" ·
+# "개인신용정보 처리는 국내 시스템으로 제한"을 논지로 쓰고 있어서, 데모를 us-east-1 에
+# 올리면 우리 문서와 어긋난다. 리전 선택 비용은 0 이고 심사에서 물었을 때 답이 갈린다.
+AWS_REGION="${AWS_REGION:-ap-northeast-2}"
+SSM_PREFIX="${SSM_PREFIX:-/sphinx/prod}"
+
+CHECK_ONLY=0
+[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+
+command -v aws >/dev/null || { echo "aws CLI 가 없다. EC2 에 설치하거나 AWS_REGION 을 확인한다." >&2; exit 1; }
+command -v docker >/dev/null || { echo "docker 가 없다." >&2; exit 1; }
+
+# SecureString 을 복호화해 받는다. 값이 없으면 여기서 죽는다 — 빈 값으로 넘겨서 컨테이너가
+# "떠 있지만 안 되는" 상태가 되는 것이 제일 나쁘다.
+get() {
+  local name="$1" out
+  if ! out=$(aws ssm get-parameter \
+              --region "$AWS_REGION" \
+              --name "$SSM_PREFIX/$name" \
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text 2>/dev/null); then
+    echo "SSM 에서 $SSM_PREFIX/$name 을 못 읽었다. 파라미터가 있는지, 인스턴스 역할에" >&2
+    echo "ssm:GetParameter 와 kms:Decrypt 가 있는지 확인한다 (docs/deployment.md)." >&2
+    exit 1
+  fi
+  if [ -z "$out" ] || [ "$out" = "None" ]; then
+    echo "SSM 파라미터 $SSM_PREFIX/$name 이 비어 있다." >&2
+    exit 1
+  fi
+  printf '%s' "$out"
+}
+
+echo "리전 $AWS_REGION · 접두어 $SSM_PREFIX 에서 비밀을 받는다"
+
+export LLM_API_KEY;       LLM_API_KEY=$(get llm-api-key)
+export SPHINX_API_USER;   SPHINX_API_USER=$(get api-user)
+export SPHINX_API_PASSWORD; SPHINX_API_PASSWORD=$(get api-password)
+
+# 선택값. 없으면 코드 기본값을 쓴다(config.py 의 DEFAULT_MODEL 등).
+export LLM_API_BASE="${LLM_API_BASE:-}"
+export LLM_MODEL="${LLM_MODEL:-}"
+
+# 값 자체는 절대 찍지 않는다. 길이만 보여 "받긴 받았다"를 확인한다.
+echo "  LLM_API_KEY         ${#LLM_API_KEY}자"
+echo "  SPHINX_API_USER     ${#SPHINX_API_USER}자"
+echo "  SPHINX_API_PASSWORD ${#SPHINX_API_PASSWORD}자"
+
+if [ "$CHECK_ONLY" = 1 ]; then
+  echo "--check 라 여기서 멈춘다."
+  exit 0
+fi
+
+cd "$(dirname "$0")/.."
+
+# data/ 가 있어야 한다. 읽기 전용 볼륨의 원본이고, 없으면 docker 가 빈 디렉토리를 만들어
+# 마운트해서 **오해 라이브러리 없이 컨테이너가 뜬다** — ai-service 는 로딩 시점에 죽으니
+# 드러나지만, 원인이 "git clone 이 덜 됐다"라는 것은 로그만 봐서는 안 보인다.
+for d in data/timeseries data/misconception_library contracts/samples; do
+  [ -d "$d" ] || { echo "$d 가 없다. 레포를 통째로 clone 했는지 확인한다." >&2; exit 1; }
+done
+
+echo "compose 기동"
+docker compose up -d --build
+
+echo
+echo "상태:"
+docker compose ps
+echo
+echo "확인:"
+echo "  curl -fsS http://localhost/            # 화면"
+echo "  docker compose logs -f server          # 기동 로그"
+echo
+echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 ①③ 이 되살아난다."

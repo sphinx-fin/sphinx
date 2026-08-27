@@ -9,11 +9,11 @@ import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
-import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.security.CurrentActor;
-import com.sphinxfin.sphinx.core.AiServiceException;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionService;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +47,15 @@ public class SessionController {
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
-    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
+    /**
+     * 세션 조회. <b>읽기와 진행을 가른 action 이다</b>(#129 · 이슈 #124).
+     *
+     * <p>{@code session:interview} 를 쓰면 MGR 에게 그 그랜트를 주는 순간 같은 action 이
+     * 덮는 {@code questions/next}·{@code re-explain}·{@code abort} 까지 열린다 — 승인하려고
+     * 읽어야 하는 것과 <b>세션을 몰 수 있는 것</b>은 다르다. 그래서 읽기만 별도 action 이고,
+     * 그 덕에 승인자(MGR)가 승인 대상을 읽을 수 있으면서 진행에는 못 닿는다.
+     */
+    @PreAuthorize("@accessGuard.can('session:read', #sid)")
     @GetMapping("/{sid}")
     public ApiResponse<SessionResponse> get(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
@@ -70,9 +78,12 @@ public class SessionController {
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/questions/next")
     public ApiResponse<NextQuestionResponse> nextQuestion(@PathVariable String sid) {
-        // TODO(강희진): ai-service /internal/question 프록시 (F-INT-002, 윤지석)
+        // 질문 문면은 ai-service /internal/question 이 만든다 (F-INT-002, #60·#64).
         // 진행 상태(index/total/done)는 서버가 준다 — 화면이 '추출된 항목 수'로 분모를
         // 보완하면 서버가 물어볼 항목 수와 어긋나 조용히 틀린 진행률이 나온다.
+        //
+        // TODO(강희진): risk_item 은 아직 목이다 — 추출(F-EXT-002)이 서버에 붙으면 세션에
+        //   쌓인 항목으로 교체한다. 지금은 MockData.RISK_ITEMS 를 순서대로 물어본다.
         var session = sessionService.get(sid);
         var items = MockData.RISK_ITEMS;
         int answered = session.judgments().size();
@@ -80,9 +91,16 @@ public class SessionController {
             return ApiResponse.ok(NextQuestionResponse.done(items.size()));
         }
         var next = items.get(answered);
+        // askedTypes=[] — MVP 는 항목당 질문 1개라 항목별 사용 유형 추적을 두지 않는다.
+        String question = aiServiceClient
+                .question(next, List.of(), productTypeOf(session))
+                .question();
+        // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
+        // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
+        sessionService.recordAskedQuestion(sid, next.itemId(), question);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
-                questionFor(next),
+                question,
                 answered + 1, items.size()));
     }
 
@@ -93,20 +111,16 @@ public class SessionController {
         // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
         //
-        // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
-        // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
-        // 쌓인 항목·질문으로 교체한다.
+        // risk_item 은 아직 목이다 — 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 교체한다.
         Session session = sessionService.get(sid);
-        RiskItem item = MockData.RISK_ITEMS.stream()
-                .filter(r -> r.itemId().equals(body.itemId()))
-                .findFirst()
-                .orElseThrow(() -> new NoSuchElementException(
-                        "항목을 찾을 수 없다: " + body.itemId()));
+        RiskItem item = riskItemOf(body.itemId());
+        // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
+        String asked = askedQuestionFor(session, item);
         var scored = aiServiceClient.score(
-                item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
+                item.itemId(), asked, body.text(), item, productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         return ApiResponse.ok(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer()));
+                sid, scored.judgment(), scored.maskedAnswer(), asked));
     }
 
     /**
@@ -139,15 +153,59 @@ public class SessionController {
     }
 
     /**
-     * 질문 문면 — nextQuestion과 submitAnswer가 **같은 문자열**을 써야 한다.
+     * 채점에 실을 질문 문면. submitAnswer 가 ai-service /internal/score 에 넘기는 question 이다.
      *
-     * 두 곳에 복제하면 한쪽만 바뀌었을 때 ai-service가 채점하는 질문과 고객이 화면에서 실제로
-     * 본 질문이 갈린다. 그러면 근거(evidence)가 "묻지 않은 질문에 대한 답"을 인용하게 되는데,
-     * verify_quote_is_verbatim은 답변 인용만 보므로 못 잡고 리포트(F-GTE-004)까지 그대로 간다.
-     * TODO(강희진): F-INT-002 프록시가 붙으면 두 곳 다 그쪽으로 대체된다.
+     * ❗nextQuestion 은 이제 ai-service 가 생성한 질문을 화면에 보여주지만(F-INT-002 배선),
+     * submitAnswer 는 여전히 이 목 문면을 채점 질문으로 쓴다 — 세션이 '방금 무슨 질문을
+     * 물었는지'를 보관하지 않아서(MVP 는 항목당 질문 1개, 세션 상태를 늘리지 않는다) 재현할
+     * 수 없기 때문이다. 그래서 화면에 보인 질문과 채점된 질문이 갈릴 수 있다.
+     * TODO(강희진): 세션이 '물은 질문'을 저장하면(F-EXT-002 항목 세션 적재와 함께) submitAnswer
+     *   도 그 질문을 채점에 실어 이 목을 없앤다. 그전까지는 이 문면이 채점 기준 질문이다.
      */
     private static String questionFor(RiskItem item) {
         return "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+    }
+
+    /**
+     * 채점에 넘길 질문 — <b>고객이 실제로 본 것</b>을 쓴다 (이슈 #120).
+     *
+     * <p>전에는 여기서 {@link #questionFor} 로 목 문면을 새로 만들었다. 그런데 화면에 나간
+     * 질문은 ai-service 가 생성한 것이라 <b>둘이 다르다</b> — 고객은 Q_ai 에 답했는데 채점은
+     * Q_mock 맥락으로 돈다. 루브릭 기반이라 명백한 오해(U4)는 그대로 잡히고, 어긋나는 것은
+     * <b>경계 사례의 채점</b>이다.
+     *
+     * <p>근거(evidence)는 오염되지 않는다 — {@code Evidence(utteranceQuote, rubricClause)} 에
+     * 질문이 들어가지 않고 인용은 고객 답변에서 잘라낸 것이라 그대로 유효하다(#133 리뷰에서
+     * 확인). 어긋난 것은 근거가 아니라 <b>판정의 맥락</b>이다.
+     *
+     * <p>저장된 질문이 없으면 목 문면으로 떨어진다 — 화면을 거치지 않고 {@code /answers} 를
+     * 직접 부른 경우(테스트·직접 호출)다. 그때는 채점을 막는 것보다 진행시키는 편이 낫다:
+     * 질문 맥락이 없다고 답변을 버리면 세션 데이터가 사라진다(명세 10절).
+     * <b>다만 막지 않는 것과 남기지 않는 것은 다르다</b> — 어느 경로로 갔는지가 레코드에
+     * 안 남으므로 최소한 로그로 빈도가 보이게 한다.
+     */
+    private String askedQuestionFor(Session session, RiskItem item) {
+        String asked = session.askedQuestion(item.itemId());
+        if (asked != null) {
+            return asked;
+        }
+        log.warn("표시 질문이 없어 목 문면으로 채점한다 — /questions/next 를 거치지 않았다 "
+                + "(session={} item={}). Q_ai 로 잰 판정과 레코드에서 구별되지 않는다.",
+                session.id(), item.itemId());
+        return questionFor(item);
+    }
+
+    /**
+     * 목(MockData)에서 risk_item 을 찾는다. 목록에 없으면 404(NoSuchElementException)로 드러낸다 —
+     * submitAnswer·reExplain 이 같은 규약을 쓰도록 한 곳으로 모은다.
+     * TODO(강희진): 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목에서 찾는다.
+     */
+    private static RiskItem riskItemOf(String itemId) {
+        return MockData.RISK_ITEMS.stream()
+                .filter(r -> r.itemId().equals(itemId))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException(
+                        "항목을 찾을 수 없다: " + itemId));
     }
 
     /**
@@ -177,7 +235,9 @@ public class SessionController {
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
         // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
-        return ApiResponse.ok(sessionService.reExplain(sid, body.itemId()));
+        // risk_item 은 목(MockData)에서 찾아 넘긴다 — 서비스가 ai-service /internal/reexplain
+        // 에 실어 눈높이 재설명을 생성한다. 적격성(대상 아님·상한 도달) 판단은 서비스가 한다.
+        return ApiResponse.ok(sessionService.reExplain(sid, body.itemId(), riskItemOf(body.itemId())));
     }
 
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")

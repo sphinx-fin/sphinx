@@ -18,7 +18,7 @@ Challenge 공모전 MVP. 4인 팀(윤지석·강희진·정세현·오준서)이
 # server (Spring Boot, :8000)
 cd server && ./gradlew bootRun
 cd server && ./gradlew test
-cd server && ./gradlew test --tests 'com.sphinxfin.sphinx.core.GateEngineTest'   # 단일 테스트
+cd server && ./gradlew test --tests 'com.sphinxfin.sphinx.core.gate.GateEngineTest'   # 단일 테스트
 cd server && ./gradlew compileJava
 
 # ai-service (FastAPI, :8100 — 내부망 전용, 브라우저에 노출 금지)
@@ -53,16 +53,35 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
 명세서의 원칙들로, 코드 여러 곳에 걸쳐 강제된다. 이걸 어기는 변경은 리뷰에서 막힌다.
 
 1. **P1 — AI는 측정, 룰은 결정.** `ai-service`의 LLM 출력은 `domain/Judgment`(등급·근거
-   스팬·신뢰도)라는 *측정값*이다. 게이트 판정은 `core/GateEngine`이 선언적
+   스팬·신뢰도)라는 *측정값*이다. 게이트 판정은 `core/gate/GateEngine`이 선언적
    `resources/gate_rules.yaml`을 적용해서 만든다. LLM 원문이 판정이나 금액 계산에 직접
    들어가는 경로를 만들면 안 된다.
 2. **P2 — 시뮬레이터·게이트는 결정론적 순수 함수.** `data/timeseries/VERSION`으로 지수
    스냅샷을 고정해 재현성을 보장한다. 단위 테스트 필수.
 3. **P3 — 고객 텍스트가 `ai-service`로 나가는 유일한 경로**는
-   `core/PiiGateway.mask()` → `core/AiServiceClient`. 다른 경로로 ai-service를 부르면 안 된다.
+   `core/pii/PiiGateway.mask()` → `core/aiservice/AiServiceClient`. 다른 경로로 ai-service를 부르면 안 된다.
    세션 생성 입력 스키마에 성명·주민번호 필드는 애초에 존재하지 않는다.
    `ai-service`도 방어적으로 입구에서 PII 패턴을 재검사한다.
 4. **P4 — 근거 없는 판정은 무효.** `Judgment.Evidence`(발화 인용 + 루브릭 조항)가 비면 안 된다.
+
+### `core/` — 성격별 하위 패키지
+
+한 디렉토리에 엔티티·서비스·설정·컨버터·게이트·PII·FSM 이 섞여 있어서 갈랐다(이슈 #66).
+**루트에는 `EvidenceRecorder` 하나만 남는다** — 그건 core 가 evidence 를 모르게 하려고
+core 에 둔 경계 인터페이스라(ADR-003) 어느 하위 패키지에도 속하지 않는다.
+
+| 하위 패키지 | 무엇 |
+|---|---|
+| `core/session/` | 세션 엔티티·서비스·상태머신·오버라이드 |
+| `core/gate/` | `GateEngine`·`GateConfig` (판정) |
+| `core/pii/` | `PiiGateway` — P3 경계라 단독 패키지다 |
+| `core/aiservice/` | ai-service 호출 경계 |
+| `core/persistence/` | `BaseEntity`·JPA 감사·컨버터 |
+| `core/simulator/` | `SimulatorProperties` (설정 주입. 계산 엔진은 최상위 `simulator/`) |
+
+이 두 가지 — 루트에 하나만 남는 것, 위 표가 실물과 같은 것 — 은 `CorePackageBoundaryTest`가
+대조한다. 루트에 클래스를 새로 만드는 브랜치는 이 표와 **텍스트 충돌 없이** 합쳐지므로
+git이 알려주지 않는다(#142에서 실제로 그랬다).
 
 ### `evidence/` — 리포트와 감사 로그의 공통 기반
 
@@ -117,7 +136,7 @@ web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
   (서비스가 web DTO에 의존하지 않도록).
-- **엔티티는 `core/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
+- **엔티티는 `core/persistence/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
   append-only인 `evidence/`는 상속하지 않는다). 세션은 H2/JPA로 영속한다.
 
 ## 소유권과 기여 규칙
@@ -175,13 +194,16 @@ ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계�
 [`docs/decision-log.md`](docs/decision-log.md)에 전수로 모여 있다 — 자기 영역을 건드리기 전에
 해당 절을 먼저 본다. 남은 미결이 누구 몫이고 언제까지인지도 그 문서 10절에 있다.
 
+**두 문서를 갱신하는 절차는 `decision-sweep` 스킬**(`.claude/skills/decision-sweep/`)에 있다.
+워터마크 시각 이후에 오간 말을 전부 뽑고(`sweep.sh`), 형식을 검증한다(`check.sh`).
+규칙 자체는 스킬에 없다 — `decision-log.md`의 `갱신 규칙`·`ADR 과의 관계`와 이 파일이 근거이고,
+스킬은 절차와 함정만 담는다. 두 벌이 되면 갈린다.
+
 ## 알려진 문서 불일치
 
 스캐폴드가 Python(FastAPI) 서버에서 Spring으로 전환되며 남은 흔적들이다. 이 값을 신뢰하지 말 것.
 
 - `contracts/README.md`가 `server/app/models/`의 pydantic 모델을 언급한다 — 실제로는 Java
   `domain/` 레코드다.
-- `.env.example`의 `DB_URL=sqlite://...` — 실제 서버는 H2를 쓴다(`build.gradle`).
-- `.env.example`의 `AUDIO_RETENTION_MONTHS` — 기능 명세서 v1.1은 음성 입력을 범위에서 제외했다.
 - `docs/functional-spec-v1.1.md`는 본문 전사가 안 된 색인 상태다. 조항 단위 근거가 필요하면
   원본 문서를 봐야 한다.

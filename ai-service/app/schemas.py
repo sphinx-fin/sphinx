@@ -164,6 +164,8 @@ class ExtractionWarning(Strict):
         "LOOSE_MATCH",           # 낱자 사이 개행까지 허용해 찾음 — 거짓 양성 가능, 사람 확인 필요
         "AMBIGUOUS_SPAN",        # 같은 문면이 페이지에 여러 번 — 어느 것인지 확정 불가
         "PAGE_CORRECTED",        # 모델이 지목한 페이지에 없어 다른 페이지에서 찾음
+        "QUOTE_NARROWED",        # 긴 인용이 안 풀려 문장 경계로 좁혀 해소 — 수치는 전부 보존
+        "NARROWING_REFUSED",     # 좁히면 풀리지만 수치가 빠져 거부 (P6) → extraction_failed
         "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
         "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
     ]
@@ -339,9 +341,12 @@ class MismatchRequest(Strict):
     `survey_result`는 **freeform 매핑**이다(강희진 결정 ⓑ). `CreateSession.surveyResult`의
     `Map<String, Object>`를 그대로 받는다. 키를 문항 식별자로, 값을 기재 답변으로 본다.
 
-    ⚠️ 한계: 설문 쪽에서 `axis`를 주지 않으므로 어느 축의 모순인지는 문항 키·값의 문면을
-    해석해서 판정해야 한다. 문항 문면이 바뀌면 판정이 흔들릴 수 있다 — 정확도가 문제되면
-    설문 스키마에 axis 추가를 다시 제안한다.
+    키 규약(이슈 #44): `SUIT-` 로 시작하는 키만 문항이다. 그 외(`_surveySchemaVersion` 등)는
+    메타데이터이고 `mismatch.survey_questions()` 가 입구에서 걸러낸다.
+
+    `axis`는 설문이 주지 않지만(결정 ⓑ) 문항 키가 축을 말하므로 `question_id`에서
+    결정론적으로 나온다(`mismatch.AXIS_BY_QUESTION`). 모델 추론이 아니다 — 문항 문면을
+    다듬어도 축은 흔들리지 않는다.
     취약 요인(연령·가입금액대·투자경험·채널)은 여기 오지 않는다. 세션 typed 필드에서
     강희진이 직접 읽고 가중한다(결정 ⓓ).
     """

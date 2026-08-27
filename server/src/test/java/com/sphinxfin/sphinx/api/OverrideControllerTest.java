@@ -1,8 +1,8 @@
 package com.sphinxfin.sphinx.api;
 
-import com.sphinxfin.sphinx.core.CreateSessionCommand;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Signal;
@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,6 +55,22 @@ class OverrideControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
+
+        // 승인 뒤의 노출까지 본다. 이 둘이 S-07 리포트("오버라이드로 진행됨")가 쓸 값인데,
+        // PENDING_APPROVAL 까지만 걸어두면 승인 경로에서 빠져도 안 드러난다 (#116 리뷰).
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overrideStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.overrideReason").value(REASON))
+                // ❗값으로 박는다. isNotEmpty() 는 "누가" 를 안 봐서, 승인자를 요청자로
+                // 바꿔치기해도 전체가 초록이다(변이로 확인 — #125 리뷰). S-07 이 쓰는 것은
+                // 필드의 존재가 아니라 누가 승인했는가이고, 그게 ADR-002 견제 장치의 전부다.
+                //
+                // 부수 효과가 하나 더 있다 — 10.5(역할별 계정)가 붙어 이 폴백이 실제 주체로
+                // 바뀌는 순간 이 테스트가 깨진다. 그 작업을 하는 사람이 여기를 반드시 연다.
+                // TODO 주석은 안 읽혀도 빨간 테스트는 읽힌다.
+                .andExpect(jsonPath("$.data.overrideApprover").value("MGR(데모-미인증)"))
+                .andExpect(jsonPath("$.data.overrideDecidedAt").isNotEmpty());
     }
 
     @Test
@@ -75,6 +93,51 @@ class OverrideControllerTest {
                         .content("{\"reason\":\"" + REASON + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("OVERRIDE_NOT_ELIGIBLE"));
+    }
+
+    @Test
+    @DisplayName("사유 null(본문 {}) → 400 VALIDATION_ERROR (@NotBlank로 우회 차단)")
+    void nullReasonRejected() throws Exception {
+        String id = seed(Signal.RED);
+
+        // @Size만 있으면 null이 통과해 사유 없는 승인이 남는다(오준서 #68 리뷰) — @NotBlank가 막는다.
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("요청 후 GET /sessions/{id}가 오버라이드 사유·상태를 노출 (S-06 승인 화면 입력)")
+    void sessionResponseExposesOverride() throws Exception {
+        String id = seed(Signal.RED);
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"" + REASON + "\"}"));
+
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overrideStatus").value("PENDING_APPROVAL"))
+                .andExpect(jsonPath("$.data.overrideReason").value(REASON));
+    }
+
+    @Test
+    @DisplayName("❗승인자는 인증 주체다 — 미인증 폴백 문자열이 아니다 (#124)")
+    void approverComesFromAuthentication() throws Exception {
+        // 여기까지 override/approve 를 부르는 테스트가 전부 미인증이라 auth != null 분기가
+        // 실행 0건이었다(#125 리뷰). javadoc 의 "승인자는 인증 주체에서 얻는다" 가 코드에만
+        // 있고 검증에 없었다 — 승인자를 특정할 수 없는 승인이 불변 기록에 남으면 ADR-002
+        // 견제 장치가 무력해지므로, 그 약속을 여기서 고정한다.
+        String id = seed(Signal.RED);
+
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + REASON + "\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/{sid}/override/approve", id)
+                        .with(user("mgr-01").roles("MGR")))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(jsonPath("$.data.overrideApprover").value("mgr-01"));
     }
 
     /** 지정 신호로 판정 기록된 세션을 저장하고 id를 반환한다. */

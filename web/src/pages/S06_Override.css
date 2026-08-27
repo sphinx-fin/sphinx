@@ -1,0 +1,146 @@
+/* S-06 적색 승인 (관리자). 소유: 오준서.
+
+   불변 요건: **승인 버튼보다 사유가 위에 있어야 한다.** 사유를 접거나 아래에 두면
+   승인자가 안 읽고 누를 수 있고, API 에서 30자를 강제한 의미(ADR-002 견제 장치)가
+   화면에서 사라진다. 순서가 곧 요건이다. */
+
+.s06 {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.s06__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.s06__head h1,
+.s06 > h1 {
+  font-size: calc(36px * var(--scale));
+  line-height: calc(1.334 * var(--leading-scale));
+  letter-spacing: -0.027em;
+  font-weight: 700;
+}
+.s06__sid { margin-top: var(--space-2); color: var(--text-muted); font-size: calc(14px * var(--scale)); }
+.s06__sid code { background: var(--surface-sunken); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+
+.s06__error {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  line-height: calc(1.55 * var(--leading-scale));
+}
+
+/* ── 상태 ────────────────────────────────────────────────────────────────────
+   적색 판정 자체가 아니라 **오버라이드 진행 상태**다. 그래서 판정 3색을 쓰지 않는다 —
+   여기에 적색을 쓰면 "승인됨"이 적색으로 보이는 모순이 생긴다. */
+.s06__state {
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  font-size: calc(16px * var(--scale));
+}
+.s06__state--none             { border-left-color: var(--border-strong); }
+.s06__state--pending-approval { border-left-color: var(--accent); background: var(--surface); }
+.s06__state--approved         { border-left-color: var(--kohl-70); }
+
+/* ── 공통 ─────────────────────────────────────────────────────────────────── */
+.s06__request h2,
+.s06__approve h2 {
+  font-size: calc(20px * var(--scale));
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+
+.s06__warn {
+  background: var(--yellow-bg);
+  border: 1px solid var(--yellow);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  margin-bottom: var(--space-4);
+}
+
+.s06__label {
+  display: block;
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.s06__textarea {
+  width: 100%;
+  font: inherit;
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+.s06__textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+.s06__counter {
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+.s06__counter--short { color: var(--red); font-weight: 600; }
+
+/* ── 승인 검토 — 사유가 버튼 위에 온다 ──────────────────────────────────── */
+.s06__reason-shown { margin-bottom: var(--space-4); }
+.s06__reason-shown blockquote {
+  border-left: 3px solid var(--accent);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: calc(16px * var(--scale));
+  line-height: calc(1.65 * var(--leading-scale));
+  white-space: pre-wrap;
+}
+
+.s06__ineligible {
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text-muted);
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+}
+
+/* ── 버튼 ─────────────────────────────────────────────────────────────────── */
+.s06__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+.s06__btn {
+  font: inherit;
+  font-size: calc(15px * var(--scale));
+  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.s06__btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.s06__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.s06__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.s06__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+.s06__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.s06__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
+.s06__btn--quiet:hover:not(:disabled) { background: var(--surface-sunken); }

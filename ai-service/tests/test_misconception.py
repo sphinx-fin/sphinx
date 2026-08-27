@@ -183,3 +183,78 @@ def test_deterministic_fixture_cases_match_expected_type():
     assert checked, "결정론 케이스가 하나도 검증되지 않았다"
     if pending:
         pytest.skip(f"라이브러리 패턴 대기: {', '.join(pending)} — {_M04_PENDING}")
+
+
+# ── 경로 주입 (결정로그 10.7) ─────────────────────────────────────────────────
+def _reset_caches():
+    from app import config
+
+    config.settings.cache_clear()
+    misconception.library.cache_clear()
+
+
+@pytest.fixture
+def clean_caches():
+    _reset_caches()
+    yield
+    _reset_caches()
+
+
+def test_data_dir_is_injectable(monkeypatch, tmp_path, clean_caches):
+    """상대경로 하드코딩이면 컨테이너 안에서 파일을 못 찾는다."""
+    from app import config
+
+    monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path))
+    assert misconception.library_path() == tmp_path / misconception.LIBRARY_RELPATH
+
+
+def test_missing_library_says_which_env_var_to_set(monkeypatch, tmp_path, clean_caches):
+    """`FileNotFoundError` 만 나면 배포자가 무엇을 고쳐야 하는지 모른다."""
+    from app import config
+
+    monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path / "없는곳"))
+    with pytest.raises(misconception.MisconceptionLibraryMissing) as exc:
+        misconception.library()
+    assert config.DATA_DIR_ENV in str(exc.value)
+
+
+def test_library_validates_products_at_load_time(monkeypatch, tmp_path, clean_caches):
+    """★ docstring 이 "로딩 시점에 터뜨린다"고 적었는데 테스트에서만 불렸다.
+
+    검증을 로더 안으로 옮겼으므로, 테스트를 안 돌린 환경에서도 이 파일은 로드되지 않는다.
+    """
+    from app import config
+
+    lib = tmp_path / misconception.LIBRARY_RELPATH
+    lib.parent.mkdir(parents=True)
+    lib.write_text(
+        "version: 1\ntypes:\n  - id: M99-BOGUS\n    products: [CRYPTO]\n    patterns: [x]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path))
+    with pytest.raises(ValueError) as exc:
+        misconception.library()          # assert_products_are_canonical 를 따로 부르지 않는다
+    assert "CRYPTO" in str(exc.value)
+
+
+def test_startup_fails_when_data_is_missing(monkeypatch, tmp_path, clean_caches):
+    """기동 때 죽어야 한다 — 지연 로딩이면 기동은 성공하고 첫 고객 요청에서 500 이다."""
+    from fastapi.testclient import TestClient
+
+    from app import config
+    from app.main import app
+
+    monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path / "없는곳"))
+    with pytest.raises(misconception.MisconceptionLibraryMissing):
+        with TestClient(app):
+            pass
+
+
+def test_healthz_shows_where_data_comes_from():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    body = TestClient(app).get("/healthz").json()
+    assert body["data_dir_env"] == "SPHINX_DATA_DIR"
+    assert body["misconception_library_version"] >= 1

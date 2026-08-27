@@ -153,16 +153,54 @@ public class ReportService {
         return "report-" + sessionId + "-" + seq;
     }
 
+    /**
+     * 판정 한 건의 이력 항목. <b>그 판정을 만든 값들을 함께 담는다</b> (이슈 #136).
+     *
+     * <p>{@code askedQuestion} 과 {@code promptVersion} 이 여기 있어야 하는 이유는 같다 —
+     * <b>둘 다 측정을 결정하는데 재구성할 방법이 없다.</b> 질문은 ai-service 가 매번 생성하고
+     * 세션 테이블은 재질문 시 덮어쓰므로, 기록에서 빼면 <i>"이 판정은 어느 질문에 대한 답을
+     * 잰 것인가"</i> 에 답할 수 없다. {@code confidence} 는 프롬프트 버전마다 뜻이 다르다 —
+     * v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). 값만 있고 정의가 없으면 감사 시점에
+     * 0.65 가 두 가지 뜻일 수 있다(결정 10.38).
+     *
+     * <p>그래서 {@code promptVersion} 을 {@code confidence} <b>바로 뒤</b>에 둔다. 읽는 사람이
+     * 그 숫자의 뜻을 같은 자리에서 보게 하려는 것이고, 떨어뜨려 놓으면 하나만 보고 해석한다.
+     *
+     * <p><b>null 을 생략하지 않는다</b> — {@code misconceptionType} 과 같은 규약이다. 없음과
+     * 미기재는 다르고, 여기서 생략하면 <i>"필드가 생기기 전 레코드"</i> 와 <i>"값이 없는
+     * 판정"</i> 이 같아진다. append-only 라 섞인 뒤에는 못 가른다.
+     *
+     * <p>두 값은 <b>해시 대상에 들어간다</b>(내용의 일부다). 그게 요지다 — 빠져 있으면 질문이
+     * 바뀌어도 {@code contentHash} 가 같아서, 문서를 받은 사람이 대조로 그 변화를 못 잡는다.
+     *
+     * <h3>{@code misconceptionType} 은 리포트에 안 싣는다 (이슈 #144)</h3>
+     *
+     * <p>그 값이 <b>불공정영업 신호 그 자체</b>다 — {@code UnfairSalesTypes.isSignal} 이
+     * 보는 것이 이 필드이고, {@code M08-TYING} 이 오면 COMPL 로 사건이 나간다(F-GTE-003).
+     * 정책은 {@code signal:unfair:read} 를 COMPL 로 좁혀 뒀는데, 리포트는
+     * {@code report:read} 라 <b>SELLER 가 자기 세션 것을 연다.</b> 같은 값이 다른 action 으로
+     * 새면 그 좁힘이 무의미하다 — 판매자가 무엇이 탐지되는지 알면 문면만 바꿔 같은 영업을
+     * 한다(기획 7-4 · ADR-001).
+     *
+     * <p><b>역할에 따라 가리지 않는다.</b> 신호일 때만 빼면 <b>그 부재가 곧 신호</b>이고,
+     * 역할마다 다른 내용을 내면 {@code contentHash} 가 갈려 <i>"고객이 받은 문서를 나중에
+     * 대조한다"</i> 가 성립하지 않는다. 그래서 <b>항상 뺀다.</b>
+     *
+     * <p>감사가 손해 보지 않는다 — 값은 {@link StoredEvidenceRecorder} 가 불변 기록에 그대로
+     * 남기고, COMPL 은 {@code audit:read}(org)로 그 체인을 읽는다. <b>리포트는 기록이 아니라
+     * 기록에서 만든 문서</b>이고, 이 필드는 그 문서의 독자(판매자 포함)에게 줄 것이 아니다.
+     */
     private static Map<String, Object> judgmentHistoryEntry(Map<String, Object> judgment,
                                                             Map<String, Object> payload) {
         Map<String, Object> history = new LinkedHashMap<>();
         history.put("at", payload.get("at"));
         history.put("reverifyCount", payload.get("reverifyCount"));
+        history.put("askedQuestion", payload.get("askedQuestion"));   // 봉투 층 — 서버가 채운다
         history.put("grade", judgment.get("grade"));
         history.put("confidence", judgment.get("confidence"));
+        history.put("promptVersion", judgment.get("promptVersion"));  // confidence 의 정의다
         history.put("evidence", judgment.get("evidence"));
         history.put("reason", judgment.get("reason"));
-        history.put("misconceptionType", judgment.get("misconceptionType"));
         return history;                     // 색은 담지 않는다 (ADR-004 §5)
     }
 

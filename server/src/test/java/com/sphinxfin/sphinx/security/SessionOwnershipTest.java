@@ -2,8 +2,8 @@ package com.sphinxfin.sphinx.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

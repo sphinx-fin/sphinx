@@ -15,16 +15,89 @@
 """
 from __future__ import annotations
 
+import logging
+from functools import lru_cache
+
 import re
 import unicodedata
 from pathlib import Path
 
-from . import misconception, rubrics
+from . import misconception, rubrics, textsim
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v1.md"
-PROMPT_VERSION = "F-SCR-001_v1"
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
+PROMPT_VERSION = "F-SCR-001_v2"
+
+log = logging.getLogger(__name__)
+
+#: 이 값 이상이면 발화가 문서·루브릭 문면을 옮긴 것으로 본다. 오해 라이브러리의
+#: `NGRAM_THRESHOLD`(0.62)와 같은 계산이지만 숫자는 따로 둔다 — 저쪽은 "짧은 패턴이 발화에
+#: 있는가", 이쪽은 "발화가 긴 문면에서 잘려나왔는가"로 분포가 다르다.
+#:
+#: **dev set 실측(LLM 불필요, `test_echo_threshold_has_margin` 이 고정)**
+#:
+#:     실제 발화 11건        최대 0.256  (VAR-PRINCIPAL-UNDERSTOOD)
+#:     문면을 그대로 옮김     1.000
+#:     어미만 바꾼 부분 복창   0.800
+#:
+#: 0.6 은 실측 최대의 2.3배이고 부분 복창(0.80) 아래다. 처음 0.85 로 뒀더니 어미가 바뀐
+#: 부분 복창을 놓쳤다 — 복창은 보통 어미를 자기 말로 바꿔 온다.
+ECHO_THRESHOLD = 0.6
+
+#: 복창 판정을 건너뛰는 발화 길이 하한(정규화 후 문자 바이그램 개수). **상수가 아니라
+#: 루브릭에서 유도한다** — `min(조항 바이그램) - 1`.
+#:
+#: ## 처음 쓴 근거가 틀렸다 (PR #114 리뷰, 정세현)
+#:
+#: 원래 주석은 *"분모가 작으면 우연 일치가 점수를 지배한다"* 였다. 실측이 그걸 부정한다.
+#:
+#:     '손실'       1bg  containment=1.000   ← 조항 문면 그대로다. 우연이 아니다
+#:     '투자원금의'  4bg  containment=1.000   ← 조항 문면 그대로다
+#:     '원금 손실'   3bg  containment=0.667   ← 어휘만 겹친다(순서 다름)
+#:
+#: 전체 루브릭으로 넓혀 재보면 두 군이 **바이그램 개수로 안 갈린다.**
+#:
+#:     조항 부분열(verbatim)      1bg 부터
+#:     어휘만 겹침(순서 다름)      9bg 까지
+#:
+#: 즉 이 하한은 "진짜 복창"과 "우연 일치"를 가르는 도구가 될 수 없다. 그런 도구로 쓰려고
+#: 값을 고르면 근거가 없다.
+#:
+#: ## 하한의 실제 역할 — 무의미한 계산을 건너뛴다
+#:
+#: 복창 판정의 목적은 *"요소는 다 말했는데 자기 말인지 모르겠다"* 를 잡는 것이다. 그 상황은
+#: **U1 일 때만** 생기고, U1 은 필수 요소를 자기 말로 설명해야 나온다. 조항 하나를 담을
+#: 길이보다 짧은 발화는 요소 미충족이라 U2 이하가 되고, 게이트 R-04 가 이미 YELLOW 로 잡는다.
+#:
+#: 그래서 값의 **유일한 실제 제약은 상방**이다 — 가장 짧은 조항을 그대로 옮긴 복창을 놓치지
+#: 않아야 한다. 정세현이 *"상방 하나로만 값을 고정하면 경계선 바로 아래다"* 라고 한 것이
+#: 정확히 이 사실을 가리킨다. 그러면 **경계선 바로 아래가 정답**이고, 상수로 박을 이유가 없다.
+#:
+#: 루브릭에서 유도하면 조항이 바뀔 때 자동으로 따라온다. `#112` 가 조항 최단을 13bg → 6bg 로
+#: 바꿨을 때 하드코딩 값(8)이 깨진 것이 그 필요의 실측이다.
+@lru_cache(maxsize=1)
+def min_echo_bigrams() -> int:
+    """가장 짧은 루브릭 조항보다 하나 작은 값. 하한의 유일한 제약이 상방이라 그렇다."""
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(clause)))
+        for rubric in rubrics.all_rubrics().values()
+        for clause in rubric.required_elements
+    )
+    return max(1, shortest - 1)
+
+
+#: 실제 발화의 최대 echo 와 `ECHO_THRESHOLD` 사이에 있어야 하는 최소 간격.
+#: 여유가 없으면 정상 이해가 황색이 된다(기획서 5절 관리지표 10%).
+#:
+#: 실측 최대는 `VAR-DEPOSIT-FULL`(0.368)이다 — 예금자보호 항목은 발화와 조항이 **같은 법률
+#: 용어**를 쓰므로 구조적으로 높다. 복창이 아니라 어휘가 겹치는 것이고, 이 항목군에서는
+#: 여유가 늘 좁을 것이다. 상수로 드러내 두면 발화를 추가할 때 어디까지 좁혀졌는지 보인다.
+ECHO_MARGIN_MIN = 0.15
+
+#: 복창일 때 씌우는 confidence 상한. 게이트 R-05(`anyConfidenceBelow 0.7`)가 이걸 받는다.
+#: **임계값 자체는 게이트 소유다**(ADR-005) — 여기 있는 건 측정값의 상한이지 판정 정책이 아니다.
+ECHO_CONFIDENCE_CAP = 0.3
 
 # 신뢰도 기반 황색 강등은 **여기서 하지 않는다.**
 # 강희진 결정(PR #10 리뷰): P1 경계상 게이트 정책이 채점에 섞이지 않아야 하므로
@@ -60,6 +133,7 @@ def score(
     judgment = _drop_llm_misconception_type(judgment)
     verify_quote_is_verbatim(judgment, answer_text)
     verify_rubric_clause_is_published(judgment, rubric)
+    judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
     return apply_misconception_floor(judgment, matched, rubric)
 
 
@@ -89,6 +163,73 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
         question=question,
         answer_text=answer_text,
     )
+
+
+# ── 문면 복창: 모델에게 묻지 않고 계산한다 ─────────────────────────────────────
+def echo_score(answer_text: str, rubric: rubrics.Rubric, risk_item: RiskItem) -> float:
+    """발화가 문서·루브릭 문면을 그대로 옮긴 정도. 0.0~1.0.
+
+    프롬프트 v2 는 confidence 를 *"다른 채점자에게도 같게 나올 것인가"* 로 정의했고, 그
+    정의에서 가장 중요한 경우가 **복창**이다 — 요소는 다 들어 있지만 자기 말로 이해한 것인지
+    따라 말한 것인지 발화만으로는 가려지지 않는다(기획서 4절 *"자기 말로 설명"*).
+
+    이걸 모델에게 물었더니 못 했다. 같은 내용에 종결어미만 바꾼 절제 실험에서
+
+        "…원금이 깎여서 나온다고 들었어요"   → 0.30
+        "…원금이 깎여서 나옵니다"            → 0.90
+        "투자원금의 손실이 발생할 수 있습니다" → 0.30   (진짜 복창)
+
+    이 나왔다. 전문(傳聞) 종결이 복창으로 읽힌다. 어미를 판단 재료로 쓰지 말라는 지시를
+    프롬프트에 세 번(문장 · 절제 규칙 · 예시) 넣어도 flash-lite 는 바뀌지 않았고, 오발동이
+    진짜 복창과 같은 밴드(0.3)에 있어 게이트 임계값으로도 갈리지 않았다.
+
+    그래서 계산으로 내린다 — 스팬을 원문에서 계산하고 유형 ID 를 라이브러리에서만 받는 것과
+    같은 층이다(`모델 출력을 그대로 믿지 않는다`). 임계값이 숫자로 드러나 재현되고 심사에서
+    설명 가능해진다.
+
+    **너무 짧은 발화는 계산하지 않는다** — `min_echo_bigrams()` 참고. 가장 짧은 조항도 담지 못하는
+    길이라 U1 이 나오지 않고, 상한을 씌워도 게이트 판정이 바뀌지 않는다.
+
+    대조 대상은 **고객이 옮겨 적을 수 있는 문면**이다.
+    - `condition.value_text` — 상품문서 원문 조항
+    - `rubric.required_elements` — 정답 문면. 루브릭은 공개 의무 대상이라 판매자가 읽을 수 있다
+
+    방향은 `containment(발화, 문면)` 이다 — **발화의 바이그램이 문면에 얼마나 있는지**.
+    반대 방향으로 재면 긴 원문을 짧게 인용한 발화가 항상 낮게 나와 복창이 안 잡힌다.
+    """
+    grams = len(textsim.bigrams(textsim.normalize(answer_text)))
+    floor = min_echo_bigrams()
+    if grams < floor:
+        log.info(
+            "복창 판정 생략: 발화 바이그램 %d개 < %d — 가장 짧은 조항도 담지 못하는 길이라 "
+            "U1 이 나오지 않는다(상한을 씌워도 판정이 바뀌지 않는다)", grams, floor,
+        )
+        return 0.0
+
+    references = [risk_item.condition.value_text, *rubric.required_elements]
+    return max((textsim.containment(answer_text, ref) for ref in references), default=0.0)
+
+
+def cap_confidence_if_echoed(
+    judgment: Judgment, answer_text: str, rubric: rubrics.Rubric, risk_item: RiskItem
+) -> Judgment:
+    """복창이면 confidence 에 상한을 씌운다. **등급은 건드리지 않는다.**
+
+    등급을 깎지 않는 이유: 이해한 사람과 따라 말한 사람을 발화만으로 구분할 수 없다. 등급을
+    추측해 내리면 이해→오해 오판(기획서 5절 관리지표 10%)을 우리가 만드는 것이다. 가릴 수
+    없다는 사실 자체를 confidence 로 보고하고, 판정은 게이트가 한다(P1).
+
+    **강등 사실을 `reason` 에 남긴다.** 조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지
+    설명할 수 없다.
+    """
+    echo = echo_score(answer_text, rubric, risk_item)
+    if echo < ECHO_THRESHOLD or judgment.confidence <= ECHO_CONFIDENCE_CAP:
+        return judgment
+    return judgment.model_copy(update={
+        "confidence": ECHO_CONFIDENCE_CAP,
+        "reason": f"{judgment.reason} (문서 문면 복창 포함도 {echo:.2f} ≥ "
+                  f"{ECHO_THRESHOLD} — 자기 말인지 가릴 수 없어 확신도 상한 적용)",
+    })
 
 
 # ── 후처리: 전부 안전한 방향으로만 움직인다 ────────────────────────────────────

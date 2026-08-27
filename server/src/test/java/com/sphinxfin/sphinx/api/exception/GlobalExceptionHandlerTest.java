@@ -1,7 +1,7 @@
 package com.sphinxfin.sphinx.api.exception;
 
-import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
-import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
+import com.sphinxfin.sphinx.core.session.ReExplainNotEligibleException;
+import com.sphinxfin.sphinx.core.session.ReverifyExhaustedException;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

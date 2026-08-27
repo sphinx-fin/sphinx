@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import routes
-from .config import configure_logging, settings
+from . import misconception, routes, rubrics
+from .config import DATA_DIR_ENV, settings,configure_logging
+
 from .pii import PiiDetected, assert_payload_clean
 
 log = logging.getLogger(__name__)
@@ -94,10 +96,32 @@ class PiiGuardMiddleware:
         await self.app(scope, replay, send)
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """기동 시점에 데이터 파일을 실제로 읽는다 — 첫 요청 때 죽지 않게.
+
+    컨테이너에서 `data/` 를 안 마운트하면 여기서 `MisconceptionLibraryMissing` 이 나고
+    메시지가 `SPHINX_DATA_DIR` 을 알려준다(결정로그 10.7). 이걸 지연 로딩으로 두면
+    **기동은 성공하고 첫 고객 요청에서 500** 이 된다 — 배포 실수를 데모 중에 발견하는 경로다.
+
+    루브릭↔오해 라이브러리 교차 참조도 여기서 본다. `assert_related_misconceptions_exist`
+    는 로더 안에 넣을 수 없다 — 두 로더가 서로를 부르면 순환이 된다.
+    """
+    misconception.library()          # 파일 읽기 + products 계약 검증
+    rubrics.all_rubrics()            # 루브릭 파싱
+    rubrics.assert_related_misconceptions_exist()
+    log.info(
+        "데이터 로드 완료: data_dir=%s 오해유형=%d 루브릭=%d",
+        settings().data_dir, len(misconception.library()), len(rubrics.all_rubrics()),
+    )
+    yield
+
+
 app = FastAPI(
     title="SphinX AI Service",
     version="0.1.0",
     description="LLM 파이프라인 (내부망 전용 — 브라우저에 노출 금지)",
+    lifespan=lifespan,
 )
 app.add_middleware(PiiGuardMiddleware)
 app.include_router(routes.router)
@@ -115,7 +139,15 @@ async def _pii_handler(request: Request, exc: PiiDetected) -> JSONResponse:
 
 @app.get("/healthz")
 def healthz() -> dict:
-    """키 유무를 노출하지만 값은 절대 노출하지 않는다."""
+    """키 유무를 노출하지만 값은 절대 노출하지 않는다.
+
+    `prompt_versions` 는 **어느 프롬프트로 측정 중인지**다. 프롬프트 v2 에서 `confidence` 의
+    정의가 바뀌어(등급 확신도 → 채점 재현 가능성) v1 과 v2 의 숫자를 섞어 비교할 수 없게
+    됐는데, `Judgment` 에 프롬프트 버전 필드가 없어 판정 기록만 봐서는 어느 정의인지 모른다.
+    계약 변경(강희진 승인)이 필요한 사안이라 우선 실행 중인 값을 여기서 볼 수 있게 한다.
+    """
+    from . import mismatch, scoring
+
     cfg = settings()
     return {
         "status": "ok",
@@ -124,4 +156,11 @@ def healthz() -> dict:
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
         "log_level": cfg.log_level,         # 관측이 켜져 있는지 (PR #113·#114 리뷰)
+        "data_dir": str(cfg.data_dir),      # 어디서 오해 라이브러리를 읽는지 (10.7)
+        "data_dir_env": DATA_DIR_ENV,
+        "misconception_library_version": misconception.library_version(),
+        "prompt_versions": {
+            "F-SCR-001": scoring.PROMPT_VERSION,
+            "F-DET-002": mismatch.PROMPT_VERSION,
+        },
     }

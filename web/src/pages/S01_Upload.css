@@ -1,0 +1,97 @@
+/* S-01 문서 업로드·추출 결과. 소유: 오준서.
+
+   불변 요건: **추출 실패 큐가 추출 결과보다 위에 온다.** 실패를 아래로 내리거나 접으면
+   "7개 추출됨"만 보이고 빠진 3개를 아무도 모른다. 순서가 곧 요건이다(E-EXT-03). */
+
+.s01 { max-width: 52rem; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-5); }
+
+.s01__head h1 { font-size: calc(36px * var(--scale)); line-height: calc(1.334 * var(--leading-scale));
+  letter-spacing: -0.027em; font-weight: 700; }
+.s01__sub { margin-top: var(--space-2); color: var(--text-muted); font-size: calc(16px * var(--scale)); }
+
+.s01__error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+
+/* ── 업로드 ───────────────────────────────────────────────────────────────── */
+.s01__upload {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.s01__label { font-size: calc(13px * var(--scale)); font-weight: 600; color: var(--text-muted); margin-top: var(--space-2); }
+.s01__file, .s01__select {
+  font: inherit; font-size: calc(15px * var(--scale));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--surface); color: var(--text);
+}
+.s01__file:focus-visible, .s01__select:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+/* ── 파싱 결과 ────────────────────────────────────────────────────────────── */
+.s01__parse {
+  border: 1px solid var(--border); border-left-width: 5px;
+  border-radius: var(--radius); padding: var(--space-4) var(--space-5);
+  background: var(--surface); font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+.s01__parse--parsed { border-left-color: var(--border-strong); }
+/* 문서를 못 읽은 것은 사람이 바로 조치해야 하는 상태라 눈에 띄게 둔다. */
+.s01__parse--parse_failed { border-left-color: var(--yellow); background: var(--yellow-bg); }
+.s01__parse code { background: var(--surface-sunken); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+
+/* ── 추출 실패 큐 — 결과보다 위 ───────────────────────────────────────────── */
+.s01__failed {
+  background: var(--yellow-bg); border: 1px solid var(--yellow);
+  border-radius: var(--radius); padding: var(--space-4) var(--space-5);
+}
+.s01__failed h2 { font-size: calc(18px * var(--scale)); font-weight: 700; color: var(--yellow); margin-bottom: var(--space-2); }
+.s01__failed-why { font-size: calc(14px * var(--scale)); line-height: calc(1.6 * var(--leading-scale)); margin-bottom: var(--space-3); }
+.s01__failed ul { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.s01__failed li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+.s01__item-name { font-weight: 600; }
+.s01__item-id { font-size: calc(12px * var(--scale)); color: var(--text-muted);
+  background: var(--surface); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+
+/* ── 추출된 항목 ──────────────────────────────────────────────────────────── */
+.s01__items h2 { font-size: calc(20px * var(--scale)); font-weight: 600; margin-bottom: var(--space-3); }
+.s01__count { color: var(--text-muted); font-weight: 400; font-size: calc(15px * var(--scale)); }
+.s01__of { color: var(--text-muted); font-weight: 400; font-size: calc(14px * var(--scale)); }
+.s01__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
+
+.s01__list { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.s01__item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5); }
+.s01__item-head { display: flex; gap: var(--space-3); align-items: baseline; justify-content: space-between; }
+.s01__item-head h3 { font-size: calc(17px * var(--scale)); font-weight: 600; }
+
+.s01__importance {
+  flex: none; font-size: calc(12px * var(--scale)); font-weight: 600;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2); color: var(--text-muted); background: var(--surface);
+}
+.s01__importance--required { color: var(--text); border-color: var(--kohl-50); }
+
+/* 원문 인용 — 가공하지 않는다(P6). 인용 표시를 시각적으로 분명히 한다. */
+.s01__quote {
+  margin-top: var(--space-2);
+  border-left: 3px solid var(--accent); padding-left: var(--space-3);
+  font-size: calc(15px * var(--scale)); line-height: calc(1.6 * var(--leading-scale));
+}
+.s01__span { margin-top: var(--space-2); font-size: calc(12px * var(--scale)); color: var(--text-muted); }
+.s01__span-note { color: var(--kohl-30); }
+
+/* ── 버튼 ─────────────────────────────────────────────────────────────────── */
+.s01__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.s01__btn {
+  font: inherit; font-size: calc(15px * var(--scale)); font-weight: 600;
+  padding: var(--space-3) var(--space-5); border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.s01__btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.s01__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.s01__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.s01__btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); margin-top: var(--space-4); }
+.s01__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.s01__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
+.s01__btn--quiet:hover:not(:disabled) { background: var(--surface-sunken); }

@@ -34,7 +34,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import parsing, templates
+import re
+
+from . import numerics, parsing, templates, textsim
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import (
     Condition,
@@ -136,6 +138,8 @@ def _to_risk_item(
     """인용을 원문 스팬으로 해소한다. 못 하면 None — 호출자가 실패 항목으로 만든다."""
     span = _resolve(candidate, doc, warnings)
     if span is None:
+        span = _rescue(candidate, doc, template_item, warnings)
+    if span is None:
         warnings.append(ExtractionWarning(
             code="SPAN_UNRESOLVED", item_id=candidate.item_id,
             message=f"인용을 원문에서 찾지 못했다: {candidate.quote[:40]!r}",
@@ -191,6 +195,137 @@ def _resolve(candidate: ExtractedCandidate, doc: dict, warnings: list[Extraction
                 message=f"모델이 p{candidate.page} 라고 했으나 p{page} 에서 찾았다",
             ))
             return span
+    return None
+
+
+# ── 인용 좁히기 구제 (P6 조건부) ──────────────────────────────────────────────
+#: 이보다 짧아지면 어느 조건인지 특정되지 않는다.
+MIN_NARROWED_QUOTE_CHARS = 12
+
+#: 좁히기 시도 상한. `loose` 전략은 낱자마다 `\s*` 를 끼운 정규식이라 페이지 전체 검색이
+#: 싸지 않다. 실패한 항목에만 도는 경로지만 상한을 둔다 — 긴 것부터 보므로 답은 앞에서 나온다.
+MAX_RESCUE_ATTEMPTS = 160
+
+_WS_SPLIT = re.compile(r"\s+")
+
+
+def _narrowed_candidates(quote: str) -> list[str]:
+    """좁힌 인용 후보. **긴 것부터** — 조건 문면을 최대한 남긴다.
+
+    문장 경계로만 자르면 안 된다. 표가 섞인 구간의 열 누출은 **문장부호를 데리고 오지
+    않는다** — 실측 원문이 이렇게 생겼다.
+
+        …최초기준가격의 85%인 / 조기상환지급일에 자동조기상환되며, 상환금액은 (연 11.00%)
+        환 다음과 같습니다.
+
+    `(연 11.00%)` 와 `환` 이 옆 열에서 끼어든 조각이고 그 앞에 마침표가 없다. 그래서
+    **어절 단위 연속 구간**을 본다. 앞에 끼는 경우도 뒤에 끼는 경우도 있어 양쪽을 다 만든다.
+    """
+    tokens = _WS_SPLIT.split(quote.strip())
+    if len(tokens) < 2:
+        return []
+    out: list[str] = []
+    for size in range(len(tokens) - 1, 0, -1):
+        for i in range(len(tokens) - size + 1):
+            window = " ".join(tokens[i:i + size])
+            if len(window) >= MIN_NARROWED_QUOTE_CHARS:
+                out.append(window)
+            if len(out) >= MAX_RESCUE_ATTEMPTS:
+                return out
+    return out
+
+
+#: 좁힌 창이 항목의 것이라고 보려면 `cue` 와 이만큼 겹쳐야 한다.
+#:
+#: **왜 `cue` 인가** — 좁히기 후보 중 무엇이 진짜 조건인지 판별할 신뢰할 만한 신호가
+#: `cue` 뿐이다. 그것이 그 항목이 무엇인지를 정의하는 유일한 문면이고, `cue` 에는 숫자를
+#: 금지해 뒀으므로(회차마다 달라진다) 수치에 휘둘리지 않는다. 표 조각은 cue 어휘와 무관해서
+#: 낮게 나온다.
+#:
+#: PR #118 리뷰(정세현)의 지적으로 넣었다. 그전 규칙("수치가 하나라도 남으면 통과 + 첫 성공
+#: 즉시 반환")은 **"누출 열이 진짜 조건문보다 짧다" 는 암묵 가정**에만 의존했고, 역방향
+#: 픽스처로 실제로 깨지는 것을 확인했다(아래 실측).
+#:
+#:     항목                            진짜 조건   누출 조각
+#:     ELS-ELDERLY-COOLING              0.560      0.040
+#:     ELS-EARLY-REDEMPTION-CONDITION   0.633      0.200
+#:
+#: 0.35 는 두 군 사이다. 낮은 쪽(0.200)보다 위, 높은 쪽(0.560)보다 아래.
+CUE_CONTAINMENT_MIN = 0.35
+
+
+def _rescue(candidate: ExtractedCandidate, doc: dict, template_item: templates.TemplateItem,
+            warnings: list[ExtractionWarning]):
+    """인용이 안 풀릴 때 어절 경계로 좁혀 다시 해소한다. 결정론이다 — LLM 을 다시 부르지 않는다.
+
+    ## 후보를 고르는 규칙 두 개
+
+    통과 조건이 둘이고, **둘 다 없으면 엉뚱한 표 셀이 조건으로 들어온다.**
+
+    1. **`cue` 와 겹쳐야 한다** (`CUE_CONTAINMENT_MIN`). 누출 조각도 원문에 실재하므로
+       "원문에서 찾았다" 만으로는 진짜 조건과 구별되지 않는다 — 원 인용이 해소에 실패한 것은
+       두 열이 이어붙은 문자열이 원문에 없어서지 각 조각이 없어서가 아니다.
+    2. **수치가 하나도 안 남는 좁히기는 거부한다** (P6). 막아야 하는 것은
+       `condition.value_text` 에 숫자가 없는 RiskItem 이다. 추출은 성공으로 보이는데
+       채점 프롬프트의 `[상품 조건 원문]` 에 수치가 없어 "수치로 언급" 루브릭이 검증 불가가
+       되고, 재설명은 원문에 없는 숫자를 전부 환각 처리한다. 조용히 등급을 망친다.
+
+    "수치 **전부** 보존" 은 쓸 수 없다 — 누출 열이 가짜 수치를 데려오므로 정답을 탈락시킨다
+    (`11.00%` 는 옆 열 값이고 조건의 수치는 `85%` 다).
+
+    ## 첫 성공이 아니라 cue 가 가장 높은 창을 고른다
+
+    길이 내림차순으로 첫 성공을 취하면 **누출이 진짜보다 길 때 누출을 고른다.** 역방향
+    픽스처로 재현했다 — 각주(45자)가 조건(23자)보다 길어 먼저 잡히고, 정답 스팬 대신
+    각주 스팬이 나왔다. 통과 후보를 모아 `cue` 포함도 최댓값을 고르고, 동점이면 긴 쪽이다.
+
+    수치가 일부만 남으면 받되 어느 수치가 떨어졌는지 경고에 적는다(`사람 확인 필요:`).
+    """
+    want = set(numerics.numbers(candidate.quote))
+    cue = template_item.cue
+    accepted: list[tuple[float, int, str, dict]] = []
+    refused_no_number: str | None = None
+    refused_off_cue: str | None = None
+
+    for narrowed in _narrowed_candidates(candidate.quote):
+        probe = candidate.model_copy(update={"quote": narrowed})
+        span = _resolve(probe, doc, [])       # 이 단계의 PAGE_CORRECTED 는 삼킨다
+        if span is None:
+            continue
+        if want and not set(numerics.numbers(narrowed)):
+            refused_no_number = refused_no_number or narrowed
+            continue
+        cue_score = textsim.containment(cue, narrowed)
+        if cue_score < CUE_CONTAINMENT_MIN:
+            refused_off_cue = refused_off_cue or narrowed
+            continue
+        accepted.append((cue_score, len(narrowed), narrowed, span))
+
+    if accepted:
+        cue_score, _, narrowed, span = max(accepted, key=lambda a: (a[0], a[1]))
+        dropped = sorted(want - set(numerics.numbers(narrowed)))
+        detail = "수치는 전부 남았다" if not dropped else f"사람 확인 필요: 빠진 수치 {dropped}"
+        warnings.append(ExtractionWarning(
+            code="QUOTE_NARROWED", item_id=candidate.item_id,
+            message=(f"인용을 {len(candidate.quote)}자 → {len(narrowed)}자로 좁혀 해소했다 "
+                     f"(cue 포함도 {cue_score:.2f}, 후보 {len(accepted)}건 중 최댓값). {detail}. "
+                     f"남은 수치 {sorted(set(numerics.numbers(narrowed))) or '없음'}"),
+        ))
+        return span
+
+    if refused_off_cue is not None:
+        warnings.append(ExtractionWarning(
+            code="NARROWING_REFUSED", item_id=candidate.item_id,
+            message=(f"좁힌 인용({len(refused_off_cue)}자)은 원문에서 찾았지만 cue 와 겹치지 "
+                     f"않아 거부했다 — 표 옆 열 조각일 수 있다. 인용: {refused_off_cue[:50]!r}"),
+        ))
+    elif refused_no_number is not None:
+        warnings.append(ExtractionWarning(
+            code="NARROWING_REFUSED", item_id=candidate.item_id,
+            message=(f"좁힌 인용({len(refused_no_number)}자)은 원문에서 찾았지만 수치가 하나도 "
+                     f"남지 않아 거부했다 — 원 인용 수치 {sorted(want)}. 조건에서 수치가 "
+                     f"사라지면 채점이 조용히 망가진다"),
+        ))
     return None
 
 

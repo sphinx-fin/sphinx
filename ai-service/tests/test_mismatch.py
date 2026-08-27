@@ -15,7 +15,13 @@ from app import mismatch
 from app.llm_client import LlmClient
 from app.schemas import Contradiction, SuitabilityMismatch, SurveyRef
 
-SURVEY = {"Q3_위험감수": "원금 손실을 감수할 수 있다", "Q7_기간": "3년 이상"}
+#: 문항 키는 #44 에서 확정된 `s02-survey-v1` 세트다. `_surveySchemaVersion` 을 **일부러**
+#: 넣어 둔다 — 메타키가 문항으로 새는 결함(#98 ②)의 회귀 고정이다.
+SURVEY = {
+    "_surveySchemaVersion": "s02-survey-v1",
+    "SUIT-PRINCIPAL-LOSS": "손실이 나더라도 감수할 수 있다",
+    "SUIT-HORIZON": "5년 이상 묶어둘 수 있다",
+}
 UTTERANCES = [{"item_id": "ELS-PRINCIPAL-LOSS-WARNING",
                "text": "원금은 절대 손해 보면 안 됩니다. 은행이라 믿고 온 거예요."}]
 
@@ -32,8 +38,8 @@ class FakeLlm(LlmClient):
 
 def _contradiction(
     quote: str = "원금은 절대 손해 보면 안 됩니다",
-    question_id: str = "Q3_위험감수",
-    recorded: str = "원금 손실을 감수할 수 있다",
+    question_id: str = "SUIT-PRINCIPAL-LOSS",
+    recorded: str = "손실이 나더라도 감수할 수 있다",
     confidence: float = 0.9,
 ) -> Contradiction:
     return Contradiction(
@@ -191,3 +197,181 @@ def test_detect_takes_no_vulnerability_inputs():
                          "vulnerability_weights", "coaching_score"}
     assert params == {"session_id", "survey_result", "utterances",
                       "survey_schema_version", "llm"}
+
+
+# ── 설문 맵: 문항과 메타데이터 (#98 ②, 규약 #44) ──────────────────────────────
+def test_metadata_keys_are_not_questions():
+    kept = mismatch.survey_questions(SURVEY)
+    assert "_surveySchemaVersion" not in kept
+    assert set(kept) == {"SUIT-PRINCIPAL-LOSS", "SUIT-HORIZON"}
+
+
+def test_metadata_key_does_not_reach_the_prompt():
+    """모델이 `_surveySchemaVersion` 을 설문 문항으로 읽으면 안 된다."""
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=False, confidence=0.0,
+        contradictions=[], reason="없다",
+    ))
+    mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    prompt = llm.calls[0]["prompt"]
+    assert "_surveySchemaVersion" not in prompt
+    assert "SUIT-PRINCIPAL-LOSS" in prompt
+
+
+def test_metadata_key_cannot_be_cited_as_survey_evidence():
+    """★ 이게 #98 이 적은 것보다 나쁜 쪽이다.
+
+    `_is_traceable` 은 `question_id in survey_result` 만 봤다. 메타키도 맵에 있으므로
+    **문항이 아닌 것을 근거로 든 모순이 P4 대조를 통과했다.** 필터를 `build_prompt` 안에만
+    두면 이 경로는 그대로 남는다 — 그래서 입구에서 걸러야 한다.
+    """
+    bogus = _contradiction(
+        question_id="_surveySchemaVersion", recorded="s02-survey-v1", confidence=0.95,
+    )
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=True, confidence=0.95,
+        contradictions=[bogus], reason="메타키를 근거로 든 판정",
+    ))
+    out = mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    assert out.contradictions == []
+    assert out.mismatch is False
+
+
+# ── 축 고정 (#44 회신) ────────────────────────────────────────────────────────
+def test_axis_comes_from_question_id_not_from_the_model():
+    """모델이 축을 틀리게 내도 `question_id` 가 정한다.
+
+    v1 은 모델이 문항 문면을 읽어 축을 판단했고 그게 '약한 고리'였다. 키가 축을 말하므로
+    (#44 ①) 축은 계산되는 값이다.
+    """
+    # 축 기본값은 principal_preservation 인데 참조는 기간 문항이다.
+    wrong = _contradiction(question_id="SUIT-HORIZON", recorded="5년 이상 묶어둘 수 있다")
+    llm = FakeLlm(SuitabilityMismatch(
+        session_id="S", status="evaluated", mismatch=True, confidence=0.9,
+        contradictions=[wrong], reason="축이 틀린 판정",
+    ))
+    out = mismatch.detect("S", SURVEY, UTTERANCES, llm=llm)
+    assert [c.axis for c in out.contradictions] == ["investment_horizon"]
+
+
+def test_axis_map_is_one_to_one_with_the_contract():
+    """계약 enum 과 매핑이 어긋나면 한쪽 축이 영원히 안 나오거나 판정 시점에 죽는다."""
+    mismatch.assert_axis_map_matches_contract()
+    assert len(mismatch.AXIS_BY_QUESTION) == len(set(mismatch.AXIS_BY_QUESTION.values()))
+
+
+def test_unknown_survey_question_is_rejected_not_guessed():
+    """설문 세트가 바뀌면 축 매핑도 같이 올라와야 한다 — 조용히 빼고 판정하지 않는다."""
+    with pytest.raises(mismatch.UnknownSurveyQuestion) as exc:
+        mismatch.survey_questions({"SUIT-CRYPTO-EXPERIENCE": "없다"})
+    assert "SUIT-CRYPTO-EXPERIENCE" in str(exc.value)
+
+
+def test_survey_with_only_metadata_is_insufficient_not_evaluated():
+    """메타키만 온 것은 '모순 없음'이 아니라 '판정 불가'다."""
+    out = mismatch.detect("S", {"_surveySchemaVersion": "s02-survey-v1"}, UTTERANCES)
+    assert out.status == "insufficient_input"
+    assert out.mismatch is False
+
+
+# ── 엔드포인트 ────────────────────────────────────────────────────────────────
+def test_unknown_survey_question_is_422_not_502():
+    """세트 버전 불일치는 요청 문제다. 502 로 내면 "AI 가 안 된다"로 읽힌다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    resp = TestClient(app).post("/internal/mismatch", json={
+        "session_id": "S",
+        "survey_result": {"SUIT-CRYPTO-EXPERIENCE": "없다"},
+        "utterances": [{"text": "원금은 절대 손해 보면 안 됩니다. 은행이라 믿고 왔어요."}],
+    })
+    assert resp.status_code == 422
+    assert "SUIT-CRYPTO-EXPERIENCE" in resp.json()["detail"]
+
+
+def test_axis_mismatch_is_logged_not_silent(caplog):
+    """덮어쓰기만 하고 비교하지 않으면 프롬프트가 매핑 표를 안 읽는 것을 알 수 없다.
+
+    PR #113 리뷰(정세현) — `#74` 에서 약속한 "불일치를 경고로 남긴다" 의 남은 절반이다.
+    판정에는 영향이 없다(계산값이 이긴다). 계약에 필드를 늘리지 않고 로그로 둔다.
+    """
+    import logging
+
+    wrong = _contradiction(question_id="SUIT-HORIZON", recorded="5년 이상 묶어둘 수 있다")
+    assert wrong.axis == "principal_preservation", "픽스처 기본값이 기간 축이 아니어야 한다"
+
+    with caplog.at_level(logging.INFO, logger="app.mismatch"):
+        pinned = mismatch._pin_axis(wrong)
+
+    assert pinned.axis == "investment_horizon"
+    assert any("축 불일치" in r.message for r in caplog.records), caplog.text
+
+
+def test_matching_axis_is_not_logged(caplog):
+    """일치할 때도 로그를 남기면 불일치가 묻힌다."""
+    import logging
+
+    right = _contradiction(question_id="SUIT-PRINCIPAL-LOSS")   # 기본 axis 와 같다
+    with caplog.at_level(logging.INFO, logger="app.mismatch"):
+        mismatch._pin_axis(right)
+    assert not [r for r in caplog.records if "축 불일치" in r.message]
+
+# ── 세션 단위 dev set (LLM 없이 픽스처 계약만 본다) ──────────────────────────
+def _session_specs():
+    import yaml
+
+    from pathlib import Path
+
+    d = Path(__file__).resolve().parent / "fixtures" / "sessions"
+    return [(p, yaml.safe_load(p.read_text(encoding="utf-8"))) for p in sorted(d.glob("*.yaml"))]
+
+
+def test_session_devset_exists():
+    """모순은 세션 단위 판정이다. 항목 단위 dev set 으로는 검증할 수 없었다."""
+    assert _session_specs(), "세션 dev set 이 없다"
+
+
+def test_session_devset_survey_keys_are_known():
+    """모르는 `SUIT-` 키가 있으면 dev set 이 422 로 죽는다 — 라벨이 아니라 오류다."""
+    for path, spec in _session_specs():
+        for case in spec["cases"]:
+            questions = {k for k in case["survey"] if k.startswith(mismatch.QUESTION_KEY_PREFIX)}
+            unknown = questions - set(mismatch.AXIS_BY_QUESTION)
+            assert not unknown, f"{path.name}/{case['id']}: {sorted(unknown)}"
+
+
+def test_session_devset_covers_every_axis():
+    """축 하나가 한 번도 안 나오면 그 문항의 매핑이 틀렸는지 알 수 없다."""
+    covered = {a for _, spec in _session_specs()
+               for case in spec["cases"] for a in (case.get("expected_axes") or [])}
+    missing = sorted(set(mismatch.AXIS_BY_QUESTION.values()) - covered)
+    assert not missing, f"기대 라벨에 안 나오는 축: {missing}"
+
+
+def test_session_devset_covers_both_directions():
+    """`survey_understates_tolerance` 쪽이 하나도 없으면 그 값은 검증되지 않은 채 남는다."""
+    directions = {case.get("expected_direction") for _, spec in _session_specs()
+                  for case in spec["cases"]} - {None}
+    assert directions == {"survey_overstates_tolerance", "survey_understates_tolerance"}
+
+
+def test_session_devset_labels_are_self_consistent():
+    """`mismatch=false` 인데 축을 기대하거나, `insufficient_input` 인데 모순을 기대하면
+    스키마 불변식과 부딪혀 무엇이 틀렸는지 헷갈린다."""
+    for path, spec in _session_specs():
+        for case in spec["cases"]:
+            axes = case.get("expected_axes") or []
+            where = f"{path.name}/{case['id']}"
+            assert bool(axes) == case["expected_mismatch"], where
+            if case["expected_status"] == "insufficient_input":
+                assert not case["expected_mismatch"] and not axes, where
+            if not case["expected_mismatch"]:
+                assert case.get("expected_direction") is None, where
+
+
+def test_session_devset_has_a_consistent_control():
+    """전부 모순 케이스면 억지 모순(정상 계약 차단)을 감시할 대조군이 없다."""
+    clean = [case for _, spec in _session_specs() for case in spec["cases"]
+             if case["expected_status"] == "evaluated" and not case["expected_mismatch"]]
+    assert clean, "모순 없음이 정답인 케이스가 없다"

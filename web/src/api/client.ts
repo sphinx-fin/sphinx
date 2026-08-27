@@ -85,3 +85,18 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+
+/**
+ * 멀티파트 전송. `POST /products/documents`(F-EXT-001 문서 업로드)가 유일한 사용처다.
+ *
+ * `post` 를 쓰면 안 된다 — 그쪽은 본문을 항상 `JSON.stringify` 하므로 `FormData` 가
+ * **`{}` 로 직렬화된다.** 파일이 사라진 채 요청이 나가고 서버는 "file 파라미터 없음"으로
+ * 400 을 준다. 타입은 `unknown` 이라 통과하고 런타임에만 틀리는 종류다.
+ *
+ * `Content-Type` 을 **일부러 안 넣는다.** 멀티파트는 헤더에 boundary 문자열이 들어가야
+ * 하는데 그 값은 브라우저가 `FormData` 를 직렬화하면서 정한다. 직접 지정하면 boundary 가
+ * 빠져 서버가 본문을 못 가른다.
+ */
+export function postForm<T>(path: string, form: FormData): Promise<T> {
+  return request<T>(path, { method: "POST", body: form });
+}
