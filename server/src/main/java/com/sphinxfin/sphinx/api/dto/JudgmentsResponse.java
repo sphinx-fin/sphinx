@@ -1,6 +1,6 @@
 package com.sphinxfin.sphinx.api.dto;
 
-import com.sphinxfin.sphinx.core.Session;
+import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.domain.Judgment;
 
 import java.util.Comparator;

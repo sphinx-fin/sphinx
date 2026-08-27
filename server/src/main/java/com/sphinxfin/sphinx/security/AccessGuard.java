@@ -1,6 +1,6 @@
 package com.sphinxfin.sphinx.security;
 
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;

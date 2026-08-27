@@ -1,10 +1,10 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
-import com.sphinxfin.sphinx.core.AiServiceClient;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
-import com.sphinxfin.sphinx.core.AiServiceException;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.junit.jupiter.api.BeforeEach;

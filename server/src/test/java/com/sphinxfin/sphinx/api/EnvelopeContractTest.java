@@ -1,8 +1,8 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
-import com.sphinxfin.sphinx.core.AiServiceClient;
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.Signal;
