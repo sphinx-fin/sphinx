@@ -4,6 +4,9 @@ import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
+
+import java.math.BigDecimal;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -148,6 +151,134 @@ class AiServiceClientTest {
                 .isInstanceOf(EvidenceRequiredException.class);
         server.verify();
     }
+
+    // ── F-INT-002 /internal/question ────────────────────────────────────────
+
+    @Test
+    @DisplayName("question: 요청은 snake_case(risk_item·asked_types·product_type), 응답은 question+question_type로 파싱")
+    void questionSendsSnakeCaseAndParsesResponse() {
+        server.expect(requestTo(BASE + "/internal/question"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andExpect(jsonPath("$.risk_item.item_id").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.risk_item.condition.source_span.page").value(3))
+                .andExpect(jsonPath("$.product_type").value("ELS"))
+                .andExpect(jsonPath("$.asked_types[0]").value("situation"))
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "question": "낙인 아래로 떨어지면 어떻게 되나요?",
+                          "question_type": "condition",
+                          "fallback_used": false
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.Question q =
+                client.question(ITEM, List.of("situation"), "ELS");
+
+        assertThat(q.question()).isEqualTo("낙인 아래로 떨어지면 어떻게 되나요?");
+        assertThat(q.questionType()).isEqualTo("condition");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("question: askedTypes가 null이면 asked_types를 빈 배열로 보낸다(#60 non-nullable)")
+    void questionNullAskedTypesSerializesEmptyArray() {
+        server.expect(requestTo(BASE + "/internal/question"))
+                .andExpect(jsonPath("$.asked_types").isArray())
+                .andExpect(jsonPath("$.asked_types").isEmpty())
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "question": "질문?",
+                          "question_type": "amount",
+                          "fallback_used": true
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.Question q = client.question(ITEM, null, "ELS");
+
+        assertThat(q.questionType()).isEqualTo("amount");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("question: 상류 5xx → AiServiceException")
+    void questionUpstreamErrorRaisesAiServiceException() {
+        server.expect(requestTo(BASE + "/internal/question"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.question(ITEM, List.of(), "ELS"))
+                .isInstanceOf(AiServiceException.class);
+        server.verify();
+    }
+
+    // ── F-INT-004 /internal/reexplain ───────────────────────────────────────
+
+    @Test
+    @DisplayName("reExplain: 요청은 snake_case(risk_item·judgment·age_band·experience_level), 응답은 content+cited_spans로 파싱")
+    void reExplainSendsSnakeCaseAndParsesResponse() {
+        server.expect(requestTo(BASE + "/internal/reexplain"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andExpect(jsonPath("$.risk_item.item_id").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.judgment.item_id").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.judgment.grade").value("U4"))
+                .andExpect(jsonPath("$.judgment.misconception_type").value("M01-PRINCIPAL-GUARANTEE"))
+                .andExpect(jsonPath("$.age_band").value("senior"))
+                .andExpect(jsonPath("$.experience_level").value("none"))
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "content": "쉽게 말하면, 원금이 보장되지 않습니다 …",
+                          "cited_spans": [ { "page": 3, "start": 120, "end": 210 } ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.ReExplanation r =
+                client.reExplain(ITEM, JUDGMENT, "senior", "none");
+
+        assertThat(r.content()).startsWith("쉽게 말하면");
+        assertThat(r.citedSpans()).hasSize(1);
+        assertThat(r.citedSpans().get(0).page()).isEqualTo(3);
+        assertThat(r.citedSpans().get(0).start()).isEqualTo(120);
+        assertThat(r.citedSpans().get(0).end()).isEqualTo(210);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("reExplain: ageBand·experienceLevel이 null이면 null로 보낸다(선택 필드)")
+    void reExplainNullOptionalsSerializeNull() {
+        server.expect(requestTo(BASE + "/internal/reexplain"))
+                .andExpect(jsonPath("$.age_band").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.experience_level").value(org.hamcrest.Matchers.nullValue()))
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "content": "설명",
+                          "cited_spans": []
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.ReExplanation r = client.reExplain(ITEM, JUDGMENT, null, null);
+
+        assertThat(r.citedSpans()).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("reExplain: 상류 5xx → AiServiceException")
+    void reExplainUpstreamErrorRaisesAiServiceException() {
+        server.expect(requestTo(BASE + "/internal/reexplain"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.reExplain(ITEM, JUDGMENT, "senior", "none"))
+                .isInstanceOf(AiServiceException.class);
+        server.verify();
+    }
+
+    private static final Judgment JUDGMENT = new Judgment(
+            "ELS-PRINCIPAL-LOSS-WARNING", Grade.U4, new BigDecimal("0.9"),
+            new Judgment.Evidence("원금은 지켜지죠", "낙인 하회 시 손실"),
+            "원금 보장으로 오해", "M01-PRINCIPAL-GUARANTEE");
 
     private static String validJudgmentJson() {
         return """

@@ -5,12 +5,14 @@ import java.math.BigDecimal;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
@@ -25,6 +27,13 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * F-INT-001 세션 영속 통합. 실제 H2에 저장·재조회하며 감사필드·컨버터·재검증 카운트를 검증한다.
@@ -41,12 +50,33 @@ class SessionServiceTest {
 
     private SessionService service;
     private RecordingEvidence evidence;
+    private AiServiceClient aiClient;
+
+    /** ai-service 재설명 콘텐츠 기본값 — 테스트별로 필요하면 재스텁한다. */
+    private static final String AI_REEXPLAIN = "[ai-service 재설명 콘텐츠]";
 
     @BeforeEach
     void setUp() {
         evidence = new RecordingEvidence();
+        aiClient = mock(AiServiceClient.class);
+        // 재설명 배선(F-INT-004): 콘텐츠는 이제 ai-service 가 만든다. 상류 의존성이라 목으로 대신하고,
+        // HTTP 계약(snake_case·파싱·실패 매핑)은 AiServiceClientTest 가 따로 검증한다.
+        when(aiClient.reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class)))
+                .thenReturn(new AiServiceClient.ReExplanation(AI_REEXPLAIN, List.of()));
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
-                Optional.of(evidence), 2);
+                Optional.of(evidence), aiClient, 2);
+    }
+
+    /** 서비스의 3-arg reExplain 을 감싼다 — 항목 id 로 목 risk_item 을 만들어 넘긴다. */
+    private SessionService.ReExplanation reExplain(String sid, String itemId) {
+        return service.reExplain(sid, itemId, riskItem(itemId));
+    }
+
+    /** itemId 로 만든 목 risk_item. 배선은 이 항목을 그대로 ai-service 로 넘긴다. */
+    private static RiskItem riskItem(String itemId) {
+        return RiskItem.extracted(itemId, "mock-doc", itemId, "required",
+                new RiskItem.Condition("…(원문 인용)", new RiskItem.SourceSpan(1, 0, 10)));
     }
 
     @Test
@@ -260,7 +290,7 @@ class SessionServiceTest {
         service.recordJudgment(s.id(), j("A", Grade.U3));              // IN_PROGRESS
         assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
 
-        service.reExplain(s.id(), "A");                                // → RE_EXPLAIN
+        reExplain(s.id(), "A");                                // → RE_EXPLAIN
         assertThat(service.get(s.id()).state()).isEqualTo(SessionState.RE_EXPLAIN);
 
         service.recordJudgment(s.id(), j("A", Grade.U1));             // 재검증 통과 → IN_PROGRESS 복귀
@@ -276,14 +306,14 @@ class SessionServiceTest {
     void reexplainTwiceFailed_isRed() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U3));   // IN_PROGRESS
-        service.reExplain(s.id(), "A");                      // RE_EXPLAIN
+        reExplain(s.id(), "A");                      // RE_EXPLAIN
         service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증1 실패 (RE_VERIFY)
-        service.reExplain(s.id(), "A");                      // RE_EXPLAIN
+        reExplain(s.id(), "A");                      // RE_EXPLAIN
         service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증2 실패 (RE_VERIFY)
 
         assertThat(service.get(s.id()).reverifyCount("A")).isEqualTo(2);
         // 상한 도달 → 재설명 불가. '대상 아님'과 타입이 달라야 프론트가 문면 파싱 없이 가른다.
-        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+        assertThatThrownBy(() -> reExplain(s.id(), "A"))
                 .isInstanceOf(ReverifyExhaustedException.class);
 
         var r = service.judge(s.id());
@@ -296,7 +326,7 @@ class SessionServiceTest {
     void reexplainUnderstoodItem_rejected() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U1));
-        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+        assertThatThrownBy(() -> reExplain(s.id(), "A"))
                 .isInstanceOf(ReExplainNotEligibleException.class);
     }
 
@@ -304,7 +334,7 @@ class SessionServiceTest {
     @DisplayName("판정이 아직 없는 항목도 재설명 대상이 아니다")
     void reexplainUnjudgedItem_rejected() {
         Session s = service.create(cmd(null));
-        assertThatThrownBy(() -> service.reExplain(s.id(), "A"))
+        assertThatThrownBy(() -> reExplain(s.id(), "A"))
                 .isInstanceOf(ReExplainNotEligibleException.class);
     }
 
@@ -314,40 +344,62 @@ class SessionServiceTest {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U3));
 
-        var r = service.reExplain(s.id(), "A");
+        var r = reExplain(s.id(), "A");
         assertThat(r.reverifyQuestion()).isNotBlank();
         assertThat(r.content()).isNotBlank();
     }
 
     @Test
-    @DisplayName("고령자 모드에서는 재설명 문면과 변형 질문이 같은 눈높이여야 한다")
+    @DisplayName("재설명 콘텐츠는 ai-service 응답에서 온다 (F-INT-004 배선)")
+    void reexplainContentComesFromAiService() {
+        when(aiClient.reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class)))
+                .thenReturn(new AiServiceClient.ReExplanation("ai-service 가 만든 재설명", List.of()));
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+
+        var r = reExplain(s.id(), "A");
+
+        // 문면은 더 이상 서비스 목이 아니라 ai-service 가 만든 것이다(목 문자열이 지워졌다).
+        assertThat(r.content()).isEqualTo("ai-service 가 만든 재설명");
+    }
+
+    @Test
+    @DisplayName("고령자 모드에서는 재설명 콘텐츠·변형 질문이 같은 눈높이여야 한다")
     void reverifyQuestionFollowsVulnerableMode() {
         // 60대(3)+5천만원대(1)+없음(3) = 7 ≥ 임계 4 → 취약
         Session s = service.create(cmd(Map.of("riskProfile", "안정형")));
         assertThat(s.vulnerable()).isTrue();
         service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U3));
 
-        var r = service.reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING");
+        var r = reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING");
         assertThat(r.vulnerable()).isTrue();
-        // 쉬운 말로 설명해 놓고 곧바로 전문용어로 되물으면 한 응답 안에서 모드가 깨진다.
-        assertThat(r.content()).doesNotContain("기초자산");
+        // 콘텐츠의 눈높이는 이제 ai-service 가 연령대·경험수준으로 맞춘다 — 세션 값이 실제로
+        // 넘어가야 ai-service 가 고령자 모드로 생성할 수 있다.
+        verify(aiClient).reExplain(any(RiskItem.class), any(Judgment.class), eq("60대"), eq("없음"));
+        // 변형 질문은 여전히 서비스 목이고 취약 모드를 따른다 — 쉬운 말 설명에 전문용어로 되묻지 않는다.
         assertThat(r.reverifyQuestion()).doesNotContain("기초자산");
     }
 
     @Test
-    @DisplayName("재설명은 '해당 항목만' 설명한다 — 항목이 다르면 문면도 달라야 한다")
-    void reexplainContentIsScopedToItem() {
+    @DisplayName("재설명은 '해당 항목만' 다룬다 — 항목이 갈리면 ai-service 로 넘어가는 risk_item 도 갈린다")
+    void reexplainForwardsScopedItemToAiService() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U3));
         service.recordJudgment(s.id(), j("ELS-NO-DEPOSIT-INSURANCE", Grade.U3));
 
-        String loss = service.reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING").content();
+        reExplain(s.id(), "ELS-PRINCIPAL-LOSS-WARNING");
         // 상태를 되돌리기 위해 재검증을 한 번 태운다(RE_EXPLAIN → RE_VERIFY → IN_PROGRESS)
         service.recordJudgment(s.id(), j("ELS-PRINCIPAL-LOSS-WARNING", Grade.U1));
-        String deposit = service.reExplain(s.id(), "ELS-NO-DEPOSIT-INSURANCE").content();
+        reExplain(s.id(), "ELS-NO-DEPOSIT-INSURANCE");
 
-        assertThat(loss).isNotEqualTo(deposit);
-        assertThat(deposit).contains("예금자보호");
+        ArgumentCaptor<RiskItem> itemCaptor = ArgumentCaptor.forClass(RiskItem.class);
+        verify(aiClient, times(2)).reExplain(itemCaptor.capture(), any(Judgment.class),
+                nullable(String.class), nullable(String.class));
+        // 항목이 다르면 넘어가는 risk_item 도 달라야 한다 — 예금자보호를 물었는데 원금손실
+        // 항목을 넘기면 재설명이 아니라 딴소리가 된다(스코핑은 이제 배선이 담보한다).
+        assertThat(itemCaptor.getAllValues()).extracting(RiskItem::itemId)
+                .containsExactly("ELS-PRINCIPAL-LOSS-WARNING", "ELS-NO-DEPOSIT-INSURANCE");
     }
 
     @Test
@@ -355,7 +407,7 @@ class SessionServiceTest {
     void reexplainHistoryIsAppendedToEvidence() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U3));   // 최초 미이해
-        service.reExplain(s.id(), "A");
+        reExplain(s.id(), "A");
         service.recordJudgment(s.id(), j("A", Grade.U1));   // 재검증 통과 — 세션에서 U3는 소실
         var result = service.judge(s.id());
 
@@ -371,7 +423,7 @@ class SessionServiceTest {
     @DisplayName("evidence 구현이 없어도(NO_OP) 세션 루프는 그대로 돈다")
     void worksWithoutEvidenceRecorder() {
         SessionService bare = new SessionService(repository, new GateEngine(),
-                new CoachingScoreService(), Optional.empty(), 2);
+                new CoachingScoreService(), Optional.empty(), aiClient, 2);
         Session s = bare.create(cmd(null));
         bare.recordJudgment(s.id(), j("A", Grade.U1));
         assertThat(bare.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
@@ -436,7 +488,7 @@ class SessionServiceTest {
         assertThat(evidence.gates).isEmpty();
 
         // 황색을 보고 재설명 → 재검증 → 녹색. 미리보기가 없으면 이 흐름이 막힌다.
-        service.reExplain(s.id(), "A");
+        reExplain(s.id(), "A");
         service.recordJudgment(s.id(), j("A", Grade.U1));
         assertThat(service.previewGate(s.id()).signal()).isEqualTo(Signal.GREEN);
         assertThat(service.judge(s.id()).signal()).isEqualTo(Signal.GREEN);

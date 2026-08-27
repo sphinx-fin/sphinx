@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.core;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
@@ -29,21 +30,27 @@ public class SessionService {
     private final GateEngine gateEngine;
     private final CoachingScoreService coachingScoreService;
     private final EvidenceRecorder evidenceRecorder;
+    private final AiServiceClient aiServiceClient;
     private final int maxReverify;   // 항목당 재검증 상한(application.yml)
 
     /**
      * evidenceRecorder는 Optional 주입 — evidence/ 구현(F-GTE-004)이 등록되기 전에도
      * 세션 루프가 돌아야 하므로, 없으면 NO_OP으로 대체한다.
+     *
+     * aiServiceClient 는 재설명 콘텐츠 생성(F-INT-004)에 쓴다 — 눈높이 재설명은 룰이 아니라
+     * 측정 기반 생성이므로 서비스가 조율만 하고 문면은 ai-service 가 만든다(P1: 판정 아님).
      */
     public SessionService(SessionRepository repository,
                           GateEngine gateEngine,
                           CoachingScoreService coachingScoreService,
                           Optional<EvidenceRecorder> evidenceRecorder,
+                          AiServiceClient aiServiceClient,
                           @Value("${sphinx.scoring.max-reverify:2}") int maxReverify) {
         this.repository = repository;
         this.gateEngine = gateEngine;
         this.coachingScoreService = coachingScoreService;
         this.evidenceRecorder = evidenceRecorder.orElse(EvidenceRecorder.NO_OP);
+        this.aiServiceClient = aiServiceClient;
         this.maxReverify = maxReverify;
     }
 
@@ -128,9 +135,17 @@ public class SessionService {
     /**
      * F-INT-004 재설명 — 이해 부족 항목을 다시 설명한다. 상태를 RE_EXPLAIN으로 두고,
      * 이후 같은 항목 재답변(recordJudgment)이 재검증이 된다. 재검증 상한에 도달한 항목은
-     * 재설명하지 않고 판정으로 보낸다(게이트 R-03이 RED). 문면은 취약 여부로 맞춘다.
+     * 재설명하지 않고 판정으로 보낸다(게이트 R-03이 RED).
+     *
+     * 재설명 콘텐츠는 ai-service /internal/reexplain 가 만든다 — 판정(측정값)과 risk_item,
+     * 세션의 연령대·경험수준으로 눈높이 재설명을 생성한다(#60). LLM 문면은 판정이 아니라
+     * 설명 초안이므로 P1 을 어기지 않는다. risk_item 은 호출부(SessionController)가 넘긴다 —
+     * 지금은 목(MockData) 항목이고, 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 바뀐다.
+     *
+     * ai-service 호출은 상태 전이 전에 한다 — 실패(502)하면 세션을 RE_EXPLAIN 으로 옮기지
+     * 않아 재시도가 깔끔하다(부수효과 없이 실패).
      */
-    public ReExplanation reExplain(String sessionId, String itemId) {
+    public ReExplanation reExplain(String sessionId, String itemId, RiskItem riskItem) {
         Session session = get(sessionId);
         Judgment judgment = session.judgmentFor(itemId);
         if (judgment == null || judgment.grade() == Grade.U1) {
@@ -140,36 +155,13 @@ public class SessionService {
             throw new ReverifyExhaustedException(
                     "재검증 상한(" + maxReverify + "회) 도달 — 재설명 불가, 판정으로 진행: " + itemId);
         }
+        String content = aiServiceClient
+                .reExplain(riskItem, judgment, session.ageBand(), session.experienceLevel())
+                .content();
         session.fire(SessionFsm.Event.REQUEST_REEXPLAIN);
         repository.save(session);
-        return new ReExplanation(itemId, reExplainContent(itemId, session.vulnerable()),
+        return new ReExplanation(itemId, content,
                 session.vulnerable(), reverifyQuestion(itemId, session.vulnerable()));
-    }
-
-    /**
-     * 재설명 문면. 기획서 7-2 [기능 1]은 "해당 항목만" 재설명하라고 하므로 itemId로 가른다
-     * — 예금자보호 항목을 물었는데 원금손실을 설명하면 재설명이 아니라 딴소리다.
-     * 눈높이는 취약 여부로 다시 가른다(기획서 175행: 비유 중심·짧은 문장).
-     * TODO: ai-service /internal/reexplain 연결(F-INT-004, 윤지석). 지금은 데모 항목 2종 목.
-     */
-    private String reExplainContent(String itemId, boolean vulnerable) {
-        return switch (itemId) {
-            case "ELS-PRINCIPAL-LOSS-WARNING" -> vulnerable
-                    ? "쉽게 다시 설명드릴게요. 이 상품은 은행 예금과 달라서 맡긴 돈(원금)이 "
-                      + "줄어들 수 있어요. '예금처럼 안전하다'가 아니라는 점만 꼭 기억해 주세요."
-                    : "다시 설명드리면, 기초자산이 정해진 수준 아래로 내려가면 원금 손실이 "
-                      + "발생합니다. 손실은 하락폭에 비례해 커집니다.";
-            case "ELS-NO-DEPOSIT-INSURANCE" -> vulnerable
-                    ? "이건 예금이 아니에요. 은행이 잘못돼도 나라가 5천만 원까지 돌려주는 "
-                      + "예금자보호가 이 상품에는 적용되지 않습니다."
-                    : "다시 설명드리면, 이 상품은 예금자보호법 적용 대상이 아닙니다. "
-                      + "예금자보호 한도와 무관하게 원금이 보호되지 않습니다.";
-            default -> vulnerable
-                    ? "쉽게 다시 설명드릴게요. 이 상품은 은행 예금과 달라서 맡긴 돈이 "
-                      + "줄어들 수 있어요."
-                    : "다시 설명드리면, 이 상품은 원금이 보장되지 않으며 조건에 따라 "
-                      + "손실이 발생할 수 있습니다.";
-        };
     }
 
     /**
