@@ -46,6 +46,8 @@ class AskedQuestionTest {
 
     /** 불변 기록에 실제로 넘어간 질문을 본다 — 채점값과 갈리는지가 요지다(#137 리뷰). */
     static final java.util.List<String> RECORDED = new java.util.ArrayList<>();
+    static final java.util.List<com.sphinxfin.sphinx.core.EvidenceRecorder.QuestionSource> SOURCES
+            = new java.util.ArrayList<>();
 
     @org.springframework.boot.test.context.TestConfiguration
     static class RecordingCfg {
@@ -54,8 +56,11 @@ class AskedQuestionTest {
         com.sphinxfin.sphinx.core.EvidenceRecorder recordingEvidence() {
             return new com.sphinxfin.sphinx.core.EvidenceRecorder() {
                 @Override public void appendJudgment(String sid, Judgment j, int r,
-                                                     String askedQuestion, java.time.Instant at) {
+                                                     String askedQuestion,
+                                                     QuestionSource questionSource,
+                                                     java.time.Instant at) {
                     RECORDED.add(askedQuestion);
+                    SOURCES.add(questionSource);
                 }
                 @Override public void appendGate(String sid,
                         com.sphinxfin.sphinx.domain.GateResult res, java.time.Instant at) { }
@@ -74,6 +79,7 @@ class AskedQuestionTest {
     @BeforeEach
     void stub() {
         RECORDED.clear();
+        SOURCES.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED"));
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
@@ -144,6 +150,28 @@ class AskedQuestionTest {
         assertThat(RECORDED)
                 .as("기록에 남은 질문이 채점에 쓴 질문과 같아야 한다")
                 .containsExactly(scoredQuestion());
+
+        // ❗같은 문면이라 문면만으로는 못 가른다. 고객이 그것을 봤는지는 따로 남아야 한다.
+        assertThat(SOURCES)
+                .as("고객은 이 문면을 본 적이 없다 — 서버가 채점 맥락으로 지어낸 것이다. "
+                        + "기록이 정상 경로와 똑같이 생기면 감사 시점에 '이 판정은 고객이 "
+                        + "보고 답한 질문으로 잰 것인가' 에 답할 수 없다 (#136 3항)")
+                .containsExactly(com.sphinxfin.sphinx.core.EvidenceRecorder.QuestionSource.SERVER_FALLBACK);
+    }
+
+    @Test
+    @DisplayName("❗화면을 거친 답변은 DISPLAYED 로 남는다 — 폴백 표식이 항상 붙으면 뜻이 없다")
+    void displayedQuestionIsRecordedAsDisplayed() throws Exception {
+        String sid = createSession();
+        mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\",\"text\":\"낙인 하회하면 손실 납니다\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(SOURCES)
+                .as("정상 경로가 SERVER_FALLBACK 으로 남으면 표식이 아무것도 안 가른다 — "
+                        + "폴백만 잡는 단정은 상수 SERVER_FALLBACK 을 넣어도 통과한다")
+                .containsExactly(com.sphinxfin.sphinx.core.EvidenceRecorder.QuestionSource.DISPLAYED);
     }
 
     @Test

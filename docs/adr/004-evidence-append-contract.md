@@ -29,6 +29,17 @@ void appendJudgment(String sessionId, Judgment judgment, int reverifyCount, Inst
 void appendGate(String sessionId, GateResult result, Instant at);
 ```
 
+> **이후 시그니처가 늘었다** (결정 자체는 그대로다 — 적재 지점과 인터페이스 위치).
+> 판정을 만든 값이 가변 테이블에만 남는 문제(이슈 #136)로 두 인자가 붙었다.
+>
+> ```java
+> void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
+>                     String askedQuestion, QuestionSource questionSource, Instant at);
+> ```
+>
+> `askedQuestion` 은 채점에 넘긴 문면(#137), `questionSource` 는 고객이 그것을 봤는지다.
+> 둘 다 append-only 기록의 봉투 층이고 `Judgment` 계약에는 들어가지 않는다.
+
 `recordJudgment` 와 `judge` 끝에서 호출하고, **덮어쓰기 전 값이 아니라 매 건** 적재한다.
 구현 등록 전에도 세션 루프가 돌아야 하므로 `Optional` 주입 + `NO_OP` 기본값.
 
