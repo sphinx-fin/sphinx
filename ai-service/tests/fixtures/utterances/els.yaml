@@ -130,3 +130,24 @@ cases:
     expected_grade: U1
     expected_misconception: null
     deterministic: false
+
+  # ── 문면 복창 (프롬프트 v2 / 게이트 R-05) ────────────────────────────────────
+  # ★ 이 케이스가 R-05(`anyConfidenceBelow 0.7`)를 실제로 발동시키는 유일한 형태다.
+  #   ADR-005 가 관측한 대로 R-05 가 판정을 바꿀 수 있는 경우는 **전부 U1 인 세션**뿐이고,
+  #   그 상황은 "요소는 다 말했는데 자기 말인지 모르겠다" 일 때만 생긴다.
+  #
+  #   등급은 U1 이 맞다 — 이해한 사람과 따라 말한 사람을 발화만으로 구분할 수 없으므로
+  #   등급을 추측해 내리지 않는다(이해→오해 오판을 우리가 만드는 것). 가릴 수 없다는 사실을
+  #   confidence 로 보고하고 판정은 게이트가 한다(P1).
+  #
+  #   발화는 루브릭 조항을 그대로 옮긴 것이다. 루브릭은 공개 의무 대상이라 판매자가 읽을 수
+  #   있고, 판매자가 읽어준 문장을 고객이 되풀이하는 것이 현실의 경로다.
+  - id: PARROTED-RUBRIC-CLAUSE
+    source: 합성 — 기획서 4절 "자기 말로 설명" 기준의 반례. 문면 복창
+    item_id: ELS-PRINCIPAL-LOSS-WARNING
+    question: 이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?
+    answer: 투자원금의 손실이 발생할 수 있습니다.
+    expected_grade: U1
+    expected_misconception: null
+    expected_confidence_max: 0.3   # scoring.ECHO_CONFIDENCE_CAP
+    deterministic: true            # 포함도 계산이라 LLM 과 무관하게 재현된다

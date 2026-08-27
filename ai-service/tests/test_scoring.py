@@ -216,3 +216,159 @@ def test_fabricated_quote_still_rejected_after_normalization():
     """정규화가 검증을 무르게 하지 않았음을 고정한다."""
     with pytest.raises(LlmError, match="P4"):
         _score(make_judgment(quote="고객이 원금 손실을 이해한다고 답변함"))
+
+
+# ── 문면 복창 (프롬프트 v2 / ADR-005 confidence 재정의) ───────────────────────
+def _rubric_and_item():
+    from app import rubrics as r
+    return r.get("ELS-PRINCIPAL-LOSS-WARNING"), RISK_ITEM
+
+
+def test_echo_score_separates_parroting_from_paraphrase():
+    """같은 내용을 자기 순서로 말한 발화와 문면을 옮긴 발화가 갈려야 한다.
+
+    모델은 이걸 못 했다 — 종결어미만 바꿔도 confidence 가 0.90 ↔ 0.30 으로 흔들렸다.
+    """
+    rubric, item = _rubric_and_item()
+    paraphrase = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나온다고 들었어요."
+    verbatim = rubric.required_elements[0] + "."
+    assert scoring.echo_score(paraphrase, rubric, item) < scoring.ECHO_THRESHOLD
+    assert scoring.echo_score(verbatim, rubric, item) >= scoring.ECHO_THRESHOLD
+
+
+def test_sentence_ending_does_not_change_echo_score():
+    """`~라고 들었어요` 는 공손 표현이다. 모델이 여기서 틀렸으므로 계산으로 고정한다."""
+    rubric, item = _rubric_and_item()
+    hearsay = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나온다고 들었어요."
+    plain = "기초자산이 낙인 밑으로 떨어지면 떨어진 만큼 원금이 깎여서 나옵니다."
+    a, b = scoring.echo_score(hearsay, rubric, item), scoring.echo_score(plain, rubric, item)
+    assert abs(a - b) < 0.05, f"어미만 다른데 {a:.3f} vs {b:.3f}"
+
+
+def test_echo_threshold_has_margin_over_real_utterances():
+    """임계값이 실제 발화 쪽으로 내려오면 정상 이해가 황색이 된다(관리지표 10%).
+
+    dev set 전체를 대조한다 — 발화를 추가할 때 여유가 줄면 여기서 걸린다. 복창으로 라벨한
+    케이스(`expected_confidence_max`)는 제외한다. 그건 걸려야 하는 쪽이다.
+    """
+    import yaml
+
+    from app import rubrics as r
+
+    worst = 0.0
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from run_devset import load_risk_items
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "utterances"
+    for path in sorted(fixtures.glob("*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        items = load_risk_items(spec["product_type"])
+        for case in spec["cases"]:
+            item = items.get(case["item_id"])
+            if item is None or case.get("expected_confidence_max") is not None:
+                continue
+            try:
+                rubric = r.get(case["item_id"])
+            except r.RubricNotFound:
+                continue
+            worst = max(worst, scoring.echo_score(case["answer"], rubric, item))
+    margin = scoring.ECHO_THRESHOLD - worst
+    assert margin >= scoring.ECHO_MARGIN_MIN, (
+        f"여유 부족: 실제 발화 최대 {worst:.3f}, 임계 {scoring.ECHO_THRESHOLD} "
+        f"→ 간격 {margin:.3f} < {scoring.ECHO_MARGIN_MIN}"
+    )
+
+
+def test_prompt_version_matches_the_file_in_use():
+    """상수와 파일이 어긋나면 `/healthz` 가 거짓말을 한다 — 그리고 아무도 모른다."""
+    assert scoring.PROMPT_PATH.name == f"{scoring.PROMPT_VERSION}.md"
+    assert scoring.PROMPT_PATH.exists()
+
+
+def test_v1_prompt_is_kept_for_audit():
+    """루브릭·프롬프트는 공개 의무 대상이다. 정의가 바뀐 이전 버전을 지우면 v1 로 측정된
+    판정을 나중에 설명할 수 없다."""
+    assert (scoring.PROMPT_PATH.parent / "F-SCR-001_v1.md").exists()
+
+
+def test_short_answers_are_not_treated_as_parroting():
+    """분모가 작으면 우연 일치가 점수를 지배한다 (PR #114 리뷰, 정세현).
+
+    `"손실"` 은 바이그램이 1개라 그 하나가 조항에 있으면 containment 가 1.000 이다.
+    복창이 아닌데 상한이 걸린다.
+    """
+    rubric, item = _rubric_and_item()
+    for short in ("손실", "원금", "원금 손실"):
+        assert scoring.echo_score(short, rubric, item) == 0.0, short
+
+
+def test_short_answers_would_have_scored_high_without_the_floor():
+    """하한이 하는 일이 실제로 있는지 — 없으면 이 발화들이 상한을 받는다.
+
+    `"손실"` 은 조항 문면 그대로라 containment 가 1.000 이다. **우연 일치가 아니다**
+    (원래 주석이 그렇게 적었고 실측이 부정했다). 하한이 막는 것은 우연이 아니라
+    **U1 이 나올 수 없는 길이의 발화** 다.
+    """
+    from app import textsim
+
+    rubric, _ = _rubric_and_item()
+    clause = rubric.required_elements[0]
+    assert textsim.containment("손실", clause) == 1.0
+    assert textsim.containment("원금 손실", clause) >= scoring.ECHO_THRESHOLD
+
+
+def test_the_floor_is_derived_from_the_shortest_clause():
+    """★ 하한은 상수가 아니라 루브릭에서 나온다.
+
+    처음 상수 8 로 박았다가 `#112`(required 루브릭 10종)가 조항 최단을 13bg → 6bg 로 바꾸면서
+    깨졌다. 하한의 유일한 실제 제약은 **가장 짧은 조항을 그대로 옮긴 복창을 놓치지 않는 것**
+    이므로(PR #114 리뷰), 그 값에서 유도하는 것이 맞다.
+
+    이전에는 이 성질을 두 테스트로 나눠 뒀는데 **하나가 다른 하나에 포섭돼 단독으로 깨질 수
+    없었다**(정세현 지적). 유도로 바꾸면서 상방은 이 한 건으로 모은다.
+    """
+    from app import rubrics as r
+    from app import textsim
+
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(clause)))
+        for rubric in r.all_rubrics().values()
+        for clause in rubric.required_elements
+    )
+    assert scoring.min_echo_bigrams() < shortest, (
+        f"하한 {scoring.min_echo_bigrams()} ≥ 조항 최단 {shortest} — 그 조항 복창을 놓친다"
+    )
+
+
+def test_the_shortest_clause_verbatim_is_still_caught():
+    """유도가 맞는지 문면으로 확인한다 — 가장 짧은 조항을 그대로 답하면 잡혀야 한다."""
+    from app import rubrics as r
+    from app import textsim
+
+    shortest = min(
+        ((len(textsim.bigrams(textsim.normalize(c))), item_id, c)
+         for item_id, rubric in r.all_rubrics().items()
+         for c in rubric.required_elements),
+    )
+    _, item_id, clause = shortest
+    rubric = r.get(item_id)
+    probe = RISK_ITEM.model_copy(update={"item_id": item_id})
+    assert scoring.echo_score(clause, rubric, probe) >= scoring.ECHO_THRESHOLD, (
+        f"{item_id} 의 최단 조항 {clause!r} 복창이 안 잡힌다"
+    )
+
+
+def test_capped_confidence_records_the_reason():
+    """조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다."""
+    rubric, item = _rubric_and_item()
+    verbatim = rubric.required_elements[0] + "."
+    judgment = make_judgment(
+        grade=Grade.U1, confidence=0.95, quote=verbatim, reason="필수 요소를 언급했다",
+    )
+    out = scoring.cap_confidence_if_echoed(judgment, verbatim, rubric, item)
+    assert out.confidence == scoring.ECHO_CONFIDENCE_CAP
+    assert "복창" in out.reason and "포함도" in out.reason
+    assert out.grade == Grade.U1, "등급은 건드리지 않는다"
