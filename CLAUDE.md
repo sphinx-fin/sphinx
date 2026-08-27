@@ -79,6 +79,10 @@ core 에 둔 경계 인터페이스라(ADR-003) 어느 하위 패키지에도 �
 | `core/persistence/` | `BaseEntity`·JPA 감사·컨버터 |
 | `core/simulator/` | `SimulatorProperties` (설정 주입. 계산 엔진은 최상위 `simulator/`) |
 
+이 두 가지 — 루트에 하나만 남는 것, 위 표가 실물과 같은 것 — 은 `CorePackageBoundaryTest`가
+대조한다. 루트에 클래스를 새로 만드는 브랜치는 이 표와 **텍스트 충돌 없이** 합쳐지므로
+git이 알려주지 않는다(#142에서 실제로 그랬다).
+
 ### `evidence/` — 리포트와 감사 로그의 공통 기반
 
 `ReportService`(F-GTE-004)와 `AuditLog`(F-CMN-002)는 저장 요구가 동일하다: append-only,
