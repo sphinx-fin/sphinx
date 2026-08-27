@@ -106,12 +106,13 @@ public class SessionController {
         // risk_item 은 아직 목이다 — 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 교체한다.
         Session session = sessionService.get(sid);
         RiskItem item = riskItemOf(body.itemId());
+        // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
+        String asked = askedQuestionFor(session, item);
         var scored = aiServiceClient.score(
-                item.itemId(), askedQuestionFor(session, item), body.text(), item,
-                productTypeOf(session));
+                item.itemId(), asked, body.text(), item, productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         return ApiResponse.ok(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer()));
+                sid, scored.judgment(), scored.maskedAnswer(), asked));
     }
 
     /**

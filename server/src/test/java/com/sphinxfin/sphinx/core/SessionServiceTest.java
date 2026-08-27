@@ -109,31 +109,29 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("❗판정을 만든 질문이 불변 기록으로 넘어간다 — 세션 테이블은 덮어쓴다")
+    @DisplayName("❗호출자가 넘긴 질문이 불변 기록으로 그대로 간다 — 서비스가 다시 구하지 않는다")
     void askedQuestionReachesTheEvidenceRecord() {
         Session s = service.create(cmd(null));
-        service.recordAskedQuestion(s.id(), "A", "원금이 줄어드는 조건을 말씀해 주시겠어요?");
-        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordJudgment(s.id(), j("A", Grade.U1), null,
+                "원금이 줄어드는 조건을 말씀해 주시겠어요?");
 
         assertThat(evidence.askedQuestions)
-                .as("질문은 session_asked_question 에만 있고 재질문 시 덮어쓴다 — 여기서 안 실으면 "
-                        + "'이 판정은 어느 질문에 대한 답을 잰 것인가' 에 답할 수 없다 (#136)")
+                .as("서비스가 세션 맵을 다시 읽으면 값을 두 곳에서 구하게 되고, 폴백처럼 "
+                        + "한쪽에만 있는 분기에서 채점값과 기록값이 갈린다 (#137 리뷰)")
                 .containsExactly("원금이 줄어드는 조건을 말씀해 주시겠어요?");
     }
 
     @Test
-    @DisplayName("재질문 뒤 재검증하면 그때 보여준 질문이 그 판정에 실린다")
+    @DisplayName("재검증하면 각 판정에 그때의 질문이 따로 남는다 — 세션 맵은 마지막 것만 갖는다")
     void reaskedQuestionGoesWithItsOwnJudgment() {
         Session s = service.create(cmd(null));
-        service.recordAskedQuestion(s.id(), "A", "첫 질문");
-        service.recordJudgment(s.id(), j("A", Grade.U3));
+        service.recordJudgment(s.id(), j("A", Grade.U3), null, "첫 질문");
 
         service.reExplain(s.id(), "A", riskItem("A"));
-        service.recordAskedQuestion(s.id(), "A", "다시 여쭙는 질문");
-        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordJudgment(s.id(), j("A", Grade.U1), null, "다시 여쭙는 질문");
 
         assertThat(evidence.askedQuestions)
-                .as("세션 맵은 마지막 것만 남지만 불변 기록에는 각 판정의 질문이 따로 남아야 한다")
+                .as("세션 맵은 덮어쓰지만 불변 기록에는 판정마다 그 질문이 남아야 한다 (#136)")
                 .containsExactly("첫 질문", "다시 여쭙는 질문");
     }
 

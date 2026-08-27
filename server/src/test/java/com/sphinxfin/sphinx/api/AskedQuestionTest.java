@@ -44,6 +44,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("F-INT-002 채점 질문 ↔ 표시 질문 일치")
 class AskedQuestionTest {
 
+    /** 불변 기록에 실제로 넘어간 질문을 본다 — 채점값과 갈리는지가 요지다(#137 리뷰). */
+    static final java.util.List<String> RECORDED = new java.util.ArrayList<>();
+
+    @org.springframework.boot.test.context.TestConfiguration
+    static class RecordingCfg {
+        @org.springframework.context.annotation.Bean
+        @org.springframework.context.annotation.Primary
+        com.sphinxfin.sphinx.core.EvidenceRecorder recordingEvidence() {
+            return new com.sphinxfin.sphinx.core.EvidenceRecorder() {
+                @Override public void appendJudgment(String sid, Judgment j, int r,
+                                                     String askedQuestion, java.time.Instant at) {
+                    RECORDED.add(askedQuestion);
+                }
+                @Override public void appendGate(String sid,
+                        com.sphinxfin.sphinx.domain.GateResult res, java.time.Instant at) { }
+                @Override public void appendOverride(String sid, String reason,
+                        String approver, java.time.Instant at) { }
+            };
+        }
+    }
+
     private static final String ITEM = "ELS-PRINCIPAL-LOSS-WARNING";
     private static final String Q_AI = "이 상품은 어떤 경우에 원금이 줄어들 수 있을까요? 아시는 대로 말씀해 주세요.";
 
@@ -52,6 +73,7 @@ class AskedQuestionTest {
 
     @BeforeEach
     void stub() {
+        RECORDED.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED"));
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
@@ -115,6 +137,13 @@ class AskedQuestionTest {
         assertThat(scoredQuestion())
                 .as("질문 맥락이 없다고 답변을 버리면 세션 데이터가 사라진다(명세 10절)")
                 .isNotBlank();
+
+        // ❗폴백에서도 채점값과 기록값이 같아야 한다. 값을 두 곳에서 따로 구하면 여기서
+        // 갈리고(채점은 목 문면, 기록은 null), 그러면 null 이 "필드 이전 레코드" 와
+        // "폴백이었다" 두 뜻을 갖는다 — append-only 라 섞인 뒤에는 못 가른다 (#137 리뷰).
+        assertThat(RECORDED)
+                .as("기록에 남은 질문이 채점에 쓴 질문과 같아야 한다")
+                .containsExactly(scoredQuestion());
     }
 
     @Test
