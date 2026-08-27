@@ -53,6 +53,10 @@
         "null"
       ],
       "description": "F-DET-001 매칭 시 유형ID (예: M08-TYING)"
+    },
+    "prompt_version": {
+      "type": "string",
+      "description": "이 판정을 낸 채점 프롬프트 버전(ai-service scoring.PROMPT_VERSION, 예 F-SCR-001_v2). optional — 이 필드가 생기기 전 레코드는 없다. ❗confidence 의 정의가 프롬프트 버전마다 다르다: v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). evidence 는 append-only 라 두 정의가 같은 컬럼에 섞이면 감사 시점에 어느 쪽으로 해석할지 판단할 근거가 없어진다 — 그래서 값과 함께 남긴다(결정 10.38 · 이슈 #136)."
     }
   }
 }

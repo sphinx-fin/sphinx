@@ -303,6 +303,7 @@ class CanonicalJsonTest {
                             + "\"grade\":\"U4\","
                             + "\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\","
                             + "\"misconceptionType\":null,"
+                            + "\"promptVersion\":null,"
                             + "\"reason\":\"원금 보장으로 오해\"}");
         }
 

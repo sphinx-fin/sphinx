@@ -172,7 +172,8 @@ class OverrideServiceTest {
 
         @Override
         public void appendJudgment(String sessionId, com.sphinxfin.sphinx.domain.Judgment judgment,
-                                   int reverifyCount, Instant at) { }
+                                   int reverifyCount,
+                                   String askedQuestion, Instant at) { }
 
         @Override
         public void appendGate(String sessionId, GateResult result, Instant at) { }

@@ -106,8 +106,11 @@ public class SessionService {
         // 같은 트랜잭션 안이다(2026-08-25 결정): append-only 해시 체인은 순서가 해시에
         // 들어가므로 구멍을 나중에 메울 수 없다. append 가 실패하면 세션 저장도 함께 롤백되고
         // 요청 전체가 실패한다 — 근거 없는 판정이 무효라면 기록 없는 판정도 무효다(P4와 같은 논리).
+        // 그 판정을 만든 질문을 함께 남긴다 — 질문은 재질문 시 덮어쓰는 가변 테이블에만
+        // 있어서, 여기서 안 실으면 "어느 질문에 대한 답을 잰 것인가" 에 답할 수 없다 (#136).
         evidenceRecorder.appendJudgment(
-                sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
+                sessionId, judgment, session.reverifyCount(judgment.itemId()),
+                session.askedQuestion(judgment.itemId()), Instant.now());
         return judgment;
     }
 

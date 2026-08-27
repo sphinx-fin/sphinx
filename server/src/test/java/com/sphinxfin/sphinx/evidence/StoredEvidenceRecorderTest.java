@@ -70,7 +70,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("판정 → 게이트 → 오버라이드 순서가 기록에 남는다")
         void keepsCrossKindOrder() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", T0);
             recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04", "R-05")), T0.plusSeconds(1));
             recorder.appendOverride(SID, "고객이 충분히 이해했다고 판단하여 진행합니다", "mgr-01", T0.plusSeconds(2));
 
@@ -110,8 +110,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("같은 항목의 재검증이 두 건으로 남는다 — 덮어쓰기가 아니다")
         void reverificationIsAppendedNotOverwritten() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, T0);
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, T0.plusSeconds(60));
+            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, "질문 문면", T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, "질문 문면", T0.plusSeconds(60));
 
             List<Map<String, Object>> stored = payloads();
             assertThat(stored).hasSize(2);
@@ -141,7 +141,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("grade 원값과 근거가 들어간다. 색은 안 들어간다 (ADR-004 §5)")
         void storesGradeAndEvidenceButNoColor() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", T0);
 
             Map<String, Object> item = child(payloads().get(0), "judgment");
             assertThat(item.get("grade")).isEqualTo("U4");
@@ -154,7 +154,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("misconceptionType 이 null 이어도 키를 남긴다 — 생략하면 '없음' 과 '미기재' 가 같아진다")
         void keepsNullMisconceptionType() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, "질문 문면", T0);
 
             assertThat(child(payloads().get(0), "judgment").keySet())
                     .contains("misconceptionType");
@@ -163,8 +163,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("적재한 뒤에도 사슬이 검증된다 — 왕복이 성립한다")
         void chainStaysVerifiableAfterReplay() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, T0);
-            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, T0.plusSeconds(30));
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", T0);
+            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, "질문 문면", T0.plusSeconds(30));
             em.flush();
 
             assertThat(store.verify(StoredEvidenceRecorder.streamOf(SID)).ok()).isTrue();
@@ -189,7 +189,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("문자열이나 Double 이 아니라 BigDecimal 값으로 왕복한다")
         void roundTripsAsNumber() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", T0);
 
             Object confidence = child(payloads().get(0), "judgment").get("confidence");
             assertThat(confidence)
