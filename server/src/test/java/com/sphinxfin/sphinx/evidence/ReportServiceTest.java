@@ -395,7 +395,7 @@ class ReportServiceTest {
                             new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",
                                     "끼워팔기 인지 실패"),
                             "판매자 발화 인용", "M08-TYING"),
-                    0, "질문 문면", T0);
+                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
             em.flush();
             em.clear();
             return reports.render(SID);
