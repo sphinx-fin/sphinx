@@ -87,6 +87,9 @@ public class SessionController {
         String question = aiServiceClient
                 .question(next, List.of(), productTypeOf(session))
                 .question();
+        // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
+        // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
+        sessionService.recordAskedQuestion(sid, next.itemId(), question);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
                 question,
@@ -100,13 +103,12 @@ public class SessionController {
         // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
         //
-        // risk_item·question은 아직 목이다 — 추출(F-EXT-002)이 붙기 전까지 MockData에서
-        // 항목을 찾고 질문을 nextQuestion과 같은 문면으로 만든다. 추출이 붙으면 세션에
-        // 쌓인 항목·질문으로 교체한다.
+        // risk_item 은 아직 목이다 — 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 교체한다.
         Session session = sessionService.get(sid);
         RiskItem item = riskItemOf(body.itemId());
         var scored = aiServiceClient.score(
-                item.itemId(), questionFor(item), body.text(), item, productTypeOf(session));
+                item.itemId(), askedQuestionFor(session, item), body.text(), item,
+                productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         return ApiResponse.ok(sessionService.recordJudgment(
                 sid, scored.judgment(), scored.maskedAnswer()));
@@ -153,6 +155,24 @@ public class SessionController {
      */
     private static String questionFor(RiskItem item) {
         return "이 상품에서 '" + item.name() + "'에 대해 본인 말씀으로 설명해 주시겠어요?";
+    }
+
+    /**
+     * 채점에 넘길 질문 — <b>고객이 실제로 본 것</b>을 쓴다 (이슈 #120).
+     *
+     * <p>전에는 여기서 {@link #questionFor} 로 목 문면을 새로 만들었다. 그런데 화면에 나간
+     * 질문은 ai-service 가 생성한 것이라 <b>둘이 다르다</b> — 고객은 Q_ai 에 답했는데 채점은
+     * Q_mock 맥락으로 돈다. 루브릭 기반이라 명백한 오해는 그대로 잡히지만 경계 사례에서
+     * 어긋나고, 무엇보다 <b>근거가 "묻지 않은 질문에 대한 답"을 인용</b>하게 된다.
+     * 인용 대조(verify_quote_is_verbatim)는 답변만 보므로 그걸 못 잡고 리포트까지 간다.
+     *
+     * <p>저장된 질문이 없으면 목 문면으로 떨어진다 — 화면을 거치지 않고 {@code /answers} 를
+     * 직접 부른 경우(테스트·직접 호출)다. 그때는 채점을 막는 것보다 진행시키는 편이 낫다:
+     * 질문 맥락이 없다고 답변을 버리면 세션 데이터가 사라진다(명세 10절).
+     */
+    private static String askedQuestionFor(Session session, RiskItem item) {
+        String asked = session.askedQuestion(item.itemId());
+        return asked != null ? asked : questionFor(item);
     }
 
     /**

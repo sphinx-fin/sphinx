@@ -133,6 +133,19 @@ public class SessionService {
     }
 
     /**
+     * 고객에게 보여준 질문을 기록한다 (F-INT-002).
+     *
+     * <p>채점이 같은 문면을 쓰게 하려는 것이다. ai-service 가 질문을 매번 생성하므로 저장하지
+     * 않으면 채점 시점에 재현할 수 없다.
+     */
+    @Transactional
+    public Session recordAskedQuestion(String sessionId, String itemId, String question) {
+        Session session = get(sessionId);
+        session.recordAskedQuestion(itemId, question);
+        return repository.save(session);
+    }
+
+    /**
      * F-INT-004 재설명 — 이해 부족 항목을 다시 설명한다. 상태를 RE_EXPLAIN으로 두고,
      * 이후 같은 항목 재답변(recordJudgment)이 재검증이 된다. 재검증 상한에 도달한 항목은
      * 재설명하지 않고 판정으로 보낸다(게이트 R-03이 RED).
