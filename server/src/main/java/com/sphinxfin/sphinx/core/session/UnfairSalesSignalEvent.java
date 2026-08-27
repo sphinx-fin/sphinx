@@ -1,4 +1,4 @@
-package com.sphinxfin.sphinx.core;
+package com.sphinxfin.sphinx.core.session;
 
 import java.time.Instant;
 
