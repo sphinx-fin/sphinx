@@ -47,7 +47,15 @@ public class SessionController {
         return ApiResponse.ok(SessionResponse.of(session));
     }
 
-    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
+    /**
+     * 세션 조회. <b>읽기와 진행을 가른 action 이다</b>(#129 · 이슈 #124).
+     *
+     * <p>{@code session:interview} 를 쓰면 MGR 에게 그 그랜트를 주는 순간 같은 action 이
+     * 덮는 {@code questions/next}·{@code re-explain}·{@code abort} 까지 열린다 — 승인하려고
+     * 읽어야 하는 것과 <b>세션을 몰 수 있는 것</b>은 다르다. 그래서 읽기만 별도 action 이고,
+     * 그 덕에 승인자(MGR)가 승인 대상을 읽을 수 있으면서 진행에는 못 닿는다.
+     */
+    @PreAuthorize("@accessGuard.can('session:read', #sid)")
     @GetMapping("/{sid}")
     public ApiResponse<SessionResponse> get(@PathVariable String sid) {
         return ApiResponse.ok(SessionResponse.of(sessionService.get(sid)));
