@@ -17,6 +17,18 @@ product_type: ELS
 version: 1
 answer_set_documents:            # ADR-007: 정답지는 단일 문서가 아니라 집합
   - 간이투자설명서
+# ── importance 부여 기준 (결정 10.1 · 소유: 정세현) ───────────────────────────
+# required     그 항목을 오해하면 **계약의 금전적 결과**(손실·환급금·현금화)를 잘못 이해하게
+#              되고, 그 오해가 **오해 라이브러리 7종**(실제 분쟁조정례·기획서 데모 경로)으로
+#              실증된 것. 윤지석의 루브릭 범위가 이것이다(10.1).
+# recommended  알아야 하지만 오해가 금전 결과 이해를 직접 뒤집지는 않는 것 — 제도상 분류,
+#              절차 권리, 비용 정의처럼 다른 층에 있는 것.
+#
+# 근거를 앞세우는 이유는 3.17 과 같다. "중요해 보인다" 로 required 를 늘리면 루브릭 분모가
+# 커지고, 근거 없이 만든 항목이 채점을 확정하는 상태가 된다 — 개수보다 근거가 먼저다.
+# 각 항목의 판단 근거는 importance 옆에 한 줄로 적었다.
+# ─────────────────────────────────────────────────────────────────────────────
+
 # `fallback_question` (F-INT-002)
 #   LLM 없이 쓰는 항목별 기본 질문이다. 생성 질문이 정답 노출 검사를 MAX_ATTEMPTS 회 통과하지
 #   못하면 이걸 낸다 — 인터뷰가 멈추면 세션 자체가 진행되지 않으므로 폴백이 없으면 안 된다.
@@ -26,21 +38,21 @@ answer_set_documents:            # ADR-007: 정답지는 단일 문서가 아니
 items:
   - item_id: ELS-NO-DEPOSIT-INSURANCE
     name: 예금자보호 비대상
-    importance: null
+    importance: required    # M02 예금자보호 오인 — 분쟁조정례 직접 근거
     cue: 예금자보호법에 따라 보호되지 않는다는 고지
     fallback_question: 이 상품이 예금자보호를 받는지 어떻게 이해하고 계신지 말씀해 주시겠어요?
     section_hint: 표지 · 투자결정시 유의사항
 
   - item_id: ELS-PRINCIPAL-LOSS-WARNING
     name: 원금손실 가능성 고지
-    importance: null
+    importance: required    # M01 원금보장 오인 — 분쟁조정례 직접 근거
     cue: 투자원금의 손실이 발생할 수 있다는 고지
     fallback_question: 이 상품에 넣은 돈이 어떻게 될 수 있는지 본인 말씀으로 설명해 주시겠어요?
     section_hint: 표지 · 투자결정시 유의사항
 
   - item_id: ELS-HIGH-COMPLEXITY
     name: 고난도금융투자상품
-    importance: null
+    importance: recommended    # 제도상 분류 고지. 오해해도 금전 결과 이해가 뒤집히지 않는다
     # 자본시장법 시행령 제2조제7호의 정의 수치(원금의 100분의 20)는 cue 에 넣지 않는다 —
     # 법령 상수라 무해하지만 예외를 허용하면 상품 조건값이 섞여 들어온다.
     cue: 고난도금융투자상품 해당 여부와 그 판단 기준
@@ -49,70 +61,74 @@ items:
 
   - item_id: ELS-ELDERLY-COOLING
     name: 고령투자자 숙려제도 대상
-    importance: null
+    importance: recommended    # 절차 권리(숙려 대상 안내). 상품 이해와 다른 층이다
     cue: 65세 이상 고령투자자·부적합 투자자가 숙려제도 대상이라는 안내
     fallback_question: 청약하시기 전에 따로 생각할 시간을 두는 절차가 있다고 들으셨나요? 어떤 절차인지 말씀해 주시겠어요?
     section_hint: 투자위험 · 유의사항
 
   - item_id: ELS-EARLY-REDEMPTION-CONDITION
     name: 조기상환 조건
-    importance: null
+    importance: required    # M04 조기상환 구조 오인
     cue: 자동조기상환평가일에 기초자산이 모두 기준가격 이상일 때 상환된다는 조건
     fallback_question: 만기 전에 돈을 돌려받는 경우가 있다면 어떤 조건일 때인지 말씀해 주시겠어요?
     section_hint: 상환조건 · 손익구조
 
   - item_id: ELS-KNOCKIN-BARRIER
     name: 낙인 배리어
-    importance: null
+    importance: required    # M04. ADR-006 이 원금손실을 셋으로 쪼갠 이유가 이 항목이다
     cue: 낙인구간(최초기준가격의 일정 비율) 미만으로 하락한 이력 조건
     fallback_question: 기초자산이 어느 정도까지 떨어지면 문제가 되는지 말씀해 주시겠어요?
     section_hint: 상환조건 · 손익구조
 
   - item_id: ELS-MATURITY-LOSS-CONDITION
     name: 만기 손실조건
-    importance: null
+    importance: required    # M04. 낙인만 말하고 만기 조건을 빼먹은 답변이 U1 로 통과하면 안 된다
     cue: 만기평가일 기준가격 비율 미만일 때 손실이 발생한다는 조건
     fallback_question: 만기에 손실이 확정되는 경우가 어떤 상황인지 설명해 주시겠어요?
     section_hint: 상환조건 · 손익구조
 
   - item_id: ELS-TOTAL-LOSS-SCENARIO
     name: 전액손실 사례
-    importance: null
+    importance: required    # M03 확률 오인 — '반토막 날 리가' 의 반대편
     cue: 최대손실 시 투자원금 전액을 잃을 수 있다는 사례·수치
     fallback_question: 가장 나쁜 경우에 얼마를 잃을 수 있다고 이해하고 계신가요?
     section_hint: 손실 사례 · 수익률조견표
 
   - item_id: ELS-LOSS-SIMULATION
     name: 과거 데이터 수익률 모의실험
-    importance: null
+    importance: required    # M03. 기획 7-2 표가 이 모의실험이고 데모 경로다
     cue: 기초자산 과거 데이터를 이용한 수익률 모의실험 결과
     fallback_question: 과거 데이터로 해본 모의실험 결과를 어떻게 이해하셨는지 말씀해 주시겠어요?
     section_hint: 모의실험
 
   - item_id: ELS-MIDWAY-REDEMPTION-COST
     name: 중도상환 원금손실
-    importance: null
+    importance: required    # 중도상환 시 원금 미달 — 금전 결과가 직접 바뀐다
     cue: 중도상환 시 공정가액 대비 차감이 발생해 원금에 미달할 수 있다는 조건
     fallback_question: 만기 전에 중간에 돈을 빼려면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 중도상환 · 유동성 위험
 
   - item_id: ELS-COOLING-PERIOD
     name: 숙려기간
-    importance: null
+    importance: recommended    # 절차(숙려기간 일수). 결과 이해와 다른 층이다
     cue: 판매 과정에서 확보되는 숙려기간(영업일 수)
     fallback_question: 청약 후에 다시 생각할 수 있는 기간이 있는지, 있다면 어떤 것인지 말씀해 주시겠어요?
     section_hint: 청약 · 숙려제도
 
   - item_id: ELS-NO-LISTING
     name: 환금성 제약(비상장)
-    importance: null
+    importance: required    # 비상장 = 만기 전 현금화 불가. 유동성 오해가 금전 결과다
     cue: 거래소에 상장하지 않아 만기 전 환금이 제약된다는 고지
     fallback_question: 가입한 뒤에 이 상품을 팔고 싶으면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 유동성 위험
 
   - item_id: ELS-ISSUER-CREDIT-RISK
     name: 발행사 신용위험
-    importance: null
+    importance: required    # M01/M02 와 같은 층 — 윤지석 리뷰(PR #100) 수용. ELS-NO-DEPOSIT-INSURANCE
+    # 의 required_elements 가 발행사 신용위험을 일부러 빼고 "별도 항목(ELS-ISSUER-CREDIT-RISK)
+    # 의 범위" 라고 전제하는데, 그 항목이 recommended 면 "예금자보호 안 됨"은 묻고 "그래서 뭐가
+    # 문제인가"는 안 묻는 상태가 된다 — 쪼갠 이유가 사라진다. M04 를 required 로 둔 근거("급하면
+    # 빼면 되죠"가 오해다)와 같은 구조로, "증권사가 망할 리가"는 M01 의 사촌이다.
     cue: 발행인의 신용으로 발행되는 무보증 증권이라는 고지와 신용등급
     fallback_question: 이 상품을 발행한 회사에 문제가 생기면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 발행사 위험
