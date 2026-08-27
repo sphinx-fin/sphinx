@@ -77,14 +77,19 @@ class ApproverAccessTest {
         }
 
         @Test
-        @DisplayName("지금은 HTTP 로 403 이다 — 계정에 지점이 없어 branch 를 판단할 수 없다")
+        @DisplayName("지금은 HTTP 로 403 이다 — 계정에 지점이 없어 branch 를 판단할 수 없다 "
+                + "(10.5 가 오면 200 으로 뒤집는다)")
         void mgrReadIsBlockedUntilAccountsCarryBranch() throws Exception {
             String sid = sessionBySeller("seller-01");
 
-            // 10.5 가 오면 이 단정이 깨진다. 그때 이 테스트를 200 으로 뒤집으면서
-            // #124 가 실제로 닫혔는지 확인하는 자리가 된다 — 빨간 테스트는 읽힌다.
-            mvc.perform(get("/sessions/{sid}", sid).with(mgr("mgr-01")))
-                    .andExpect(status().isForbidden());
+            int status = mvc.perform(get("/sessions/{sid}", sid).with(mgr("mgr-01")))
+                    .andReturn().getResponse().getStatus();
+
+            assertThat(status)
+                    .as("계정에 지점이 실려 이게 200 이 되면 #124 가 닫힌 것이다 — 이 단정을 "
+                            + "200 으로 뒤집고 이슈를 닫는다. 정책은 이미 허용이고(옆 테스트) "
+                            + "지금 막는 것은 CurrentActor.branchId() 가 null 이라서다 (결정 10.5)")
+                    .isEqualTo(403);
         }
 
         @Test
