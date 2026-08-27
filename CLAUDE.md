@@ -200,7 +200,5 @@ ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계�
 
 - `contracts/README.md`가 `server/app/models/`의 pydantic 모델을 언급한다 — 실제로는 Java
   `domain/` 레코드다.
-- `.env.example`의 `DB_URL=sqlite://...` — 실제 서버는 H2를 쓴다(`build.gradle`).
-- `.env.example`의 `AUDIO_RETENTION_MONTHS` — 기능 명세서 v1.1은 음성 입력을 범위에서 제외했다.
 - `docs/functional-spec-v1.1.md`는 본문 전사가 안 된 색인 상태다. 조항 단위 근거가 필요하면
   원본 문서를 봐야 한다.
