@@ -1,0 +1,8 @@
+# 빌드 컨텍스트에서 뺀다. node_modules 를 넣으면 호스트(macOS)에서 만들어진 네이티브
+# 바이너리가 alpine 이미지로 들어가고, npm ci 가 만든 것과 섞인다.
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.log

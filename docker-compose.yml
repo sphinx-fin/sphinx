@@ -1,0 +1,134 @@
+# SphinX 배포 — AWS EC2 + docker compose. 소유: 오준서 (인프라 R)
+#
+# 이슈 #41(배포 전 보안) · #37(data/ 전제) · 결정로그 10.3.
+#
+# ── 이 파일이 지키는 것 하나 ────────────────────────────────────────────────
+#
+# **`ai-service` 를 외부에 열지 않는다.** 아래에서 `ports:` 를 가진 서비스는 `web` 뿐이다.
+# 포트를 게시하지 않은 서비스는 같은 compose 네트워크 안에서만 닿는다 — EC2 호스트에서도,
+# 인터넷에서도 안 보인다.
+#
+# 이게 가장 싸고 효과가 큰 조치인 이유는 #41 에 적혀 있다. `ai-service` 의 `/internal/*` 은
+# 지금 무인증이고, :8100 이 퍼블릭에 뜨는 순간 **PII 마스킹을 건너뛰고 LLM 에 직접 프롬프트를
+# 넣을 수 있다.** CLAUDE.md 가 P3 로 못박은 *"고객 텍스트가 ai-service 로 나가는 유일한 경로는
+# PiiGateway.mask() → AiServiceClient"* 가 그 순간 거짓이 된다. 노출을 안 하면 `permitAll`
+# 상태여도 외부에서 못 부른다.
+#
+# 네트워크를 둘로 가른 것은 그 위의 2차 방어다. `ai-service` 는 `internal` 에만 있어서
+# `web` 컨테이너가 뚫려도 거기서 :8100 으로 직접 못 간다 — 반드시 `server` 를 거친다.
+#
+# ── 쓰는 법 ────────────────────────────────────────────────────────────────
+#
+#   scripts/deploy_ec2.sh            # SSM 에서 비밀을 받아 아래를 띄운다(권장)
+#   docker compose up -d --build     # 환경변수를 직접 넣었을 때
+#
+# 비밀을 `.env` 평문으로 두지 않는다(#41 ④). 아래 `${VAR:?}` 문법이 **미설정이면 기동을
+# 거부**하므로, 키 없이 뜬 채로 데모 중에 LLM 호출만 실패하는 상황이 생기지 않는다.
+#
+# 자세한 배포 절차·리전·보안그룹은 `docs/deployment.md`.
+
+name: sphinx
+
+services:
+  # ── ai-service (FastAPI) — 외부 노출 없음 ─────────────────────────────────
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    # ports: 없다. 의도적이다 — 위 주석 참조. 추가하려면 #41 을 먼저 읽는다.
+    environment:
+      # 오해 라이브러리(M01~M08)를 여기서 읽는다. 못 읽으면 매칭이 통째로 안 돌고
+      # apply_misconception_floor 가 U4 를 못 올린다 — 기획서 7-2 데모 메인 판정 경로다.
+      # 다행히 로딩 시점에 죽으므로 조용히 틀리지는 않는다(#37).
+      SPHINX_DATA_DIR: /data
+      SPHINX_LOG_LEVEL: ${SPHINX_LOG_LEVEL:-INFO}
+      # 미설정이면 compose 가 기동을 거부한다. 키 없이 떠서 데모 중에만 실패하는 것보다 낫다.
+      LLM_API_KEY: ${LLM_API_KEY:?SSM 에서 받아 환경변수로 넣는다 — scripts/deploy_ec2.sh 참조}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    volumes:
+      # data/ 를 이미지에 굽지 않는다. timeseries/ 18,089줄을 한 벌 더 두면 VERSION 의
+      # sha256 으로 고정한 원본과 조용히 갈라지고, 시뮬레이터 출력이 달라진 원인이 코드인지
+      # 데이터인지 구분할 수단이 없어진다(P2 · #37).
+      - ./data:/data:ro
+      # ❗ contracts/ 도 런타임 의존이다. templates.py 의 assert_matches_contract() 가
+      # contracts/samples/parsed_*.json 을 읽어 상품유형 템플릿과 대조하는데, **파일이 없으면
+      # 예외도 로그도 없이 대조가 통째로 no-op** 이 된다(#37 코멘트 ②). data/ 와 달리 이건
+      # 조용해서, 빠뜨리면 템플릿이 계약과 어긋난 채로 컨테이너에서 통과한다.
+      # 마운트 지점이 /contracts 인 이유: 앱이 /app/app/ 에 있어 parents[2] 가 / 로 떨어진다.
+      - ./contracts:/contracts:ro
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/healthz').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # ── server (Spring Boot) — 외부 노출 없음, web 이 프록시한다 ───────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    # ports: 없다. 화면은 web 컨테이너의 nginx 가 /api 로 넘긴다.
+    # 직접 열어야 할 일이 생기면 IP 제한이나 basic auth 를 먼저 건다(#41).
+    environment:
+      # prod 프로파일이 H2 콘솔을 끄고(ddl-auto: create), permitAll 대신 인증을 요구한다.
+      # 이걸 안 켜면 브라우저에서 세션 테이블을 직접 고칠 수 있고 F-GTE-004·F-CMN-002 의
+      # 전제가 무너진다(#41 ②).
+      SPRING_PROFILES_ACTIVE: prod
+      # 미설정이면 SecurityConfig.prodUsers 가 기동을 거부한다 — Spring 이 임의 비밀번호를
+      # 만들어 기동 로그에 찍는 상황을 막기 위한 것이다. compose 에서도 한 번 더 막는다.
+      SPHINX_API_USER: ${SPHINX_API_USER:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
+      SPHINX_API_PASSWORD: ${SPHINX_API_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
+      # 빈 값으로 두면 안 된다. Spring 의 ${VAR:기본값} 은 빈 문자열을 값으로 취급해
+      # 기본값이 죽고, Path.of("") 가 작업 디렉토리로 떨어진다(#126). 그 PR 이후로는
+      # 빈 값이면 기동을 거부하므로 조용히 틀린 경로로 뜨지는 않는다.
+      SPHINX_TIMESERIES_DIR: /data/timeseries
+      # Spring 완화 바인딩: sphinx.ai-service.base-url → SPHINX_AISERVICE_BASEURL
+      # (점·하이픈을 없애고 대문자로). 이름이 낯설어 보이지만 이게 규칙대로다.
+      SPHINX_AISERVICE_BASEURL: http://ai-service:8100
+    volumes:
+      # 시계열만 필요하다. documents/ 는 런타임에 안 쓰고 dispute_cases/ 는 어떤 코드도
+      # 읽지 않는다(#37). 읽기 전용이라 컨테이너가 원본을 건드릴 수 없다.
+      - ./data/timeseries:/data/timeseries:ro
+    networks: [internal, edge]
+    depends_on:
+      ai-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # SecurityConfig 의 PUBLIC_PATHS 가 이 경로만 인증 없이 연다.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 40s
+
+  # ── web (정적 dist + nginx) — 유일하게 외부에 열리는 서비스 ────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      # EC2 보안그룹에서도 80 만 연다. 8000·8100 은 인바운드에 넣지 않는다(#41).
+      - "80:80"
+    networks: [edge]
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  # web ↔ server 만. ai-service 는 여기 없다.
+  edge:
+    driver: bridge
+  # server ↔ ai-service 만. web 컨테이너는 이 네트워크에 없으므로 :8100 으로 직접 갈 수 없다.
+  internal:
+    driver: bridge
+    # ❗`internal: true` 를 붙이지 않는다. 그 플래그는 컨테이너 간 격리가 아니라 **아웃바운드
+    # 차단**이고, 그러면 ai-service 가 LLM API 에 못 나간다(F-EXT-002·F-SCR-001·F-INT-002 가
+    # 전부 죽는다). 여기서 원하는 격리는 "web 에서 ai-service 로 못 간다"인데 그건 네트워크
+    # 소속만으로 이미 성립한다 — 두 서비스가 공유하는 네트워크가 없다.
