@@ -1,5 +1,7 @@
 package com.sphinxfin.sphinx.core;
 
+import com.sphinxfin.sphinx.core.session.UnfairSalesSignalEvent;
+import com.sphinxfin.sphinx.core.session.UnfairSalesTypes;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -8,6 +10,7 @@ import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +34,7 @@ public class SessionService {
     private final CoachingScoreService coachingScoreService;
     private final EvidenceRecorder evidenceRecorder;
     private final AiServiceClient aiServiceClient;
+    private final ApplicationEventPublisher events;
     private final int maxReverify;   // 항목당 재검증 상한(application.yml)
 
     /**
@@ -45,12 +49,14 @@ public class SessionService {
                           CoachingScoreService coachingScoreService,
                           Optional<EvidenceRecorder> evidenceRecorder,
                           AiServiceClient aiServiceClient,
+                          ApplicationEventPublisher events,
                           @Value("${sphinx.scoring.max-reverify:2}") int maxReverify) {
         this.repository = repository;
         this.gateEngine = gateEngine;
         this.coachingScoreService = coachingScoreService;
         this.evidenceRecorder = evidenceRecorder.orElse(EvidenceRecorder.NO_OP);
         this.aiServiceClient = aiServiceClient;
+        this.events = events;
         this.maxReverify = maxReverify;
     }
 
@@ -127,7 +133,27 @@ public class SessionService {
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()),
                 askedQuestion, Instant.now());
+        publishIfUnfairSales(sessionId, judgment);
         return judgment;
+    }
+
+    /**
+     * F-GTE-003 — 판정에 불공정영업 신호가 있으면 COMPL 로 사건을 낸다 (이슈 #63).
+     *
+     * <p>불변 기록 append 뒤에 낸다. 통보가 먼저 나가고 기록이 롤백되면 컴플라이언스가
+     * 근거 없는 알림을 받는다 — 같은 트랜잭션이라 append 가 실패하면 여기까지 안 온다.
+     *
+     * <p>❗<b>발행 여부를 판정 응답에 싣지 않는다.</b> 판매자가 그 필드를 보면 무엇이
+     * 탐지되는지 알게 되고, 그러면 같은 영업을 문면만 바꿔서 한다(기획 7-4 역이용 방지).
+     * 그래서 이 메서드는 값을 돌려주지 않는다 — 호출자가 실수로 응답에 실을 수 없다.
+     */
+    private void publishIfUnfairSales(String sessionId, Judgment judgment) {
+        if (!UnfairSalesTypes.isSignal(judgment.misconceptionType())) {
+            return;
+        }
+        events.publishEvent(new UnfairSalesSignalEvent(
+                sessionId, judgment.itemId(), judgment.misconceptionType(),
+                judgment.evidence().utteranceQuote(), Instant.now()));
     }
 
     /**
