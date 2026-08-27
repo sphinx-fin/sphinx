@@ -175,6 +175,11 @@ ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계�
 [`docs/decision-log.md`](docs/decision-log.md)에 전수로 모여 있다 — 자기 영역을 건드리기 전에
 해당 절을 먼저 본다. 남은 미결이 누구 몫이고 언제까지인지도 그 문서 10절에 있다.
 
+**두 문서를 갱신하는 절차는 `decision-sweep` 스킬**(`.claude/skills/decision-sweep/`)에 있다.
+워터마크 시각 이후에 오간 말을 전부 뽑고(`sweep.sh`), 형식을 검증한다(`check.sh`).
+규칙 자체는 스킬에 없다 — `decision-log.md`의 `갱신 규칙`·`ADR 과의 관계`와 이 파일이 근거이고,
+스킬은 절차와 함정만 담는다. 두 벌이 되면 갈린다.
+
 ## 알려진 문서 불일치
 
 스캐폴드가 Python(FastAPI) 서버에서 Spring으로 전환되며 남은 흔적들이다. 이 값을 신뢰하지 말 것.
