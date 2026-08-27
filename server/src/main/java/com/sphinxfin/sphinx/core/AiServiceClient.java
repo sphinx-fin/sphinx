@@ -190,9 +190,23 @@ public class AiServiceClient {
     /**
      * F-INT-004 재설명 — 판정(측정값)과 risk_item으로 눈높이 재설명 콘텐츠를 만든다.
      *
-     * 입력은 상품 유도값(risk_item)과 측정값(judgment), 연령대·경험수준뿐이라 고객 텍스트가
-     * 없다 — question()과 같은 이유로 PiiGateway.mask()를 거치지 않는다. ageBand·
-     * experienceLevel은 선택이며(#60 스키마도 nullable), null이면 그대로 null로 보낸다.
+     * ❗<b>고객 텍스트가 있다</b> — {@code judgment.evidence().utteranceQuote()} 가 발화 인용
+     * 그대로다. question() 과 달리 이 경로는 고객의 말을 ai-service 로 보낸다.
+     *
+     * <p>그런데도 여기서 {@link PiiGateway#mask(String)} 를 부르지 않는 이유는 <b>없어서가
+     * 아니라 이미 마스킹된 것이기 때문</b>이다. 그 인용은 채점 경로에서 만들어진다 —
+     * {@code score()} 가 mask() 를 태워 보낸 발화를 ai-service 의 인용 대조
+     * (verify_quote_is_verbatim)가 검증하므로, 인용은 <b>구성상</b> 마스킹 상태다. 같은 파일
+     * {@code Scored(judgment, maskedAnswer)} 가 "그때 실제로 나간 마스킹 발화" 인 것이 그
+     * 근거다. ai-service 의 PiiGuardMiddleware 가 {@code /internal/*} 본문의 모든 문자열을
+     * 재검사하는 것이 두 번째 방어선이다.
+     *
+     * <p><b>이 전제가 깨지는 변경</b>: {@code Evidence} 에 원문 필드가 추가되거나,
+     * {@code Judgment} 가 mask() 밖 경로로 만들어지는 것. 그러면 이 호출이 원문을 내보낸다.
+     * P3 문면("고객 텍스트가 나가는 유일한 경로는 mask() → AiServiceClient")에 형식상 걸리는
+     * 자리라 근거를 여기 남긴다 (#119 리뷰).
+     *
+     * <p>ageBand·experienceLevel은 선택이며(#60 스키마도 nullable), null이면 그대로 null로 보낸다.
      *
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
