@@ -246,4 +246,56 @@ class AccessPolicyTest {
                     .isFalse();
         }
     }
+
+    @Nested
+    @DisplayName("읽기와 진행을 가른다 — 승인자는 읽되 세션을 몰지 못한다 (이슈 #124)")
+    class ReadIsNotInterview {
+
+        @Test
+        @DisplayName("MGR 은 지점 내 세션을 읽는다 — 사유를 모르고 승인하는 상태를 없앤다")
+        void mgrCanReadBranchSession() {
+            assertThat(policy.permits(mgr("BR-1"), "session:read", session("seller-01", "BR-1")))
+                    .as("승인자가 승인 대상을 못 읽으면 오버라이드 사유가 응답에 실려도 닿지 않는다")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("❗MGR 은 같은 세션을 진행하지는 못한다 — 여기가 가른 이유다")
+        void mgrCannotDriveTheSession() {
+            Target inBranch = session("seller-01", "BR-1");
+
+            assertThat(policy.permits(mgr("BR-1"), "session:interview", inBranch))
+                    .as("session:interview 는 questions/next · re-explain · abort 를 덮는다. "
+                        + "읽기를 열려고 여기에 MGR 을 붙이면 지점 내 적색 세션을 중단하거나 "
+                        + "질문을 다시 돌릴 권한까지 열린다 — 운영 압박이 들어왔을 때 문제가 "
+                        + "되는 권한이다(기획 7-4 · ADR-001)")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("COMPL 은 전체를 읽되 역시 진행하지 못한다")
+        void complReadsButDoesNotDrive() {
+            Actor compl = new Actor("compl-01", Role.COMPL, null);
+            Target any = session("seller-01", "BR-9");
+
+            assertThat(policy.permits(compl, "session:read", any)).isTrue();
+            assertThat(policy.permits(compl, "session:interview", any)).isFalse();
+        }
+
+        @Test
+        @DisplayName("면담을 진행하는 SELLER 는 둘 다 가진다 — 가르면서 기존 경로를 끊지 않았다")
+        void sellerKeepsBoth() {
+            Target own = session("seller-01", "BR-1");
+
+            assertThat(policy.permits(seller("seller-01"), "session:read", own)).isTrue();
+            assertThat(policy.permits(seller("seller-01"), "session:interview", own)).isTrue();
+        }
+
+        @Test
+        @DisplayName("읽기도 범위를 지킨다 — 남의 지점은 MGR 도 못 읽는다")
+        void readStillRespectsScope() {
+            assertThat(policy.permits(mgr("BR-1"), "session:read", session("seller-02", "BR-2")))
+                    .isFalse();
+        }
+    }
 }
