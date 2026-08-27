@@ -88,13 +88,17 @@ def test_level_is_injectable(monkeypatch):
     assert not logging.getLogger(config.APP_LOGGER).isEnabledFor(logging.INFO)
 
 
-def test_unknown_level_falls_back_loudly(monkeypatch, caplog):
-    """`SPHINX_LOG_LEVEL=INFOO` 같은 오타가 관측을 끄는데 그게 안 보이면 안 된다."""
+def test_unknown_level_falls_back_to_the_default(monkeypatch):
+    """`SPHINX_LOG_LEVEL=INFOO` 가 관측을 끄면 안 된다 — 기본값으로 내려간다.
+
+    경고가 실제로 사람 눈에 닿는지는 `test_fallback_warning_goes_through_our_handler` 가
+    본다. **`caplog` 으로 보지 않는 이유**: `propagate=False` 라 root 캡처 핸들러에 안 가고,
+    그건 이 PR 이 의도한 동작이다(같은 줄이 두 번 찍히면 빈도 관측이 두 배로 틀린다).
+    `caplog` 이 잡히는지로 검사하면 **그 의도와 반대 방향을 고정**하게 된다.
+    """
     monkeypatch.setenv(config.LOG_LEVEL_ENV, "INFOO")
     config.settings.cache_clear()
-    with caplog.at_level(logging.WARNING, logger="app.config"):
-        assert config.configure_logging() == config.DEFAULT_LOG_LEVEL
-    assert any(config.LOG_LEVEL_ENV in r.message for r in caplog.records), caplog.text
+    assert config.configure_logging() == config.DEFAULT_LOG_LEVEL
 
 
 def test_entrypoint_configures_logging_on_import():
@@ -106,10 +110,78 @@ def test_entrypoint_configures_logging_on_import():
     assert "configure_logging()" in source
 
 
-def test_healthz_reports_the_level():
-    """배포 후 "관측이 켜져 있나" 를 물을 수 있어야 한다."""
+def test_healthz_reports_the_applied_level_not_the_requested_one(monkeypatch):
+    """★ 오타를 낸 사람이 `/healthz` 에서 자기 오타를 되돌려받으면 안 된다.
+
+    `WARNING` 을 치려다 `WARNIG` 를 쳤다면 실제로는 INFO 로 도는데 화면은 *"WARNIG 로
+    설정됨"* 이다 — 관측이 켜져 있는지 묻는 유일한 창구가 사실이 아닌 값을 말한다
+    (PR #121 리뷰, 정세현 실측).
+
+    **기대값을 하드코딩한다.** 이전 버전은 `settings().log_level` 과 대조해서 양쪽이 같은
+    출처였고, 그래서 둘이 같이 틀려도 초록이었다.
+    """
     from fastapi.testclient import TestClient
 
     from app.main import app
 
-    assert TestClient(app).get("/healthz").json()["log_level"] == config.settings().log_level
+    monkeypatch.setenv(config.LOG_LEVEL_ENV, "INFOO")
+    config.settings.cache_clear()
+    config.configure_logging()
+
+    body = TestClient(app).get("/healthz").json()
+    assert body["log_level"] == "INFO", "적용되지 않은 값을 보고한다"
+    assert body["log_level_requested"] == "INFOO", "요청 원본도 함께 보여야 진단이 된다"
+
+
+def test_healthz_level_matches_the_logger_not_the_setting(monkeypatch):
+    """출처가 로거여야 한다 — 실제로 필터링에 쓰이는 값과 어긋날 수 없다."""
+    import logging as _logging
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setenv(config.LOG_LEVEL_ENV, "ERROR")
+    config.settings.cache_clear()
+    config.configure_logging()
+    assert TestClient(app).get("/healthz").json()["log_level"] == "ERROR"
+    assert _logging.getLogger(config.APP_LOGGER).getEffectiveLevel() == _logging.ERROR
+
+
+def test_numeric_levels_are_accepted(monkeypatch):
+    """파이썬 로깅은 숫자 레벨을 정식으로 받는다. 안 받으면 오타와 같은 경고를 받고,
+    그러면 그 경고가 두 가지 뜻을 갖는다(PR #121 리뷰)."""
+    import logging as _logging
+
+    monkeypatch.setenv(config.LOG_LEVEL_ENV, "10")
+    config.settings.cache_clear()
+    config.configure_logging()
+    assert _logging.getLogger(config.APP_LOGGER).getEffectiveLevel() == _logging.DEBUG
+
+
+def test_out_of_range_numeric_level_falls_back(monkeypatch, caplog):
+    """`0` 은 NOTSET 이라 상속으로 새고, 범위를 벗어난 값도 오타와 같다."""
+    import logging as _logging
+
+    for bad in ("0", "999"):
+        monkeypatch.setenv(config.LOG_LEVEL_ENV, bad)
+        config.settings.cache_clear()
+        assert config.configure_logging() == config.DEFAULT_LOG_LEVEL, bad
+
+
+def test_fallback_warning_goes_through_our_handler(monkeypatch, capsys):
+    """경고를 핸들러 붙이기 전에 내면 `logging.lastResort` 로 나가 포맷이 없다.
+
+    관측을 켜는 함수가 자기 경고를 관측 밖으로 내보내면 안 된다(PR #121 리뷰, 정세현 실측).
+    """
+    import logging as _logging
+
+    logger = _logging.getLogger(config.APP_LOGGER)
+    logger.handlers[:] = []
+    monkeypatch.setenv(config.LOG_LEVEL_ENV, "INFOO")
+    config.settings.cache_clear()
+    config.configure_logging()
+
+    captured = capsys.readouterr().err
+    assert config.LOG_LEVEL_ENV in captured
+    assert "WARNING" in captured, f"포맷 없는 lastResort 출력이다: {captured!r}"

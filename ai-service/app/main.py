@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import misconception, routes, rubrics
-from .config import DATA_DIR_ENV, settings,configure_logging
+from .config import DATA_DIR_ENV, configure_logging, effective_log_level, settings
 
 from .pii import PiiDetected, assert_payload_clean
 
@@ -155,7 +155,8 @@ def healthz() -> dict:
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
-        "log_level": cfg.log_level,         # 관측이 켜져 있는지 (PR #113·#114 리뷰)
+        "log_level": effective_log_level(),     # **적용된** 레벨. 요청값이 아니다 (#121 리뷰)
+        "log_level_requested": cfg.log_level,   # 환경변수 원본. 둘이 다르면 오타가 있었다
         "data_dir": str(cfg.data_dir),      # 어디서 오해 라이브러리를 읽는지 (10.7)
         "data_dir_env": DATA_DIR_ENV,
         "misconception_library_version": misconception.library_version(),

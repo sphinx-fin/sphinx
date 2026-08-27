@@ -60,6 +60,34 @@ APP_LOGGER = "app"
 #: 설정하므로 안 겹치지만, "남의 것이 있으면 내 것을 안 붙인다" 는 조용한 실패다.
 HANDLER_MARK = "_sphinx_app_handler"
 
+
+def effective_log_level() -> str:
+    """지금 **실제로 적용된** 레벨 이름. `settings()` 를 보지 않고 로거에서 읽는다.
+
+    `/healthz` 가 이걸 낸다. `settings().log_level` 은 환경변수 원본이라 오타가 그대로
+    들어 있고, 그걸 내면 오타를 낸 사람이 자기 오타를 되돌려받는다 — 관측이 켜져 있는지
+    묻는 유일한 창구가 사실이 아닌 값을 말하게 된다(PR #121 리뷰, 정세현 실측).
+
+    출처를 로거로 둔 이유도 같다. `configure_logging()` 의 반환값을 담아 두면 그 변수와
+    설정값이 **같은 계산에서 나와** 둘이 같이 틀릴 수 있다. 로거의 실효 레벨은 실제로
+    필터링에 쓰이는 값이라 그것과 어긋날 수 없다.
+    """
+    return logging.getLevelName(logging.getLogger(APP_LOGGER).getEffectiveLevel())
+
+
+def _resolve_level(name: str) -> int | None:
+    """레벨 이름 또는 숫자를 정수로. 알 수 없으면 None.
+
+    **숫자도 받는다** — 파이썬 로깅이 숫자 레벨을 정식으로 지원하므로 아는 사람이
+    `SPHINX_LOG_LEVEL=10` 으로 쓸 수 있다. 안 받으면 그게 오타와 같은 경고를 받고, 그러면
+    경고가 두 가지 뜻을 갖는다(PR #121 리뷰, 정세현).
+    """
+    if name.isdigit():
+        value = int(name)
+        return value if 0 < value <= logging.CRITICAL else None
+    level = getattr(logging, name, None)
+    return level if isinstance(level, int) else None
+
 log = logging.getLogger(__name__)
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]   # ai-service/
@@ -144,13 +172,9 @@ def configure_logging() -> str:
     여러 번 불려도 핸들러가 쌓이지 않는다(테스트가 반복 호출한다).
     """
     requested = settings().log_level
-    level = getattr(logging, requested, None)
-    if not isinstance(level, int):
-        log.warning(
-            "%s 값을 알 수 없어 %s 로 내려간다: %r",
-            LOG_LEVEL_ENV, DEFAULT_LOG_LEVEL, requested,
-        )
-        requested = DEFAULT_LOG_LEVEL
+    level = _resolve_level(requested)
+    fallback = level is None
+    if fallback:
         level = getattr(logging, DEFAULT_LOG_LEVEL)
 
     logger = logging.getLogger(APP_LOGGER)
@@ -161,4 +185,14 @@ def configure_logging() -> str:
         setattr(handler, HANDLER_MARK, True)
         logger.addHandler(handler)
     logger.propagate = False
+
+    # **경고를 핸들러 붙인 뒤에 낸다.** 앞에서 내면 `logging.lastResort` 로 나가 포맷 없는
+    # 맨 줄이 된다(PR #121 리뷰, 정세현 실측). 관측을 켜는 함수가 자기 경고를 관측 밖으로
+    # 내보내면 안 된다.
+    if fallback:
+        log.warning(
+            "%s 값을 알 수 없어 %s 로 내려간다: %r  (이름은 DEBUG·INFO·WARNING·ERROR·"
+            "CRITICAL, 숫자도 받는다)", LOG_LEVEL_ENV, DEFAULT_LOG_LEVEL, requested,
+        )
+        requested = DEFAULT_LOG_LEVEL
     return requested
