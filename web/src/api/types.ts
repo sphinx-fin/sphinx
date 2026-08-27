@@ -139,10 +139,50 @@ export interface Judgment {
   misconceptionType?: string | null;
 }
 
-/** 게이트 판정. `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다. */
+/**
+ * 게이트 **확정** 판정 (`POST /sessions/{id}/judge`).
+ * `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다.
+ */
 export interface GateResult {
   signal: Signal;
   ruleTrace: string[];
+}
+
+/**
+ * 적합성 모순 판정 상태 (F-DET-002).
+ * 미리보기는 모순을 평가하지 않으므로 보통 `NOT_EVALUATED` 다.
+ */
+export type SuitabilityStatus = "NOT_EVALUATED" | "NO_MISMATCH" | "MISMATCH" | "UNKNOWN";
+
+/**
+ * 게이트 **미리보기** (`GET /sessions/{id}/gate-preview`).
+ *
+ * **`GateResult` 와 다른 타입이다.** `/judge` 는 `signal`·`ruleTrace` 둘뿐이고, 이쪽은
+ * 미리보기를 안전하게 만드는 두 필드를 더 싣는다. 미리보기를 `GateResult` 로 받으면
+ * 남는 필드를 TS 가 잡아주지 않아 **타입은 통과하는데 화면만 조용히 덜 그린다** —
+ * `RiskItem` 의 snake_case 사고(decision-log 10.18)와 같은 종류다.
+ */
+export interface GatePreview {
+  signal: Signal;
+  ruleTrace: string[];
+  /**
+   * 감사 기준점으로 기록된 값인가. false 면 아직 확정이 아니다.
+   *
+   * **확정 여부의 근거는 이 필드다.** 세션 상태(`state === "JUDGED"`)로 유추하면 지금은
+   * 우연히 일치하지만 상태 전이가 하나 늘 때 조용히 어긋난다.
+   */
+  recorded: boolean;
+  /** 기준점 확정 시각. null 이면 `/judge` 가 아직 호출되지 않은 세션이다. */
+  judgedAt?: string | null;
+  /**
+   * ❗`NOT_EVALUATED` 인 GREEN 을 최종 통과로 그리면 안 된다.
+   *
+   * 미리보기는 모순을 평가하지 않으므로 그 GREEN 은 **모순 평가 전** 값이고, `/judge` 에서
+   * YELLOW(UNKNOWN)·RED(MISMATCH) 로 갈릴 수 있다. 방향이 나쁜 쪽이다 — 판매자가 GREEN 을
+   * 보고 재설명 루프를 건너뛰고 확정으로 갔다가 거기서 막힌다. 그래서 신호 옆에
+   * "적합성 미확인" 을 함께 낸다(신호 자체는 바꾸지 않는다).
+   */
+  suitabilityStatus: SuitabilityStatus;
 }
 
 /**

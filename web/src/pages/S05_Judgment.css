@@ -81,6 +81,29 @@
   color: var(--text-muted);
 }
 
+/* ── 적합성 미확인 ───────────────────────────────────────────────────────────
+   미리보기 신호 옆에 붙는다(#132 리뷰 · 계약 GatePreview). 신호등 3색을 쓰지 않는다 —
+   이 배지가 색으로 판정을 말하기 시작하면 룰 엔진이 하지 않은 판정을 화면이 지어내는
+   것이 된다. 중립색 + 테두리로 "덧붙은 사실" 로만 읽히게 둔다. */
+.s05__unevaluated {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  vertical-align: middle;
+}
+.s05__unevaluated-desc {
+  margin-top: var(--space-1);
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
 /* ── 룰 트레이스 ────────────────────────────────────────────────────────────
    감사 대상이라 접거나 숨기지 않는다. */
 .s05__trace {

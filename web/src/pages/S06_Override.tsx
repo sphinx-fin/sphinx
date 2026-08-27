@@ -34,7 +34,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { GateResult, SessionResponse } from "../api/types";
+import type { GatePreview, SessionResponse } from "../api/types";
 import "./S06_Override.css";
 
 /** ADR-002 견제 장치. 서버가 400 으로 막는 값과 같아야 한다 — 화면이 더 느슨하면 의미가 없다. */
@@ -53,7 +53,7 @@ export default function S06Override() {
   const navigate = useNavigate();
 
   const [session, setSession] = useState<SessionResponse | null>(null);
-  const [gate, setGate] = useState<GateResult | null>(null);
+  const [gate, setGate] = useState<GatePreview | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -68,7 +68,10 @@ export default function S06Override() {
       setSession(s);
       setForbidden(false);
       try {
-        setGate(await get<GateResult>(`/sessions/${sid}/gate-preview`));
+        // `/gate-preview` 는 GateResult 가 아니라 GatePreview 다 — S-05 와 같은 자리다(#132 리뷰).
+        // 이 화면이 읽는 것은 signal 뿐이지만, 타입을 좁게 받으면 남는 필드를 TS 가 잡아주지
+        // 않아 나중에 recorded·suitabilityStatus 를 쓸 때 조용히 undefined 가 된다.
+        setGate(await get<GatePreview>(`/sessions/${sid}/gate-preview`));
       } catch {
         // 신호를 못 읽어도 오버라이드 상태는 보여준다 — 승인자에게는 사유가 먼저다.
         setGate(null);

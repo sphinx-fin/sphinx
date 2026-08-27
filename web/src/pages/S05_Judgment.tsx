@@ -31,11 +31,21 @@
  * ⑤ **색만으로 구분하지 않는다** (tokens.css 규칙 3)
  *    신호등에는 항상 라벨을 병기한다. 이 화면은 판매를 막는 판정을 표시하므로
  *    색각 이상에서 적/녹이 구분되지 않는 상태를 허용할 수 없다.
+ *
+ * ⑥ **미리보기 신호는 확정 신호가 아니다** (계약 `GatePreview` · #132 리뷰)
+ *    `/gate-preview` 는 모순을 평가하지 않으므로 `suitabilityStatus` 가 보통
+ *    `NOT_EVALUATED` 고, 그 GREEN 은 `/judge` 에서 YELLOW·RED 로 갈릴 수 있다. 그대로
+ *    다른 GREEN 처럼 그리면 판매자가 재설명 루프를 건너뛰고 확정으로 갔다가 거기서
+ *    막힌다 — 나쁜 방향이다. 신호는 그대로 두고 "적합성 미확인" 을 병기한다.
+ *    확정 여부도 세션 상태가 아니라 응답의 `recorded` 로 판단한다. 지금은 두 출처가
+ *    우연히 일치하지만, 근거는 응답 안에 있다.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { GateResult, Grade, Judgment, RiskItem, SessionResponse, Signal } from "../api/types";
+import type {
+  GatePreview, GateResult, Grade, Judgment, RiskItem, SessionResponse, Signal, SuitabilityStatus,
+} from "../api/types";
 import "./S05_Judgment.css";
 
 /** 등급 라벨. 명세서 0.5 의 4단계 — 색이 아니라 말로 읽힌다. */
@@ -59,6 +69,37 @@ const SIGNAL_DESC: Record<Signal, string> = {
   RED: "이 상태로는 계약을 진행할 수 없습니다.",
 };
 
+/**
+ * 화면이 들고 있는 게이트 값.
+ *
+ * **미리보기와 확정은 서로 다른 계약이다** — `/gate-preview` 는 `GatePreview`,
+ * `/judge` 는 `GateResult` 를 준다. 한 타입으로 뭉치면 확정 이후에도 미리보기 전용
+ * 필드를 읽는 코드가 생기는데 그건 낡은 값이다. 공통분(신호·룰)만 남기고, 미리보기
+ * 전용 정보는 확정 뒤에 `null` 이 되게 한다.
+ */
+interface GateView {
+  signal: Signal;
+  ruleTrace: string[];
+  /** 감사 기준점으로 기록됐는가. **응답이 알려준다**(설계 판단 ⑥). */
+  settled: boolean;
+  /** 미리보기일 때만 값이 있다. `/judge` 응답에는 이 필드가 없으므로 확정 뒤에는 null. */
+  suitability: SuitabilityStatus | null;
+}
+
+const previewView = (g: GatePreview): GateView => ({
+  signal: g.signal,
+  ruleTrace: g.ruleTrace,
+  settled: g.recorded,
+  suitability: g.suitabilityStatus,
+});
+
+const settledView = (g: GateResult): GateView => ({
+  signal: g.signal,
+  ruleTrace: g.ruleTrace,
+  settled: true,
+  suitability: null,
+});
+
 export default function S05Judgment() {
   const { sid = "" } = useParams();
   const navigate = useNavigate();
@@ -66,9 +107,7 @@ export default function S05Judgment() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [judgments, setJudgments] = useState<Judgment[]>([]);
   const [items, setItems] = useState<RiskItem[]>([]);
-  const [gate, setGate] = useState<GateResult | null>(null);
-  /** 확정된 판정인가, 아직 미리보기인가. 화면 문구가 여기서 갈린다. */
-  const [settled, setSettled] = useState(false);
+  const [gate, setGate] = useState<GateView | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -89,12 +128,11 @@ export default function S05Judgment() {
       setJudgments(js.judgments ?? []);
       setItems(ri.items ?? []);
 
-      // 이미 확정된 세션이면 미리보기를 부르지 않는다. JUDGED 이후의 gate-preview 는
-      // 같은 값을 돌려주지만, 화면이 "미리보기" 문구를 띄우면 확정 사실이 흐려진다.
-      const done = s.state === "JUDGED" || s.state === "CLOSED";
-      setSettled(done);
-      const g = await get<GateResult>(`/sessions/${sid}/gate-preview`);
-      setGate(g);
+      // 확정된 세션에도 그대로 부른다 — 계약이 "이미 판정된 세션은 재계산하지 않고
+      // 기록값을 돌려준다(recorded=true)" 고 명시한다. 화면이 미리보기인지 확정인지는
+      // 세션 상태가 아니라 그 `recorded` 가 정한다(설계 판단 ⑥).
+      const g = await get<GatePreview>(`/sessions/${sid}/gate-preview`);
+      setGate(previewView(g));
       setError(null);
     } catch (e) {
       setError(describe(e));
@@ -111,8 +149,7 @@ export default function S05Judgment() {
     setBusy(true);
     try {
       const g = await post<GateResult>(`/sessions/${sid}/judge`, {});
-      setGate(g);
-      setSettled(true);
+      setGate(settledView(g));
       setConfirming(false);
       setError(null);
     } catch (e) {
@@ -151,10 +188,20 @@ export default function S05Judgment() {
           <div className="s05__banner-main">
             {/* 색과 라벨을 함께 낸다 — 색만으로 구분하지 않는다(설계 판단 ⑤) */}
             <span className="s05__signal">{SIGNAL_LABEL[gate.signal]}</span>
+            {/* 신호 자체는 바꾸지 않는다. "이 신호는 모순 평가 전 값" 이라는 사실만
+                덧붙인다(설계 판단 ⑥). 확정된 판정에는 붙지 않는다 — suitability 가 null 이다. */}
+            {gate.suitability === "NOT_EVALUATED" && (
+              <span className="s05__unevaluated">적합성 미확인</span>
+            )}
             <p className="s05__signal-desc">{SIGNAL_DESC[gate.signal]}</p>
+            {gate.suitability === "NOT_EVALUATED" && (
+              <p className="s05__unevaluated-desc">
+                적합성 모순은 아직 평가되지 않았습니다. 확정 시 신호가 바뀔 수 있습니다.
+              </p>
+            )}
           </div>
           <p className="s05__settled">
-            {settled
+            {gate.settled
               ? "확정된 판정입니다."
               : "아직 확정되지 않은 미리보기입니다. 아래에서 확정합니다."}
           </p>
@@ -225,7 +272,7 @@ export default function S05Judgment() {
 
       {/* ── 다음 행동 ─────────────────────────────────────────────────────── */}
       <footer className="s05__actions">
-        {!settled && (
+        {gate && !gate.settled && (
           confirming ? (
             <div className="s05__confirm" role="alertdialog" aria-label="판정 확정 확인">
               <p>
@@ -260,7 +307,7 @@ export default function S05Judgment() {
           </button>
         )}
 
-        {settled && (
+        {gate?.settled && (
           <button type="button" className="s05__btn" onClick={() => navigate(`/report/${sid}`)}>
             이해 기록 리포트
           </button>
