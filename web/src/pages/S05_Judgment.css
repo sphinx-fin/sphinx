@@ -1,0 +1,242 @@
+/* S-05 판정 결과 (판매자). 소유: 오준서.
+
+   불변 요건 둘.
+
+   ① **신호등 3색은 배너 한 곳에서만.** 항목 카드에 녹/황/적을 쓰면 화면이 "항목마다 적색"
+      을 말하게 되는데, 계약은 항목별 signal 을 싣지도 않는다(P1). 항목은 등급 라벨과
+      왼쪽 테두리 굵기로만 구분한다.
+   ② **색만으로 구분하지 않는다.** 배너에는 항상 라벨("통과"·"보완 필요"·"보류")이 함께
+      나간다. 판매를 막는 판정을 색각 이상에서 못 읽는 상태를 허용할 수 없다. */
+
+.s05 {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.s05__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.s05__head h1 {
+  font-size: calc(36px * var(--scale));
+  line-height: calc(1.334 * var(--leading-scale));
+  letter-spacing: -0.027em;
+  font-weight: 700;
+}
+.s05__sid {
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+  font-size: calc(14px * var(--scale));
+}
+.s05__sid code {
+  background: var(--surface-sunken);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.s05__error {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ── 세션 신호등 ─────────────────────────────────────────────────────────────
+   이 화면에서 판정 3색을 쓰는 유일한 자리다. */
+.s05__banner {
+  border: 1px solid;
+  border-left-width: 6px;
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.s05__banner--green  { background: var(--green-bg);  border-color: var(--green); }
+.s05__banner--yellow { background: var(--yellow-bg); border-color: var(--yellow); }
+.s05__banner--red    { background: var(--red-bg);    border-color: var(--red); }
+
+.s05__signal {
+  font-size: calc(28px * var(--scale));
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.s05__banner--green  .s05__signal { color: var(--green); }
+.s05__banner--yellow .s05__signal { color: var(--yellow); }
+.s05__banner--red    .s05__signal { color: var(--red); }
+
+.s05__signal-desc {
+  margin-top: var(--space-1);
+  font-size: calc(16px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+}
+.s05__settled {
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+
+/* ── 룰 트레이스 ────────────────────────────────────────────────────────────
+   감사 대상이라 접거나 숨기지 않는다. */
+.s05__trace {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+}
+.s05__trace h2 {
+  font-size: calc(14px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: var(--space-2);
+}
+.s05__trace ul { display: flex; flex-wrap: wrap; gap: var(--space-2); list-style: none; }
+.s05__trace code {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: calc(13px * var(--scale));
+}
+.s05__trace-note {
+  margin-top: var(--space-2);
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+
+/* ── 항목별 판정 ────────────────────────────────────────────────────────────
+   신호등 색을 쓰지 않는다. 등급은 라벨과 테두리로만 구분한다. */
+.s05__items h2 {
+  font-size: calc(20px * var(--scale));
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+.s05__count { color: var(--text-muted); font-weight: 400; font-size: calc(15px * var(--scale)); }
+.s05__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
+
+.s05__list { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+
+.s05__item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+}
+/* 등급이 낮을수록 왼쪽 테두리가 진해진다 — 색상이 아니라 명도다. 판정 3색과 섞이지 않는다. */
+.s05__item--u1 { border-left-color: var(--limestone-80); }
+.s05__item--u2 { border-left-color: var(--kohl-30); }
+.s05__item--u3 { border-left-color: var(--kohl-50); }
+.s05__item--u4 { border-left-color: var(--kohl-70); }
+
+.s05__item-head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.s05__item-head h3 { font-size: calc(17px * var(--scale)); font-weight: 600; }
+.s05__grade {
+  flex: none;
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.s05__reason {
+  margin-top: var(--space-2);
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+}
+
+/* ── 근거 — 이 화면의 존재 이유 ──────────────────────────────────────────── */
+.s05__evidence {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 40rem) {
+  .s05__evidence { grid-template-columns: 1fr; }
+}
+.s05__evidence-label {
+  display: block;
+  font-size: calc(12px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+.s05__quote blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-3);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+.s05__rubric p {
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+.s05__item-foot {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+.s05__misconception code { background: var(--surface-sunken); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+
+/* ── 행동 ───────────────────────────────────────────────────────────────── */
+.s05__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+
+.s05__btn {
+  font: inherit;
+  font-size: calc(15px * var(--scale));
+  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.s05__btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.s05__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.s05__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 강조는 "누를 수 있는 것"에만 쓴다 — 상태를 뜻하지 않는다(tokens.css 규칙 2). */
+.s05__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+.s05__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.s05__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
+.s05__btn--quiet:hover:not(:disabled) { background: var(--surface-sunken); }
+
+/* ── 확정 확인 — 되돌릴 수 없으므로 한 단계 둔다 ─────────────────────────── */
+.s05__confirm {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+.s05__confirm p { font-size: calc(15px * var(--scale)); line-height: calc(1.55 * var(--leading-scale)); }
+.s05__confirm-buttons { display: flex; gap: var(--space-2); }

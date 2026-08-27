@@ -91,11 +91,31 @@ export interface CreateSessionRequest {
   surveyResult?: Record<string, string> | null;
 }
 
+/** F-GTE-002 오버라이드 진행 상태. `NONE` 이 값으로 나간다 — 부재가 아니다. */
+export type OverrideStatus = "NONE" | "PENDING_APPROVAL" | "APPROVED";
+
 export interface SessionResponse {
   sessionId: string;
   state: SessionState;
   productId: string;
   contractRef?: string | null;
+
+  /* ── F-GTE-002 ────────────────────────────────────────────────────────────
+   * 계약에 이미 있었는데(#116, `openapi.yaml` SessionResponse) 이 타입만 따라오지
+   * 않았다. 서버는 네 필드를 실어 보내는데 화면 타입에 없으니 **런타임에는 있는 값을
+   * 화면이 못 쓰는** 상태였다 — S-06 을 붙이면서 드러났다.
+   *
+   * `overrideStatus` 는 **required 다.** 계약도 required 로 잡았다(nullable 아님).
+   * optional 로 두면 화면이 "오버라이드 없음"을 `!overrideStatus` 로 읽게 되고,
+   * 그러면 **"없다" 와 "안 실렸다" 가 같아진다** — 필드가 빠진 응답을 "요청 없음"으로
+   * 읽어 승인 대기 세션에 요청 화면을 띄운다. 값으로 비교하게 강제한다(#125 리뷰).   */
+  overrideStatus: OverrideStatus;
+  /** 판매자가 적은 진행 사유(30자 이상, ADR-002). 요청 전이면 null. */
+  overrideReason?: string | null;
+  /** 승인한 MGR. 승인 전이면 null. */
+  overrideApprover?: string | null;
+  /** 승인 시각(ISO-8601). 승인 전이면 null. */
+  overrideDecidedAt?: string | null;
 }
 
 /**
@@ -276,13 +296,30 @@ export interface ProductSummary {
 export interface HeatmapCell {
   product: string;
   item: string;
-  /** 오해율 0~1. 표본 부족(n<30) 셀은 서버가 마스킹해 null로 내려준다. */
+  /** 오해율 0~1. `masked` 면 null. */
   misrate: number | null;
+  /** 표본 수. 마스킹돼도 내려준다. */
   n: number;
+  /**
+   * 소표본(n<30) 마스킹 여부. **셀을 제거하지 않는다** — 제거하면 화면이 "데이터 없음"과
+   * "가려짐"을 구분할 수 없고, 감사·심사 관점에서는 가려졌다는 사실 자체가 마스킹이
+   * 동작한 증거다(계약 · `rbac_policy.yaml` 집계 절).
+   *
+   * 계약에 required 로 있었는데 이 타입에만 없었다. `misrate === null` 하나로 두 상태를
+   * 읽으면 소표본 셀이 "데이터 없음"으로 그려지고, **마스킹이 동작한 증거가 화면에서
+   * 사라진다** — 그게 데모에서 보여야 하는 것인데.
+   */
+  masked: boolean;
 }
 
 export interface HeatmapResponse {
-  /** 합성 세션 기반이면 true — 화면에 워터마크를 상시 노출해야 한다 (F-DSH-001). */
+  /** 합성 세션 기반이면 true — 화면에 워터마크를 상시 노출해야 한다 (F-DSH-001, 연출 금지). */
   synthetic: boolean;
+  /**
+   * **데이터 범위**. `rbac_policy.yaml` 의 `own_session`/`branch`/`org` 와 같은 어휘이고
+   * 요청자 역할이 결정한다(MGR=branch · COMPL=org). 집계 축(`groupBy`)과 다른 개념이라
+   * 화면에 표시해 무엇을 보고 있는지 드러낸다. 계약 required — 이 타입에만 없었다.
+   */
+  scope: "branch" | "org";
   cells: HeatmapCell[];
 }
