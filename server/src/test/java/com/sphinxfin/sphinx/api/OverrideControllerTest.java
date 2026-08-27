@@ -54,6 +54,15 @@ class OverrideControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
+
+        // 승인 뒤의 노출까지 본다. 이 둘이 S-07 리포트("오버라이드로 진행됨")가 쓸 값인데,
+        // PENDING_APPROVAL 까지만 걸어두면 승인 경로에서 빠져도 안 드러난다 (#116 리뷰).
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.overrideStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.overrideReason").value(REASON))
+                .andExpect(jsonPath("$.data.overrideApprover").isNotEmpty())
+                .andExpect(jsonPath("$.data.overrideDecidedAt").isNotEmpty());
     }
 
     @Test
