@@ -85,6 +85,21 @@ public class SessionService {
      */
     @Transactional
     public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer) {
+        return recordJudgment(sessionId, judgment, maskedAnswer, null);
+    }
+
+    /**
+     * 채점에 쓴 질문까지 함께 기록한다.
+     *
+     * <p>❗{@code askedQuestion} 은 <b>호출자가 넘긴다</b> — 여기서 세션 맵을 다시 읽지 않는다.
+     * 읽으면 값을 두 곳에서 따로 구하게 되고, 폴백처럼 한쪽에만 있는 분기가 생기는 순간
+     * <b>채점한 질문과 기록한 질문이 갈린다</b>. 실제로 그랬다 — 세션 맵이 비면 채점은 목
+     * 문면으로 떨어지는데 기록은 null 이었고, 그러면 null 이 "필드 이전 레코드" 와
+     * "폴백이었다" 두 뜻을 갖는다(#137 리뷰). append-only 라 섞인 뒤에는 못 가른다.
+     */
+    @Transactional
+    public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer,
+                                   String askedQuestion) {
         Session session = get(sessionId);
         if (maskedAnswer != null) {
             session.recordUtterance(judgment.itemId(), maskedAnswer);
@@ -106,8 +121,12 @@ public class SessionService {
         // 같은 트랜잭션 안이다(2026-08-25 결정): append-only 해시 체인은 순서가 해시에
         // 들어가므로 구멍을 나중에 메울 수 없다. append 가 실패하면 세션 저장도 함께 롤백되고
         // 요청 전체가 실패한다 — 근거 없는 판정이 무효라면 기록 없는 판정도 무효다(P4와 같은 논리).
+        // 그 판정을 만든 질문을 함께 남긴다 — 채점에 넘긴 값 그대로다(호출자가 준다).
+        // 질문은 재질문 시 덮어쓰는 가변 테이블에만 있어서, 여기서 안 실으면 "어느 질문에
+        // 대한 답을 잰 것인가" 에 답할 수 없다 (#136).
         evidenceRecorder.appendJudgment(
-                sessionId, judgment, session.reverifyCount(judgment.itemId()), Instant.now());
+                sessionId, judgment, session.reverifyCount(judgment.itemId()),
+                askedQuestion, Instant.now());
         return judgment;
     }
 
