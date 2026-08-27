@@ -153,13 +153,35 @@ public class ReportService {
         return "report-" + sessionId + "-" + seq;
     }
 
+    /**
+     * 판정 한 건의 이력 항목. <b>그 판정을 만든 값들을 함께 담는다</b> (이슈 #136).
+     *
+     * <p>{@code askedQuestion} 과 {@code promptVersion} 이 여기 있어야 하는 이유는 같다 —
+     * <b>둘 다 측정을 결정하는데 재구성할 방법이 없다.</b> 질문은 ai-service 가 매번 생성하고
+     * 세션 테이블은 재질문 시 덮어쓰므로, 기록에서 빼면 <i>"이 판정은 어느 질문에 대한 답을
+     * 잰 것인가"</i> 에 답할 수 없다. {@code confidence} 는 프롬프트 버전마다 뜻이 다르다 —
+     * v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). 값만 있고 정의가 없으면 감사 시점에
+     * 0.65 가 두 가지 뜻일 수 있다(결정 10.38).
+     *
+     * <p>그래서 {@code promptVersion} 을 {@code confidence} <b>바로 뒤</b>에 둔다. 읽는 사람이
+     * 그 숫자의 뜻을 같은 자리에서 보게 하려는 것이고, 떨어뜨려 놓으면 하나만 보고 해석한다.
+     *
+     * <p><b>null 을 생략하지 않는다</b> — {@code misconceptionType} 과 같은 규약이다. 없음과
+     * 미기재는 다르고, 여기서 생략하면 <i>"필드가 생기기 전 레코드"</i> 와 <i>"값이 없는
+     * 판정"</i> 이 같아진다. append-only 라 섞인 뒤에는 못 가른다.
+     *
+     * <p>두 값은 <b>해시 대상에 들어간다</b>(내용의 일부다). 그게 요지다 — 빠져 있으면 질문이
+     * 바뀌어도 {@code contentHash} 가 같아서, 문서를 받은 사람이 대조로 그 변화를 못 잡는다.
+     */
     private static Map<String, Object> judgmentHistoryEntry(Map<String, Object> judgment,
                                                             Map<String, Object> payload) {
         Map<String, Object> history = new LinkedHashMap<>();
         history.put("at", payload.get("at"));
         history.put("reverifyCount", payload.get("reverifyCount"));
+        history.put("askedQuestion", payload.get("askedQuestion"));   // 봉투 층 — 서버가 채운다
         history.put("grade", judgment.get("grade"));
         history.put("confidence", judgment.get("confidence"));
+        history.put("promptVersion", judgment.get("promptVersion"));  // confidence 의 정의다
         history.put("evidence", judgment.get("evidence"));
         history.put("reason", judgment.get("reason"));
         history.put("misconceptionType", judgment.get("misconceptionType"));

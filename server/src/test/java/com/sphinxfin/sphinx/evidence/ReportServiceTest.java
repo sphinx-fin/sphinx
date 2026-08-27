@@ -47,6 +47,13 @@ class ReportServiceTest {
                 new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"), "사유", null);
     }
 
+    /** 프롬프트 버전을 실은 판정 — ai-service 가 `prompt_version` 을 보내는 경우다 (#136). */
+    private static Judgment judgment(String itemId, Grade grade, String confidence,
+                                     String promptVersion) {
+        return new Judgment(itemId, grade, new BigDecimal(confidence),
+                new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"), "사유", null, promptVersion);
+    }
+
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
         recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", T0);
@@ -242,6 +249,88 @@ class ReportServiceTest {
         void latestIsEmptyBeforeFirstIssue() {
             seedSession();
             assertThat(reports.latest(SID)).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("측정을 결정한 값이 리포트에 남는다 (이슈 #136)")
+    class MeasurementProvenance {
+
+        @Test
+        @DisplayName("❗판정마다 그때 물은 질문이 따로 남는다 — 세션 테이블은 마지막 것만 갖는다")
+        void eachJudgmentKeepsItsOwnQuestion() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "첫 질문", T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1,
+                    "다시 여쭙는 질문", T0.plusSeconds(60));
+            em.flush();
+            em.clear();
+
+            List<Map<String, Object>> history = historyOf(list(reports.render(SID), "items").get(0));
+
+            assertThat(history).extracting(h -> h.get("askedQuestion"))
+                    .as("재질문하면 세션 맵은 덮어쓴다. 리포트가 이력이라는 것은 "
+                            + "각 판정에 그때의 질문이 붙어 있다는 뜻이다 (#136)")
+                    .containsExactly("첫 질문", "다시 여쭙는 질문");
+        }
+
+        @Test
+        @DisplayName("❗confidence 옆에 그 정의(promptVersion)가 같이 온다")
+        void confidenceCarriesItsDefinition() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.65", "F-SCR-001_v2"),
+                    0, "질문 문면", T0);
+            em.flush();
+            em.clear();
+
+            Map<String, Object> entry = historyOf(list(reports.render(SID), "items").get(0)).get(0);
+
+            assertThat(entry.get("promptVersion"))
+                    .as("v1 은 등급 확신도, v2 는 재현 가능성이다(#114). 값만 남기면 "
+                            + "감사 시점에 0.65 가 두 가지 뜻일 수 있다(결정 10.38)")
+                    .isEqualTo("F-SCR-001_v2");
+            assertThat(entry.get("confidence")).isEqualTo(new BigDecimal("0.65"));
+        }
+
+        @Test
+        @DisplayName("❗질문이 바뀌면 contentHash 가 바뀐다 — 안 그러면 대조로 못 잡는다")
+        void questionIsPartOfTheHashedContent() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, "물은 질문 A", T0);
+            em.flush();
+            em.clear();
+
+            // 세션 둘을 비교하지 않는다 — sessionId 가 내용에 들어가므로 질문을 빼도 해시가
+            // 갈려서 이 단정이 공짜로 통과한다(역검증에서 잡혔다). 같은 내용에서 질문 하나만
+            // 바꿔야 그 필드가 해시에 실린다는 것을 잰다.
+            Map<String, Object> content = reports.render(SID);
+            Map<String, Object> entry = historyOf(list(content, "items").get(0)).get(0);
+            assertThat(entry)
+                    .as("질문이 내용에 들어 있어야 그다음 단정이 의미를 갖는다")
+                    .containsEntry("askedQuestion", "물은 질문 A");
+
+            String before = reports.contentHash(content);
+            entry.put("askedQuestion", "물은 질문 B");
+
+            assertThat(reports.contentHash(content))
+                    .as("질문만 바뀌었는데 해시가 같으면, 문서를 받은 사람이 질문이 바뀐 것을 "
+                            + "대조로 못 잡는다 — 요약본에 전문과 같은 해시를 싣는 이유가 그것이다")
+                    .isNotEqualTo(before);
+        }
+
+        @Test
+        @DisplayName("null 을 생략하지 않는다 — 없음과 미기재를 가른다")
+        void nullsAreWrittenNotOmitted() {
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, null, T0);
+            em.flush();
+            em.clear();
+
+            Map<String, Object> entry = historyOf(list(reports.render(SID), "items").get(0)).get(0);
+
+            assertThat(entry)
+                    .as("misconceptionType 과 같은 규약이다. 생략하면 '필드가 생기기 전 "
+                            + "레코드' 와 '값이 없는 판정' 이 같아지고, append-only 라 "
+                            + "섞인 뒤에는 못 가른다")
+                    .containsKeys("askedQuestion", "promptVersion");
+            assertThat(entry.get("askedQuestion")).isNull();
+            assertThat(entry.get("promptVersion")).isNull();
         }
     }
 }
