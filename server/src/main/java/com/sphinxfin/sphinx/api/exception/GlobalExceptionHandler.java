@@ -2,11 +2,11 @@ package com.sphinxfin.sphinx.api.exception;
 
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
-import com.sphinxfin.sphinx.core.AiServiceException;
-import com.sphinxfin.sphinx.core.OverrideNotEligibleException;
-import com.sphinxfin.sphinx.core.ReExplainNotEligibleException;
-import com.sphinxfin.sphinx.core.ReverifyExhaustedException;
-import com.sphinxfin.sphinx.core.SessionFsm;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
+import com.sphinxfin.sphinx.core.session.OverrideNotEligibleException;
+import com.sphinxfin.sphinx.core.session.ReExplainNotEligibleException;
+import com.sphinxfin.sphinx.core.session.ReverifyExhaustedException;
+import com.sphinxfin.sphinx.core.session.SessionFsm;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.MeasurementInvalidException;
 import com.sphinxfin.sphinx.security.AccessGuard;

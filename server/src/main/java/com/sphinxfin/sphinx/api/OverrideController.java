@@ -2,8 +2,8 @@ package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.OverrideResponse;
-import com.sphinxfin.sphinx.core.OverrideService;
-import com.sphinxfin.sphinx.core.Session;
+import com.sphinxfin.sphinx.core.session.OverrideService;
+import com.sphinxfin.sphinx.core.session.Session;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;

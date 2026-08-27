@@ -11,6 +11,18 @@ version: 1
 answer_set_documents:
   - 상품요약서
   - 변액보험 운용설명서
+# ── importance 부여 기준 (결정 10.1 · 소유: 정세현) ───────────────────────────
+# required     그 항목을 오해하면 **계약의 금전적 결과**(손실·환급금·현금화)를 잘못 이해하게
+#              되고, 그 오해가 **오해 라이브러리 7종**(실제 분쟁조정례·기획서 데모 경로)으로
+#              실증된 것. 윤지석의 루브릭 범위가 이것이다(10.1).
+# recommended  알아야 하지만 오해가 금전 결과 이해를 직접 뒤집지는 않는 것 — 제도상 분류,
+#              절차 권리, 비용 정의처럼 다른 층에 있는 것.
+#
+# 근거를 앞세우는 이유는 3.17 과 같다. "중요해 보인다" 로 required 를 늘리면 루브릭 분모가
+# 커지고, 근거 없이 만든 항목이 채점을 확정하는 상태가 된다 — 개수보다 근거가 먼저다.
+# 각 항목의 판단 근거는 importance 옆에 한 줄로 적었다.
+# ─────────────────────────────────────────────────────────────────────────────
+
 # `fallback_question` (F-INT-002)
 #   LLM 없이 쓰는 항목별 기본 질문이다. 생성 질문이 정답 노출 검사를 MAX_ATTEMPTS 회 통과하지
 #   못하면 이걸 낸다 — 인터뷰가 멈추면 세션 자체가 진행되지 않으므로 폴백이 없으면 안 된다.
@@ -20,7 +32,7 @@ answer_set_documents:
 items:
   - item_id: VAR-PERFORMANCE-LINKED
     name: 실적배당형 성격
-    importance: null
+    importance: required    # M05 저축성 오인의 반대편 — 실적에 따라 변동된다
     cue: 실적배당형이므로 보험금·해약환급금이 특별계정 운용실적에 따라 변동된다는 고지
     fallback_question: 이 보험에서 받게 되는 돈이 무엇에 따라 달라지는지 말씀해 주시겠어요?
     section_hint: 상품의 성격
@@ -28,7 +40,7 @@ items:
 
   - item_id: VAR-PRINCIPAL-LOSS
     name: 원금손실 가능성
-    importance: null
+    importance: required    # M01 원금보장 오인
     cue: 해약환급금에 최저보증이 없어 원금손실이 계약자에게 귀속된다는 고지
     fallback_question: 이 상품에 낸 돈이 어떻게 될 수 있는지 본인 말씀으로 설명해 주시겠어요?
     section_hint: 상품의 성격 · 유의사항
@@ -47,7 +59,7 @@ items:
   # 부분적으로 참이라 결정론 상향이 오판이었다.
   - item_id: VAR-PARTIAL-DEPOSIT-INSURANCE
     name: 예금자보호 범위
-    importance: null
+    importance: required    # M02 계열. #57 로 결정론 경로가 없어져 루브릭이 유일한 탐지 수단이다
     cue: 예금자보호가 적용되는 급부의 범위와 보호 한도
     fallback_question: 이 계약이 예금자보호를 받는지, 받는다면 어디까지인지 말씀해 주시겠어요?
     section_hint: 표지 · 유의사항
@@ -55,7 +67,7 @@ items:
 
   - item_id: VAR-WITHDRAWAL-FEE
     name: 중도인출 수수료
-    importance: null
+    importance: recommended    # 수수료율. 금전이지만 분쟁 근거가 없다
     cue: 중도인출 시 부과되는 수수료율·한도
     fallback_question: 중간에 돈을 일부 빼 쓰려면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 중도인출
@@ -63,7 +75,7 @@ items:
 
   - item_id: VAR-CONTRACT-COST
     name: 계약체결·관리비용 정의
-    importance: null
+    importance: recommended    # 비용 정의. 아래 FEE-DEDUCTION 이 그 결과를 담는다
     cue: 계약체결비용·계약관리비용이 보험료 중 일정비율로 책정된다는 정의
     fallback_question: 낸 보험료에서 회사가 떼는 비용이 있다고 들으셨나요? 어떤 비용인지 말씀해 주시겠어요?
     section_hint: 비용 · 수수료
@@ -71,7 +83,7 @@ items:
 
   - item_id: VAR-FEE-DEDUCTION
     name: 월공제액 차감 구조
-    importance: null
+    importance: required    # 월공제 차감 구조 — 환급금이 납입보험료보다 적어지는 '이유' 다
     cue: 월공제액(위험보험료·계약체결관리비용·보증비용) 및 미상각신계약비 차감 구조
     fallback_question: 낸 보험료가 전부 투자되는지, 아니면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 해약환급금 산출
@@ -79,7 +91,7 @@ items:
 
   - item_id: VAR-NOT-BANK-SAVINGS
     name: 은행 저축과 다름
-    importance: null
+    importance: required    # M05 저축성 오인 직접
     cue: 보험이 은행 저축과 달리 위험보장과 저축을 겸비한 제도라는 고지
     fallback_question: 이 상품이 은행 저축과 어떻게 다른지 말씀해 주시겠어요?
     section_hint: 해약환급금 · 유의사항
@@ -87,7 +99,7 @@ items:
 
   - item_id: VAR-SURRENDER-BELOW-PREMIUM
     name: 해약환급금이 납입보험료보다 적을 수 있음
-    importance: null
+    importance: required    # M06 해지환급금 오인 직접
     cue: 중도해지 시 해약환급금이 납입 보험료보다 적거나 없을 수 있다는 고지
     fallback_question: 중간에 해지하시면 낸 돈을 얼마나 돌려받는지 말씀해 주시겠어요?
     section_hint: 해약환급금
@@ -95,7 +107,7 @@ items:
 
   - item_id: VAR-EARLY-SURRENDER-RATIO
     name: 조기해지 환급률
-    importance: null
+    importance: required    # M06. 초기 시점 환급률이 분쟁이 나는 지점이다
     cue: 경과기간별 해약환급금 예시표의 **초기 시점** 환급률 수치
     fallback_question: 가입 초기에 해지하면 낸 돈의 어느 정도가 돌아오는지 말씀해 주시겠어요?
     section_hint: 해약환급금 예시표
@@ -103,7 +115,7 @@ items:
 
   - item_id: VAR-LONG-TERM-RATIO
     name: 장기 경과 환급률
-    importance: null
+    importance: recommended    # 장기 환급률은 회복 전망이고, 오해의 핵심은 초기 시점이다
     cue: 경과기간별 해약환급금 예시표의 **장기 시점** 환급률 수치
     fallback_question: 오래 유지한 뒤에 해지하면 낸 돈의 어느 정도가 돌아오는지 말씀해 주시겠어요?
     section_hint: 해약환급금 예시표

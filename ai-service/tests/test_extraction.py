@@ -7,6 +7,7 @@ API 키 없이 돈다.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -150,12 +151,38 @@ def test_duplicate_candidate_keeps_the_first():
 
 
 # ── 진단 노출 ─────────────────────────────────────────────────────────────────
-def test_importance_placeholder_is_surfaced_once():
-    """RiskItem.importance 가 계약상 required 라 비워둘 수 없다. 자리표시자를 숨기지 않는다."""
+def test_assigned_importance_needs_no_placeholder():
+    """#100 이 23종에 importance 를 부여해 이슈 #26 이 닫혔다 — 자리표시자가 나올 일이 없다.
+
+    회귀 고정이다. 누가 템플릿의 importance 를 다시 비우면 여기서 깨진다.
+    `IMPORTANCE_FALLBACK` 이 "required" 라서 값만 보면 **부여된 것과 채워진 것을 구별할 수
+    없다.** 그래서 경고 부재와 **템플릿이 준 값과의 일치**를 함께 본다.
+    """
+    result, _ = _extract()
+    assert [w for w in result.warnings if w.code == "IMPORTANCE_PLACEHOLDER"] == []
+    assigned = {i.item_id: i.importance for i in templates.get("ELS").items}
+    assert assigned, "템플릿이 비었다"
+    assert all(v in ("required", "recommended") for v in assigned.values()), assigned
+    assert {i.item_id: i.importance for i in result.items} == assigned
+
+
+def test_unassigned_importance_is_surfaced_once(monkeypatch):
+    """미부여를 조용히 넘기지 않는다 — 원래 의도를 이 경로에 남겨 둔다.
+
+    항목 **두 건**을 비운다. 한 건만 비우면 "항목마다 반복하지 않는다"를 확인할 수 없다.
+    """
+    tpl = templates.get("ELS")
+    blank_ids = set(tpl.item_ids[:2])
+    blanked = tuple(replace(i, importance=None) if i.item_id in blank_ids else i
+                    for i in tpl.items)
+    monkeypatch.setattr(templates, "get", lambda _product_type: replace(tpl, items=blanked))
+
     result, _ = _extract()
     placeholders = [w for w in result.warnings if w.code == "IMPORTANCE_PLACEHOLDER"]
     assert len(placeholders) == 1, "항목마다 반복하지 않는다"
-    assert all(i.importance == extraction.IMPORTANCE_FALLBACK for i in result.items)
+    assert "#26" in placeholders[0].message
+    assert all(i.importance == extraction.IMPORTANCE_FALLBACK
+               for i in result.items if i.item_id in blank_ids)
 
 
 def test_oversized_document_is_rejected_not_truncated():

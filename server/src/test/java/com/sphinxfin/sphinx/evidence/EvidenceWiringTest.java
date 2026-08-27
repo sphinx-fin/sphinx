@@ -1,9 +1,9 @@
 package com.sphinxfin.sphinx.evidence;
 
-import com.sphinxfin.sphinx.core.CreateSessionCommand;
+import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionService;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionService;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
