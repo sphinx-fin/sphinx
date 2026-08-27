@@ -121,6 +121,27 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, String> maskedUtterancesByItem = new HashMap<>();
 
+    /**
+     * 항목별로 <b>고객에게 실제로 보여준 질문</b>(F-INT-002). 채점이 같은 문면을 쓰게 하려고 남긴다.
+     *
+     * <p>질문은 ai-service 가 매번 생성하므로 <b>같은 항목이라도 호출마다 다르다.</b> 저장하지
+     * 않으면 채점 시점에 재현할 방법이 없어서, 고객이 답한 질문과 채점에 넘어간 질문이 갈린다 —
+     * 루브릭 기반이라 명백한 오해는 그대로 잡히지만 경계 사례에서 맥락이 어긋난다. 그리고
+     * 그 어긋남은 <b>근거(evidence)가 "묻지 않은 질문에 대한 답"을 인용하게</b> 만드는데,
+     * 인용 대조는 답변만 보므로 못 잡고 리포트까지 그대로 간다.
+     *
+     * <p>{@code EAGER} 인 이유: 채점 경로가 {@code SessionService.get()} 이 돌려준
+     * <b>분리된(detached) 엔티티</b>에서 이 맵을 읽는다. LAZY 로 바꾸면
+     * {@code LazyInitializationException} 이 난다 — {@code AskedQuestionTest} 가 잡긴 하지만
+     * 이유를 적어두면 거기까지 안 간다.
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "session_asked_question", joinColumns = @JoinColumn(name = "session_id"))
+    @MapKeyColumn(name = "item_id")
+    @Column(name = "question", columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, String> askedQuestionsByItem = new HashMap<>();
+
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
     @Column(columnDefinition = "TEXT")
@@ -210,6 +231,16 @@ public class Session extends BaseEntity {
     /** 항목별 최신 판정을 기록(재검증 시 덮어씀). */
     public void recordJudgment(Judgment judgment) {
         judgmentsByItem.put(judgment.itemId(), judgment);
+    }
+
+    /** 고객에게 보여준 질문을 항목별로 기록(재질문 시 덮어씀 — 마지막에 보여준 것이 답의 맥락이다). */
+    public void recordAskedQuestion(String itemId, String question) {
+        askedQuestionsByItem.put(itemId, question);
+    }
+
+    /** 그 항목에 실제로 보여준 질문. 없으면 null — 화면을 거치지 않고 답변이 들어온 경우다. */
+    public String askedQuestion(String itemId) {
+        return askedQuestionsByItem.get(itemId);
     }
 
     /** 마스킹된 발화를 항목별로 기록(재검증 시 덮어씀). */
