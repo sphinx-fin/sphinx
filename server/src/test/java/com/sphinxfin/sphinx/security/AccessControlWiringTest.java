@@ -95,15 +95,22 @@ class AccessControlWiringTest {
         //
         // 정책 층 단정(AccessPolicyTest)만으로는 이 되돌림이 안 잡힌다 — 그쪽은 action 이름을
         // 직접 넣으므로 어노테이션이 무엇을 쓰는지와 무관하다. 배선을 보는 자리는 여기다.
-        String action = endpointActions().entrySet().stream()
+        // findFirst() 를 쓰지 않는다. contains 는 /sessions/{sid}/… 하위 경로에도 걸리므로
+        // 그 아래에 get() 이라는 이름의 핸들러가 하나만 더 생기면 매치가 둘이 되고,
+        // 어느 쪽을 집을지는 getHandlerMethods() 순회 순서(빈 등록 순서)가 정한다. 그러면
+        // 새 엔드포인트가 우연히 session:read 일 때 단정은 통과하는데 정작 GET /sessions/{sid}
+        // 는 아무도 안 보는 상태가 된다 — 이 테스트의 존재 이유가 빠져나간다 (#138 리뷰).
+        List<String> matched = endpointActions().entrySet().stream()
                 .filter(e -> e.getKey().endsWith("→ get"))
                 .filter(e -> e.getKey().contains("/sessions/{sid}"))
                 .map(Map.Entry::getValue)
-                .findFirst()
-                .orElseThrow(() -> new AssertionError(
-                        "GET /sessions/{sid} 핸들러를 못 찾았다 — 이 테스트의 키 매칭이 낡았다"));
+                .toList();
 
-        assertThat(action)
+        assertThat(matched)
+                .as("GET /sessions/{sid} 핸들러가 정확히 하나여야 한다 — 여럿이면 이 단정이 "
+                        + "어느 것을 본 것인지 알 수 없다. 키 매칭을 좁혀라")
+                .hasSize(1);
+        assertThat(matched.get(0))
                 .as("GET /sessions/{sid} 의 action 이 바뀌면 승인자 접근이 조용히 닫힌다")
                 .isEqualTo("session:read");
     }

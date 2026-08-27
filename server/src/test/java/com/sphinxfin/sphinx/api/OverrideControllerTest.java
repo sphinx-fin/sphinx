@@ -120,7 +120,6 @@ class OverrideControllerTest {
                 .andExpect(jsonPath("$.data.overrideReason").value(REASON));
     }
 
-    /** 지정 신호로 판정 기록된 세션을 저장하고 id를 반환한다. */
     @Test
     @DisplayName("❗승인자는 인증 주체다 — 미인증 폴백 문자열이 아니다 (#124)")
     void approverComesFromAuthentication() throws Exception {
@@ -141,6 +140,7 @@ class OverrideControllerTest {
                 .andExpect(jsonPath("$.data.overrideApprover").value("mgr-01"));
     }
 
+    /** 지정 신호로 판정 기록된 세션을 저장하고 id를 반환한다. */
     private String seed(Signal signal) {
         Session s = Session.create(new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE, "60대",
                 "없음", "5천만원대", "CT-1", "SUIT-v1", Map.of()));

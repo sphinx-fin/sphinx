@@ -106,12 +106,23 @@ class ApproverAccessTest {
         }
 
         @Test
-        @DisplayName("진행 주체(SELLER)는 자기 세션을 계속 진행한다")
+        @DisplayName("❗진행 주체(SELLER)는 자기 세션을 계속 진행한다 — 가르면서 떨어뜨리면 안 된다")
         void sellerStillDrivesOwnSession() throws Exception {
             String sid = sessionBySeller("seller-01");
 
-            mvc.perform(get("/sessions/{sid}", sid).with(seller("seller-01")))
-                    .andExpect(status().isOk());
+            // 진행 요청으로 건다. GET 만 보면 "읽는다" 를 볼 뿐이라, SELLER 의
+            // session:interview 그랜트가 통째로 사라져도 이 클래스가 전부 초록이었다
+            // (재현함 — MGR 은 여전히 403, SELLER 는 여전히 읽는다). 배선 층에서 갈린
+            // 두 쪽을 다 보는 자리가 여기뿐인데 긍정형이 비어 있었다 (#138 리뷰).
+            //
+            // 403 이 아님만 본다 — 여기서 보는 것은 권한이지 상태 전이가 아니다.
+            int status = mvc.perform(post("/sessions/{sid}/abort", sid).with(seller("seller-01")))
+                    .andReturn().getResponse().getStatus();
+
+            assertThat(status)
+                    .as("session:interview 가 SELLER own_session 으로 남아 있어야 한다 — "
+                            + "이게 403 이면 읽기·진행을 가르면서 진행 쪽을 떨어뜨린 것이다")
+                    .isNotEqualTo(403);
         }
 
         @Test
