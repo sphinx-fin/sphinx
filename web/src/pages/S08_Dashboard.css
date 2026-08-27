@@ -1,0 +1,87 @@
+/* S-08 오해 지도. 소유: 오준서.
+
+   불변 요건 둘.
+
+   ① **합성 워터마크는 상시.** 접거나 각주로 내리지 않는다(연출 금지, F-DSH-003).
+   ② **가려진 셀은 빈칸이 아니다.** 소표본 마스킹은 "데이터 없음"과 구분돼야 한다 —
+      가려졌다는 사실 자체가 마스킹이 동작한 증거이고, 그게 기획서 7-4 의 실물 근거다.
+
+   집계에는 판정 3색을 쓰지 않는다. 명도만으로 강도를 낸다 — 여기에 적색을 쓰면
+   집계가 판정처럼 보이고, 그러면 "지점 성과 지표"로 읽힌다. */
+
+.s08 { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-5); }
+.s08__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.s08__head { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-start; justify-content: space-between; }
+.s08__head h1 { font-size: calc(36px * var(--scale)); line-height: calc(1.334 * var(--leading-scale));
+  letter-spacing: -0.027em; font-weight: 700; }
+.s08__scope { margin-top: var(--space-2); font-size: calc(14px * var(--scale)); color: var(--text-muted); }
+.s08__scope-note { color: var(--kohl-30); }
+
+/* 상시 노출. 눈에 띄되 판정색은 아니다. */
+.s08__watermark {
+  flex: none;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
+.s08__error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+
+/* ── 차단됨 — 오류가 아니라 시연 대상이다 ─────────────────────────────────── */
+.s08__blocked {
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); padding: var(--space-6);
+}
+.s08__blocked h2 { font-size: calc(22px * var(--scale)); font-weight: 700; margin-bottom: var(--space-3); }
+.s08__blocked p { font-size: calc(16px * var(--scale)); line-height: calc(1.6 * var(--leading-scale)); }
+.s08__blocked-why { margin-top: var(--space-3); color: var(--text-muted); }
+
+/* ── 필터 ─────────────────────────────────────────────────────────────────── */
+.s08__filters { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.s08__filters label { display: flex; flex-direction: column; gap: var(--space-1); }
+.s08__filters span { font-size: calc(13px * var(--scale)); font-weight: 600; color: var(--text-muted); }
+.s08__filters input {
+  font: inherit; font-size: calc(15px * var(--scale));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--surface); color: var(--text);
+}
+.s08__filters input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+/* ── 표 ───────────────────────────────────────────────────────────────────── */
+.s08__table-wrap { overflow-x: auto; }
+.s08__table { border-collapse: collapse; width: 100%; font-size: calc(14px * var(--scale)); }
+.s08__table th, .s08__table td {
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  vertical-align: middle;
+}
+.s08__table thead th { background: var(--surface-sunken); font-weight: 600; white-space: nowrap; }
+.s08__table tbody th { background: var(--surface-sunken); text-align: left; white-space: nowrap; font-weight: 600; }
+
+.s08__cell { min-width: 6rem; }
+.s08__pct { display: block; font-weight: 700; font-size: calc(15px * var(--scale)); }
+/* 배경이 진해지면 먹색 글자가 안 읽힌다. 임계 위에서만 반전한다. */
+.s08__pct--strong { color: var(--text-inverse); }
+.s08__n { display: block; font-size: calc(11px * var(--scale)); color: var(--text-muted); }
+.s08__pct--strong + .s08__n { color: var(--limestone-88); }
+
+/* 가려짐 — 빗금으로 "값이 없는 게 아니라 가려졌다"를 시각적으로 말한다. */
+.s08__cell--masked {
+  background: repeating-linear-gradient(
+    45deg, var(--surface-sunken), var(--surface-sunken) 4px, var(--surface) 4px, var(--surface) 8px);
+}
+.s08__masked-label { display: block; font-size: calc(12px * var(--scale)); font-weight: 700; color: var(--text-muted); }
+
+.s08__cell--absent { color: var(--kohl-30); }
+
+.s08__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
+.s08__legend { font-size: calc(13px * var(--scale)); color: var(--text-muted); line-height: calc(1.6 * var(--leading-scale)); }

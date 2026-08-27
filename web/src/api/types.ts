@@ -91,11 +91,31 @@ export interface CreateSessionRequest {
   surveyResult?: Record<string, string> | null;
 }
 
+/** F-GTE-002 오버라이드 진행 상태. `NONE` 이 값으로 나간다 — 부재가 아니다. */
+export type OverrideStatus = "NONE" | "PENDING_APPROVAL" | "APPROVED";
+
 export interface SessionResponse {
   sessionId: string;
   state: SessionState;
   productId: string;
   contractRef?: string | null;
+
+  /* ── F-GTE-002 ────────────────────────────────────────────────────────────
+   * 계약에 이미 있었는데(#116, `openapi.yaml` SessionResponse) 이 타입만 따라오지
+   * 않았다. 서버는 네 필드를 실어 보내는데 화면 타입에 없으니 **런타임에는 있는 값을
+   * 화면이 못 쓰는** 상태였다 — S-06 을 붙이면서 드러났다.
+   *
+   * `overrideStatus` 는 **required 다.** 계약도 required 로 잡았다(nullable 아님).
+   * optional 로 두면 화면이 "오버라이드 없음"을 `!overrideStatus` 로 읽게 되고,
+   * 그러면 **"없다" 와 "안 실렸다" 가 같아진다** — 필드가 빠진 응답을 "요청 없음"으로
+   * 읽어 승인 대기 세션에 요청 화면을 띄운다. 값으로 비교하게 강제한다(#125 리뷰).   */
+  overrideStatus: OverrideStatus;
+  /** 판매자가 적은 진행 사유(30자 이상, ADR-002). 요청 전이면 null. */
+  overrideReason?: string | null;
+  /** 승인한 MGR. 승인 전이면 null. */
+  overrideApprover?: string | null;
+  /** 승인 시각(ISO-8601). 승인 전이면 null. */
+  overrideDecidedAt?: string | null;
 }
 
 /**
@@ -119,10 +139,50 @@ export interface Judgment {
   misconceptionType?: string | null;
 }
 
-/** 게이트 판정. `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다. */
+/**
+ * 게이트 **확정** 판정 (`POST /sessions/{id}/judge`).
+ * `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다.
+ */
 export interface GateResult {
   signal: Signal;
   ruleTrace: string[];
+}
+
+/**
+ * 적합성 모순 판정 상태 (F-DET-002).
+ * 미리보기는 모순을 평가하지 않으므로 보통 `NOT_EVALUATED` 다.
+ */
+export type SuitabilityStatus = "NOT_EVALUATED" | "NO_MISMATCH" | "MISMATCH" | "UNKNOWN";
+
+/**
+ * 게이트 **미리보기** (`GET /sessions/{id}/gate-preview`).
+ *
+ * **`GateResult` 와 다른 타입이다.** `/judge` 는 `signal`·`ruleTrace` 둘뿐이고, 이쪽은
+ * 미리보기를 안전하게 만드는 두 필드를 더 싣는다. 미리보기를 `GateResult` 로 받으면
+ * 남는 필드를 TS 가 잡아주지 않아 **타입은 통과하는데 화면만 조용히 덜 그린다** —
+ * `RiskItem` 의 snake_case 사고(decision-log 10.18)와 같은 종류다.
+ */
+export interface GatePreview {
+  signal: Signal;
+  ruleTrace: string[];
+  /**
+   * 감사 기준점으로 기록된 값인가. false 면 아직 확정이 아니다.
+   *
+   * **확정 여부의 근거는 이 필드다.** 세션 상태(`state === "JUDGED"`)로 유추하면 지금은
+   * 우연히 일치하지만 상태 전이가 하나 늘 때 조용히 어긋난다.
+   */
+  recorded: boolean;
+  /** 기준점 확정 시각. null 이면 `/judge` 가 아직 호출되지 않은 세션이다. */
+  judgedAt?: string | null;
+  /**
+   * ❗`NOT_EVALUATED` 인 GREEN 을 최종 통과로 그리면 안 된다.
+   *
+   * 미리보기는 모순을 평가하지 않으므로 그 GREEN 은 **모순 평가 전** 값이고, `/judge` 에서
+   * YELLOW(UNKNOWN)·RED(MISMATCH) 로 갈릴 수 있다. 방향이 나쁜 쪽이다 — 판매자가 GREEN 을
+   * 보고 재설명 루프를 건너뛰고 확정으로 갔다가 거기서 막힌다. 그래서 신호 옆에
+   * "적합성 미확인" 을 함께 낸다(신호 자체는 바꾸지 않는다).
+   */
+  suitabilityStatus: SuitabilityStatus;
 }
 
 /**
@@ -276,13 +336,30 @@ export interface ProductSummary {
 export interface HeatmapCell {
   product: string;
   item: string;
-  /** 오해율 0~1. 표본 부족(n<30) 셀은 서버가 마스킹해 null로 내려준다. */
+  /** 오해율 0~1. `masked` 면 null. */
   misrate: number | null;
+  /** 표본 수. 마스킹돼도 내려준다. */
   n: number;
+  /**
+   * 소표본(n<30) 마스킹 여부. **셀을 제거하지 않는다** — 제거하면 화면이 "데이터 없음"과
+   * "가려짐"을 구분할 수 없고, 감사·심사 관점에서는 가려졌다는 사실 자체가 마스킹이
+   * 동작한 증거다(계약 · `rbac_policy.yaml` 집계 절).
+   *
+   * 계약에 required 로 있었는데 이 타입에만 없었다. `misrate === null` 하나로 두 상태를
+   * 읽으면 소표본 셀이 "데이터 없음"으로 그려지고, **마스킹이 동작한 증거가 화면에서
+   * 사라진다** — 그게 데모에서 보여야 하는 것인데.
+   */
+  masked: boolean;
 }
 
 export interface HeatmapResponse {
-  /** 합성 세션 기반이면 true — 화면에 워터마크를 상시 노출해야 한다 (F-DSH-001). */
+  /** 합성 세션 기반이면 true — 화면에 워터마크를 상시 노출해야 한다 (F-DSH-001, 연출 금지). */
   synthetic: boolean;
+  /**
+   * **데이터 범위**. `rbac_policy.yaml` 의 `own_session`/`branch`/`org` 와 같은 어휘이고
+   * 요청자 역할이 결정한다(MGR=branch · COMPL=org). 집계 축(`groupBy`)과 다른 개념이라
+   * 화면에 표시해 무엇을 보고 있는지 드러낸다. 계약 required — 이 타입에만 없었다.
+   */
+  scope: "branch" | "org";
   cells: HeatmapCell[];
 }
