@@ -129,6 +129,7 @@ def score(
         system=load_system_prompt(),
     )
 
+    judgment = _pin_prompt_version(judgment)
     judgment = _pin_item_id(judgment, item_id)
     judgment = _drop_llm_misconception_type(judgment)
     verify_quote_is_verbatim(judgment, answer_text)
@@ -233,6 +234,20 @@ def cap_confidence_if_echoed(
 
 
 # ── 후처리: 전부 안전한 방향으로만 움직인다 ────────────────────────────────────
+def _pin_prompt_version(judgment: Judgment) -> Judgment:
+    """어느 프롬프트가 낸 값인지 고정한다. **모델에게 묻지 않는다** (결정 10.46).
+
+    `confidence` 의 정의가 프롬프트 버전마다 다르다 — v1 은 등급 확신도, v2 는 재현
+    가능성이다(PR #114). `evidence/` 가 append-only 라 두 정의가 같은 컬럼에 섞이면 감사
+    시점에 어느 쪽으로 해석할지 판단할 근거가 없어진다.
+
+    모델 출력을 쓰지 않는 이유는 `item_id`·`misconception_type` 과 같다 — 프롬프트 파일이
+    실제로 무엇인지는 **우리가 아는 사실**이고 모델이 보고할 값이 아니다. 프롬프트에
+    버전을 적어 내게 하면 파일을 바꿀 때 그 문면을 같이 안 고쳐도 아무 일이 안 일어난다.
+    """
+    return judgment.model_copy(update={"prompt_version": PROMPT_VERSION})
+
+
 def _pin_item_id(judgment: Judgment, item_id: str) -> Judgment:
     """LLM이 item_id를 바꿔 쓰는 것을 허용하지 않는다 — 호출자가 지정한 항목이 진실이다."""
     if judgment.item_id == item_id:

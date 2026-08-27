@@ -431,3 +431,21 @@ def test_capped_confidence_records_the_reason():
     assert out.confidence == scoring.ECHO_CONFIDENCE_CAP
     assert "복창" in out.reason and "포함도" in out.reason
     assert out.grade == Grade.U1, "등급은 건드리지 않는다"
+
+
+# ── prompt_version (결정 10.46 · 계약 10.38) ─────────────────────────────────
+def test_prompt_version_is_pinned_by_us_not_the_model():
+    """`confidence` 의 정의가 프롬프트 버전마다 다르다 — v1 등급 확신도 / v2 재현 가능성.
+
+    `evidence/` 가 append-only 라 두 정의가 같은 컬럼에 섞이면 감사 시점에 어느 쪽으로
+    해석할지 판단할 근거가 없어진다(PR #114 리뷰 → 결정 10.38 → 10.46).
+    """
+    bogus = make_judgment().model_copy(update={"prompt_version": "모델이 만든 값"})
+    judgment, _ = _score(bogus)
+    assert judgment.prompt_version == scoring.PROMPT_VERSION
+
+
+def test_prompt_version_matches_the_prompt_file_actually_used():
+    """상수와 파일이 어긋나면 레코드가 없는 프롬프트를 가리킨다."""
+    assert scoring.PROMPT_PATH.name == f"{scoring.PROMPT_VERSION}.md"
+    assert scoring.PROMPT_PATH.exists()
