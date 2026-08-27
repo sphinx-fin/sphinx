@@ -1,7 +1,5 @@
 package com.sphinxfin.sphinx.core.session;
 
-import com.sphinxfin.sphinx.core.session.UnfairSalesSignalEvent;
-import com.sphinxfin.sphinx.core.session.UnfairSalesTypes;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;

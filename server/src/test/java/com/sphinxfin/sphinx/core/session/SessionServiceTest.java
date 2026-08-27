@@ -2,7 +2,6 @@ package com.sphinxfin.sphinx.core.session;
 
 import java.math.BigDecimal;
 
-import com.sphinxfin.sphinx.core.session.UnfairSalesSignalEvent;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
