@@ -86,6 +86,28 @@ class AccessControlWiringTest {
                 .isEmpty();
     }
 
+    @Test
+    @DisplayName("❗GET /sessions/{sid} 는 session:read 다 — interview 로 되돌리면 승인자가 못 읽는다")
+    void sessionReadIsNotInterview() {
+        // 읽기와 진행을 가른 이유가 여기 있다(#129 · 이슈 #124). session:interview 는
+        // questions/next · re-explain · abort 를 같이 덮으므로, 승인자에게 그 그랜트를 주면
+        // 조회뿐 아니라 세션을 몰 수 있게 된다.
+        //
+        // 정책 층 단정(AccessPolicyTest)만으로는 이 되돌림이 안 잡힌다 — 그쪽은 action 이름을
+        // 직접 넣으므로 어노테이션이 무엇을 쓰는지와 무관하다. 배선을 보는 자리는 여기다.
+        String action = endpointActions().entrySet().stream()
+                .filter(e -> e.getKey().endsWith("→ get"))
+                .filter(e -> e.getKey().contains("/sessions/{sid}"))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "GET /sessions/{sid} 핸들러를 못 찾았다 — 이 테스트의 키 매칭이 낡았다"));
+
+        assertThat(action)
+                .as("GET /sessions/{sid} 의 action 이 바뀌면 승인자 접근이 조용히 닫힌다")
+                .isEqualTo("session:read");
+    }
+
     /** 엔드포인트 → @PreAuthorize에 적힌 action(없으면 null). */
     private Map<String, String> endpointActions() {
         Map<String, String> out = new LinkedHashMap<>();

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -120,6 +121,26 @@ class OverrideControllerTest {
     }
 
     /** 지정 신호로 판정 기록된 세션을 저장하고 id를 반환한다. */
+    @Test
+    @DisplayName("❗승인자는 인증 주체다 — 미인증 폴백 문자열이 아니다 (#124)")
+    void approverComesFromAuthentication() throws Exception {
+        // 여기까지 override/approve 를 부르는 테스트가 전부 미인증이라 auth != null 분기가
+        // 실행 0건이었다(#125 리뷰). javadoc 의 "승인자는 인증 주체에서 얻는다" 가 코드에만
+        // 있고 검증에 없었다 — 승인자를 특정할 수 없는 승인이 불변 기록에 남으면 ADR-002
+        // 견제 장치가 무력해지므로, 그 약속을 여기서 고정한다.
+        String id = seed(Signal.RED);
+
+        mvc.perform(post("/sessions/{sid}/override", id).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + REASON + "\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/{sid}/override/approve", id)
+                        .with(user("mgr-01").roles("MGR")))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/sessions/{sid}", id))
+                .andExpect(jsonPath("$.data.overrideApprover").value("mgr-01"));
+    }
+
     private String seed(Signal signal) {
         Session s = Session.create(new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE, "60대",
                 "없음", "5천만원대", "CT-1", "SUIT-v1", Map.of()));
