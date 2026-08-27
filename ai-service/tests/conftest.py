@@ -5,9 +5,11 @@
 - **합성 PDF** — 이 파일 안에 텍스트를 두고 실행 시점에 PDF로 찍는다. 표 추출·캡션 추정·
   텍스트 레이어 부재 같은 기계적 동작을 문서 없이 검증하기 위한 것이다. 폭에 맞춰 줄바꿈을
   접는다 — 실제 공시 PDF가 문장 중간에서 개행하고, 그게 스팬 해소가 다뤄야 하는 조건이다.
-- **실문서** — `data/documents/`(git 제외)의 데모 대상 2종. 없으면 해당 테스트를 skip 한다.
-  계약 준수는 결국 실문서로 확인해야 하지만, 문서가 없는 체크아웃에서 테스트 전체가 죽으면
-  안 된다.
+- **실문서** — `data/documents/`의 데모 대상 2종. **이 파일들은 추적된다**(PR #30) — 그래서
+  `git clone` 만으로도, CI 러너에서도 이 테스트가 돈다. 없으면 skip 하는 경로는 남겨두지만
+  그건 문서를 지운 체크아웃을 위한 것이지 정상 상태가 아니다. CI 는 skip 을 실패로 센다
+  (`.github/workflows/ci.yml`) — 러너에서 skip 이 나오면 그건 편의가 아니라 검산이 안
+  돌았다는 뜻이다.
 
 합성 픽스처의 텍스트를 `contracts/samples/`에서 가져오지 않는다. 그 샘플은 이제 실문서 파싱
 출력이고, 실문서 텍스트를 합성 PDF로 되돌려 다시 파싱하는 건 아무것도 검증하지 않는다.
@@ -84,7 +86,9 @@ def real_case(request):
     spec = REAL_CASES[request.param]
     pdf = DOCS / spec["pdf"]
     if not pdf.exists():
-        pytest.skip(f"{pdf.relative_to(REPO_ROOT)} 없음 (git 제외). {spec['fetch']}")
+        # 이 파일들은 추적된다(#30). 여기에 걸린다는 것은 체크아웃이 온전하지 않다는
+        # 뜻이지 "아직 안 받았다" 가 아니다 — CI 는 이 skip 을 실패로 센다.
+        pytest.skip(f"{pdf.relative_to(REPO_ROOT)} 없음 — 추적되는 파일이다(#30). {spec['fetch']}")
     kwargs = dict(
         document_id=spec["document_id"],
         product_type=spec["product_type"],
