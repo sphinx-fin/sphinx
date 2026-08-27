@@ -1,8 +1,8 @@
 package com.sphinxfin.sphinx.api;
 
-import com.sphinxfin.sphinx.core.CreateSessionCommand;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Signal;

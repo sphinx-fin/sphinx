@@ -1,8 +1,8 @@
 package com.sphinxfin.sphinx.evidence;
 
-import com.sphinxfin.sphinx.core.CreateSessionCommand;
-import com.sphinxfin.sphinx.core.Session;
-import com.sphinxfin.sphinx.core.SessionRepository;
+import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
+import com.sphinxfin.sphinx.core.session.Session;
+import com.sphinxfin.sphinx.core.session.SessionRepository;
 import com.sphinxfin.sphinx.domain.Channel;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;

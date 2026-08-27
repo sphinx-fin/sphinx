@@ -1,6 +1,6 @@
 package com.sphinxfin.sphinx.api.dto;
 
-import com.sphinxfin.sphinx.core.CreateSessionCommand;
+import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
 import com.sphinxfin.sphinx.domain.Channel;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
