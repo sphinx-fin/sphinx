@@ -21,12 +21,23 @@
  *    데모에서 실제로 시연하는 항목이다. 그래서 403 은 오류가 아니라 **정상 결과**로
  *    그린다: 빨간 에러 배너가 아니라 차단 설명 화면이다.
  *
+ * ④ **수치가 무엇의 비율인지 화면이 먼저 말한다.**
+ *    `misrate` 는 그 항목에서 **오해(U4)로 판정된 비율**이다(`AggregateService.Tally`).
+ *    분자에 U4 만 들어가므로 **나머지가 다 이해한 것이 아니다** — 부분이해(U2)·미이해(U3)
+ *    는 이 수치 어디에도 없다. 정의를 각주로 내리면 "41%" 를 본 사람이 "59% 는 이해했다"
+ *    로 읽고, 그건 이 제품이 제일 하면 안 되는 종류의 오독이다. 그래서 정의와 **말할 수
+ *    없는 것**을 표 바로 위에 둔다.
+ *
+ *    같은 이유로 이 화면은 **개인을 말하지 않는다.** "이 고객이 아는가" 의 답은 세션별
+ *    이해 기록(S-07)에 있고, 여기 있는 것은 집계뿐이다(계약상 세션ID조차 안 내려온다).
+ *
  * `scope`(branch·org)를 헤더에 박는다. 무엇을 보고 있는지가 안 보이면 MGR 이 자기 지점
  * 수치를 전사 수치로 착각한다 — 집계 축(`groupBy`)과 다른 개념이라 특히 헷갈린다.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiRequestError, get } from "../api/client";
-import type { HeatmapCell, HeatmapResponse } from "../api/types";
+import type { HeatmapCell, HeatmapResponse, ProductSummary } from "../api/types";
+import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
 
 const SCOPE_LABEL: Record<HeatmapResponse["scope"], string> = {
@@ -43,6 +54,9 @@ export default function S08Dashboard() {
   const [error, setError] = useState<string | null>(null);
   /** 403 은 오류가 아니라 시연 대상이다(설계 판단 ③). 에러와 따로 들고 있다. */
   const [blocked, setBlocked] = useState(false);
+  /** 집계는 상품 id 만 준다. 이름은 이미 있는 `/products` 로 푼다 — 새 계약이 필요 없다.
+      못 풀면 id 를 그대로 보여준다(합성·구 상품이면 목록에 없을 수 있다). */
+  const [names, setNames] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,10 +84,24 @@ export default function S08Dashboard() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const list = await get<ProductSummary[]>("/products");
+        if (!alive) return;
+        setNames(Object.fromEntries((list ?? []).map((p) => [p.productId, p.name])));
+      } catch {
+        /* 이름은 있으면 좋은 것이지 없으면 화면이 못 뜨는 것이 아니다 — id 로 그린다. */
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   /* ── 표 축 ──────────────────────────────────────────────────────────────
    * 셀 목록에서 축을 뽑는다. 서버가 축을 따로 주지 않고, 축을 화면에 하드코딩하면
    * 상품·항목이 늘 때 조용히 빠진다.                                              */
-  const { products, items, byKey } = useMemo(() => {
+  const { products, items, byKey, top } = useMemo(() => {
     const cells = data?.cells ?? [];
     const ps: string[] = [];
     const its: string[] = [];
@@ -86,7 +114,12 @@ export default function S08Dashboard() {
       if (!its.includes(c.item)) its.push(c.item);
       map.set(`${c.product}\u0000${c.item}`, c);
     }
-    return { products: ps, items: its, byKey: map };
+    // 가장 높은 셀 하나를 뽑아 둔다. 표를 훑기 전에 "그래서 어디가 문제냐" 가 먼저
+    // 읽혀야 한다 — 가려진 셀은 값이 없으므로 후보가 아니다.
+    const top = cells
+      .filter((c) => !c.masked && c.misrate != null)
+      .sort((a, b) => (b.misrate ?? 0) - (a.misrate ?? 0))[0];
+    return { products: ps, items: its, byKey: map, top };
   }, [data]);
 
   if (loading) {
@@ -119,6 +152,11 @@ export default function S08Dashboard() {
       <header className="s08__head">
         <div>
           <h1>오해 지도</h1>
+          {/* 설계 판단 ④ — 정의를 각주로 내리지 않는다. */}
+          <p className="s08__lede">
+            상품의 <strong>어느 설명이 고객에게 잘 전달되지 않는지</strong>를 봅니다.
+            개인이 무엇을 알고 모르는지는 이 화면이 아니라 세션별 이해 기록에 있습니다.
+          </p>
           <p className="s08__scope">
             데이터 범위 <strong>{data ? SCOPE_LABEL[data.scope] : "—"}</strong>
             <span className="s08__scope-note"> · 요청자 역할이 정합니다</span>
@@ -134,20 +172,57 @@ export default function S08Dashboard() {
 
       {error && <p className="s08__error" role="alert">{error}</p>}
 
+      {/* 자유 입력이 아니라 선택이다. "60대" 와 "60세" 를 손으로 치면 후자는 아무 셀도
+          안 걸리는데 화면은 그냥 빈 표를 보여준다 — 오타와 "해당 없음" 이 구분되지 않는다.
+          허용값은 세션이 실제로 보내는 값과 **같은 곳**(lib/sessionAttrs)에서 온다. */}
       <section className="s08__filters">
         <label>
           <span>상품</span>
-          <input value={product} onChange={(e) => setProduct(e.target.value)} placeholder="전체" />
+          <select className="s08__select" value={product} onChange={(e) => setProduct(e.target.value)}>
+            <option value="">전체</option>
+            {/* 고른 상품에 셀이 하나도 없으면 그 값이 목록에서 사라져 필터가 풀린 것처럼
+                보인다 — 실제로는 걸려 있다. 선택값은 목록에 없어도 남긴다. */}
+            {(products.includes(product) || !product ? products : [product, ...products]).map((id) => (
+              <option key={id} value={id}>{names[id] ?? id}</option>
+            ))}
+          </select>
         </label>
         <label>
           <span>연령대</span>
-          <input value={ageBand} onChange={(e) => setAgeBand(e.target.value)} placeholder="전체" />
+          <select className="s08__select" value={ageBand} onChange={(e) => setAgeBand(e.target.value)}>
+            <option value="">전체</option>
+            {AGE_BANDS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </label>
         <label>
           <span>채널</span>
-          <input value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="전체" />
+          <select className="s08__select" value={channel} onChange={(e) => setChannel(e.target.value)}>
+            <option value="">전체</option>
+            {CHANNELS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </label>
       </section>
+
+      {/* 설계 판단 ④ — "41%" 를 보기 전에 그 41% 가 무엇인지 읽게 한다. */}
+      <section className="s08__what">
+        <p className="s08__what-def">
+          <strong>오해율</strong> = 그 항목을 <strong>오해(U4)</strong> 로 판정받은 세션의
+          비율입니다.
+        </p>
+        <p className="s08__what-cant">
+          ❗나머지가 이해했다는 뜻이 아닙니다 — <strong>부분이해·미이해는 이 수치에
+          들어가지 않습니다.</strong> 40%는 “10명 중 4명이 반대로 알고 있다”이지 “6명은
+          안다”가 아닙니다.
+        </p>
+      </section>
+
+      {top && (
+        <p className="s08__top" role="status">
+          가장 높은 곳은 <strong>{names[top.product] ?? top.product}</strong> 의{" "}
+          <strong>{top.item}</strong> — 오해율 {Math.round((top.misrate ?? 0) * 100)}%
+          <span className="s08__top-n"> · 표본 {top.n}건</span>
+        </p>
+      )}
 
       {products.length === 0 ? (
         <p className="s08__empty">집계된 셀이 없습니다.</p>
@@ -163,7 +238,10 @@ export default function S08Dashboard() {
             <tbody>
               {products.map((p) => (
                 <tr key={p}>
-                  <th scope="row">{p}</th>
+                  <th scope="row">
+                    {names[p] ?? p}
+                    {names[p] && <span className="s08__row-id">{p}</span>}
+                  </th>
                   {items.map((it) => {
                     const c = byKey.get(`${p}\u0000${it}`);
                     if (!c) {
@@ -175,7 +253,10 @@ export default function S08Dashboard() {
                       return (
                         <td key={it} className="s08__cell s08__cell--masked">
                           <span className="s08__masked-label">가려짐</span>
-                          <span className="s08__n">n={c.n}</span>
+                          <span className="s08__n">{c.n}건</span>
+                          <span className="sr-only">
+                            표본이 30건 미만({c.n}건)이라 값을 가렸습니다
+                          </span>
                         </td>
                       );
                     }
@@ -188,7 +269,10 @@ export default function S08Dashboard() {
                         style={{ background: `color-mix(in srgb, var(--kohl-70) ${pct}%, var(--surface))` }}
                       >
                         <span className={pct >= 55 ? "s08__pct s08__pct--strong" : "s08__pct"}>{pct}%</span>
-                        <span className="s08__n">n={c.n}</span>
+                        <span className="s08__n">{c.n}건 중</span>
+                        <span className="sr-only">
+                            {c.n}건 중 {pct}퍼센트가 이 항목을 오해로 판정받았습니다
+                        </span>
                       </td>
                     );
                   })}
@@ -199,10 +283,20 @@ export default function S08Dashboard() {
         </div>
       )}
 
-      <p className="s08__legend">
-        진할수록 오해율이 높습니다. <strong>가려짐</strong>은 표본이 30건 미만이라 개인이
-        역추정되지 않도록 값을 감춘 셀입니다 — 데이터가 없는 것과 다릅니다.
-      </p>
+      <section className="s08__legend">
+        {/* 문장으로만 적어 두면 표를 보는 사람이 농도를 눈대중한다. 눈금을 같이 둔다. */}
+        <div className="s08__scale">
+          <span className="s08__scale-end">0%</span>
+          <span className="s08__scale-bar" aria-hidden="true" />
+          <span className="s08__scale-end">100%</span>
+        </div>
+        <ul className="s08__keys">
+          <li><span className="s08__key s08__key--masked">가려짐</span>
+            표본 30건 미만이라 개인이 역추정되지 않도록 값을 감춘 셀입니다.</li>
+          <li><span className="s08__key s08__key--absent">—</span>
+            그 조합의 판정이 아직 없습니다. <strong>가려진 것과 다릅니다.</strong></li>
+        </ul>
+      </section>
     </main>
   );
 }

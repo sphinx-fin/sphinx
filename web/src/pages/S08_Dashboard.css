@@ -47,11 +47,27 @@
 .s08__filters { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .s08__filters label { display: flex; flex-direction: column; gap: var(--space-1); }
 .s08__filters span { font-size: calc(13px * var(--scale)); font-weight: 600; color: var(--text-muted); }
-.s08__filters input {
+.s08__filters .s08__select {
   font: inherit; font-size: calc(15px * var(--scale));
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong); border-radius: var(--radius);
-  background: var(--surface); color: var(--text);
+  min-height: var(--control-h-sm);
+  min-width: 9rem;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: var(--surface-sunken); color: var(--text);
+  appearance: none;
+  /* 셀렉트 화살표 — S-02 와 같은 그림이다(data URI 라 토큰을 못 쓴다, kohl-30 #998d78). */
+  padding-right: var(--space-8);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23998d78' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
+}
+.s08__filters .s08__select:focus {
+  outline: none;
+  background-color: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
 }
 
 /* ── 표 ───────────────────────────────────────────────────────────────────── */
@@ -82,5 +98,95 @@
 
 .s08__cell--absent { color: var(--kohl-30); }
 
+/* 행 머리 — 상품명 아래 id 를 작게. 합성·구 상품이라 이름이 안 풀리면 id 만 남는다. */
+.s08__row-id {
+  display: block;
+  margin-top: calc(2px * var(--scale));
+  font-size: calc(11px * var(--scale));
+  font-weight: 400;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 .s08__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
 .s08__legend { font-size: calc(13px * var(--scale)); color: var(--text-muted); line-height: calc(1.6 * var(--leading-scale)); }
+
+/* ── 이 화면이 무엇을 말하는가 (설계 판단 ④) ──────────────────────────────── */
+.s08__lede {
+  margin-top: var(--space-2);
+  max-width: 44rem;
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+/* 지표 정의는 표 바로 위에 붙인다 — 각주로 내리면 숫자를 먼저 읽고 오해한다. */
+.s08__what {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.s08__what-def {
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+/* "나머지는 이해했다" 오독을 막는 문장. 정의보다 이쪽이 더 중요해서 면을 준다. */
+.s08__what-cant {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+
+/* 가장 높은 셀 — 표를 훑기 전에 "어디가 문제냐" 가 먼저 읽혀야 한다. */
+.s08__top {
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+}
+.s08__top-n { color: var(--text-muted); font-size: calc(13px * var(--scale)); }
+
+/* ── 범례 ─────────────────────────────────────────────────────────────────── */
+.s08__legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+  line-height: calc(1.6 * var(--leading-scale));
+}
+.s08__scale { display: flex; align-items: center; gap: var(--space-2); max-width: 22rem; }
+.s08__scale-end { font-variant-numeric: tabular-nums; }
+/* 표 셀과 같은 색 계산이다 — 눈금과 셀이 다른 색이면 눈금이 거짓말을 한다. */
+.s08__scale-bar {
+  flex: 1;
+  height: calc(10px * var(--scale));
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, var(--surface), var(--kohl-70));
+  border: 1px solid var(--border);
+}
+.s08__keys { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.s08__keys li { display: flex; align-items: baseline; gap: var(--space-2); }
+.s08__key {
+  flex: none;
+  min-width: 4.5rem;
+  text-align: center;
+  padding: calc(2px * var(--scale)) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: calc(12px * var(--scale));
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.s08__key--masked {
+  background: repeating-linear-gradient(
+    45deg, var(--surface-sunken), var(--surface-sunken) 4px, var(--surface) 4px, var(--surface) 8px);
+}
+.s08__key--absent { background: var(--surface-sunken); color: var(--kohl-30); }
