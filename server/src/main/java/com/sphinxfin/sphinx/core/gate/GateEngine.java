@@ -48,6 +48,35 @@ public class GateEngine {
     }
 
     /**
+     * 재검증 상한 — {@code R-03}({@code reverifyFailed >= N})의 {@code N}. (이슈 #66)
+     *
+     * <h2>왜 여기서 내는가</h2>
+     *
+     * <p>같은 숫자가 {@code application.yml}({@code sphinx.scoring.max-reverify})에도 있었다.
+     * 둘은 <b>같은 논리값이어야 한다</b> — 상한만큼 실패하면 게이트가 잡아야 하기 때문이다.
+     * 한쪽만 바꾸면 상한과 게이트가 따로 논다(상한 3인데 게이트가 2에서 RED 면 3번째 재설명
+     * 기회가 무의미해진다).
+     *
+     * <p>대조 테스트로 막고 있었는데, 그건 <b>어긋난 뒤에 잡는 것</b>이다. 고칠 자리가 둘이면
+     * 언젠가 한 곳만 바뀐다. ADR-005 가 <i>"임계값의 단일 출처는 {@code gate_rules.yaml}"</i>
+     * 로 정해 뒀으니 그 방향으로 접는다 — 룰이 숫자를 소유하고 서비스가 여기서 읽는다.
+     *
+     * <p>❗<b>룰이 없으면 던진다.</b> 기본값으로 떨어뜨리면 R-03 을 지운 파일이 조용히 돌고,
+     * 재검증이 영원히 안 끝나거나 게이트가 안 잡는다. 로드 시점 fail-fast 가 이 클래스의
+     * 규약이다(알 수 없는 조건도 그때 던진다).
+     */
+    public int reverifyThreshold() {
+        for (Rule rule : rules) {
+            Matcher m = Pattern.compile("reverifyFailed\\s*>=\\s*(\\d+)").matcher(rule.ifExpr());
+            if (m.matches()) {
+                return Integer.parseInt(m.group(1));
+            }
+        }
+        throw new IllegalStateException(
+                "gate_rules.yaml 에 reverifyFailed >= N 룰이 없다 — 재검증 상한을 정할 근거가 없다 (#66)");
+    }
+
+    /**
      * @param judgments          항목별 이해도 판정 목록(AI 측정값)
      * @param suitabilityMismatch 적합성 모순이 **확인**됐는가(F-DET-002 → R-02)
      * @param suitabilityUnknown  판정을 시도했으나 **확인하지 못했는가**(결정 10.9 → R-02b).
@@ -96,7 +125,7 @@ public class GateEngine {
             }
             List<Rule> compiled = new ArrayList<>(file.rules.size());
             for (RawRule raw : file.rules) {
-                compiled.add(new Rule(raw.id, compile(raw.ifExpr), Signal.valueOf(raw.then)));
+                compiled.add(new Rule(raw.id, raw.ifExpr, compile(raw.ifExpr), Signal.valueOf(raw.then)));
             }
             return compiled;
         } catch (IOException e) {
@@ -173,7 +202,11 @@ public class GateEngine {
                    int reverifyFailed) {}
 
     /** 컴파일된 룰. */
-    record Rule(String id, Predicate<Context> predicate, Signal signal) {}
+    /**
+     * 컴파일된 룰. {@code ifExpr} 원문을 함께 든다 — 술어로 접고 나면 임계값을 되읽을 수
+     * 없는데, {@link #reverifyThreshold()} 가 그 숫자를 필요로 한다(이슈 #66).
+     */
+    record Rule(String id, String ifExpr, Predicate<Context> predicate, Signal signal) {}
 
     /** gate_rules.yaml 역직렬화 형태. */
     private static final class RulesFile {
