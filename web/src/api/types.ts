@@ -135,8 +135,22 @@ export interface Judgment {
   };
   /** 판정 사유 1문장. */
   reason: string;
-  /** F-DET-001 매칭 시 오해 유형ID (예: M01-PRINCIPAL-GUARANTEE). */
-  misconceptionType?: string | null;
+  /**
+   * ❗`misconceptionType` 은 여기 없다 — 이슈 #144. **다시 넣지 않는다.**
+   *
+   * 그 값이 불공정영업 신호 그 자체다. `M08-TYING` 이면 COMPL 로 사건이 나가는데
+   * (F-GTE-003), 같은 값을 판매자 화면이 받으면 무엇이 탐지되는지 알게 되고 문면만
+   * 바꿔 같은 영업을 한다(기획 7-4 역이용 방지). `rbac_policy.yaml` 이
+   * `signal:unfair:read` 를 COMPL 로 좁혀 둔 것과 같은 이유다.
+   *
+   * 서버가 `#147` 로 `JudgmentView` 에서 뺐으므로 응답 JSON 에도 오지 않는다. 선언만
+   * 남겨 두면 옵셔널이라 타입은 통과하고 **다음 사람이 화면에 다시 그린다** — 실제로
+   * `S05_Judgment.tsx` 가 그러고 있었다. 신호를 조건부로 가리지도 않는다: 신호일 때만
+   * 빼면 그 부재가 곧 신호다.
+   *
+   * 내부 계약(`judgment.schema.json`)에는 그대로 있다 — 재설명 프롬프트와 불변 기록이
+   * 쓴다. 없어진 것은 판매자 화면으로 가는 이 표현 하나다.
+   */
 }
 
 /**
