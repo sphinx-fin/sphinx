@@ -364,7 +364,9 @@ paths:
         내용이 그대로면 다시 발행하지 않고 기존 것을 돌려준다(멱등). 내용이 달라지면 새로
         발행하되 이전 발행 기록은 지우지 않는다 — "교부 시점에 무엇이 적혀 있었는가" 에
         답하려면 둘이 나란히 남아야 한다(ADR-004).
-        권한: `report:read` (SELLER=own_session · MGR=branch · COMPL=org).
+        권한: `report:issue` — **SELLER=own_session 뿐이다.** 조회(`report:read`)와 다른
+        action 인 것이 위 문단의 요지다. MGR·COMPL 은 감독을 위해 남의 세션을 **읽지만**
+        교부하지는 않는다 — 분쟁 시점에 답해야 하는 것은 "언제 누가 교부했는가" 다(이슈 #154).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -375,7 +377,8 @@ paths:
               schema: {$ref: '#/components/schemas/ReportApiResponse'}
         '403':
           description: >
-            범위 밖 접근. `report:read` 는 SELLER=own_session · MGR=branch · COMPL=org 다.
+              범위 밖 접근. `report:issue` 는 SELLER=own_session 뿐이다 — MGR·COMPL 도
+              여기서 403 이다(읽기는 되지만 교부는 안 된다).
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
@@ -903,7 +906,18 @@ components:
           description: >
             전문과 **같은 해시**다. 고객이 받은 문서를 나중에 대조할 수 있어야 하므로 요약본에도
             싣는다.
-        previewUrl:  {type: string, description: "브라우저 미리보기"}
+        previewUrl:
+          type: string
+          nullable: true
+          description: >
+            브라우저 미리보기(PDF 인라인). **PDF 생성이 붙기 전까지 null 이다** — 전문
+            (`ReportResponse.previewUrl`)과 같은 이유이고, 같은 PDF 를 가리키므로 성격이
+            다를 이유가 없다(이슈 #157).
+            값을 채우면 계약이 "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 난다.
+            스키마 검증은 통과하고 화면은 링크를 그리며 **눌러야 드러난다** — 이쪽은
+            고객 교부용이라 전문보다 나쁘다.
+            `required` 에는 남긴다. 키가 없는 것과 값이 null 인 것은 다르고, 화면은
+            "아직 없다" 를 그릴 수 있어야 한다.
         downloadUrl: {type: string, nullable: true, description: "교부 방식이 정해지기 전까지 nullable"}
     ReportSummaryApiResponse:
       type: object
