@@ -253,11 +253,12 @@ export default function S05Judgment() {
                 </div>
 
                 <div className="s05__item-foot">
-                  {j.misconceptionType && (
-                    <span className="s05__misconception">
-                      오해 유형 <code>{j.misconceptionType}</code>
-                    </span>
-                  )}
+                  {/* 오해 유형(misconceptionType)은 여기 안 그린다 — 이슈 #144.
+                      그 값이 불공정영업 신호 그 자체라 판매자가 무엇이 탐지되는지 알면
+                      문면만 바꿔 같은 영업을 한다(기획 7-4 역이용 방지). 서버가 #147 로
+                      JudgmentView 에서 뺐으므로 응답에도 안 온다 — 여기서 지우는 것은
+                      값이 없어서가 아니라 **다시 실리면 다시 그려지는 자리**를 없애는
+                      것이다. 신호는 COMPL 로만 간다(F-GTE-003). */}
                   {/* 신뢰도를 숨기지 않는다 — 낮으면 게이트가 R-05 로 황색 강등하므로
                       판매자가 "왜 등급보다 신호가 낮은가"를 여기서 읽을 수 있어야 한다. */}
                   <span className="s05__confidence">

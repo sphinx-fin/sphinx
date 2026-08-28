@@ -60,6 +60,12 @@ class OwnershipEnforcementTest {
                 .andReturn().getResponse().getContentAsString();
         String sid = JsonPath.read(created, "$.data.sessionId");
 
+        // 소유자 쪽은 **200 이어야** 한다. 404(미발행)로는 "막히지 않았다"밖에 못 보고, 이
+        // 테스트가 잡으려는 것은 과허용 변이라 허용 쪽이 끝까지 가는 것을 봐야 한다.
+        // 그래서 먼저 발행한다 — report:issue 도 SELLER own_session 이므로 같은 사람이 한다.
+        mvc.perform(post("/sessions/" + sid + "/report").with(seller("seller-01")))
+                .andExpect(status().isOk());
+
         mvc.perform(get("/sessions/" + sid + "/report").with(seller("seller-01")))
                 .andExpect(status().isOk());
         mvc.perform(get("/sessions/" + sid + "/report").with(seller("seller-02")))

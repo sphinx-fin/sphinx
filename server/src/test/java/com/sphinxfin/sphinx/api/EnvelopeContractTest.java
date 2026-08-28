@@ -96,6 +96,11 @@ class EnvelopeContractTest {
         assertEnveloped(mvc.perform(post("/sessions/" + sid + "/questions/next")));
         assertEnveloped(mvc.perform(post("/sessions/" + sid + "/simulate")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":50000000}")));
+        // 리포트는 **발행한 뒤에야** 조회된다. 목이던 시절에는 GET 이 늘 200 이라 이 줄 하나로
+        // 됐는데, 배선이 붙으면서 미발행 세션은 404 다(계약 GET 404: "아직 발행된 리포트가
+        // 없다"). 봉투를 보는 테스트이므로 성공 응답이 나오는 상태를 만들어서 본다 —
+        // 404 봉투는 GlobalExceptionHandler 쪽 테스트가 따로 본다.
+        assertEnveloped(mvc.perform(post("/sessions/" + sid + "/report")));
         assertEnveloped(mvc.perform(get("/sessions/" + sid + "/report")));
     }
 
