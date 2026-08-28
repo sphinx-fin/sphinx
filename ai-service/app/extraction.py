@@ -253,6 +253,58 @@ def _narrowed_candidates(quote: str) -> list[str]:
 #: 0.35 는 두 군 사이다. 낮은 쪽(0.200)보다 위, 높은 쪽(0.560)보다 아래.
 CUE_CONTAINMENT_MIN = 0.35
 
+#: **`cue` 판별이 통하지 않는 항목이 있다** — 표 셀이 그렇다. 결정로그 10.45(정세현 전수
+#: 실측)에서 나왔다. 계약 정답 23건 중 7건이 임계 아래이고 둘은 **0.000** 이다.
+#:
+#:     VAR-EARLY-SURRENDER-RATIO  0.000
+#:       cue         경과기간별 해약환급금 예시표의 초기 시점 환급률 수치
+#:       value_text  3개월 900,000 526,240 58.4
+#:
+#: 표 셀은 **순수 수치**라 자연어 cue 와 어휘가 하나도 안 겹친다. 임계값을 낮추는 것으로는
+#: 해결되지 않는다(0.000 은 어떤 임계값도 못 살린다). 그리고 그 7건이 전부 표·수치 항목인데
+#: **표 셀이야말로 열 누출이 나는 곳**이라, 임계가 가장 센 곳이 구제가 가장 필요한 곳이다.
+#:
+#: 그래서 항목 성격에 따라 기준을 **자동으로 바꾼다.** 후보 어느 것도 cue 와 겹치지 않으면
+#: (`best_cue < CUE_CONTAINMENT_MIN`) cue 판별이 이 항목에 작동하지 않는다고 보고, 대신
+#: **원 인용의 수치와 가장 많이 겹치는 창**을 고른다 — 표 셀에서는 수치가 곧 그 조건의
+#: 정체이기 때문이다. 정세현이 `#118` 리뷰에서 처음 제시한 선택지(`kept ∩ want` 최대)가
+#: 여기서 제 자리를 찾는다. 자연어 항목에서 그걸 안 쓰는 이유는 그대로다 — 누출 열이
+#: 가짜 수치를 데려오므로 자연어 조건에서는 cue 가 더 정확하다.
+#: 정규화 후 숫자 비율이 이 값 이상이면 **표 셀**로 본다 — cue 판별이 원리적으로 통하지
+#: 않는 구간이다. 계약 정답 전수 실측으로 갈랐다.
+#:
+#:     표 셀(cue 0.000)        0.889 · 0.955
+#:     cue 통과군 최대          0.242
+#:
+#: 0.5 는 그 사이이고 여유가 넓다. **cue 미달 자연어 후보는 계속 거부한다** — 그쪽 보호를
+#: 유지해야 `#118` 리뷰가 막은 결함(누출 열을 조건으로 잡는 것)이 다시 열리지 않는다.
+#:
+#: ## 무엇에 재는가 — 창이 아니라 **원 인용**이다 (PR #152 리뷰, 정세현)
+#:
+#: 처음에는 이 비율을 창(`narrowed`)마다 쟀다. 그러면 자연어 항목에서 우회로가 열린다.
+#: 창은 원 인용의 부분열이므로, 인용에 표 열이 누출돼 들어오면 **그 누출 조각만으로 된 창**
+#: 이 숫자비율 1.000 으로 게이트를 통과한다. 실측 재현:
+#:
+#:     항목        ELS-NO-LISTING (cue 0.182 — 자연어 미달 5건 중 하나)
+#:     quote       '본 증권은 상장하지 않을 예정이므로' + '× [100%+ 5.50%]'(p7 누출)
+#:
+#:     창 단위 판정   p7 표 셀 스팬을 p14 자연어 항목의 조건으로 반환.
+#:                   경고는 "수치는 전부 남았다" — `want` 가 누출 조각에서 나와 겹침 2/2 다
+#:     인용 단위 판정 원 인용 숫자비율 0.286 → 자연어 → cue 보호 유지 → 안전한 실패
+#:
+#: 위 두 군을 인용 전체로 재도 그대로 갈린다(0.889·0.955 vs 0.286). 그리고
+#: `containment(cue, 창) ≤ containment(cue, 인용)` 이 항상 성립하므로(창이 인용의 연속
+#: 부분열이라 bigram 이 부분집합) 판별을 인용 단위로 내려도 **통과할 수 있었던 창을 잃지
+#: 않는다.** 표 셀 2건의 구제는 유지되고 자연어 항목의 cue 보호도 유지된다.
+TABULAR_DIGIT_RATIO = 0.5
+
+
+def _digit_ratio(text: str) -> float:
+    normalized = textsim.normalize(text)
+    if not normalized:
+        return 0.0
+    return sum(ch.isdigit() for ch in normalized) / len(normalized)
+
 
 def _rescue(candidate: ExtractedCandidate, doc: dict, template_item: templates.TemplateItem,
             warnings: list[ExtractionWarning]):
@@ -283,6 +335,18 @@ def _rescue(candidate: ExtractedCandidate, doc: dict, template_item: templates.T
     """
     want = set(numerics.numbers(candidate.quote))
     cue = template_item.cue
+
+    # **표 셀 여부는 항목 단위로 한 번 판단한다** (PR #152 리뷰, 정세현).
+    # 창(`narrowed`)에 걸면 안 된다 — 창은 원 인용의 부분열이므로 자연어 항목의 인용에 표
+    # 열이 누출되면 **그 누출 조각만으로 된 창**이 숫자비율 1.000 으로 통과한다. 그러면
+    # `#118` 리뷰가 막은 결함이 그대로 다시 열린다(`test_natural_language_item_...` 이 재현).
+    #
+    # 인용 단위로 재야 하는 이유는 성질에도 있다. 표 셀인지는 *창의 성질*이 아니라 그 인용이
+    # 통째로 표에서 왔는가의 문제다. 그리고 `containment(cue, 창) ≤ containment(cue, 인용)`
+    # 이 항상 성립하므로(창이 인용의 연속 부분열 → bigram 부분집합) **판별을 인용 단위로
+    # 내려도 통과할 수 있었던 창을 잃지 않는다.**
+    tabular = _digit_ratio(candidate.quote) >= TABULAR_DIGIT_RATIO
+
     accepted: list[tuple[float, int, str, dict]] = []
     refused_no_number: str | None = None
     refused_off_cue: str | None = None
@@ -296,19 +360,34 @@ def _rescue(candidate: ExtractedCandidate, doc: dict, template_item: templates.T
             refused_no_number = refused_no_number or narrowed
             continue
         cue_score = textsim.containment(cue, narrowed)
-        if cue_score < CUE_CONTAINMENT_MIN:
+        if cue_score < CUE_CONTAINMENT_MIN and not tabular:
+            # 자연어인데 cue 와 안 겹친다 — 표 옆 열 조각일 수 있다. 거부한다.
             refused_off_cue = refused_off_cue or narrowed
             continue
         accepted.append((cue_score, len(narrowed), narrowed, span))
 
     if accepted:
-        cue_score, _, narrowed, span = max(accepted, key=lambda a: (a[0], a[1]))
+        best_cue = max(a[0] for a in accepted)
+        if best_cue >= CUE_CONTAINMENT_MIN:
+            cue_score, _, narrowed, span = max(accepted, key=lambda a: (a[0], a[1]))
+            basis = f"cue 포함도 {cue_score:.2f}"
+        else:
+            # 표 셀 인용만 여기 온다 — 자연어 인용은 위 필터가 cue 미달 창을 전부 걸렀으므로
+            # `accepted` 가 비고 이 분기에 도달하지 않는다. 이제 주석과 코드가 같은 말을 한다.
+            cue_score, _, narrowed, span = max(
+                accepted,
+                key=lambda a: (len(want & set(numerics.numbers(a[2]))), a[1]),
+            )
+            kept_n = len(want & set(numerics.numbers(narrowed)))
+            basis = (f"cue 최댓값 {best_cue:.2f} < {CUE_CONTAINMENT_MIN} · 인용 숫자비율 "
+                     f"{_digit_ratio(candidate.quote):.2f} — 표 셀로 보고 수치 겹침 "
+                     f"{kept_n}/{len(want)}개로 골랐다")
         dropped = sorted(want - set(numerics.numbers(narrowed)))
         detail = "수치는 전부 남았다" if not dropped else f"사람 확인 필요: 빠진 수치 {dropped}"
         warnings.append(ExtractionWarning(
             code="QUOTE_NARROWED", item_id=candidate.item_id,
             message=(f"인용을 {len(candidate.quote)}자 → {len(narrowed)}자로 좁혀 해소했다 "
-                     f"(cue 포함도 {cue_score:.2f}, 후보 {len(accepted)}건 중 최댓값). {detail}. "
+                     f"({basis}, 후보 {len(accepted)}건). {detail}. "
                      f"남은 수치 {sorted(set(numerics.numbers(narrowed))) or '없음'}"),
         ))
         return span

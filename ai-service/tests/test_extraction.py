@@ -408,3 +408,133 @@ def test_cue_threshold_separates_the_two_groups():
         assert miss < extraction.CUE_CONTAINMENT_MIN <= hit, (
             f"{item_id}: 진짜 {hit:.3f} · 누출 {miss:.3f} · 임계 {extraction.CUE_CONTAINMENT_MIN}"
         )
+
+
+# ── cue 임계값 전수 측정 (결정 10.45) ────────────────────────────────────────
+#: **cue 판별이 도달하지 못하는 계약 정답 항목.** 정세현 전수 실측(결정로그 10.45)에서
+#: 나왔다 — 항목 2개로 잡은 임계값이 전수에서는 7건을 거부한다.
+#:
+#: 성격이 둘로 갈린다.
+#:
+#:   표 셀        숫자 비율 0.889·0.955 — cue 가 **원리적으로** 안 통한다(순수 수치라
+#:                자연어와 어휘가 안 겹친다). `TABULAR_DIGIT_RATIO` 로 우회한다.
+#:   자연어 5건    cue 문면이 원문과 다른 어휘를 쓴다. **cue 품질 문제**이고 임계값으로는
+#:                못 푼다 — 0.07 아래로 내리면 누출 조각(0.040·0.200)과 겹쳐 판별력이 사라진다.
+#:
+#: 이 목록을 박아 두는 이유: 지금 상태를 드러내고, **새로 늘면 잡히게** 하는 것이다.
+#: 줄어들면(cue 를 고치면) 그것도 잡힌다 — 목록을 같이 갱신하게 된다.
+_CUE_UNREACHABLE = {
+    # 표 셀 — TABULAR_DIGIT_RATIO 로 우회된다
+    "VAR-EARLY-SURRENDER-RATIO",
+    "VAR-LONG-TERM-RATIO",
+    # 자연어 — cue 문면 개선이 근본이다 (결정 10.45, 3주차 정량평가 전)
+    "VAR-WITHDRAWAL-FEE",
+    "ELS-TOTAL-LOSS-SCENARIO",
+    "ELS-NO-LISTING",
+    "ELS-MIDWAY-REDEMPTION-COST",
+    "VAR-PARTIAL-DEPOSIT-INSURANCE",
+}
+
+
+def _cue_scores() -> dict[str, tuple[float, float]]:
+    """계약 정답 전건의 (cue 포함도, 숫자 비율)."""
+    from app import textsim
+
+    out = {}
+    for product_type, name in (("ELS", "parsed_els_sample.json"),
+                               ("VARIABLE_INSURANCE", "parsed_variable_sample.json")):
+        cues = {i.item_id: i.cue for i in templates.get(product_type).items}
+        for entry in _doc(name)["_expected_risk_items"]:
+            cue = cues.get(entry["item_id"])
+            if cue is None:
+                continue
+            out[entry["item_id"]] = (
+                textsim.containment(cue, entry["value_text"]),
+                extraction._digit_ratio(entry["value_text"]),
+            )
+    return out
+
+
+def test_cue_unreachable_set_is_exactly_what_we_measured():
+    """★ 임계값이 계약 정답 몇 건을 거부하는지 전수로 고정한다.
+
+    항목 2개 실측으로 잡은 값이 전수에서 7건을 거부했다(결정 10.45). 그 사실이 코드에
+    안 남으면 F-EXT-003 재현율에서 **조용한 손실**로만 나타난다 — 방향은 안전하지만
+    (틀린 스팬이 아니라 `extraction_failed`) 왜 낮은지 알 수 없다.
+    """
+    below = {iid for iid, (cue, _) in _cue_scores().items()
+             if cue < extraction.CUE_CONTAINMENT_MIN}
+    assert below == _CUE_UNREACHABLE, (
+        f"새로 미달: {sorted(below - _CUE_UNREACHABLE)} · "
+        f"해소됨(목록에서 빼라): {sorted(_CUE_UNREACHABLE - below)}"
+    )
+
+
+def test_tabular_items_are_rescued_by_the_numeric_path():
+    """표 셀은 cue 가 원리적으로 안 통한다 — 숫자 비율로 갈라 수치 기준을 쓴다."""
+    scores = _cue_scores()
+    tabular = {iid for iid, (_, digits) in scores.items()
+               if digits >= extraction.TABULAR_DIGIT_RATIO}
+    assert tabular, "표 셀 항목이 하나도 안 잡힌다 — 임계가 너무 높다"
+    assert tabular <= _CUE_UNREACHABLE, "cue 가 통하는 항목을 표 셀로 오인한다"
+
+
+def test_tabular_threshold_has_margin_over_natural_language():
+    """자연어 항목을 표 셀로 오인하면 그 항목의 cue 보호가 사라진다."""
+    scores = _cue_scores()
+    passing = [d for iid, (cue, d) in scores.items()
+               if cue >= extraction.CUE_CONTAINMENT_MIN]
+    assert max(passing) < extraction.TABULAR_DIGIT_RATIO, (
+        f"cue 통과군 최대 숫자비율 {max(passing):.3f} ≥ 임계 "
+        f"{extraction.TABULAR_DIGIT_RATIO} — 자연어가 표 셀로 잡힌다"
+    )
+
+
+# ── 표 셀 판정의 모집단 (PR #152 리뷰, 정세현) ────────────────────────────────
+#: 정세현이 재현한 누출 조각. **p7 표에서 왔고 숫자비율 1.000 이다.**
+#: `ELS-NO-LISTING`(p14 자연어 항목, cue 0.182)의 인용에 이게 붙으면, 표 셀 판정을 창에
+#: 걸었을 때 이 조각만으로 된 창이 게이트를 통과했다.
+_TABULAR_BLEED = "× [100%+ 5.50%]"
+
+
+def test_natural_language_item_is_not_rescued_by_a_tabular_bleed_window():
+    """★ 창이 아니라 원 인용으로 표 셀을 판정한다 — 안 그러면 `#118` 결함이 다시 열린다.
+
+    이전 구현은 `_digit_ratio(narrowed)` 를 봤다. 창은 원 인용의 부분열이므로 자연어
+    항목의 인용에 표 열이 누출되면 **그 누출 조각만으로 된 창**이 숫자비율 1.000 으로
+    cue 게이트를 우회한다. 결과가 `extraction_failed`(안전한 실패)에서 **p7 표 셀 스팬을
+    p14 자연어 항목의 조건 원문으로 잡은 스팬**으로 뒤집혔고, 경고는 `사람 확인 필요` 도
+    아니라 *"수치는 전부 남았다"* 였다 — `want` 가 누출 조각에서 나온 수치라 겹침이 만점이라서다.
+
+    **모집단이 요지다.** 기존 테스트 셋은 전부 `_digit_ratio(value_text)`, 즉 계약 정답
+    원문 분포를 잰다. 런타임에 그 함수로 들어가는 것은 `narrowed` 이므로 임계값을 어떻게
+    바꿔도 이 경로가 안 보였다. 그래서 이 테스트는 `_rescue` 를 실제로 태운다.
+    """
+    doc = _doc()
+    expected = _expected(doc, "ELS-NO-LISTING")
+    candidate = ExtractedCandidate(
+        item_id="ELS-NO-LISTING", page=14,
+        quote=f"{expected['value_text']} {_TABULAR_BLEED}",
+    )
+    # 픽스처가 성립하는지: 누출 조각은 창 단위로 보면 표 셀이고, 원 인용은 자연어다
+    assert extraction._digit_ratio(_TABULAR_BLEED) >= extraction.TABULAR_DIGIT_RATIO
+    assert extraction._digit_ratio(candidate.quote) < extraction.TABULAR_DIGIT_RATIO
+    assert extraction._resolve(candidate, doc, []) is None, "이 인용은 원문에 없어야 한다"
+
+    warnings: list[Any] = []
+    span = extraction._rescue(candidate, doc, _tpl(candidate.item_id), warnings)
+    assert span is None, f"자연어 항목이 표 셀 경로로 구제됐다 — {span}"
+    assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
+
+
+def test_tabular_bleed_window_alone_would_have_resolved():
+    """픽스처가 실제로 함정인지 — 누출 조각만으로도 원문에서 해소된다.
+
+    이게 아니면 위 테스트는 "안 풀리는 것을 안 골랐다" 는 시시한 사실만 확인한다
+    (`test_bleed_fragment_alone_would_have_resolved` 와 같은 이유).
+    """
+    doc = _doc()
+    bleed_only = ExtractedCandidate(item_id="ELS-NO-LISTING", page=7, quote=_TABULAR_BLEED)
+    span = extraction._resolve(bleed_only, doc, [])
+    assert span is not None, "누출 조각이 원문에서 안 풀리면 함정이 성립하지 않는다"
+    assert span["source_span"]["page"] != _expected(doc, "ELS-NO-LISTING")["source_span"]["page"]

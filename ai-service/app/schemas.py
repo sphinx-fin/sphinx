@@ -75,6 +75,11 @@ class Judgment(Strict):
     misconception_type: str | None = Field(
         default=None, description="F-DET-001 매칭 시 유형ID (예: M08-TYING)"
     )
+    prompt_version: str | None = Field(
+        default=None,
+        description="이 판정을 낸 채점 프롬프트 버전. **모델이 채우지 않는다** — "
+                    "scoring 이 후처리에서 고정한다(결정 10.46 · 계약 10.38)",
+    )
 
 
 # ── contracts/parsed_document.schema.json (계약 소유: 정세현) ──────────────────
