@@ -115,6 +115,33 @@ class AccessControlWiringTest {
                 .isEqualTo("session:read");
     }
 
+    @Test
+    @DisplayName("❗세션 이해항목 조회는 session:read 다 — 카탈로그 action 으로 바꾸면 범위가 org 가 된다")
+    void sessionRiskItemsIsSessionScopedNotCatalog() {
+        // 이 라우트가 있는 이유가 범위다(이슈 #158). 대상이 세션이라 own_session 이 자연히
+        // 서는데, action 을 product:read 로 바꾸면 **그 그랜트가 scope: org** 라 세션 대상에도
+        // 통과한다 — 라우트는 그대로인데 고객이 전 카탈로그를 볼 수 있던 상태로 되돌아간다.
+        //
+        // 이 되돌림은 다른 어떤 단정도 안 잡는다. product:read 는 정책에 실재하므로
+        // everyDeclaredActionExistsInPolicy 가 통과하고, 라우트 자체 테스트는 200 을 받는다.
+        // 실측했다: action 만 바꾸고 전체를 돌리면 BUILD SUCCESSFUL 이다 (#164 리뷰).
+        List<String> matched = endpointActions().entrySet().stream()
+                .filter(e -> e.getKey().endsWith("→ riskItems"))
+                .filter(e -> e.getKey().contains("/sessions/{sid}/risk-items"))
+                .map(Map.Entry::getValue)
+                .toList();
+
+        assertThat(matched)
+                .as("GET /sessions/{sid}/risk-items 핸들러가 정확히 하나여야 한다 — 여럿이면 "
+                        + "이 단정이 어느 것을 본 것인지 알 수 없다")
+                .hasSize(1);
+        assertThat(matched.get(0))
+                .as("세션 대상 라우트에 카탈로그 action 을 걸면 own_session 이 아니라 org 로 "
+                        + "판정된다. 고객에게 카탈로그를 열지 않으려고 만든 라우트가 그 자체로 "
+                        + "카탈로그 권한을 요구하게 된다(이슈 #158)")
+                .isEqualTo("session:read");
+    }
+
     /** 엔드포인트 → @PreAuthorize에 적힌 action(없으면 null). */
     private Map<String, String> endpointActions() {
         Map<String, String> out = new LinkedHashMap<>();
