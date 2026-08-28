@@ -1,0 +1,174 @@
+/* S-07 이해 기록 리포트. 소유: 오준서.
+
+   불변 요건 둘.
+
+   ① **내용 해시를 자르지 않는다.** 고객이 받은 문서를 나중에 대조하는 값이라, 앞 8자만
+      보이면 대조가 성립하지 않는다. 좁은 화면에서도 64자가 전부 보이도록 줄바꿈시키고
+      말줄임(`text-overflow`)을 쓰지 않는다.
+
+   ② **판정 3색을 쓰지 않는다.** 이 화면은 판정을 말하지 않는다 — 교부 사실과 기록을
+      말한다. 여기에 녹·황·적을 쓰면 리포트 자체가 판정처럼 읽힌다(tokens.css 규칙 1).
+      오류 문구 한 곳만 예외다. */
+
+.s07 {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.s07__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.s07__head h1 {
+  font-size: calc(36px * var(--scale));
+  line-height: calc(1.334 * var(--leading-scale));
+  letter-spacing: -0.027em;
+  font-weight: 700;
+}
+.s07__sid { margin-top: var(--space-2); color: var(--text-muted); font-size: calc(14px * var(--scale)); }
+.s07__sid code { background: var(--surface-sunken); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
+
+.s07__error {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  line-height: calc(1.55 * var(--leading-scale));
+}
+
+/* ── 미발행·세션 없음 ────────────────────────────────────────────────────────
+   미발행은 **오류가 아니라 상태**다(계약 GET 404). 그래서 오류 색을 쓰지 않고,
+   다음 행동(발행)을 같은 카드 안에 둔다. */
+.s07__empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.s07__empty h2 { font-size: calc(20px * var(--scale)); font-weight: 700; }
+.s07__empty p { line-height: calc(1.55 * var(--leading-scale)); color: var(--text-muted); }
+
+/* ── 메타 ───────────────────────────────────────────────────────────────── */
+.s07__meta {
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+}
+.s07__meta dl { display: flex; flex-wrap: wrap; gap: var(--space-5) var(--space-8); }
+.s07__meta dt { font-size: calc(13px * var(--scale)); color: var(--text-muted); }
+.s07__meta dd { margin-top: var(--space-1); font-size: calc(16px * var(--scale)); font-weight: 600; }
+.s07__meta code { font-size: calc(15px * var(--scale)); }
+
+/* ── 내용 해시 — 이 화면의 요지 ────────────────────────────────────────────── */
+.s07__hash {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+.s07__hash h2 {
+  font-size: calc(14px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.s07__hash-algo {
+  font-size: calc(11px * var(--scale));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  letter-spacing: 0.04em;
+}
+.s07__hash-note {
+  margin-top: var(--space-2);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.s07__hash-row {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+/* 64자가 전부 보여야 한다(불변 요건 ①) — 자르지 않고 접는다. */
+.s07__hash-value {
+  flex: 1 1 22rem;
+  min-width: 0;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ── 문서(PDF) ───────────────────────────────────────────────────────────── */
+.s07__pdf h2 { font-size: calc(14px * var(--scale)); font-weight: 600; color: var(--text-muted); }
+.s07__pdf-links { margin-top: var(--space-3); display: flex; flex-wrap: wrap; gap: var(--space-3); }
+/* 링크가 없을 때 비활성 버튼을 두지 않는다 — 없는 것은 없다고 쓴다(설계 판단 ③). */
+.s07__pdf-none {
+  margin-top: var(--space-2);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+/* ── 다음 행동 ───────────────────────────────────────────────────────────── */
+.s07__actions {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.s07__reissue-note {
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+.s07__nav { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ── 버튼 ────────────────────────────────────────────────────────────────────
+   S-05·S-06 과 같은 모양이다. 강조(--accent)는 누를 수 있는 것에만 쓰고 상태를 뜻하지
+   않는다(tokens.css 규칙 2). */
+.s07__btn {
+  font: inherit;
+  font-size: calc(15px * var(--scale));
+  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+.s07__btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.s07__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.s07__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.s07__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+.s07__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.s07__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
+.s07__btn--quiet:hover:not(:disabled) { background: var(--surface-sunken); }

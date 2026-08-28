@@ -149,6 +149,37 @@ export interface GateResult {
 }
 
 /**
+ * F-GTE-004 이해 기록 리포트 (판매자용 전문).
+ *
+ * `GET /sessions/{id}/report` · `POST /sessions/{id}/report` 가 같은 모양을 돌려준다.
+ * **고객 교부용 요약(`/report/summary`)은 다른 문서다** — 계약이 스키마를 나눈 근거가
+ * 둘이 다르다는 것이므로 이 타입을 그쪽에 재사용하지 않는다.
+ */
+export interface ReportResponse {
+  reportId: string;
+  sessionId: string;
+  generatedAt: string;
+  /**
+   * 리포트 **내용**의 sha256 (CanonicalJson). 체인 항목 해시가 아니다 — 항목 해시는 앞
+   * 항목과 순번에 의존해서 문서 한 장을 든 고객이 재계산할 수 없다.
+   *
+   * **자르거나 숨기지 않는다.** 고객이 받은 문서를 나중에 대조하는 값이라, 앞 8자만
+   * 보이면 대조가 성립하지 않는다.
+   */
+  contentHash: string;
+  /**
+   * ❗**PDF 생성이 붙기 전까지 `null` 이다.** 계약이 그렇게 정한 이유가 여기 있다 —
+   * 값을 채우면 "이 URL 로 가면 문서가 있다" 를 계약이 보장하는데 404 가 난다.
+   * 스키마 검증은 통과하고 화면은 링크를 그리며, **눌러야 드러난다.**
+   *
+   * 그래서 화면은 `null` 일 때 링크를 그리지 않는다. 빈 링크보다 "아직 없다" 가 낫다.
+   */
+  previewUrl?: string | null;
+  /** `previewUrl` 과 같은 이유로 PDF 생성 전까지 null. */
+  downloadUrl?: string | null;
+}
+
+/**
  * 적합성 모순 판정 상태 (F-DET-002).
  * 미리보기는 모순을 평가하지 않으므로 보통 `NOT_EVALUATED` 다.
  */
