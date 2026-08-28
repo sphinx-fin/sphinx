@@ -108,11 +108,15 @@ def leaked_fragments(question: str, forbidden: tuple[str, ...]) -> list[str]:
     긴 어구는 부분 포함으로도 잡는다 — 루브릭 조항을 그대로 쓰지 않아도 핵심 구절만
     옮기면 답을 알려준 것이다. 짧은 조각(MIN_LEAK_NGRAM 미만)은 우연 일치가 많아
     숫자에 한해서만 본다 — 숫자는 조사·어미가 붙지 않아 우연 일치가 거의 없다.
+
+    **양쪽이 같은 정규화를 지나야 한다** (이슈 #183). `numbers()` 가 금지 조각에서 콤마를
+    지우는데 질문 쪽은 안 지워서, **문서 표기를 그대로 옮긴 질문이 통과했다** — 계약 정답의
+    콤마 수치 5건 전건이 그랬다. `for_leak_check()` 가 양쪽에서 자릿수 콤마를 지운다.
     """
-    q = numerics.canonical(question)
+    q = numerics.for_leak_check(question)
     hits = []
     for fragment in forbidden:
-        f = numerics.canonical(fragment)
+        f = numerics.for_leak_check(fragment)
         if not f:
             continue
         if len(f) < MIN_LEAK_NGRAM:
