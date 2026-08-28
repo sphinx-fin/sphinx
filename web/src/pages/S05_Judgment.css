@@ -218,7 +218,6 @@
   font-size: calc(13px * var(--scale));
   color: var(--text-muted);
 }
-.s05__misconception code { background: var(--surface-sunken); padding: 0 var(--space-1); border-radius: var(--radius-sm); }
 
 /* ── 행동 ───────────────────────────────────────────────────────────────── */
 .s05__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
