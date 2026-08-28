@@ -140,3 +140,117 @@
   line-height: calc(1.5 * var(--leading-scale));
   letter-spacing: 0.0057em; color: var(--text-muted); }
 .ss__done-id b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ── 대상 상품 모달 (설계 판단 ⑥) ────────────────────────────────────────── */
+.ss__linkbtn {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: calc(14px * var(--scale));
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ss__linkbtn:disabled { color: var(--text-muted); text-decoration: none; cursor: not-allowed; }
+
+.ss__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-5) var(--space-4);
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.ss__modal {
+  width: 100%;
+  max-width: 44rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.ss__modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.ss__modal-title { font-size: calc(22px * var(--scale)); margin: 0; }
+.ss__modal-meta {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: calc(13px * var(--scale));
+}
+.ss__modal-x {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: calc(14px * var(--scale));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* 항목이 많으면 본문만 스크롤한다 — 헤더의 닫기 버튼이 항상 보여야 한다. */
+.ss__modal-body {
+  padding: var(--space-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ss__doc-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ss__doc-item--failed { border-style: dashed; }
+.ss__doc-item-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ss__doc-item-name { font-size: calc(16px * var(--scale)); margin: 0; }
+
+.ss__badge {
+  flex-shrink: 0;
+  font-size: calc(12px * var(--scale));
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+}
+.ss__badge--req { color: var(--text); }
+.ss__badge--fail { background: var(--red-bg); color: var(--red); }
+
+/* 원문은 인용이다 — 요약하지 않고 그대로 둔다(P6). 줄바꿈도 문서 그대로 보존한다. */
+.ss__doc-quote {
+  margin: 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  white-space: pre-wrap;
+  font-size: calc(15px * var(--scale));
+  line-height: 1.6;
+}
+.ss__doc-span {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: calc(12px * var(--scale));
+  font-variant-numeric: tabular-nums;
+}
+.ss__modal-note { margin-top: var(--space-2); }

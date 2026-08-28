@@ -35,14 +35,28 @@
  *    건너뛰면 3점이 되어 **취약으로 분류되지 않는다** — 고령자 모드가 안 켜지고 재설명이
  *    일반 문면으로 나간다. 에러도 로그도 없고 시연만 밋밋해진다(decision-log 10.12).
  *    화면이 계약보다 엄격한 것은 흔하고, 여기서는 그게 맞다.
+ *
+ * ⑥ **"대상 상품 보기" 는 시스템이 읽어낸 것을 보여준다 — 문서 뷰어가 아니다.**
+ *    판매자가 세션을 열기 전에 확인해야 하는 것은 *"이 상품 문서가 있느냐"* 가 아니라
+ *    **"이 시스템이 그 문서에서 무엇을 조건으로 뽑았느냐"** 다. 뽑힌 항목이 곧 인터뷰
+ *    질문이 되고 채점 루브릭의 대상이 되므로, 여기서 틀린 것을 못 보면 세션 하나가 통째로
+ *    틀린 근거 위에서 돌아간다. 그래서 모달은 **항목별 조건 원문과 그 원문이 문서 어디에
+ *    있는지(페이지·오프셋)** 를 보여준다 — 판매자가 손에 든 설명서와 눈으로 대조할 수 있는
+ *    최소 단위다. 추출 실패 항목도 숨기지 않는다(E-EXT-03).
+ *
+ *    **PDF 원본은 아직 안 그린다.** 계약에 문서 조회 엔드포인트가 없다(`openapi.yaml` 에
+ *    `POST /products/documents` 업로드만 있다). 없는 링크를 그려 두면 눌러 보고 깨진 것을
+ *    보게 되므로, S-07 이 PDF 미리보기에 한 것과 같은 선택을 한다 — 자리가 생기면 그리고,
+ *    그 전에는 무엇이 없는지만 적는다.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
   Channel,
   CreateSessionRequest,
   ProductSummary,
+  RiskItem,
   SessionResponse,
 } from "../api/types";
 import { detectPii } from "../lib/pii";
@@ -69,6 +83,14 @@ export default function S02SessionStart() {
   const [contractRef, setContractRef] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
+  /* ── 대상 상품 보기 (설계 판단 ⑥) ─────────────────────────────────────── */
+  const [docOpen, setDocOpen] = useState(false);
+  const [docItems, setDocItems] = useState<RiskItem[] | null>(null);
+  const [docLoading, setDocLoading] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  /** 닫을 때 포커스를 되돌릴 곳. 안 되돌리면 키보드 사용자가 문서 맨 위로 튕긴다. */
+  const docTriggerRef = useRef<HTMLButtonElement>(null);
+
   const [phase, setPhase] = useState<Phase>("editing");
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +111,42 @@ export default function S02SessionStart() {
     })();
     return () => { alive = false; };
   }, []);
+
+  const closeDoc = useCallback(() => {
+    setDocOpen(false);
+    docTriggerRef.current?.focus();
+  }, []);
+
+  /* 상품을 바꾸면 이전 상품의 항목이 남아 있으면 안 된다 — 그대로 두면 A 상품을 고르고
+     B 상품의 조건을 확인한 채로 세션을 연다. */
+  useEffect(() => {
+    setDocItems(null);
+    setDocError(null);
+  }, [productId]);
+
+  useEffect(() => {
+    if (!docOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeDoc();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [docOpen, closeDoc]);
+
+  async function openDoc() {
+    setDocOpen(true);
+    if (docItems || !productId) return;      // 이미 받아 뒀으면 다시 부르지 않는다
+    setDocLoading(true);
+    setDocError(null);
+    try {
+      const res = await get<{ items: RiskItem[] }>(`/products/${productId}/risk-items`);
+      setDocItems(res.items ?? []);
+    } catch (e) {
+      setDocError(describe(e));
+    } finally {
+      setDocLoading(false);
+    }
+  }
 
   const refPii = useMemo(() => detectPii(contractRef), [contractRef]);
   const unanswered = SURVEY_QUESTIONS.filter((q) => !answers[q.id]).length;
@@ -179,8 +237,7 @@ export default function S02SessionStart() {
         <header className="ss__head">
           <h1 className="ss__title">세션 시작</h1>
           <p className="ss__sub">
-            계약 직전 이해도 검증 세션을 만듭니다. 고객 속성은 <b>구간 값</b>만 받습니다 —
-            성명·주민등록번호·계좌번호는 이 시스템에 저장되지 않습니다.
+            계약 직전 이해도 검증 세션을 만듭니다. 고객 속성은 <b>구간 값</b>만 받습니다.
           </p>
           <button type="button" className="ss__preset" onClick={applyDemoPreset} disabled={busy}>
             데모 입력값 채우기
@@ -207,6 +264,16 @@ export default function S02SessionStart() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              ref={docTriggerRef}
+              className="ss__linkbtn"
+              disabled={!productId}
+              onClick={openDoc}
+            >
+              대상 상품 보기
+            </button>
+
             {/* 파싱 실패는 은폐하지 않는다 (E-EXT-03) — 조건을 못 읽은 상품은 검증도 못 한다. */}
             {product?.status === "parse_failed" && (
               <p className="ss__hint" role="alert">
@@ -260,7 +327,6 @@ export default function S02SessionStart() {
                   </option>
                 ))}
               </select>
-              <p className="ss__hint">생년월일·나이는 받지 않습니다.</p>
             </div>
 
             <div className="ss__field">
@@ -281,7 +347,6 @@ export default function S02SessionStart() {
                   </option>
                 ))}
               </select>
-              <p className="ss__hint">정확한 금액은 받지 않습니다.</p>
             </div>
 
             <div className="ss__field">
@@ -316,7 +381,6 @@ export default function S02SessionStart() {
                 placeholder="예: 2026-0825-0031"
                 onChange={(e) => setContractRef(e.target.value)}
               />
-              <p className="ss__hint">금융사 내부 계약 번호입니다. 고객 식별정보가 아닙니다.</p>
             </div>
           </div>
 
@@ -333,7 +397,7 @@ export default function S02SessionStart() {
           <h2 className="ss__section">적합성 설문</h2>
           <p className="ss__hint ss__hint--block">
             고객이 기재한 답변 그대로 입력합니다. 이 답변은 되말하기 발화와 대조되어
-            <b> 설문과 실제 이해가 어긋나는지</b>를 판정하는 데 쓰입니다(F-DET-002).
+            <b> 설문과 실제 이해가 어긋나는지</b>를 판정하는 데 쓰입니다.
           </p>
 
           {SURVEY_QUESTIONS.map((q, qi) => (
@@ -387,7 +451,127 @@ export default function S02SessionStart() {
           </button>
         </div>
       </div>
+
+      {docOpen && (
+        <ProductDocumentModal
+          product={product}
+          items={docItems}
+          loading={docLoading}
+          error={docError}
+          onClose={closeDoc}
+        />
+      )}
     </main>
+  );
+}
+
+/**
+ * 대상 상품 모달 — 설계 판단 ⑥.
+ *
+ * 판매자가 손에 든 설명서와 **눈으로 대조**할 수 있게, 항목별로 조건 원문과 그 원문의
+ * 위치(페이지·오프셋)를 나란히 둔다. 원문을 요약하지 않는다 — 요약하면 대조가 안 된다(P6).
+ */
+function ProductDocumentModal({
+  product,
+  items,
+  loading,
+  error,
+  onClose,
+}: {
+  product: ProductSummary | undefined;
+  items: RiskItem[] | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { closeRef.current?.focus(); }, []);
+
+  const extracted = items?.filter((i) => i.status === "extracted") ?? [];
+  const failed = items?.filter((i) => i.status !== "extracted") ?? [];
+
+  return (
+    <div className="ss__overlay" onClick={onClose}>
+      {/* 바깥 클릭으로 닫되, 안쪽 클릭이 새어 올라가면 내용을 누를 때마다 닫힌다. */}
+      <div
+        className="ss__modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="doc-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="ss__modal-head">
+          <div>
+            <h2 className="ss__modal-title" id="doc-title">
+              {product?.name ?? "대상 상품"}
+            </h2>
+            <p className="ss__modal-meta">
+              <code>{product?.productId}</code>
+              {product?.productType && <> · {product.productType}</>}
+              {items && <> · 이해항목 {items.length}개</>}
+            </p>
+          </div>
+          <button type="button" ref={closeRef} className="ss__modal-x" onClick={onClose}
+                  aria-label="닫기">
+            닫기
+          </button>
+        </header>
+
+        <div className="ss__modal-body">
+          <p className="ss__hint ss__hint--block">
+            이 시스템이 상품 문서에서 <b>조건으로 읽어낸 것</b>입니다. 인터뷰 질문과 채점
+            기준이 이 원문에서 나오므로, 설명서와 다르면 세션을 열기 전에 잡아야 합니다.
+          </p>
+
+          {loading && <p className="ss__hint">불러오는 중…</p>}
+          {error && <p className="ss__alert ss__alert--error" role="alert">{error}</p>}
+
+          {items && items.length === 0 && !loading && (
+            <p className="ss__alert ss__alert--warn" role="status">
+              <b>읽어낸 조건이 없습니다.</b>
+              이 상태로 세션을 열면 물어볼 항목이 없습니다.
+            </p>
+          )}
+
+          {extracted.map((it) => (
+            <article key={it.itemId} className="ss__doc-item">
+              <div className="ss__doc-item-head">
+                <h3 className="ss__doc-item-name">{it.name}</h3>
+                <span className={`ss__badge ${it.importance === "required" ? "ss__badge--req" : ""}`}>
+                  {it.importance === "required" ? "필수" : "권장"}
+                </span>
+              </div>
+              <blockquote className="ss__doc-quote">{it.condition.valueText}</blockquote>
+              <p className="ss__doc-span">
+                {it.itemId} · p.{it.condition.sourceSpan.page} · 위치{" "}
+                {it.condition.sourceSpan.start}–{it.condition.sourceSpan.end}
+              </p>
+            </article>
+          ))}
+
+          {/* 추출 실패를 숨기지 않는다 (E-EXT-03) — 못 읽은 조건은 검증도 안 된다. */}
+          {failed.map((it) => (
+            <article key={it.itemId} className="ss__doc-item ss__doc-item--failed">
+              <div className="ss__doc-item-head">
+                <h3 className="ss__doc-item-name">{it.name}</h3>
+                <span className="ss__badge ss__badge--fail">추출 실패</span>
+              </div>
+              <p className="ss__doc-span">
+                {it.itemId} — 조건 원문을 못 읽었습니다. 이 항목은 검증되지 않습니다.
+              </p>
+            </article>
+          ))}
+
+          {/* S-07 과 같은 선택 — 없는 것은 안 그리고, 무엇이 없는지만 적는다. */}
+          {items && items.length > 0 && (
+            <p className="ss__hint ss__modal-note">
+              문서 원본(PDF) 보기는 아직 없습니다. 계약에 문서 조회 엔드포인트가 생기면 이
+              자리에 붙습니다.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
