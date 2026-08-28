@@ -113,17 +113,29 @@ class OwnershipEnforcementTest {
                         .contentType(MediaType.APPLICATION_JSON).content(answer))
                 .andExpect(status().isForbidden());
 
-        // ❗같은 CUST 역할이라도 이름이 sellerId 와 같으면 인가를 통과한다.
-        //   막는 것이 역할이 아니라 ownerId 대조라는 것이 여기서 드러난다. 403 이 아니기만
-        //   하면 된다 — 그 뒤 처리 결과(채점 성공/실패)는 이 단정의 관심이 아니다.
-        mvc.perform(post("/sessions/" + sid + "/answers").with(cust("seller-01"))
-                        .contentType(MediaType.APPLICATION_JSON).content(answer))
-                .andExpect(result -> assertThat(result.getResponse().getStatus())
-                        .as("역할이 CUST 여도 이름이 sellerId 와 같으면 인가는 통과한다 — "
-                                + "귀속이 역할이 아니라 이름 대조라는 뜻이다(결정 7.24). "
-                                + "여기가 403 이 되면 귀속 모델이 바뀐 것이므로 "
-                                + "rbac_policy.yaml 의 CUST 도달 불가 주석과 7.24·7.25 를 "
-                                + "같이 고쳐야 한다")
-                        .isNotEqualTo(403));
+        // ❗같은 CUST 역할이라도 이름이 sellerId 와 같으면 **판매자와 똑같이** 통과한다.
+        //   막는 것이 역할이 아니라 ownerId 대조라는 것이 여기서 드러난다.
+        //
+        //   isNotEqualTo(403) 으로 두지 않는다 — 그건 401 에도 만족된다. currentActor() 가
+        //   던지는 경로가 열리면(#105 가 401·403 을 가른 자리다) 이 단정은 초록인데 귀속에
+        //   대해 아무것도 증명하지 않는다. 정당한 판매자와 같은 코드인지를 보면 그 구멍이
+        //   닫히고, 하류 결과에도 안 묶인다 — 오늘은 둘 다 502(ai-service 없음)이고
+        //   나중에 목이 붙으면 둘 다 200 이 된다 (#174 리뷰).
+        int asSeller = answerAs(sid, seller("seller-01"), answer);
+        int asCustNamedLikeSeller = answerAs(sid, cust("seller-01"), answer);
+
+        assertThat(asCustNamedLikeSeller)
+                .as("역할이 CUST 여도 이름이 sellerId 와 같으면 판매자와 똑같이 통과한다 — "
+                        + "귀속이 역할이 아니라 이름 대조라는 뜻이다(결정 7.24). 여기가 "
+                        + "갈리면 귀속 모델이 바뀐 것이므로 rbac_policy.yaml 의 CUST 도달 "
+                        + "불가 주석과 7.24·7.25 를 같이 고쳐야 한다")
+                .isEqualTo(asSeller);
+    }
+
+    /** 답변을 한 번 넣고 상태코드만 돌려준다. 하류 결과가 아니라 인가 결과를 보려는 것이다. */
+    private int answerAs(String sid, RequestPostProcessor who, String body) throws Exception {
+        return mvc.perform(post("/sessions/" + sid + "/answers").with(who)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andReturn().getResponse().getStatus();
     }
 }
