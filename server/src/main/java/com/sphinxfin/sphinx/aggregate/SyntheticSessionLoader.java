@@ -39,7 +39,10 @@ import java.util.Map;
  * <h2>생성하지 않고 읽기만 한다</h2>
  *
  * <p>분포는 {@code scripts/gen_synth_sessions.py} 가 만들고 산출물이
- * {@code data/synth_sessions/sessions.json} 으로 커밋돼 있다. 여기서 생성하지 않는 이유는
+ * {@code data/synth_sessions/sessions.json} 에 놓인다. <b>그 파일은 추적하지 않는다</b> —
+ * {@code .gitignore} 가 첫 커밋부터 그렇게 정해 뒀고, {@code deploy_ec2.sh} 가 배포 때
+ * 생성한다({@code data/timeseries} 를 {@code fetch_timeseries.py} 로 받아오는 것과 같다).
+ * 여기서 생성하지 않는 이유는
  * 오해율의 근거가 <b>루브릭의 {@code related_misconceptions}</b> 인데 그 파일이
  * {@code ai-service/app/rubrics/} 에 있기 때문이다 — 서버가 거기를 읽으면 모듈 경계를 넘고,
  * 매핑을 복제하면 두 벌이 되어 갈린다.
@@ -86,7 +89,18 @@ public class SyntheticSessionLoader implements ApplicationRunner {
         this.file = Path.of(file);
     }
 
+    /**
+     * ❗<b>{@code @Transactional} 이 여기 있어야 한다.</b> {@code load()} 에만 붙이면
+     * <b>자기 호출이라 프록시를 안 지나</b> 트랜잭션이 안 걸리고, {@code em.flush()} 가
+     * {@code TransactionRequiredException} 으로 죽는다 — <b>서버가 기동 실패한다.</b>
+     *
+     * <p>테스트는 이걸 못 잡았다. {@code @SpringBootTest} 가 테스트 메서드에 트랜잭션을
+     * 걸어 주므로 {@code load()} 를 직접 부르면 이미 트랜잭션이 있다. 실물은 {@code run()}
+     * 을 거치는데 그 경로를 아무도 안 탔다(PR #194 리뷰, 강희진 실측).
+     * {@code SyntheticSessionBootTest} 가 그 경로를 재도록 붙였다.
+     */
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
         if (!enabled) {
             return;
