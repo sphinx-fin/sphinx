@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
@@ -19,11 +21,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * F-DSH-003 합성 세션이 대시보드를 실제로 채우는가. 소유: 정세현
  *
- * <p>이 파일이 잼는 것은 <b>"파일이 읽힌다"</b> 가 아니라 <b>"대시보드가 보여줄 것을 갖는다"</b>
+ * <p>이 파일이 재는 것은 <b>"파일이 읽힌다"</b> 가 아니라 <b>"대시보드가 보여줄 것을 갖는다"</b>
  * 다. 이슈 #179 가 물은 것이 그것이고, 목을 걷은 뒤(#188) 화면이 빈다는 사실이 그 계기다.
+ *
+ * <h2>❗픽스처를 여기서 만든다 — 커밋된 산출물을 읽지 않는다</h2>
+ *
+ * <p>{@code .gitignore} 가 첫 커밋부터 {@code data/synth_sessions/*.json} 을 무시한다.
+ * 산출물은 배포 때 {@code scripts/gen_synth_sessions.py} 가 만든다 —
+ * {@code data/timeseries} 를 {@code fetch_timeseries.py} 로 받아오는 것과 같은 모양이다.
+ *
+ * <p>그래서 이 테스트가 커밋된 파일을 읽으면 <b>CI 에서 전부 실패한다.</b> 처음에 그렇게
+ * 썼다가 로컬에만 남아 있던 생성물 때문에 초록으로 보였다 — {@code BUILD SUCCESSFUL} 을
+ * 통과로 읽으면 안 되는 그 함정이다(#188 리뷰에서 같은 것을 짚었다).
+ *
+ * <p>여기서 만드는 픽스처는 <b>생성기와 같은 스키마</b>이고 칸 수도 같은 조건
+ * (30 이상 · 30 미만 둘 다)을 만든다. 실제 분포가 그 조건을 만족하는지는 생성기의
+ * {@code --check} 와 PR 실측이 본다.
  */
 @SpringBootTest(properties = {
         "sphinx.demo.synthetic-sessions=false",     // 러너는 끄고 테스트가 직접 부른다
+        "sphinx.demo.synthetic-sessions-file=build/test-synth-sessions.json",
 })
 @DisplayName("F-DSH-003 합성 세션 (이슈 #179)")
 class SyntheticSessionLoaderTest {
@@ -36,9 +53,35 @@ class SyntheticSessionLoaderTest {
     @Autowired private AggregateService aggregate;
 
     @BeforeEach
-    void seed() {
+    void seed() throws Exception {
         sessions.deleteAll();
+        writeFixture();
         loader.load(NOW);
+    }
+
+    /**
+     * 생성기 산출물과 같은 스키마의 최소 픽스처.
+     *
+     * <p>칸 둘을 만든다 — 하나는 {@code n >= 30}(값이 보인다), 하나는 그 미만(가려진다).
+     * 주도 둘로 흩어 추이가 한 칸이 아니게 한다.
+     */
+    private void writeFixture() throws Exception {
+        StringBuilder rows = new StringBuilder();
+        for (int i = 1; i <= 34; i++) {
+            String items = i <= 8
+                    ? "\"ELS-PRINCIPAL-LOSS-WARNING\": \"U4\", \"ELS-NO-LISTING\": \"U1\""
+                    : "\"ELS-PRINCIPAL-LOSS-WARNING\": \"U1\"";
+            rows.append(rows.length() == 0 ? "" : ",\n").append("""
+                    {"sessionId": "synth-%04d", "productId": "ELS", "branchId": "BR-00%d",
+                     "sellerId": "synth-seller-01", "ageBand": "60대", "channel": "FACE_TO_FACE",
+                     "weeksAgo": %d, "dayOfWeek": 2, "hour": 10, "judgments": {%s}}"""
+                    .formatted(i, (i % 2) + 1, i % 3, items));
+        }
+        Path out = Path.of("build/test-synth-sessions.json");
+        Files.createDirectories(out.getParent());
+        Files.writeString(out, """
+                {"generator": "test", "params": "test", "paramsVersion": 1, "seed": 0,
+                 "synthetic": true, "sessions": [%s]}""".formatted(rows));
     }
 
     private AggregateService.HeatmapView heatmap() {
