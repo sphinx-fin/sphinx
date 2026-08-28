@@ -130,8 +130,14 @@ class RiskItemWireContractTest {
      * 때문이다. 없으면 "키가 어긋났다" 만 나오고 3단 중 어디인지는 안 나온다.
      *
      * <p>{@code isObject()} 로 거르는 이유는 {@code status=extraction_failed} 일 때
-     * {@code condition} 이 null 이기 때문이다 — 그때 내려가면 NPE 로 죽는데, 그건 계약
-     * 위반이 아니라 <b>정상 상태</b>다.
+     * {@code condition} 이 null 이기 때문이다. JSON 의 null 은 Jackson 에서 자바 {@code null}
+     * 이 아니라 <b>{@code NullNode}</b> 라 {@code child != null} 이 참이고, 거기로 내려가면
+     * {@code fieldNames()} 가 비어서 <b>키 집합이 {@code {}} 대 {@code {source_span, value_text}}
+     * 로 어긋난다</b> — 추출 실패 항목이 계약 위반으로 보인다. 그건 계약 위반이 아니라
+     * E-EXT-03 이 정의한 <b>정상 상태</b>다.
+     *
+     * <p>❗NPE 가 아니다. 증상을 NPE 로 적어 두면 다음 사람이 {@code Objects.requireNonNull}
+     * 류로 "고치려" 든다(#167 리뷰에서 실측으로 정정).
      */
     private static void assertKeysMatch(JsonNode wire, JsonNode schema, String path) {
         JsonNode props = schema.get("properties");
