@@ -16,7 +16,15 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Set;
+import java.util.TreeSet;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -78,9 +86,50 @@ class UnfairSignalNotExposedTest {
         }
     }
 
-    /** 신호를 가리킬 법한 어휘. 하나라도 응답에 있으면 판매자가 우회 단서를 얻는다. */
-    private static final List<String> LEAK_WORDS =
-            List.of("unfair", "escalate", "compliance", "compl", "tying", "m08", "signal", "꺾기", "불공정");
+    /**
+     * 신호를 가리킬 법한 어휘. 하나라도 응답에 있으면 판매자가 우회 단서를 얻는다.
+     *
+     * <p><b>손으로 적지 않는다</b> — 라이브러리에서 승급 유형의 ID 와 label 을 읽어 만든다.
+     * {@code UnfairSalesTypes.ESCALATING} 이 {@code UnfairSalesTypesSyncTest} 로 잠겨 있는 것과
+     * 같은 이유다: 유형이 하나 승급되면 그쪽은 빨개져서 갱신되는데 <b>손으로 적은 어휘 목록은
+     * 그대로 남는다.</b> 그러면 새 유형이 응답에 실려도 이 테스트가 초록이다 (#147 리뷰 ③).
+     *
+     * <p>ID 는 하이픈으로도 잘라 넣는다 — {@code M08-TYING} 이 통째로 안 실리고
+     * {@code tying} 만 나오는 경로가 있다(ai-service 가 {@code reason} 에 문면으로 적는다).
+     */
+    /** 고정 어휘 — 유형 ID 와 무관하게 신호를 가리키는 말. */
+    private static final List<String> FIXED_WORDS =
+            List.of("unfair", "escalate", "compliance", "compl", "signal");
+
+    private static final List<String> LEAK_WORDS = leakVocabulary();
+
+    private static List<String> leakVocabulary() {
+        Set<String> out = new TreeSet<>(FIXED_WORDS);
+        try {
+            JsonNode types = new ObjectMapper(new YAMLFactory())
+                    .readTree(Files.readString(Path.of("../data/misconception_library/misconceptions.yaml")))
+                    .get("types");
+            for (JsonNode t : types) {
+                if (!"compliance".equals(t.path("escalate").asText(null))) {
+                    continue;
+                }
+                String id = t.path("id").asText();
+                out.add(id.toLowerCase());
+                for (String part : id.split("-")) {          // M08-TYING → m08 · tying
+                    out.add(part.toLowerCase());
+                }
+                for (String word : t.path("label").asText("").split("[^가-힣A-Za-z0-9]+")) {
+                    if (word.length() >= 2) {                // 꺾기(불공정영업) 신호 → 꺾기 · 불공정영업
+                        out.add(word.toLowerCase());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("오해 라이브러리를 못 읽었다 — 이 목록이 비면 "
+                    + "누출 단정이 무엇을 하든 통과한다", e);
+        }
+        return List.copyOf(out);
+    }
 
     @Autowired private MockMvc mvc;
     @MockBean private AiServiceClient aiServiceClient;
@@ -95,7 +144,7 @@ class UnfairSignalNotExposedTest {
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.9"),
                                 new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",
-                                        "끼워팔기 인지 실패"),
+                                        "원금손실 조건 인지"),   // 루브릭 밖 조항은 실물에서 막힌다
                                 "판매자 발화 인용", "M08-TYING", null),
                         inv.getArgument(2)));
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
@@ -135,6 +184,20 @@ class UnfairSignalNotExposedTest {
                 .as("응답에 신호가 실제로 실렸다면 위 단정이 잡아야 한다 — 어휘 목록이 비거나 "
                         + "대소문자가 어긋나면 위 테스트는 무엇을 하든 초록이다")
                 .anyMatch(pretend.toLowerCase()::contains);
+    }
+
+    @Test
+    @DisplayName("❗어휘가 라이브러리에서 나온다 — 손으로 적으면 유형 승급 때 조용히 낡는다")
+    void vocabularyComesFromTheLibraryNotFromMemory() {
+        assertThat(LEAK_WORDS)
+                .as("고정 어휘만 남았다면 라이브러리 파싱이 끊긴 것이다 — 그러면 새로 승급된 "
+                        + "유형이 응답에 실려도 이 파일 전체가 초록이다")
+                .hasSizeGreaterThan(FIXED_WORDS.size());
+
+        assertThat(LEAK_WORDS)
+                .as("현재 라이브러리의 승급 유형은 M08-TYING(label: 꺾기(불공정영업) 신호)이다 — "
+                        + "ID 조각과 label 낱말이 둘 다 들어와야 reason 문면으로 새는 것도 잡는다")
+                .contains("m08", "tying", "꺾기", "불공정영업");
     }
 
     @Test
