@@ -1,0 +1,196 @@
+name: 배포 (alpha · prod)
+
+# 소유: 오준서 (인프라 R). 인프라 정의는 infra/ (OpenTofu).
+#
+# ── 왜 SSH 가 아니라 SSM Run Command 인가 ────────────────────────────────────
+#
+# GitHub 러너는 IP 가 매번 바뀐다. SSH 로 붙으려면 보안그룹 22번을 0.0.0.0/0 으로
+# 열어야 하고, 그 순간 docs/deployment.md §3 의 "22 는 내 IP 만"이 자동배포 때문에
+# 풀린다. SSM 은 인스턴스가 바깥으로 나가서 명령을 받아오는 구조라 **인바운드가 0** 이다.
+# 인스턴스는 §4.2 때문에 어차피 SSM 역할을 달고 있어서 추가 비용도 없다.
+#
+# 자격증명도 OIDC 라 Secrets 에 장기 액세스 키를 두지 않는다. 워크플로가 돌 때마다
+# 15분짜리 임시 자격증명을 받고, 신뢰 정책이 ref 를 좁혀서 main/태그 말고는 못 가져간다.
+#
+# ── 왜 박스에서 git clone 을 안 하는가 ──────────────────────────────────────
+#
+# 여기서 `git archive` 로 커밋 스냅샷을 만들어 S3 에 올리고, 박스는 그것만 받는다.
+# 그래서 **박스에 GitHub 자격증명이 하나도 없다.** 문서 §5 는 박스에서 clone 하는
+# 그림이지만, 그러려면 private 레포용 deploy key 나 PAT 를 박스에 둬야 한다.
+# 자세한 근거는 infra/README.md §5.
+#
+# ── 트리거 ──────────────────────────────────────────────────────────────────
+#
+#   main 푸시       → alpha   (자동)
+#   demo-* 태그     → prod    (alpha 에서 확인된 커밋에 태그를 단다)
+#   수동 실행       → 고른 환경 (ref 가 신뢰 정책과 맞아야 통과한다)
+#
+# ❗이 워크플로는 ci.yml 의 결과를 기다리지 않는다. 같은 푸시에서 테스트와 배포가
+# 나란히 돈다. alpha 는 그래도 되는 곳이라 일부러 이렇게 뒀다 — 깨진 머지를 **먼저
+# 보라고** 있는 환경이다. 기다리게 하려면 on: 을 workflow_run 으로 바꾼다.
+
+on:
+  push:
+    branches: [main]
+    tags: ["demo-*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 배포할 환경
+        type: choice
+        options: [alpha, prod]
+        default: alpha
+
+permissions:
+  id-token: write # OIDC 토큰을 받으려면 필요하다
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 환경·커밋 결정
+        id: t
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ inputs.target }}"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/demo-') }}" = "true" ]; then
+            TARGET=prod
+          else
+            TARGET=alpha
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "### $TARGET ← \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+
+      - name: AWS 자격증명 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/sphinx-${{ steps.t.outputs.target }}-deployer
+          aws-region: ap-northeast-2
+
+      - name: 커밋 스냅샷 올리기
+        id: art
+        run: |
+          set -eu
+          KEY="${{ steps.t.outputs.target }}/${{ github.sha }}.tar.gz"
+          # `git archive` 는 **추적 중인 파일만** 담는다 — clone 과 같은 결과가 나오고,
+          # 러너가 만든 부산물(node_modules, build/)이 섞이지 않는다. data/ 와
+          # contracts/ 가 통째로 들어오므로 §6 의 bind mount 가 그대로 성립한다.
+          git archive --format=tar.gz -o /tmp/sphinx.tar.gz "${{ github.sha }}"
+          ls -lh /tmp/sphinx.tar.gz
+          aws s3 cp /tmp/sphinx.tar.gz "s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/$KEY"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: 인스턴스 찾기
+        id: ec2
+        run: |
+          set -eu
+          ID=$(aws ec2 describe-instances \
+                 --filters "Name=tag:Name,Values=sphinx-${{ steps.t.outputs.target }}" \
+                           "Name=instance-state-name,Values=running" \
+                 --query 'Reservations[].Instances[].InstanceId' --output text)
+          # 0개면 빈 문자열, 2개 이상이면 탭으로 붙어 나온다. 둘 다 여기서 멈춘다 —
+          # 엉뚱한 박스에 배포하는 것보다 안 하는 게 낫다.
+          case "$ID" in
+            "")    echo "sphinx-${{ steps.t.outputs.target }} 인스턴스가 없다"; exit 1 ;;
+            *"	"*) echo "같은 이름의 인스턴스가 여러 개다: $ID"; exit 1 ;;
+          esac
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: 배포 명령 전송
+        id: send
+        run: |
+          set -eu
+          # 새 디렉토리에 풀고 나서 갈아 끼운다. 받기에 실패하면 `set -e` 가 여기서
+          # 멈추므로 **돌고 있던 배포를 지우지 않는다.**
+          #
+          # 아래 JSON 안의 `$(mktemp)`·`$NEW` 는 **러너에서 확장되면 안 된다** — 원격
+          # 박스의 셸이 받아 실행할 문자열이라 작은따옴표가 맞다.
+          # shellcheck disable=SC2016
+          CMD=$(aws ssm send-command \
+            --instance-ids "${{ steps.ec2.outputs.id }}" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${{ steps.t.outputs.target }} ${{ github.sha }}" \
+            --timeout-seconds 600 \
+            --parameters '{
+              "executionTimeout":["3600"],
+              "commands":[
+                "set -eux",
+                "NEW=$(mktemp -d -p /opt)",
+                "aws s3 cp s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/${{ steps.art.outputs.key }} - | tar xz -C \"$NEW\"",
+                "rm -rf /opt/sphinx && mv \"$NEW\" /opt/sphinx && chmod 755 /opt/sphinx",
+                "cd /opt/sphinx",
+                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -60 /var/log/sphinx-deploy.log; exit 1; }",
+                "tail -40 /var/log/sphinx-deploy.log"
+              ]}' \
+            --query Command.CommandId --output text)
+          echo "id=$CMD" >> "$GITHUB_OUTPUT"
+
+      - name: 결과 기다리기
+        run: |
+          set -eu
+          CMD='${{ steps.send.outputs.id }}'
+          ID='${{ steps.ec2.outputs.id }}'
+          # `aws ssm wait command-executed` 는 100초에 포기한다. 이 박스는 인스턴스
+          # 위에서 Gradle·npm·pip 를 다 빌드해서 10분을 넘길 수 있으므로 직접 돈다.
+          FAIL=0
+          for _ in $(seq 1 120); do
+            S=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+                  --query Status --output text 2>/dev/null || echo Pending)
+            case "$S" in
+              Success)                                 echo "성공"; break ;;
+              Failed|Cancelled|TimedOut|Undeliverable)  echo "실패: $S"; FAIL=1; break ;;
+            esac
+            sleep 10
+          done
+          # 출력은 2500자에서 잘린다. 전체 로그는 박스의 /var/log/sphinx-deploy.log 에 있다.
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+            --query 'StandardOutputContent' --output text | tail -40
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+            --query 'StandardErrorContent' --output text | tail -40
+          [ "$FAIL" = 0 ] || { echo "전체 로그: aws ssm start-session --target $ID → cat /var/log/sphinx-deploy.log"; exit 1; }
+
+      - name: 노출 확인 (8000·8100 은 막혀야 정상)
+        run: |
+          set -eu
+          IP=$(aws ec2 describe-instances --instance-ids '${{ steps.ec2.outputs.id }}' \
+                 --query 'Reservations[].Instances[].PublicIpAddress' --output text)
+          echo "화면: http://$IP/"
+          # ❗**401 이 정상이다.** nginx 가 사이트 전체에 auth_basic 을 걸어서(#162) 인증
+          # 없는 GET / 는 401 로 답한다. 200 이 나오면 auth_basic 이 빠진 것이라 이 한 줄이
+          # #41 1항의 회귀도 같이 잡는다.
+          #
+          # `-f` 를 쓰지 않는다 — 401 에 비영점으로 죽어서 **정상 동작을 배포 실패로 읽게**
+          # 된다. #170 이 고친 결함이 정확히 이 모양이라, 여기서 다시 만들면 안 된다.
+          # `|| echo 000` 을 쓰지 않는다 — curl 은 연결 실패에도 `-w` 로 이미 `000` 을
+          # 찍으므로 뒤에 붙는 문자열이 **덧붙어서** `000000` 이 되고, 아래 case 가
+          # `*)` 로 떨어져 "예상 밖 응답" 이라는 틀린 이유를 댄다. `|| true` 로 set -e
+          # 만 막고 코드는 curl 이 찍은 것을 그대로 쓴다.
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$IP/" || true)
+          case "$CODE" in
+            401) echo "  80  열림 · 인증 걸림 ✓" ;;
+            200) echo "  ❗200 이다 — auth_basic 이 빠졌다 (#41 1항 회귀)"; exit 1 ;;
+            000) echo "  ❗응답이 없다 — 컨테이너나 보안그룹을 본다"; exit 1 ;;
+            *)   echo "  ❗예상 밖 응답 $CODE"; exit 1 ;;
+          esac
+          # 자격증명이 실제로 통하는지는 **여기서 안 본다.** 값을 가진 것은 박스 위의
+          # deploy_ec2.sh 뿐이고(#173 이후 거기서 확인하고 결과를 찍는다), CD 역할에 앱
+          # 비밀 읽기 권한을 주면 최소권한이 무너진다.
+
+          # docs/deployment.md §8 — 이 둘이 응답하면 이슈 #41 ①③ 이 되살아난 것이다.
+          for P in 8000 8100; do
+            if curl -s --max-time 5 -o /dev/null "http://$IP:$P/" 2>/dev/null; then
+              echo "  ❗$P 이 외부에 열려 있다 (#41 ①③)"; exit 1
+            fi
+            echo "  $P 막힘 ✓"
+          done
+          echo "http://$IP/" >> "$GITHUB_STEP_SUMMARY"
+
+concurrency:
+  # 같은 환경에 두 배포가 겹치면 compose 가 서로를 밟는다. 앞의 것을 취소하지는 않는다 —
+  # 배포는 중간에 끊는 게 더 나쁘다.
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || (startsWith(github.ref, 'refs/tags/demo-') && 'prod' || 'alpha') }}
+  cancel-in-progress: false

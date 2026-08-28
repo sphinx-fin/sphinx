@@ -28,3 +28,12 @@ CLAUDE.local.md
 
 # IDE
 .idea/
+
+# OpenTofu / Terraform
+# .terraform/ 는 프로바이더 바이너리(수백 MB)라 안 올린다.
+# .terraform.lock.hcl 은 **올린다** — 팀원마다 다른 프로바이더 버전을 받으면
+# 같은 코드가 다른 plan 을 낸다.
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
