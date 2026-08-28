@@ -54,8 +54,13 @@ class RiskItem(Strict):
     product_id: str
     name: str
     importance: Literal["required", "recommended"]
-    condition: Condition
+    # ❗둘 다 계약의 required 가 아니다 — status=extraction_failed 면 condition 이 null 이고
+    #   failure_reason 이 채워진다(E-EXT-03: 실패를 은폐하지 않는다). 서버는 Jackson 이라
+    #   null 도 그대로 실어 보내므로, Strict(extra="forbid") 아래에서 이 둘이 없으면
+    #   **정상 요청이 422 로 거절된다**(이슈 #165).
+    condition: Condition | None = None
     status: Literal["extracted", "extraction_failed"]
+    failure_reason: str | None = None
 
 
 # ── contracts/judgment.schema.json ────────────────────────────────────────────
