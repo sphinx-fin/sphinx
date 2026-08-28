@@ -4,3 +4,10 @@ build
 .gradle
 *.log
 bootrun.log
+
+# 비밀은 빌드 컨텍스트에 아예 안 올린다. 지금은 Dockerfile 이 gradlew·gradle·*.gradle·src
+# 만 COPY 해서 새지 않지만, 그건 **Dockerfile 쪽 습관**이라 `COPY . .` 한 줄이면 조용히
+# 사라진다. ai-service·web 은 같은 세 줄을 이미 갖고 있다 — 여기만 없었다(#131 리뷰).
+.env
+.env.*
+!.env.example
