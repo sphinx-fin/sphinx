@@ -23,6 +23,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class CurrentActor {
 
+    private final DemoAccountsFile roster;
+
+    public CurrentActor(DemoAccountsFile roster) {
+        this.roster = roster;
+    }
+
     /** 인증 주체의 식별자. 미인증·익명이면 null. */
     public String actorId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -33,13 +39,23 @@ public class CurrentActor {
     }
 
     /**
-     * 소속 지점. 계정에 지점이 실리기 전까지(결정 10.5) null 이다.
+     * 소속 지점. <b>명부에서 읽는다</b>(결정 10.5 · {@code demo_accounts.yaml}).
      *
-     * <p>null 이면 {@code scope: branch} 판단이 성립하지 않아 정책이 <b>거부</b>한다 —
-     * 통과가 아니라 거부라 안전한 방향이지만, "막고 있다" 가 아니라 "판단할 수 없다" 는 뜻이다.
+     * <p>❗<b>요청에서 받지 않는다.</b> 지점을 헤더·쿼리로 받으면 MGR 이 남의 지점을 적어
+     * 보내는 것으로 {@code scope: branch} 를 우회한다. 귀속은 언제나 계정에서 온다 —
+     * {@code AccessGuard.targetOf} 가 세션에서 꺼내는 것과 같은 규약이다.
+     *
+     * <p>명부에 없는 계정이면 null 이다. 그러면 {@code scope: branch} 판단이 성립하지 않아
+     * 정책이 <b>거부</b>한다 — 통과가 아니라 거부라 안전한 방향이지만, "막고 있다" 가 아니라
+     * <b>"판단할 수 없다"</b> 는 뜻이다. 그 둘이 로그에서 같아 보이면 안 되므로
+     * {@code AccessPolicy} 가 사유를 갈라 적는다.
+     *
+     * <p>전에는 <b>언제나 null</b> 이었다. 그래서 MGR 이 지점 범위 집계에 아예 못 닿았고
+     * (실측: 403), 그 상태가 "정책이 막았다" 처럼 보였다.
      */
     public String branchId() {
-        return null;   // TODO(강희진): 계정에 지점이 실리면 그 클레임에서 읽는다 (10.5)
+        String id = actorId();
+        return id == null ? null : roster.byId(id).map(a -> a.branchId()).orElse(null);
     }
 
     private static boolean isAnonymous(Authentication auth) {

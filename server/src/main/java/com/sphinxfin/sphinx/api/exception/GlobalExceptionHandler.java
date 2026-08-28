@@ -57,6 +57,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 계약을 벗어난 요청 값 → 400. {@code @Valid} 가 못 잡는 자리(쿼리 enum 등)다.
+     *
+     * <p>조용히 기본값으로 떨어뜨리지 않는 이유: {@code groupBy=brnach} 같은 오타가 기본값
+     * {@code branch} 로 처리되면 화면은 <b>요청한 것과 다른 축</b>을 그리는데 아무도 모른다.
+     */
+    @ExceptionHandler(ValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> validationValue(ValidationException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", e.getMessage())));
+    }
+
+    /**
      * 재설명 대상 아님(판정 없음·이미 이해 U1) → 400. 화면은 조용히 다음 항목으로 넘어간다.
      * 상한 도달과 코드를 가르는 이유: 메시지 문자열은 계약이 아니라서, 한 코드로 내보내면
      * 프론트가 서버 문면을 파싱해야 하고 문면이 바뀌는 순간 조용히 깨진다.

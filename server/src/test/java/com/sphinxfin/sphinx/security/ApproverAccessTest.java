@@ -77,19 +77,27 @@ class ApproverAccessTest {
         }
 
         @Test
-        @DisplayName("지금은 HTTP 로 403 이다 — 계정에 지점이 없어 branch 를 판단할 수 없다 "
-                + "(10.5 가 오면 200 으로 뒤집는다)")
-        void mgrReadIsBlockedUntilAccountsCarryBranch() throws Exception {
+        @DisplayName("❗승인자가 승인 대상을 읽는다 — 계정에 지점이 실렸다 (#124 닫힘)")
+        void mgrReadsTheSessionInHisBranch() throws Exception {
             String sid = sessionBySeller("seller-01");
 
-            int status = mvc.perform(get("/sessions/{sid}", sid).with(mgr("mgr-01")))
-                    .andReturn().getResponse().getStatus();
+            // 이 단정은 원래 403 이었다. 막던 것은 정책이 아니라 CurrentActor.branchId() 가
+            // 언제나 null 이었던 것이고(scope: branch 가 비교할 값이 없어 "판단할 수 없다"),
+            // 명부(#163)가 오면서 그 값이 생겼다. 그 테스트가 예고한 대로 뒤집는다.
+            mvc.perform(get("/sessions/{sid}", sid).with(mgr("mgr-01")))
+                    .andExpect(status().isOk());
+        }
 
-            assertThat(status)
-                    .as("계정에 지점이 실려 이게 200 이 되면 #124 가 닫힌 것이다 — 이 단정을 "
-                            + "200 으로 뒤집고 이슈를 닫는다. 정책은 이미 허용이고(옆 테스트) "
-                            + "지금 막는 것은 CurrentActor.branchId() 가 null 이라서다 (결정 10.5)")
-                    .isEqualTo(403);
+        @Test
+        @DisplayName("❗남의 지점 세션은 여전히 못 읽는다 — branch 가 실제로 좁히는지 본다")
+        void mgrCannotReadAnotherBranch() throws Exception {
+            // seller-03 은 BR-002 다(명부). mgr-01 은 BR-001 이라 닿으면 안 된다.
+            // 이 단정이 없으면 "지점이 실렸다" 가 "전부 열렸다" 와 구별되지 않는다 —
+            // 위 테스트만으로는 branchId 에 아무 값이나 넣어도 통과한다.
+            String otherBranch = sessionBySeller("seller-03");
+
+            mvc.perform(get("/sessions/{sid}", otherBranch).with(mgr("mgr-01")))
+                    .andExpect(status().isForbidden());
         }
 
         @Test
