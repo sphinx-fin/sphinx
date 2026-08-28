@@ -98,7 +98,24 @@ echo "확인:"
 echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
 echo "  docker compose logs -f server          # 기동 로그"
 echo
-echo "화면까지 보려면 (값은 히스토리에 안 남는다):"
-echo "  curl -sS -o /dev/null -w '%{http_code}\n' -u \"\$SPHINX_API_USER:\$SPHINX_API_PASSWORD\" http://localhost/   # 200"
+
+# ❗**자격증명 확인은 안내하지 않고 여기서 한다** (PR #173 리뷰, 오준서).
+#
+# 위 57~58 의 export 는 이 스크립트 프로세스와 그 자식(docker compose)에만 산다. 오퍼레이터
+# 셸은 스크립트의 **부모**라 값이 안 내려간다 — `-u "$SPHINX_API_USER:..."` 를 안내 문구로
+# 찍으면 붙여 넣는 순간 `-u ":"` 가 되고, curl 이 빈 자격증명으로 Authorization 을 실제로
+# 보내므로 **401 이 나면서 안내에는 "# 200" 이라고 적혀 있다.** `#170` 과 같은 종류이고,
+# 이번엔 배포 실패가 아니라 "SSM 비밀번호가 틀렸나" 로 읽힌다.
+#
+# 값을 가진 것은 이 스크립트뿐이므로 확인도 여기서 하고 결과만 찍는다. `-K -` 로 stdin 에
+# 넘기는 이유는 `-u` 가 argv 라 `ps` 에 보이기 때문이다 — 히스토리·`ps` 둘 다 안 남는다.
+auth_code=$(printf 'user = "%s:%s"\n' "$SPHINX_API_USER" "$SPHINX_API_PASSWORD" |
+            curl -sS -K - -o /dev/null -w '%{http_code}' http://localhost/ || true)
+case "$auth_code" in
+  200)      echo "자격증명 확인: 200 — 통과" ;;
+  401)      echo "자격증명 확인: 401 — SSM 값과 nginx htpasswd 가 다르다. 둘 다 SSM 에서 나오는지 본다" ;;
+  ''|000)   echo "자격증명 확인: 요청 자체가 안 갔다 — nginx 가 떴는지 본다 (docker compose ps)" ;;
+  *)        echo "자격증명 확인: $auth_code — 예상 밖이다. server 로그를 본다" ;;
+esac
 echo
 echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 의 1·3항(permitAll · ai-service 무인증)이 되살아난다."
