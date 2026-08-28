@@ -201,13 +201,16 @@ class AccessPolicyTest {
         }
 
         @Test
-        @DisplayName("CUST 는 요약만 본다 — 전문은 거부")
-        void custSeesSummaryOnly() {
+        @DisplayName("전문과 요약은 같은 문서가 아니다 — CUST 에게 전문 그랜트가 없다")
+        void summaryGrantDoesNotOpenTheFullReport() {
+            // 그랜트 유무만 본다. 이 두 action 이 CUST 에게 **도달 가능한가**는 다른 문제이고
+            // (도달 불가다 — 아래 CustIsUnreachable), 여기서 보는 것은 "요약 그랜트가 전문까지
+            // 열어 주지 않는다" 하나다. 그래서 ownerId 가 맞는 Target 을 일부러 쓴다.
             Actor cust = new Actor("cust-01", Role.CUST, null);
-            Target own = session("cust-01", "BR-1");
+            Target ownedByCust = session("cust-01", "BR-1");
 
-            assertThat(policy.permits(cust, "report:summary:read", own)).isTrue();
-            assertThat(policy.permits(cust, "report:read", own))
+            assertThat(policy.permits(cust, "report:summary:read", ownedByCust)).isTrue();
+            assertThat(policy.permits(cust, "report:read", ownedByCust))
                     .as("판매자용 전문과 고객 교부용 요약은 같은 문서가 아니다")
                     .isFalse();
         }
@@ -372,6 +375,70 @@ class AccessPolicyTest {
             assertThat(policy.permits(seller("seller-01"), "product:manage", CATALOG)).isFalse();
             assertThat(policy.permits(admin, "product:read", CATALOG)).isTrue();
             assertThat(policy.permits(admin, "product:manage", CATALOG)).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("❗CUST 그랜트는 지금 도달 불가다 (이슈 #166)")
+    class CustIsUnreachable {
+
+        /**
+         * {@code AccessGuard.targetOf} 가 <b>실제로 만드는</b> 모양이다 — {@code ownerId} 에는
+         * 언제나 {@code Session.sellerId} 가 들어간다. 세션에 고객을 가리키는 필드가 없다.
+         *
+         * <p>기존 CUST 테스트가 {@code session("cust-01", ...)} 로 <b>고객이 소유자인 Target</b>
+         * 을 손으로 만들고 있었다. 그런 Target 은 배선에서 만들어지지 않으므로, 그 단정은
+         * <b>일어날 수 없는 일을 참이라고 말하고</b> 있었다.
+         */
+        private static final Target AS_WIRED = Target.session("S-1", "seller-01", "BR-1");
+
+        private static final Actor CUST = new Actor("cust-01", Role.CUST, null);
+
+        @Test
+        @DisplayName("정책 파일에는 그랜트가 있다 — 없어서 막히는 것이 아니다")
+        void theGrantExists() {
+            assertThat(new RbacPolicyFile().grants("session:answer"))
+                    .as("이 단정이 깨지면 누가 그랜트를 지운 것이다 — 그건 #166 의 B 안이고, "
+                            + "이 Nested 전체를 다시 봐야 한다")
+                    .anyMatch(g -> g.roles().contains(Role.CUST));
+        }
+
+        @Test
+        @DisplayName("❗그런데 배선이 만드는 Target 으로는 통과할 수 없다 — S-03 이 그것이다")
+        void custCannotAnswerOwnSession() {
+            AccessPolicy.Decision decision = policy.decide(CUST, "session:answer", AS_WIRED);
+
+            assertThat(decision.allowed()).isFalse();
+            assertThat(decision.reason())
+                    .as("역할이 없어서가 아니라 이름이 안 맞아서다 — 대조 값이 sellerId 뿐이다")
+                    .contains("자기 세션이 아니다");
+        }
+
+        @Test
+        @DisplayName("고객 교부용 요약도 같다")
+        void custCannotReadOwnSummary() {
+            assertThat(policy.permits(CUST, "report:summary:read", AS_WIRED)).isFalse();
+        }
+
+        @Test
+        @DisplayName("❗막는 것은 역할이 아니라 이름 대조다 — CUST 라도 이름이 맞으면 통과한다")
+        void theRoleIsNotWhatBlocks() {
+            // 이 단정이 #166 의 요지다. 역할은 그랜트 유무만 정하고 그 뒤로는 이름 비교뿐이라,
+            // actorId 가 우연히 sellerId 와 같으면 CUST 가 판매자 세션을 연다.
+            Actor custNamedLikeTheSeller = new Actor("seller-01", Role.CUST, null);
+
+            assertThat(policy.permits(custNamedLikeTheSeller, "session:answer", AS_WIRED))
+                    .as("역할로 막고 있었다면 이것도 거부여야 한다. 통과한다는 것이 "
+                            + "'CUST 는 원래 못 한다' 가 아니라 '대조할 값이 없다' 라는 증거다")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("판매자 경로는 멀쩡하다 — 오늘 대면 채널의 행위자는 SELLER 다")
+        void theSellerPathStillWorks() {
+            // 도달 불가가 기능을 막고 있지는 않다. S-02 에서 세션을 만든 판매자가 같은
+            // 브라우저로 S-03 을 열어 단말을 넘겨주는 구조라, 인증 주체는 SELLER 하나다.
+            assertThat(policy.permits(seller("seller-01"), "session:answer", AS_WIRED)).isTrue();
         }
     }
 }
