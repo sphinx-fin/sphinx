@@ -61,12 +61,7 @@ import type {
 } from "../api/types";
 import { detectPii } from "../lib/pii";
 import { AGE_BANDS, AMOUNT_BANDS, CHANNELS, EXPERIENCE_LEVELS } from "../lib/sessionAttrs";
-import {
-  DEMO_SURVEY_ANSWERS,
-  SURVEY_QUESTIONS,
-  SURVEY_SCHEMA_VERSION,
-  toSurveyResult,
-} from "../lib/survey";
+import { SURVEY_QUESTIONS, SURVEY_SCHEMA_VERSION, toSurveyResult } from "../lib/survey";
 import "./S02_SessionStart.css";
 
 type Phase = "editing" | "creating" | "created";
@@ -157,15 +152,6 @@ export default function S02SessionStart() {
     unanswered === 0 &&
     phase === "editing";
 
-  function applyDemoPreset() {
-    setAgeBand("60대");            // 기획서 7-2 ③ "65세 고객"
-    setAmountBand("5천만원대");     // 7-2 표 기준금액 5,000만 원
-    setExperienceLevel("없음");
-    setChannel("FACE_TO_FACE");
-    setAnswers({ ...DEMO_SURVEY_ANSWERS });
-    setError(null);
-  }
-
   async function createSession() {
     setPhase("creating");
     setError(null);
@@ -235,13 +221,7 @@ export default function S02SessionStart() {
     <main className="ss">
       <div className="ss__shell">
         <header className="ss__head">
-          <h1 className="ss__title">세션 시작</h1>
-          <p className="ss__sub">
-            계약 직전 이해도 검증 세션을 만듭니다. 고객 속성은 <b>구간 값</b>만 받습니다.
-          </p>
-          <button type="button" className="ss__preset" onClick={applyDemoPreset} disabled={busy}>
-            데모 입력값 채우기
-          </button>
+          <h1 className="ss__title">고객검사 시작</h1>
         </header>
 
         <section className="ss__card">

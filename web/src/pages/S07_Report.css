@@ -23,9 +23,9 @@
 .s07__loading { color: var(--text-muted); padding: var(--space-6); }
 
 .s07__head h1 {
-  font-size: calc(36px * var(--scale));
-  line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.027em;
+  font-size: calc(30px * var(--scale));
+  line-height: calc(1.34 * var(--leading-scale));
+  letter-spacing: -0.03em;
   font-weight: 700;
 }
 .s07__sid { margin-top: var(--space-2); color: var(--text-muted); font-size: calc(14px * var(--scale)); }
@@ -34,7 +34,7 @@
 .s07__error {
   background: var(--red-bg);
   color: var(--red);
-  border: 1px solid var(--red);
+  border: 0;
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
   line-height: calc(1.55 * var(--leading-scale));
@@ -59,7 +59,7 @@
 /* ── 메타 ───────────────────────────────────────────────────────────────── */
 .s07__meta {
   background: var(--surface-sunken);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
 }
 .s07__meta dl { display: flex; flex-wrap: wrap; gap: var(--space-5) var(--space-8); }
@@ -70,8 +70,9 @@
 /* ── 내용 해시 — 이 화면의 요지 ────────────────────────────────────────────── */
 .s07__hash {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 0;
+  box-shadow: var(--shadow-1);
+  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 .s07__hash h2 {
@@ -159,10 +160,13 @@
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
+  min-height: var(--control-h);
+  font-weight: 700;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
+.s07__btn:active:not(:disabled) { transform: scale(0.98); }
 .s07__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s07__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.s07__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.s07__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .s07__btn--primary {
   background: var(--accent);

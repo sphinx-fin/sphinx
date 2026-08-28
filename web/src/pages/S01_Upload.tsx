@@ -211,7 +211,7 @@ export default function S01Upload() {
           </button>
         )}
         <button type="button" className="s01__btn s01__btn--quiet" onClick={() => navigate("/")}>
-          세션 시작으로
+          이해도 확인으로
         </button>
       </footer>
     </main>

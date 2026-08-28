@@ -14,24 +14,11 @@
 .s08__loading { color: var(--text-muted); padding: var(--space-6); }
 
 .s08__head { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-start; justify-content: space-between; }
-.s08__head h1 { font-size: calc(36px * var(--scale)); line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.027em; font-weight: 700; }
-.s08__scope { margin-top: var(--space-2); font-size: calc(14px * var(--scale)); color: var(--text-muted); }
-.s08__scope-note { color: var(--kohl-30); }
+.s08__head h1 { font-size: calc(30px * var(--scale)); line-height: calc(1.34 * var(--leading-scale));
+  letter-spacing: -0.03em; font-weight: 700; }
 
-/* 상시 노출. 눈에 띄되 판정색은 아니다. */
-.s08__watermark {
-  flex: none;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  padding: var(--space-2) var(--space-4);
-  font-size: calc(13px * var(--scale));
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--surface-sunken);
-}
 
-.s08__error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red);
+.s08__error { background: var(--red-bg); color: var(--red); border: 0;
   border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 
 /* ── 차단됨 — 오류가 아니라 시연 대상이다 ─────────────────────────────────── */
@@ -47,32 +34,61 @@
 .s08__filters { display: flex; flex-wrap: wrap; gap: var(--space-4); }
 .s08__filters label { display: flex; flex-direction: column; gap: var(--space-1); }
 .s08__filters span { font-size: calc(13px * var(--scale)); font-weight: 600; color: var(--text-muted); }
-.s08__filters input {
+.s08__filters .s08__select {
   font: inherit; font-size: calc(15px * var(--scale));
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong); border-radius: var(--radius);
-  background: var(--surface); color: var(--text);
+  min-height: var(--control-h-sm);
+  min-width: 9rem;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: var(--surface-sunken); color: var(--text);
+  appearance: none;
+  /* 셀렉트 화살표 — S-02 와 같은 그림이다(data URI 라 토큰을 못 쓴다, kohl-30 #998d78). */
+  padding-right: var(--space-8);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23998d78' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
-.s08__filters input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.s08__filters .s08__select:focus {
+  outline: none;
+  background-color: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
 
 /* ── 표 ───────────────────────────────────────────────────────────────────── */
+/* 표도 패널 안에 앉는다 — 지면 위에 표가 맨몸으로 있으면 문서처럼 보인다. */
+.s08__matrix {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+}
 .s08__table-wrap { overflow-x: auto; }
 .s08__table { border-collapse: collapse; width: 100%; font-size: calc(14px * var(--scale)); }
 .s08__table th, .s08__table td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--surface);   /* 칸 사이 2px 여백 — 잉크 면끼리 붙지 않게 */
   padding: var(--space-2) var(--space-3);
   text-align: center;
   vertical-align: middle;
 }
-.s08__table thead th { background: var(--surface-sunken); font-weight: 600; white-space: nowrap; }
-.s08__table tbody th { background: var(--surface-sunken); text-align: left; white-space: nowrap; font-weight: 600; }
+.s08__table thead th {
+  background: transparent; font-weight: 600; white-space: nowrap;
+  color: var(--text-muted); font-size: calc(13px * var(--scale));
+  border-bottom: 1px solid var(--border);
+}
+.s08__table tbody th {
+  background: transparent; text-align: left; white-space: nowrap; font-weight: 600;
+}
 
 .s08__cell { min-width: 6rem; }
 .s08__pct { display: block; font-weight: 700; font-size: calc(15px * var(--scale)); }
-/* 배경이 진해지면 먹색 글자가 안 읽힌다. 임계 위에서만 반전한다. */
-.s08__pct--strong { color: var(--text-inverse); }
+/* 반전이 없다 — 잉크 상한(INK_MAX) 덕에 어느 칸에서도 먹색 글자가 5:1 이상이다.
+   위계는 색이 아니라 크기·굵기로 낸다. */
 .s08__n { display: block; font-size: calc(11px * var(--scale)); color: var(--text-muted); }
-.s08__pct--strong + .s08__n { color: var(--limestone-88); }
+/* 진한 칸에서는 보조 글자도 본문색으로 — muted 는 잉크 위에서 1.8:1 까지 떨어진다. */
+.s08__cell--data .s08__n { color: var(--text); opacity: 0.75; }
 
 /* 가려짐 — 빗금으로 "값이 없는 게 아니라 가려졌다"를 시각적으로 말한다. */
 .s08__cell--masked {
@@ -83,5 +99,162 @@
 
 .s08__cell--absent { color: var(--kohl-30); }
 
+/* 행 머리 — 상품명 아래 id 를 작게. 합성·구 상품이라 이름이 안 풀리면 id 만 남는다. */
+.s08__row-id {
+  display: block;
+  margin-top: calc(2px * var(--scale));
+  font-size: calc(11px * var(--scale));
+  font-weight: 400;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 .s08__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
-.s08__legend { font-size: calc(13px * var(--scale)); color: var(--text-muted); line-height: calc(1.6 * var(--leading-scale)); }
+
+
+
+
+
+/* ── 요약 타일 ────────────────────────────────────────────────────────────── */
+.s08__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+@media (max-width: 60rem) { .s08__kpis { grid-template-columns: repeat(2, 1fr); } }
+
+.s08__kpi {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  animation: ui-rise var(--dur) var(--ease) both;
+}
+.s08__kpis > *:nth-child(2) { animation-delay: 40ms; }
+.s08__kpis > *:nth-child(3) { animation-delay: 80ms; }
+.s08__kpis > *:nth-child(4) { animation-delay: 120ms; }
+
+.s08__kpi-label {
+  position: relative;         /* 툴팁의 기준 */
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+}
+/* 값이 주인공이다. 숫자는 표와 나란히 읽히도록 자족을 고정한다. */
+.s08__kpi-value {
+  font-size: calc(30px * var(--scale));
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.s08__kpi-sub { font-size: calc(12px * var(--scale)); color: var(--text-subtle); }
+
+/* ── ⓘ 와 툴팁 ───────────────────────────────────────────────────────────── */
+.s08__info {
+  width: calc(16px * var(--scale)); height: calc(16px * var(--scale));
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: calc(10px * var(--scale)); font-weight: 700; font-style: italic;
+  cursor: help;
+  padding: 0;
+}
+.s08__info:hover { background: var(--border); color: var(--text); }
+
+.s08__info:hover + .s08__tooltip,
+.s08__info:focus-visible + .s08__tooltip {
+  opacity: 1; visibility: visible; transform: none;
+}
+
+/* ── 항목별 순위 ─────────────────────────────────────────────────────────── */
+.s08__rank {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+}
+.s08__panel-title {
+  font-size: calc(15px * var(--scale));
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: var(--space-4);
+}
+.s08__rank-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.s08__rank-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: calc(14px * var(--scale));
+}
+@media (max-width: 40rem) {
+  .s08__rank-row { grid-template-columns: 1fr auto auto; }
+  .s08__rank-name { grid-column: 1 / -1; }
+}
+.s08__rank-name { color: var(--text); font-weight: 600; }
+/* 트랙은 배경이 아니라 **눈금**이다 — 막대가 짧을 때 100% 가 어디인지 보여야 비교가 된다. */
+.s08__rank-track {
+  height: calc(10px * var(--scale));
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.s08__rank-bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--kohl-70) 60%, var(--surface));
+  transition: width var(--dur-sheet) var(--ease);
+}
+.s08__rank-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.s08__rank-n { color: var(--text-subtle); font-size: calc(12px * var(--scale)); font-variant-numeric: tabular-nums; }
+
+/* ── 칸 hover 상세 ───────────────────────────────────────────────────────── */
+.s08__cell--data { position: relative; cursor: default; }
+
+/* ── 머리말 표식 ─────────────────────────────────────────────────────────── */
+.s08__tags { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.s08__tag {
+  border: 0;
+  font: inherit;
+  cursor: help;
+  padding: calc(3px * var(--scale)) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: calc(12px * var(--scale));
+  font-weight: 700;
+}
+/* 합성 표식만 한 단계 눈에 띈다 — 명세가 요구하는 "상시 노출" 이 이것이다. */
+.s08__tag--synth { background: var(--accent-bg); color: var(--accent-hover); }
+
+/* ── 화면 좌표 툴팁 ──────────────────────────────────────────────────────── */
+.s08__floattip {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;              /* 툴팁 위로 마우스가 들어가 깜빡이면 안 된다 */
+  max-width: 20rem;
+  width: max-content;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--kohl-90);
+  color: var(--limestone-99);
+  font-size: calc(13px * var(--scale));
+  font-weight: 400;
+  line-height: calc(1.55 * var(--leading-scale));
+  text-align: left;
+  box-shadow: var(--shadow-2);
+  animation: ui-fade var(--dur-press) var(--ease) both;
+}
+/* 위에 자리가 없을 때 아래로. transform 만 바꾸면 좌표 계산은 그대로 쓴다. */
+.s08__floattip--below { transform: translate(-50%, 8px); }
+.s08__floattip b { display: block; font-weight: 700; }
+.s08__tip-val { display: block; margin-top: var(--space-1); color: var(--limestone-88); }

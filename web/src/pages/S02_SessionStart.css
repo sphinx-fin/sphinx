@@ -3,181 +3,254 @@
    다만 토큰은 같은 것을 쓰므로, 판매자가 고객 화면에서 모드를 켜 둔 채로 돌아와도
    레이아웃이 깨지지 않는다(px 고정값을 쓰지 않는 이유). */
 
-.ss { min-height: 100%; display: flex; justify-content: center; padding: var(--space-5) var(--space-4) var(--space-8); }
-.ss__shell { width: 100%; max-width: 48rem; display: flex; flex-direction: column; gap: var(--space-4); }
+.ss { min-height: 100%; display: flex; justify-content: center; padding: var(--space-6) var(--space-4) var(--space-8); }
+.ss__shell { width: 100%; max-width: 46rem; display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* 카드가 한 장씩 올라온다. 전부 동시에 뜨면 화면이 "번쩍" 하고, 순서가 너무 벌어지면
+   느려 보인다 — 60ms 간격이 이 화면 카드 수(3~4장)에 맞는다. */
+.ss__shell > * { animation: ui-rise var(--dur) var(--ease) both; }
+.ss__shell > *:nth-child(2) { animation-delay: 60ms; }
+.ss__shell > *:nth-child(3) { animation-delay: 120ms; }
+.ss__shell > *:nth-child(4) { animation-delay: 180ms; }
 
 /* ── 머리말 ───────────────────────────────────────────────────────────────── */
 .ss__head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
-.ss__title { font-size: calc(36px * var(--scale));
-  line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.027em; font-weight: 700; }
-.ss__sub { color: var(--text-muted); font-size: calc(16px * var(--scale));
-  line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em; }
+.ss__title { font-size: calc(32px * var(--scale));
+  line-height: calc(1.32 * var(--leading-scale));
+  letter-spacing: -0.03em; font-weight: 700; }
 
-.ss__preset {
-  margin-top: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-sunken);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em;
-  cursor: pointer;
-}
-.ss__preset:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── 카드 ─────────────────────────────────────────────────────────────────── */
+/* 테두리 대신 그림자로 띄운다. 지면이 회색이라 흰 카드가 테두리 없이도 분리된다. */
 .ss__card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
   padding: var(--space-5);
-  display: flex; flex-direction: column; gap: var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-5);
 }
-.ss__section { font-size: calc(20px * var(--scale));
+.ss__section { font-size: calc(19px * var(--scale));
   line-height: calc(1.4 * var(--leading-scale));
-  letter-spacing: -0.012em; font-weight: 700; }
+  letter-spacing: -0.02em; font-weight: 700; }
 
 .ss__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-4); }
 @media (max-width: 40rem) { .ss__grid { grid-template-columns: 1fr; } }
 
 .ss__field { display: flex; flex-direction: column; gap: var(--space-2); }
-.ss__label { font-size: calc(16px * var(--scale));
-  line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em; font-weight: 600; }
+.ss__label { font-size: calc(14px * var(--scale));
+  line-height: calc(1.45 * var(--leading-scale));
+  letter-spacing: -0.003em; font-weight: 600; color: var(--text-muted); }
 .ss__req { margin-left: var(--space-2); font-size: calc(14px * var(--scale));
   line-height: calc(1.429 * var(--leading-scale));
   letter-spacing: 0.0145em; font-weight: 500; color: var(--red); }
 
+/* 입력칸은 테두리가 아니라 **채운 면**이다. 비어 있는 칸이 지면과 같은 흰색이면
+   "여기 쓰는 곳"이 안 보인다. 포커스에서만 흰 바탕 + 강조 테두리로 뒤집는다. */
 .ss__control {
   width: 100%;
-  padding: var(--space-3);
-  border: 1px solid var(--border-strong);
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-sunken);
+  color: var(--text);
   font-size: calc(16px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em;
+  letter-spacing: -0.003em;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
+}
+.ss__control::placeholder { color: var(--text-subtle); }
+.ss__control:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+/* 기본 화살표는 OS 마다 다르게 생겨서 화면이 브라우저처럼 보인다. 하나로 고정한다. */
+select.ss__control {
+  appearance: none;
+  padding-right: var(--space-8);
+  /* ❗data URI 안에는 var() 가 안 들어간다 — 이 한 곳만 안료값(kohl-30 #998d78)을
+     직접 적는다. 팔레트를 바꾸면 여기도 같이 고쳐야 하므로 근거를 남긴다. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23998d78' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
 }
 
-.ss__hint { font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em; color: var(--text-muted); }
+.ss__hint { font-size: calc(13px * var(--scale));
+  line-height: calc(1.45 * var(--leading-scale));
+  letter-spacing: -0.003em; color: var(--text-muted); }
 .ss__hint--block { margin-bottom: var(--space-1); }
 
 /* ── 선택지 (채널·설문 공용) ──────────────────────────────────────────────── */
 .ss__choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 .ss__choice {
+  min-height: var(--control-h-sm);
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
-  font-size: calc(16px * var(--scale));
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: calc(15px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em;
+  letter-spacing: -0.003em;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
+  transition: transform var(--dur-press) var(--ease-spring),
+              background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
 }
-/* 선택 상태를 색만으로 알리지 않는다 — 테두리 두께와 굵기를 함께 바꾼다 */
+.ss__choice:hover:not(:disabled):not(.ss__choice--on) { background: var(--border); }
+/* 누르는 순간 줄어든다 — 터치에서 "닿았다"를 색보다 빨리 알린다. */
+.ss__choice:active:not(:disabled) { transform: scale(0.96); }
+/* 선택 상태를 색만으로 알리지 않는다 — 테두리와 굵기를 함께 바꾼다(색각 이상). */
 .ss__choice--on {
-  background: var(--accent);
+  background: var(--accent-bg);
   border-color: var(--accent);
-  color: var(--text-inverse);
-  font-weight: 600;
+  color: var(--accent-hover);
+  font-weight: 700;
 }
-.ss__choice:disabled { opacity: 0.5; cursor: not-allowed; }
+.ss__choice:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── 설문 ─────────────────────────────────────────────────────────────────── */
 .ss__q { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .ss__q + .ss__q { padding-top: var(--space-4); border-top: 1px solid var(--border); }
 .ss__q-text { font-size: calc(16px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em; font-weight: 600; padding: 0; display: flex; gap: var(--space-2); }
+  letter-spacing: -0.006em; font-weight: 600; padding: 0; display: flex; gap: var(--space-2); }
 .ss__q-no { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 /* ── 알림 ─────────────────────────────────────────────────────────────────── */
-.ss__alert { padding: var(--space-4); border-radius: var(--radius); border: 1px solid transparent; font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em; }
-.ss__alert--warn { background: var(--yellow-bg); border-color: var(--yellow); color: var(--yellow); }
-.ss__alert--error { background: var(--red-bg); border-color: var(--red); color: var(--red); }
-.ss__alert--info { background: var(--surface-sunken); border-color: var(--border); color: var(--text-muted); }
+/* 테두리 없이 옅은 면 + 진한 글자. 테두리까지 색을 주면 카드 위에서 경고가 소리친다 —
+   이 화면에서 제일 크게 말해야 하는 것은 판정이지 입력 힌트가 아니다. */
+.ss__alert { padding: var(--space-4); border-radius: var(--radius-lg); border: 0;
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  letter-spacing: -0.003em;
+  animation: ui-rise var(--dur) var(--ease) both; }
+.ss__alert--warn { background: var(--yellow-bg); color: var(--yellow); }
+.ss__alert--error { background: var(--red-bg); color: var(--red); }
+.ss__alert--info { background: var(--surface-sunken); color: var(--text-muted); }
 .ss__alert b { display: block; margin-bottom: var(--space-1); }
 
 /* ── 하단 / 버튼 ──────────────────────────────────────────────────────────── */
-.ss__foot { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding-bottom: var(--space-4); }
+/* 주 동작은 화면 아래 가로 전폭이다 — 손가락이 닿는 자리이고, "다음 할 일이 하나"라는
+   것을 배치가 말한다. 버튼이 여러 개면 주 동작만 전폭으로 둔다. */
+.ss__foot { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-3); padding-bottom: var(--space-4); }
 .ss__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 
 .ss__btn {
+  min-height: var(--control-h);
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius); border: 1px solid transparent;
-  font-size: calc(16px * var(--scale));
+  font-size: calc(17px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em; font-weight: 600; cursor: pointer;
+  letter-spacing: -0.01em; font-weight: 700; cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
+.ss__btn:active:not(:disabled) { transform: scale(0.98); }
 .ss__btn--primary { background: var(--accent); color: var(--text-inverse); }
 .ss__btn--primary:hover:not(:disabled) { background: var(--accent-hover); }
-.ss__btn--ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
-.ss__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ss__btn--ghost { background: var(--surface-sunken); border-color: transparent; color: var(--text-muted); }
+.ss__btn--ghost:hover:not(:disabled) { background: var(--border); }
+/* 비활성은 흐리게가 아니라 **회색 버튼**이다. 흐린 파랑은 "곧 눌리는 파랑"처럼 보인다. */
+.ss__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
+.ss__foot > .ss__btn { width: 100%; }
 
 /* ── 생성 완료 ────────────────────────────────────────────────────────────── */
 .ss__done {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-top: calc(5px * var(--scale)) solid var(--green);
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
   padding: var(--space-6) var(--space-5);
   display: flex; flex-direction: column; gap: var(--space-4);
+  animation: ui-rise var(--dur-sheet) var(--ease) both;
 }
+/* 성공을 색 면적이 아니라 **표식**으로 말한다. 굵은 초록 테두리는 이 문법에서 경고처럼
+   보이고, 무엇보다 판정 3색을 판정이 아닌 곳에 쓰는 것이 된다(토큰 규칙 1). */
 .ss__done-title { font-size: calc(24px * var(--scale));
   line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.023em; font-weight: 700; }
+  letter-spacing: -0.023em; font-weight: 700;
+  display: flex; align-items: center; gap: var(--space-2); }
+.ss__done-title::before {
+  content: "";
+  width: calc(24px * var(--scale)); height: calc(24px * var(--scale));
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--green-solid) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3 7.5L5.8 10L11 4.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / calc(14px * var(--scale)) no-repeat;
+  animation: ui-pop var(--dur-sheet) var(--ease-spring) both;
+}
+@keyframes ui-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
 .ss__done-id { font-size: calc(16px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
   letter-spacing: 0.0057em; color: var(--text-muted); }
 .ss__done-id b { color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* ── 대상 상품 모달 (설계 판단 ⑥) ────────────────────────────────────────── */
+/* 보조 동작이라 밑줄 링크가 아니라 옅은 알약이다 — 밑줄은 이 문법에서 문서처럼 보인다. */
 .ss__linkbtn {
   align-self: flex-start;
-  background: none;
+  background: var(--accent-bg);
   border: 0;
-  padding: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
   font: inherit;
   font-size: calc(14px * var(--scale));
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  font-weight: 600;
+  color: var(--accent-hover);
   cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
-.ss__linkbtn:disabled { color: var(--text-muted); text-decoration: none; cursor: not-allowed; }
+.ss__linkbtn:active:not(:disabled) { transform: scale(0.96); }
+.ss__linkbtn:disabled { background: var(--surface-sunken); color: var(--text-subtle); cursor: not-allowed; }
 
+/* 가운데 뜨는 대화상자가 아니라 **바닥에서 올라오는 시트**다. 태블릿을 세워 쥔 손에서
+   위쪽은 멀고 아래쪽은 엄지가 닿는다 — 닫기와 스크롤이 모두 아래에 있어야 한다. */
 .ss__overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim);
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: center;
-  padding: var(--space-5) var(--space-4);
-  overflow-y: auto;
   z-index: 20;
+  animation: ui-fade var(--dur) var(--ease) both;
 }
 
 .ss__modal {
   width: 100%;
-  max-width: 44rem;
+  max-width: 46rem;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  border: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-sheet);
   display: flex;
   flex-direction: column;
-  max-height: 100%;
+  max-height: 88vh;
+  animation: ui-sheet var(--dur-sheet) var(--ease) both;
+}
+/* 시트 손잡이 — 이 면이 아래로 내려가는 것이라는 표시다. */
+.ss__modal::before {
+  content: "";
+  width: calc(36px * var(--scale));
+  height: calc(4px * var(--scale));
+  flex-shrink: 0;
+  margin: var(--space-2) auto 0;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+@media (min-width: 48rem) {
+  /* 넓은 화면에서는 바닥에 붙이지 않고 살짝 띄운다 — 데스크톱에서 전폭 시트는 어색하다. */
+  .ss__overlay { align-items: center; padding: var(--space-5); }
+  .ss__modal { border-radius: var(--radius-xl); animation-name: ui-rise; }
 }
 
 .ss__modal-head {
@@ -185,7 +258,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
 .ss__modal-title { font-size: calc(22px * var(--scale)); margin: 0; }
@@ -198,17 +271,22 @@
   flex-shrink: 0;
   font: inherit;
   font-size: calc(14px * var(--scale));
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
+  font-weight: 600;
+  min-height: var(--control-h-sm);
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
   cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
+.ss__modal-x:hover { background: var(--border); }
+.ss__modal-x:active { transform: scale(0.94); }
 
 /* 항목이 많으면 본문만 스크롤한다 — 헤더의 닫기 버튼이 항상 보여야 한다. */
 .ss__modal-body {
-  padding: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-6);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -216,14 +294,16 @@
 }
 
 .ss__doc-item {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  animation: ui-rise var(--dur) var(--ease) both;
 }
-.ss__doc-item--failed { border-style: dashed; }
+.ss__doc-item--failed { background: var(--red-bg); }
 .ss__doc-item-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .ss__doc-item-name { font-size: calc(16px * var(--scale)); margin: 0; }
 
@@ -242,7 +322,7 @@
 .ss__doc-quote {
   margin: 0;
   padding-left: var(--space-3);
-  border-left: 3px solid var(--border-strong);
+  border-left: calc(3px * var(--scale)) solid var(--border-strong);
   white-space: pre-wrap;
   font-size: calc(15px * var(--scale));
   line-height: 1.6;

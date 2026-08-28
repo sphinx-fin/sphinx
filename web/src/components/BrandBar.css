@@ -1,0 +1,29 @@
+/* 브랜드 바. 소유: 오준서.
+   화면의 주인공이 아니다 — 판정과 질문이 주인공이고 이건 "어느 제품인가"만 말한다.
+   그래서 작게, 지면 위에 얹지 않고 지면과 같은 높이로 둔다. */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text);
+  user-select: none;
+}
+
+.brand__mark {
+  display: block;
+  width: calc(22px * var(--scale));
+  height: calc(22px * var(--scale));
+}
+.brand__mark svg { display: block; width: 100%; height: 100%; }
+
+.brand__word {
+  font-size: calc(17px * var(--scale));
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+/* 워드마크도 단색이다. X 를 강조색으로 물들이면 "누를 수 있는 것"이라는 강조색 규칙이
+   깨지고(토큰 규칙 2), 판정 외의 색이 화면에 하나 더 는다. 자족 차이로만 가른다. */
+.brand__word-x { font-weight: 400; }
