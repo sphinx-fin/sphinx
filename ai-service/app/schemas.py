@@ -49,6 +49,21 @@ class Condition(Strict):
     source_span: SourceSpan
 
 
+class ConditionNotExtracted(Exception):
+    """추출 실패 항목의 조건을 쓰려고 했다 — 계약이 허용하는 값이므로 500 이면 안 된다.
+
+    계약(`risk_item.schema.json`)이 `status != "extracted"` 일 때 `condition: null` 을
+    `allOf/if/then/else` 로 **강제**한다. 즉 이 입력은 잘못된 요청이 아니라 정상 요청이고,
+    다만 그 항목으로는 질문·채점을 만들 수 없다.
+
+    **조용히 진행하지 않는다.** 폴백 질문을 내주면 고객이 답을 하는데 그 답을 채점할 조건이
+    없어서 다음 호출에서 막힌다 — 실패를 뒤로 미루는 것뿐이다. 추출 실패는 S-01 큐에서
+    사람이 처리할 일이고(E-EXT-03), ai-service 는 그 사실을 명시적으로 알린다.
+
+    재설명(F-INT-004)만 예외다 — 거기는 `_minimal()` 이 이 경우를 위해 이미 설계돼 있다.
+    """
+
+
 class RiskItem(Strict):
     item_id: str
     product_id: str
@@ -61,6 +76,29 @@ class RiskItem(Strict):
     condition: Condition | None = None
     status: Literal["extracted", "extraction_failed"]
     failure_reason: str | None = None
+
+    def require_condition(self) -> Condition:
+        """조건을 쓰는 곳은 여기를 지난다. 없으면 `ConditionNotExtracted`.
+
+        `#185` 가 `condition` 을 Optional 로 열면서 **422 가 사라진 자리에 500 이 생겼다** —
+        조건이 있다고 전제하는 지점이 다섯이고(`question_gen.answer_fragments` ·
+        `scoring.build_prompt` · `scoring.echo_score` · `reexplain.source_numerics` ·
+        `reexplain.build_prompt`) 전부 `AttributeError` 를 냈다.
+
+        다섯 곳에 `if is None` 을 흩어 놓지 않는 이유: 그러면 새 호출자가 생길 때마다 같은
+        판단을 다시 해야 하고, 하나를 빼먹으면 그 경로만 500 으로 남는다. **조건을 꺼내는
+        문법 자체를 하나로** 두면 빼먹을 자리가 없다.
+
+        `ValueError` 를 고르지 않은 이유는 라우트가 그것을 400 계열로 뭉쳐 매핑하면 서버
+        설정 오류까지 "잘못된 요청" 이 되기 때문이다(CLAUDE.md `api/` 절과 같은 이유).
+        전용 타입이라 라우트가 이 경우만 골라 422 로 낸다.
+        """
+        if self.condition is None:
+            raise ConditionNotExtracted(
+                f"{self.item_id}: status={self.status} 이라 조건이 없다 — "
+                f"사유: {self.failure_reason or '(미기재)'}"
+            )
+        return self.condition
 
 
 # ── contracts/judgment.schema.json ────────────────────────────────────────────

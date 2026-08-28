@@ -47,6 +47,13 @@ def reexplain(
     llm: LlmClient | None = None,
 ) -> ReexplainResponse:
     """오해·미이해 판정 → 맞춤 재설명."""
+    if risk_item.condition is None:
+        # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 여기만 거부하지
+        # 않는 이유는 `_minimal()` 이 **이 경우를 위해 이미 설계돼 있기** 때문이다 — 인용
+        # 형식을 쓰지 않고 cited_spans 를 비운다(#60 리뷰). 강희진의 재검증 루프가 진행할
+        # 것을 주는 쪽이 낫고, 그 문면은 P4·P6 을 어기지 않는다.
+        return _minimal(risk_item)
+
     allowed = source_numerics(risk_item)
     client_ = llm or default_client()
 
@@ -74,7 +81,7 @@ def reexplain(
 # ── P6: 수치 대조 ─────────────────────────────────────────────────────────────
 def source_numerics(risk_item: RiskItem) -> frozenset[tuple[str, str | None]]:
     """조건 원문에 있는 수치. 설명에서 쓸 수 있는 것의 전부다."""
-    return numerics.source_values(risk_item.condition.value_text)
+    return numerics.source_values(risk_item.require_condition().value_text)
 
 
 def fabricated_numerics(content: str, allowed) -> list[str]:
@@ -97,11 +104,11 @@ def _cited_spans(
     """
     canon_content = numerics.canonical(content)
     used_number = any(n in canon_content for n, _ in allowed)
-    condition = numerics.canonical(risk_item.condition.value_text)
+    condition = numerics.canonical(risk_item.require_condition().value_text)
     used_phrase = any(
         condition[i:i + 12] in canon_content for i in range(max(0, len(condition) - 11))
     )
-    return [risk_item.condition.source_span] if (used_number or used_phrase) else []
+    return [risk_item.require_condition().source_span] if (used_number or used_phrase) else []
 
 
 # ── 폴백 ──────────────────────────────────────────────────────────────────────
@@ -132,10 +139,10 @@ def _minimal(risk_item: RiskItem) -> ReexplainResponse:
         item_id=risk_item.item_id,
         content=(
             f"{risk_item.name}에 대해 상품 설명서에는 이렇게 적혀 있습니다.\n\n"
-            f"“{risk_item.condition.value_text}”\n\n"
+            f"“{risk_item.require_condition().value_text}”\n\n"
             "이 부분을 담당자와 함께 다시 확인해 주세요."
         ),
-        cited_spans=[risk_item.condition.source_span],
+        cited_spans=[risk_item.require_condition().source_span],
     )
 
 
@@ -176,7 +183,7 @@ def build_prompt(
     )
     prompt = user.format(
         item_name=f"{risk_item.item_id} — {risk_item.name}",
-        condition_text=risk_item.condition.value_text,
+        condition_text=risk_item.require_condition().value_text,
         grade=judgment.grade.value,
         grade_label=GRADE_LABELS[judgment.grade],
         misconception_note=misconception,

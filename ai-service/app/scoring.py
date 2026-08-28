@@ -155,7 +155,7 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
                  answer_text: str) -> str:
     _, template = _prompt_sections()
     return template.format(
-        condition_text=risk_item.condition.value_text,
+        condition_text=risk_item.require_condition().value_text,
         item_id=rubric.item_id,
         item_name=rubric.name,
         required_elements="\n".join(f"- {e}" for e in rubric.required_elements),
@@ -207,7 +207,7 @@ def echo_score(answer_text: str, rubric: rubrics.Rubric, risk_item: RiskItem) ->
         )
         return 0.0
 
-    references = [risk_item.condition.value_text, *rubric.required_elements]
+    references = [risk_item.require_condition().value_text, *rubric.required_elements]
     return max((textsim.containment(answer_text, ref) for ref in references), default=0.0)
 
 

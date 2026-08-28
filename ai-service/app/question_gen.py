@@ -92,7 +92,7 @@ def answer_fragments(risk_item: RiskItem) -> tuple[str, ...]:
     수치만으로 검사한다 — 루브릭이 없다고 검사를 건너뛰면 그 항목만 유도심문이 통과한다.
     """
     fragments: list[str] = []
-    fragments.extend(numerics.numbers(risk_item.condition.value_text))
+    fragments.extend(numerics.numbers(risk_item.require_condition().value_text))
     try:
         rubric = rubrics.get(risk_item.item_id)
     except rubrics.RubricNotFound:
