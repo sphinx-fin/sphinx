@@ -51,14 +51,60 @@ _WS = re.compile(r"\s+")
 
 
 def canonical(text: str) -> str:
-    """대조용 정규화 — NFC + 공백 제거."""
+    """**부분열 대조용** 정규화 — NFC + 공백 제거.
+
+    공백을 지우는 것이 여기서는 맞다. 한국어는 같은 말이 띄어쓰기만 다른 경우가 흔해서
+    (`"원금 손실"` / `"원금손실"`) 공백을 남기면 대조가 어긋난다. 그리고 그 어긋남은
+    **정답 노출을 놓치는 방향**이라(F-INT-002) 비용이 크다.
+
+    수치 추출에는 쓰지 않는다 — `_for_numbers()` 참고.
+    """
     return _WS.sub("", unicodedata.normalize("NFC", text))
+
+
+def _for_numbers(text: str) -> str:
+    """**수치 추출용** 정규화 — NFC + 공백을 한 칸으로 접는다. 지우지 않는다.
+
+    ## 왜 `canonical()` 을 쓰면 안 되나 (이슈 #175)
+
+    표에서는 **공백이 셀 경계**다. 지우면 경계가 먼저 사라지고 `\\d+(?:[.,]\\d+)*` 가 한 행을
+    통째로 먹는다.
+
+        '3개월 900,000 526,240 58.4'
+          canonical  → '3개월900,000526,24058.4'  → ['3', '90000052624058.4']
+          여기       → '3개월 900,000 526,240 58.4' → ['3', '900000', '526240', '58.4']
+
+    ## 무엇이 깨져 있었나
+
+    선택 키만의 문제가 아니었다. **F-INT-004 재설명이 원문 표의 값을 정확히 인용해도 환각으로
+    걸린다.** `fabricated()` 가 `extract(content)` 를 `source_values(value_text)` 와 대조하는데
+    원문 쪽만 뭉쳐 있으니 어느 셀 값도 허용 집합에 없다.
+
+        "3개월 시점 해약환급금은 526,240원입니다."  → 환각 ['526240원']
+        "환급률은 58.4%입니다."                      → 환각 ['58.4%']
+
+    그러면 `reexplain` 이 3회 재시도 후 `_minimal` 로 떨어지고, 그 폴백은 `value_text` 를 그대로
+    보여준다 — 고령 고객 화면에 `3개월 900,000 526,240 58.4` 가 나간다(기획서 4절 *"고령
+    고객에게는 비유 중심으로, 짧은 문장으로"*). 표 항목 2건이 재설명을 한 번도 못 만들고 있었다.
+
+    ## 왜 함수를 가르나
+
+    `canonical()` 을 고쳐서 공백을 접으면 부분열 대조가 띄어쓰기에 민감해진다 — 위 docstring
+    참고. 반대로 `cell_numbers()` 같은 **공개 추출기를 하나 더 두면** 이 모듈 docstring 이
+    경계한 형태가 된다(*"두 벌로 두면 한쪽만 고쳐지고 다른 쪽이 뚫린 채 남는다"*).
+
+    그래서 갈리는 것은 **정규화 두 벌**이고 추출기는 계속 하나다. `extract()` 를 지나는 모든
+    호출자(F-INT-002 · F-INT-004 · F-EXT-002 구제)가 같은 경계를 본다.
+
+    `_NUMERIC` 이 숫자와 단위 사이를 `\\s*` 로 이미 흡수하므로 `45 %` 같은 표기는 그대로 잡힌다.
+    """
+    return _WS.sub(" ", unicodedata.normalize("NFC", text))
 
 
 def extract(text: str) -> list[tuple[str, str | None]]:
     """`(숫자, 단위부류)` 목록. 단위가 없으면 부류는 None."""
     out: list[tuple[str, str | None]] = []
-    for number, unit in _NUMERIC.findall(canonical(text)):
+    for number, unit in _NUMERIC.findall(_for_numbers(text)):
         if number in ORDINALS:
             continue
         out.append((number.replace(",", ""), UNIT_CLASSES.get(unit) if unit else None))
@@ -101,7 +147,7 @@ def numbers(text: str) -> list[str]:
     같은 모듈에 두는 이유는 추출기가 하나여야 하기 때문이고, 판정 규칙은 용도별로 다르다.
     """
     seen: list[str] = []
-    for number, _unit in _NUMERIC.findall(canonical(text)):
+    for number, _unit in _NUMERIC.findall(_for_numbers(text)):
         if number in ORDINALS:
             continue
         n = number.replace(",", "")
