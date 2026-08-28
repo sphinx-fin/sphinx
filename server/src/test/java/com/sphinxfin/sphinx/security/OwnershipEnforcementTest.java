@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -86,5 +87,43 @@ class OwnershipEnforcementTest {
     void ownSessionIsReadable() throws Exception {
         String sid = createAs();
         mvc.perform(get("/sessions/" + sid)).andExpect(status().isOk());
+    }
+    /** 고객 역할. 대면 데모에서는 안 쓰이지만 정책에는 그랜트가 있다(#166 · 결정 7.24). */
+    private static RequestPostProcessor cust(String id) {
+        return user(id).roles("CUST");
+    }
+
+    @Test
+    @DisplayName("❗귀속은 언제나 판매자다 — CUST 는 이름이 안 맞아 막히고, 맞으면 통과한다")
+    void ownershipComesFromTheSellerNotTheRole() throws Exception {
+        // 결정 7.24·7.25 가 세운 사실을 **배선 층에서** 고정한다. AccessPolicyTest 는
+        // AS_WIRED 라는 상수로 그 모양을 손으로 적는데, AccessGuard.targetOf 가 바뀌면
+        // 그 상수만 낡고 테스트는 초록이다 — 이 클래스 docstring 이 경고하는 그 함정이다.
+        String created = mvc.perform(post("/sessions").with(seller("seller-01"))
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        String answer = "{\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\",\"text\":\"낙인 하회하면 손실 납니다\"}";
+
+        // session:answer 는 { roles: [CUST, SELLER], scope: own_session } 이다.
+        // 역할은 있는데 이름이 sellerId 와 달라 막힌다.
+        mvc.perform(post("/sessions/" + sid + "/answers").with(cust("cust-01"))
+                        .contentType(MediaType.APPLICATION_JSON).content(answer))
+                .andExpect(status().isForbidden());
+
+        // ❗같은 CUST 역할이라도 이름이 sellerId 와 같으면 인가를 통과한다.
+        //   막는 것이 역할이 아니라 ownerId 대조라는 것이 여기서 드러난다. 403 이 아니기만
+        //   하면 된다 — 그 뒤 처리 결과(채점 성공/실패)는 이 단정의 관심이 아니다.
+        mvc.perform(post("/sessions/" + sid + "/answers").with(cust("seller-01"))
+                        .contentType(MediaType.APPLICATION_JSON).content(answer))
+                .andExpect(result -> assertThat(result.getResponse().getStatus())
+                        .as("역할이 CUST 여도 이름이 sellerId 와 같으면 인가는 통과한다 — "
+                                + "귀속이 역할이 아니라 이름 대조라는 뜻이다(결정 7.24). "
+                                + "여기가 403 이 되면 귀속 모델이 바뀐 것이므로 "
+                                + "rbac_policy.yaml 의 CUST 도달 불가 주석과 7.24·7.25 를 "
+                                + "같이 고쳐야 한다")
+                        .isNotEqualTo(403));
     }
 }
