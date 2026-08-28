@@ -111,3 +111,26 @@ def test_unit_attached_to_a_bare_table_cell_is_still_refused():
     allowed = numerics.source_values(TABLE_ROW)
     assert numerics.fabricated("해약환급금은 526,240원입니다.", allowed) == ["526240원"]
     assert numerics.fabricated("환급률은 58.4%입니다.", allowed) == ["58.4%"]
+
+
+# ── 이슈 #183 — 누출 대조는 양쪽이 같은 정규화를 지나야 한다 ──────────────────
+def test_for_leak_check_drops_digit_grouping_commas():
+    """`numbers()` 가 조각에서 콤마를 지우므로 대조 상대도 지워야 한다."""
+    assert numerics.for_leak_check("526,240") == "526240"
+    assert numerics.for_leak_check("36,000,000 원") == "36000000원"
+    assert numerics.numbers("526,240") == ["526240"]
+
+
+def test_for_leak_check_keeps_prose_commas():
+    """산문의 콤마는 남긴다 — 텍스트 조각의 대조 의미를 조용히 바꾸지 않는다.
+
+    `.replace(",", "")` 로 전부 지우면 루브릭 조항(`및, 또는`)까지 형태가 바뀐다.
+    자릿수 구분은 숫자 사이에서만 성립하므로 그 자리만 본다.
+    """
+    assert numerics.for_leak_check("원금, 이자") == "원금,이자"
+    assert numerics.for_leak_check("만기, 3년") == "만기,3년"      # 콤마 뒤가 숫자여도 앞이 아니면 남는다
+
+
+def test_canonical_is_untouched_by_the_leak_normalization():
+    """`canonical()` 은 그대로다 — `_cited_spans`(F-INT-004) 가 같이 바뀌면 안 된다."""
+    assert numerics.canonical("526,240") == "526,240"

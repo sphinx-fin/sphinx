@@ -199,3 +199,86 @@ def test_fallback_question_type_is_stable():
     assert first.fallback_used and second.fallback_used and third.fallback_used
     assert first.question_type == second.question_type == third.question_type
     assert first.question_type == qg.FALLBACK_QUESTION_TYPE
+
+
+# ── 이슈 #183 — 문서 표기를 그대로 옮긴 질문 ─────────────────────────────────
+def _contract_items():
+    """계약 정답 전건을 RiskItem 으로. 금지 목록의 실제 모집단이다."""
+    import json
+
+    for product_type, fname in templates.CONTRACT_SAMPLE_BY_PRODUCT.items():
+        raw = json.loads((templates.CONTRACT_SAMPLES / fname).read_text(encoding="utf-8"))
+        for entry in raw["_expected_risk_items"]:
+            yield RISK_ITEM.model_copy(update={
+                "item_id": entry["item_id"],
+                "condition": Condition(
+                    value_text=entry["value_text"],
+                    source_span=SourceSpan(**entry["source_span"]),
+                ),
+            })
+
+
+def _comma_tokens(text: str) -> set[str]:
+    return {t for t in text.replace("\n", " ").split()
+            if "," in t and any(c.isdigit() for c in t)}
+
+
+def test_question_copying_the_document_notation_is_caught():
+    """★ 원문 표기 그대로(콤마 포함) 옮긴 질문이 잡혀야 한다 — 계약 정답 전수.
+
+    `numbers()` 는 조각에서 콤마를 지우는데 질문 쪽은 안 지워서 **가장 자연스러운 누출
+    방식이 통과했다.** 모델은 원문을 보고 질문을 만드니 콤마째 옮기는 쪽이 오히려 흔하다.
+
+    계약 정답의 콤마 수치는 5건이고 **전건이 뚫려 있었다.** 일부가 잡히는 것처럼 보이던 것도
+    우연이다 — 콤마가 세 자리마다 끊어 연속 숫자 런이 최대 3자라, `MIN_LEAK_NGRAM`(6)을
+    넘기는 것은 소수점이 붙은 값뿐인데 계약 정답에는 그런 값이 없다.
+    """
+    checked = 0
+    for item in _contract_items():
+        forbidden = qg.answer_fragments(item)
+        for token in _comma_tokens(item.condition.value_text):
+            checked += 1
+            question = f"{token} 아래로 떨어지면 어떻게 되는지 말씀해 주시겠어요?"
+            assert qg.leaked_fragments(question, forbidden), (
+                f"{item.item_id}: 원문 표기 {token!r} 을 그대로 옮겼는데 안 잡힌다"
+            )
+    assert checked >= 5, f"콤마 수치 표본이 줄었다: {checked}"
+
+
+def test_the_comma_fix_does_not_block_normal_questions():
+    """★ 오탐 — **폴백 질문 기준**으로 정상 질문이 막히지 않는다.
+
+    막히면 인터뷰가 폴백으로 새고 유형 커버리지가 깎인다. 폴백 질문 23건을 모든 항목의 금지
+    목록에 교차로 재서 고정한다(자기 항목만 재면 *"자기 답을 안 알려준다"* 만 확인되고 다른
+    항목 목록에 걸리는 경우를 못 본다).
+
+    ## 모집단이 폴백 질문이라는 것이 이 테스트의 한계다 (PR #184 리뷰, 정세현)
+
+    다른 항목의 `value_text` 를 질문 자리에 넣어 재면 `main` 과 **1건 갈린다.** 기전이 실재한다.
+
+        질문 쪽  '인출금액의 0.2%와 2,000원 …'   금지목록 VAR-LONG-TERM-RATIO(조각 '20')
+          canonical       '…0.2%와2,000원…'   '20' 없음
+          for_leak_check  '…0.2%와2000원…'    '20' 있음   ← 콤마를 지우며 생긴 런
+
+    즉 **콤마 제거는 짧은 조각(`f in q`)의 우연 일치를 늘린다.** 긴 쪽은 안전하다 —
+    6자 이상 수치 4건이 서로 6자 런을 공유하지 않는 것을 확인했다(`_shares_long_run`).
+
+    막지 않는 이유는 F-INT-002 에서 두 오류의 무게가 다르기 때문이다. 오탐은 질문 생성이
+    재시도하거나 폴백으로 가는 **마찰**이고, 미탐은 **정답이 새는 것**이다. 이 변경은 미탐
+    5건을 없애고 짧은 조각 오탐을 하나 만든다.
+
+    근본은 `MIN_LEAK_NGRAM` 을 짧은 조각에도 적용하는 쪽(두 자리 수치는 단위와 함께만 본다)
+    인데, 3주차 정량평가에서 오탐률이 실제로 문제가 될 때 판단한다.
+    """
+    items = list(_contract_items())
+    templates_by_id = {
+        i.item_id: i
+        for product_type in templates.CONTRACT_SAMPLE_BY_PRODUCT
+        for i in templates.get(product_type).items
+    }
+    for item in items:
+        forbidden = qg.answer_fragments(item)
+        for other in items:
+            question = templates_by_id[other.item_id].fallback_question
+            hits = qg.leaked_fragments(question, forbidden)
+            assert not hits, f"{other.item_id} 질문이 {item.item_id} 금지목록에 걸린다: {hits}"
