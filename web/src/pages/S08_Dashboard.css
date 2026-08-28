@@ -222,6 +222,9 @@
 /* ── 머리말 표식 ─────────────────────────────────────────────────────────── */
 .s08__tags { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .s08__tag {
+  border: 0;
+  font: inherit;
+  cursor: help;
   padding: calc(3px * var(--scale)) var(--space-3);
   border-radius: var(--radius-pill);
   background: var(--surface-sunken);

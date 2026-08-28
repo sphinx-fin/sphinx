@@ -226,8 +226,21 @@ export default function S08Dashboard() {
           {/* 범위와 합성 여부는 문장이 아니라 **표식**으로 남긴다. 둘 다 명세가 요구하는
               것이라(F-DSH-001 표시 · 연출 금지) 지우지 않고 최소 형태로 줄였다. */}
           <p className="s08__tags">
-            <span className="s08__tag">{data ? SCOPE_LABEL[data.scope] : "—"}</span>
-            {data?.synthetic && <span className="s08__tag s08__tag--synth">합성</span>}
+            <Tag
+              show={showTip} hide={hideTip} id="tip-scope"
+              text={data ? SCOPE_LABEL[data.scope] : "—"}
+              tip={"이 수치가 어느 범위의 세션을 센 것인지입니다. 요청자 역할이 정합니다 — " +
+                   "관리자(MGR)는 자기 지점, 준법감시(COMPL)는 전사입니다."}
+            />
+            {data?.synthetic && (
+              <Tag
+                show={showTip} hide={hideTip} id="tip-synth" strong
+                text="합성 데이터"
+                tip={"실제 고객 세션이 아니라 만들어 낸 세션을 집계한 수치입니다. " +
+                     "합성을 실측처럼 보이게 하지 않으려고 항상 표시합니다 — 실데이터로 " +
+                     "바뀌면 이 표식이 저절로 사라집니다."}
+              />
+            )}
           </p>
         </div>
       </header>
@@ -443,6 +456,34 @@ export default function S08Dashboard() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * 머리말 표식. 짧은 말로 두고 뜻은 hover·포커스에 붙인다 — 문장으로 깔면 값을 밀어낸다.
+ *
+ * `span` 이 아니라 `button` 인 이유는 **키보드로도 열려야** 하기 때문이다. 누르는 동작이
+ * 없는 버튼이지만, 포커스를 받을 수 있는 표준 요소가 이것이다.
+ */
+function Tag({ text, tip, id, strong, show, hide }: {
+  text: string; tip: string; id: string; strong?: boolean;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={`s08__tag ${strong ? "s08__tag--synth" : ""}`}
+        aria-describedby={id}
+        onMouseEnter={(e) => show(e.currentTarget, tip)}
+        onMouseLeave={hide}
+        onFocus={(e) => show(e.currentTarget, tip)}
+        onBlur={hide}
+      >
+        {text}
+      </button>
+      <span id={id} className="sr-only">{tip}</span>
+    </>
   );
 }
 
