@@ -15,6 +15,7 @@ import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionService;
+import com.sphinxfin.sphinx.evidence.ReportService;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class SessionController {
     private final SessionService sessionService;
     private final AiServiceClient aiServiceClient;
     private final CurrentActor currentActor;
+    private final ReportService reportService;
 
     @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
@@ -339,7 +341,6 @@ public class SessionController {
         return ApiResponse.ok(sessionService.judge(sid));
     }
 
-    /** 봉투만 씌운다. 리포트 응답 스키마는 F-GTE-004 소유자 몫이다(#46 에서 논의 중). */
     /**
      * 리포트 발행. 기록에서 이력을 조립하고 발행 사실을 체인에 남긴다(F-GTE-004).
      *
@@ -359,32 +360,43 @@ public class SessionController {
     @PreAuthorize("@accessGuard.can('report:issue', #sid)")
     @PostMapping("/{sid}/report")
     public ApiResponse<Map<String, Object>> issueReport(@PathVariable String sid) {
-        // TODO(정세현): ReportService.issue(sid) 연결 (F-GTE-004, PR #88).
-        // 목이지만 계약의 필수 필드를 채운다 — previewUrl·downloadUrl 은 PDF 생성 전까지
-        // null 이 계약이다(채우면 404 나는 경로를 계약이 보장하게 된다).
         sessionService.get(sid);   // 없는 세션이면 404
-        return ApiResponse.ok(reportPayload(sid));
+        return ApiResponse.ok(reportPayload(
+                reportService.issue(sid, Instant.now().truncatedTo(ChronoUnit.MILLIS))));
     }
 
     /**
      * 발행된 리포트 조회. 상태를 바꾸지 않는다.
      * 발행한 적 없으면 404 — "아직 교부하지 않았다"와 "교부했다"는 감사에서 구별돼야 한다.
+     *
+     * <p>❗<b>404 두 가지를 같은 코드로 낸다</b> — 세션이 없는 것과 아직 발행하지 않은 것.
+     * 계약이 그렇게 적어 뒀고(*"후자는 오류가 아니라 상태다"*), 화면은 세션을 한 번 더 조회해
+     * 다음 행동을 가른다(S-07). 여기서 코드를 가르지 않는 이유는 <b>범위 밖 세션의 존재
+     * 여부를 알려주지 않기 위해서</b>다 — `REPORT_NOT_ISSUED` 같은 코드를 따로 내면 그 코드가
+     * 나온다는 사실만으로 "그 세션은 있다"가 새어 나간다. 대신 사유를 message 로 가른다.
      */
     @PreAuthorize("@accessGuard.can('report:read', #sid)")
     @GetMapping("/{sid}/report")
     public ApiResponse<Map<String, Object>> report(@PathVariable String sid) {
-        // TODO(정세현): ReportService.latest(sid) 연결. 목은 발행 여부를 모르므로 항상 돌려준다.
-        sessionService.get(sid);
-        return ApiResponse.ok(reportPayload(sid));
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportPayload(reportService.latest(sid).orElseThrow(
+                () -> new NoSuchElementException("아직 발행된 리포트가 없다: " + sid))));
     }
 
-    /** 계약(ReportResponse)의 필수 4필드를 채운 목. URL 둘은 PDF 전까지 null 이 계약이다. */
-    private static Map<String, Object> reportPayload(String sid) {
+    /**
+     * 계약({@code ReportResponse}) 응답. <b>URL 둘은 PDF 생성 전까지 null 이 계약이다</b> —
+     * 채우면 계약이 "이 URL 로 가면 문서가 있다"를 보장하는데 404 가 나고, 스키마 검증은
+     * 통과하며 화면은 링크를 그린다. 눌러야 드러나는 종류의 결함이다.
+     *
+     * <p>{@code generatedAt} 은 발행 기록의 시각이지 지금 시각이 아니다. 같은 내용을 다시
+     * 발행하면 기존 것을 돌려주므로(멱등), 그때 이 값이 <b>안 바뀌는 것</b>이 맞다.
+     */
+    private static Map<String, Object> reportPayload(ReportService.Report report) {
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("reportId", "mock-report-001");
-        out.put("sessionId", sid);
-        out.put("generatedAt", Instant.now().truncatedTo(ChronoUnit.MILLIS).toString());
-        out.put("contentHash", "0".repeat(64));
+        out.put("reportId", report.reportId());
+        out.put("sessionId", report.sessionId());
+        out.put("generatedAt", report.generatedAt().toString());
+        out.put("contentHash", report.contentHash());
         out.put("previewUrl", null);
         out.put("downloadUrl", null);
         return out;

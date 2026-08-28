@@ -89,13 +89,33 @@ class ReportAuditSeparationTest {
     void readingDoesNotProduceIssueRecord() throws Exception {
         String sid = createSession();
 
-        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isOk());
-        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isOk());
+        // **미발행 세션이라 404 다**(계약 GET 404). 목이던 시절에는 200 이었고, 배선이 붙으면서
+        // 이 시나리오가 오히려 더 정확해졌다 — GET 이 "없으면 만들어 주는" 경로가 없다는 것을
+        // 여기서 직접 본다. 두 번 읽어도 발행되지 않으므로 여전히 404 다.
+        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isNotFound());
+        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isNotFound());
 
         assertThat(auditedActionsFor("/report"))
                 .as("MGR·COMPL 이 남의 세션을 감독하려고 열어보는 것만으로 교부 기록이 생기면 "
-                        + "교부 이력이 신뢰를 잃는다")
+                        + "교부 이력이 신뢰를 잃는다. 실패한 조회도 조회로 남는다 — "
+                        + "AuditInterceptor 가 상태코드와 무관하게 기록한다(차단당한 시도가 신호다)")
                 .containsOnly("report:read");
+    }
+
+    @Test
+    @DisplayName("❗GET 은 발행하지 않는다 — 읽은 뒤에도 리포트는 여전히 없다")
+    void readingDoesNotIssueTheReport() throws Exception {
+        String sid = createSession();
+
+        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isNotFound());
+        mvc.perform(post("/sessions/" + sid + "/report")).andExpect(status().isOk());
+        mvc.perform(get("/sessions/" + sid + "/report")).andExpect(status().isOk());
+
+        // 감사 로그만 보면 "GET 이 발행했다" 와 "GET 은 안 했고 POST 가 했다" 가 구별되지만,
+        // 그 구별은 action 이름에 기대고 있다. 상태 자체로도 확인한다 — 첫 GET 뒤에 리포트가
+        // 없어야(404) GET 이 상태를 안 바꿨다는 것이 성립한다.
+        assertThat(auditedActionsFor("/report"))
+                .containsExactly("report:read", "report:issue", "report:read");
     }
 
     @Test
