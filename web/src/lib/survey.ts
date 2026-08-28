@@ -39,8 +39,19 @@
  * 세션 typed 필드로 가고 강희진이 가중한다(결정 ⓓ). 중복해서 묻지 않는다.
  */
 
-/** 문항 세트의 버전. 문항을 추가·삭제·재문면화하면 올린다. */
-export const SURVEY_SCHEMA_VERSION = "s02-survey-v1";
+/**
+ * 문항 세트의 버전. 문항을 추가·삭제·재문면화하면 올린다.
+ *
+ * **v2 (2026-08-28)** — `SUIT-PRODUCT-EXPERIENCE` 의 선택지를 결과 중심으로 고쳤다.
+ * `"있다 — 손실을 본 적은 없다"` → `"있고 이득을 봤다"`,
+ * `"있다 — 손실을 본 적이 있다"` → `"있지만 손실을 봤다"`.
+ *
+ * 문항 텍스트는 그대로라 `test_survey_contract.py` 의 문면 해시는 안 바뀐다(그 해시는
+ * id + text 만 먹는다). 그래도 버전을 올리는 이유는 **선택지가 곧 `recorded_answer`** 라서다 —
+ * 모순 판정이 대조하는 문면이 바뀌었는데 버전이 같으면, 같은 세트라고 적힌 두 기록이 서로
+ * 다른 문면을 담게 된다. 축(`AXIS_BY_QUESTION`)은 그대로다.
+ */
+export const SURVEY_SCHEMA_VERSION = "s02-survey-v2";
 
 export interface SurveyQuestion {
   /** `surveyResult` 의 키. 축이 드러나게 짓는다. */
@@ -100,8 +111,8 @@ export const SURVEY_QUESTIONS: readonly SurveyQuestion[] = [
     text: "ELS·변액보험 등 원금비보장 상품에 가입해 보신 적이 있습니까?",
     options: [
       "없다",
-      "있다 — 손실을 본 적은 없다",
-      "있다 — 손실을 본 적이 있다",
+      "있고 이득을 봤다",
+      "있지만 손실을 봤다",
     ],
   },
 ];
