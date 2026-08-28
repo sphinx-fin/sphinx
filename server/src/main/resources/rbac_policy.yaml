@@ -8,7 +8,7 @@
 #   ① 역할 부재 — 본부 영업·마케팅에 대응하는 역할이 존재하지 않는다 (명세서 0.4, ADR-001)
 #   ② 범위 분리 — 역할이 있어도 집계 데이터에 닿는 범위가 제한된다 (아래 scope)
 # ①만으로는 부족하다. SELLER 권한으로 대시보드가 열리면 같은 구멍이 난다.
-version: 6
+version: 7
 
 roles: [CUST, SELLER, MGR, COMPL, ADMIN]
 
@@ -22,7 +22,10 @@ absent_by_design:
 
 # 데이터 범위. action·역할 조합마다 어디까지 보이는지 고정한다 — 이 경계가 7-4의 실물이다.
 scopes:
-  own_session: 본인이 진행한(또는 본인이 당사자인) 개별 세션에 한정
+  # ❗**본인이 진행한** 세션이다. 괄호로 "또는 본인이 당사자인" 을 적어 뒀었는데 그 두 번째
+  #    뜻은 구현돼 있지 않다 — 대조하는 값이 `Session.sellerId` 하나뿐이고 세션에 고객을
+  #    가리키는 필드가 없다(이슈 #166). 문면이 하지 못하는 것을 약속하고 있었다.
+  own_session: 본인이 **진행한** 개별 세션에 한정 (대조 값은 sellerId 다. 이슈 #166)
   branch:      소속 지점에 한정
   org:         전체
 
@@ -31,7 +34,7 @@ scopes:
 #   SELLER  | 본인 진행분만     | 접근 불가
 #   MGR     | 자기 지점 범위    | 자기 지점 범위
 #   COMPL   | 전체            | 전체
-#   CUST    | 본인 당사자분만   | 접근 불가
+#   CUST    | (도달 불가 #166) | 접근 불가
 #   ADMIN   | 접근 불가        | 접근 불가
 
 # action → 허용 그랜트 목록. 역할별로 범위가 다르므로 그랜트를 나열한다.
@@ -57,8 +60,25 @@ permissions:
     - { roles: [COMPL],  scope: org }
   session:interview:                                 # 면담을 **진행**한다 — 질문·재설명·중단
     - { roles: [SELLER], scope: own_session }
+  # ❗**CUST 그랜트는 현재 도달 불가다** (이슈 #166). 지우지 않는 이유는 아래에 적는다.
+  #
+  # `own_session` 은 `Target.ownerId` 와 행위자 id 를 비교하는데, `AccessGuard.targetOf` 가
+  # 거기 넣는 값은 언제나 `Session.sellerId` 다. 세션에 고객을 가리키는 필드가 없으므로
+  # (`contractRef` 는 비식별 참조번호지 행위자가 아니다) **어떤 고객도 이 비교를 통과할 수
+  # 없다.** enforce=true 로 실측했다 — CUST 는 403 이고, 역할이 CUST 여도 이름이 sellerId 와
+  # 같으면 통과한다. 즉 막는 것은 역할이 아니라 이름 대조다.
+  #
+  # 그리고 오늘 대면 채널에서는 **인증 주체가 SELLER 하나**다 — S-02 에서 세션을 만든 판매자가
+  # 같은 브라우저로 S-03 을 열어 단말을 넘겨준다. 그러니 지금 이 그랜트가 도달 불가인 것이
+  # 기능을 막고 있지도 않다.
+  #
+  # **그래도 지운다는 선택은 하지 않았다.** `MOBILE` 채널은 정의상 고객이 자기 기기로 들어오고,
+  # 그때 같은 문제가 그대로 돌아온다. 역할이 있는 것과 그 역할에 그랜트가 있는 것은 다르고
+  # (ADR-001 과 같은 결), 없앴다가 다시 만드는 것은 코드에 남지 않는다. 대신 **도달 불가라는
+  # 사실을 여기 적고 테스트로 붙들어 둔다** — `AccessPolicyTest.CustIsUnreachable` 이 이 상태를
+  # 고정하므로, 누가 #166 을 고치면 그 테스트가 먼저 깨져서 이 주석을 같이 고치게 된다.
   session:answer:                                    # F-INT-003 고객 응답 입력 (S-03)
-    - { roles: [CUST, SELLER], scope: own_session }
+    - { roles: [CUST, SELLER], scope: own_session }  # CUST 는 도달 불가 (#166)
   session:judge:
     - { roles: [SELLER], scope: own_session }
   session:judgment:read:                             # S-05 판정 결과
@@ -82,7 +102,7 @@ permissions:
   report:issue:                                      # F-GTE-004 발행(교부) — PR #94 리뷰
     - { roles: [SELLER], scope: own_session }
   report:summary:read:                               # 고객 교부용 요약
-    - { roles: [CUST], scope: own_session }
+    - { roles: [CUST], scope: own_session }          # 도달 불가 (#166). 엔드포인트도 아직 없다
 
   override:request:
     - { roles: [SELLER], scope: own_session }

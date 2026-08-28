@@ -83,7 +83,21 @@ public class AccessPolicy {
         }
     }
 
-    /** 정책이 정의한 데이터 범위. yaml의 {@code scope} 값과 1:1. */
+    /**
+     * 정책이 정의한 데이터 범위. yaml의 {@code scope} 값과 1:1.
+     *
+     * <h3>{@code OWN_SESSION} 은 "본인이 <b>진행한</b>" 이다 (이슈 #166)</h3>
+     *
+     * <p>정책 파일이 오래 <i>"본인이 진행한(또는 본인이 당사자인)"</i> 이라고 적고 있었는데
+     * <b>괄호 안은 구현돼 있지 않다.</b> 이 클래스가 비교하는 값은 {@code Target.ownerId} 하나이고,
+     * {@code AccessGuard.targetOf} 가 거기 넣는 것은 언제나 {@code Session.sellerId} 다.
+     * 세션에 고객을 가리키는 필드가 없다.
+     *
+     * <p>그래서 <b>CUST 그랜트는 도달 불가다</b> — {@code session:answer}·
+     * {@code report:summary:read} 둘 다. 정책 파일에는 남겨 두되 도달 불가라고 적어 뒀고,
+     * {@code AccessPolicyTest.CustIsUnreachable} 이 그 상태를 고정한다. #166 이 어느 쪽으로든
+     * 해결되면 그 테스트가 먼저 깨진다.
+     */
     public enum Scope {
         OWN_SESSION, BRANCH, ORG;
 
