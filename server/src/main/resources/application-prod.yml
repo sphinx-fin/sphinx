@@ -24,6 +24,17 @@ spring:
 # 미설정 상태로 prod 를 띄우면 SecurityConfig 가 기동을 거부한다 — Spring 이 임의 비밀번호를
 # 생성해 로그에 찍고 그대로 노출되는 상황을 막기 위해서다.
 sphinx:
+  security:
+    # ❗인가를 켠다 (이슈 #41 ①). 인증만으로는 부족하다 — 전에는 prod 에서도 이 값이
+    # 코드 기본값 false 라, 계정 하나로 인증만 통과하면 집계까지 그냥 닿았다. 실측:
+    #
+    #   GET /dashboard/heatmap  무인증        → 401
+    #   GET /dashboard/heatmap  demo(ROLE_API) → 200   ← SELLER 였다면 403 이어야 한다
+    #
+    # ADR-001 시연("SELLER 는 집계에 닿지 못한다")이 그 상태로는 성립하지 않는다.
+    # 로컬은 false 로 둔다 — 프론트가 계정 없이 개발할 수 있어야 하고, 그 전제가
+    # 퍼블릭 노출과 함께 성립하지 않는 것이 이 파일의 존재 이유다.
+    enforce: true
   api:
     auth:
       username: ${SPHINX_API_USER:}
