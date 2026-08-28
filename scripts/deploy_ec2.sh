@@ -109,7 +109,16 @@ echo
 #
 # 값을 가진 것은 이 스크립트뿐이므로 확인도 여기서 하고 결과만 찍는다. `-K -` 로 stdin 에
 # 넘기는 이유는 `-u` 가 argv 라 `ps` 에 보이기 때문이다 — 히스토리·`ps` 둘 다 안 남는다.
-auth_code=$(printf 'user = "%s:%s"\n' "$SPHINX_API_USER" "$SPHINX_API_PASSWORD" |
+# curl config 의 따옴표 안에서는 `\` 와 `"` 가 이스케이프 문자다. 그대로 넣으면 파싱이
+# 끊겨 **자격증명이 맞는데도 401** 이 나고, 이 스크립트는 "SSM 값과 htpasswd 가 다르다" 라고
+# 찍는다 — 이 PR 이 고치려는 것과 정확히 같은 모양(정상을 다른 원인으로 읽게 만든다)이
+# 한 겹 아래에서 반복된다(PR #173 리뷰, 강희진 실측). 따옴표를 빼는 것도 답이 아니다 —
+# 그러면 공백에서 깨진다.
+#
+# 백슬래시를 **먼저** 치환한다. 순서를 바꾸면 방금 이스케이프한 백슬래시를 다시 이스케이프한다.
+auth_user=${SPHINX_API_USER//\\/\\\\};     auth_user=${auth_user//\"/\\\"}
+auth_pass=${SPHINX_API_PASSWORD//\\/\\\\}; auth_pass=${auth_pass//\"/\\\"}
+auth_code=$(printf 'user = "%s:%s"\n' "$auth_user" "$auth_pass" |
             curl -sS -K - -o /dev/null -w '%{http_code}' http://localhost/ || true)
 case "$auth_code" in
   200)      echo "자격증명 확인: 200 — 통과" ;;

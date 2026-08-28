@@ -180,7 +180,12 @@ SPHINX_API_USER=$(aws ssm get-parameter --name "$SSM_PREFIX/api-user" \
 SPHINX_API_PASSWORD=$(aws ssm get-parameter --name "$SSM_PREFIX/api-password" \
   --with-decryption --query Parameter.Value --output text)
 
-printf 'user = "%s:%s"\n' "$SPHINX_API_USER" "$SPHINX_API_PASSWORD" |
+# curl config 의 따옴표 안에서는 `\` 와 `"` 가 이스케이프 문자다. 그대로 넣으면 파싱이
+# 끊겨 **값이 맞는데도 401** 이 나고, 비밀번호가 틀린 것으로 읽힌다. 백슬래시를 먼저 친다.
+esc_user=${SPHINX_API_USER//\\/\\\\};     esc_user=${esc_user//\"/\\\"}
+esc_pass=${SPHINX_API_PASSWORD//\\/\\\\}; esc_pass=${esc_pass//\"/\\\"}
+
+printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
   curl -sS -K - -o /dev/null -w '%{http_code}\n' http://localhost/api/products   # 200
 
 # ❗아래 둘은 **실패해야 정상이다**
