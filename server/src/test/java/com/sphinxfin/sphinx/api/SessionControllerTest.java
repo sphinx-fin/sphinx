@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -69,7 +70,7 @@ class SessionControllerTest {
                         inv.getArgument(2)));
         // 모순 판정 기본 스텁 — 판정 없음. 실패 경로는 별도 테스트에서 본다.
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
-                .thenReturn(SuitabilityStatus.NO_MISMATCH);
+                .thenReturn(new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
         // 질문 생성(F-INT-002) 기본 스텁 — nextQuestion 이 이제 ai-service 문면을 쓴다.
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition"));

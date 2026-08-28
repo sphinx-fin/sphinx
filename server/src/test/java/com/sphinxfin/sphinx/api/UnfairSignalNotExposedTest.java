@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -78,6 +79,9 @@ class UnfairSignalNotExposedTest {
                         java.time.Instant at) {
                     RECORDED_TYPES.add(j.misconceptionType());
                 }
+                @Override public void appendMismatch(String sid,
+                        com.sphinxfin.sphinx.domain.SuitabilityMismatch m,
+                        String v, java.util.Map<String, Object> r, java.time.Instant at) { }
                 @Override public void appendGate(String sid,
                         com.sphinxfin.sphinx.domain.GateResult res, java.time.Instant at) { }
                 @Override public void appendOverride(String sid, String reason,
@@ -148,7 +152,7 @@ class UnfairSignalNotExposedTest {
                                 "판매자 발화 인용", "M08-TYING", null),
                         inv.getArgument(2)));
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
-                .thenReturn(SuitabilityStatus.NO_MISMATCH);
+                .thenReturn(new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
     }
 
     @Test

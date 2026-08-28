@@ -39,6 +39,19 @@ void appendGate(String sessionId, GateResult result, Instant at);
 >
 > `askedQuestion` 은 채점에 넘긴 문면(#137), `questionSource` 는 고객이 그것을 봤는지다.
 > 둘 다 append-only 기록의 봉투 층이고 `Judgment` 계약에는 들어가지 않는다.
+>
+> **적재 종류도 하나 늘었다** (이슈 #169). 세 종류(판정·게이트·오버라이드)에 모순 판정이 붙는다.
+>
+> ```java
+> void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+>                     String surveySchemaVersion, Map<String, Object> surveyResult, Instant at);
+> ```
+>
+> 게이트에 얹지 않고 뗀 이유가 둘이다. **발생 시점이 다르다** — 재검증마다 게이트는 다시
+> 도는데 모순은 세션당 한 번이다. 그리고 **판정의 종류가 다르다** — 게이트는 룰이 만든
+> 결정이고 이것은 LLM 이 만든 측정이다(P1). 근거(`reason`·`contradictions`·`confidence`)와
+> 입력(`surveySchemaVersion`·`surveyResult`)을 함께 싣는 것은 이 판정이 R-02·R-02b 로
+> 게이트를 움직이는데 게이트 기록에는 `ruleTrace` 밖에 없었기 때문이다.
 
 `recordJudgment` 와 `judge` 끝에서 호출하고, **덮어쓰기 전 값이 아니라 매 건** 적재한다.
 구현 등록 전에도 세션 루프가 돌아야 하므로 `Optional` 주입 + `NO_OP` 기본값.

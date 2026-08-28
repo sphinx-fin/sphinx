@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -114,7 +115,7 @@ public class AiServiceClient {
      *
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
-    public SuitabilityStatus detectMismatch(String sessionId,
+    public SuitabilityMismatch detectMismatch(String sessionId,
                                             Map<String, Object> surveyResult,
                                             Map<String, String> maskedUtterances,
                                             String surveySchemaVersion) {
@@ -145,7 +146,7 @@ public class AiServiceClient {
         if (response == null) {
             throw new AiServiceException("ai-service /internal/mismatch 응답이 비었다");
         }
-        return response.toStatus();
+        return response.toMismatch();
     }
 
     /**
@@ -275,6 +276,11 @@ public class AiServiceClient {
          * insufficient_input 이면 mismatch 가 항상 false 인데 그걸 NO_MISMATCH 로 옮기면
          * 판정 실패가 "적합" 이 된다 — 계약 주석이 명시적으로 금지한 오독이다.
          */
+        /** 상태와 근거를 함께 넘긴다 — 근거를 버리면 불변 기록에 남길 것이 없다 (#169). */
+        SuitabilityMismatch toMismatch() {
+            return new SuitabilityMismatch(toStatus(), reason, confidence, contradictions);
+        }
+
         SuitabilityStatus toStatus() {
             if ("insufficient_input".equals(status)) {
                 return SuitabilityStatus.UNKNOWN;

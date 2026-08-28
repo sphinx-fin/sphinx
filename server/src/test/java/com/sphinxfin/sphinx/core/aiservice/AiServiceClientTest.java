@@ -1,12 +1,15 @@
 package com.sphinxfin.sphinx.core.aiservice;
 
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -293,4 +296,67 @@ class AiServiceClientTest {
                 }
                 """;
     }
+    @Test
+    @DisplayName("❗/internal/mismatch 의 근거가 경계를 넘어온다 — 상태만 꺼내면 버려진다 (#169)")
+    void mismatchCarriesItsBasisAcrossTheBoundary() {
+        server.expect(requestTo(BASE + "/internal/mismatch"))
+                .andRespond(withSuccess("""
+                        {
+                          "session_id": "S-1",
+                          "status": "mismatch",
+                          "mismatch": true,
+                          "confidence": 0.82,
+                          "contradictions": [
+                            {"axis": "risk_tolerance",
+                             "survey": "원금 손실은 감수할 수 있다",
+                             "utterance": "원금은 지켜지죠"}
+                          ],
+                          "reason": "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
+                          "survey_schema_version": "s02-survey-v2"
+                        }""", MediaType.APPLICATION_JSON));
+
+        SuitabilityMismatch m = client.detectMismatch(
+                "S-1", Map.of("SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다"),
+                Map.of("A", "원금은 지켜지죠"), "s02-survey-v2");
+
+        // 계약이 required 로 주는 근거 셋이 그대로 넘어와야 한다. 전에는 toStatus() 만
+        // 돌려줘서 여기서 버려졌고, 그래서 불변 기록에 남길 것이 없었다 (#169).
+        assertThat(m.status()).isEqualTo(SuitabilityStatus.MISMATCH);
+        assertThat(m.reason())
+                .as("게이트를 움직이는 판정인데 근거가 경계를 못 넘으면 감사 기록에 "
+                        + "ruleTrace 밖에 안 남는다")
+                .isEqualTo("설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다");
+        assertThat(m.confidence()).isEqualByComparingTo(new BigDecimal("0.82"));
+        assertThat(m.contradictions())
+                .as("어느 축이 어긋났는지가 근거의 실체다 — reason 은 요약이고 이쪽이 대조 대상이다")
+                .hasSize(1);
+        assertThat(m.contradictions().get(0)).containsEntry("axis", "risk_tolerance");
+    }
+
+    @Test
+    @DisplayName("insufficient_input 은 UNKNOWN 이고 그 사유도 넘어온다 — '적합' 으로 새지 않는다")
+    void insufficientInputKeepsItsReason() {
+        server.expect(requestTo(BASE + "/internal/mismatch"))
+                .andRespond(withSuccess("""
+                        {
+                          "session_id": "S-1",
+                          "status": "insufficient_input",
+                          "mismatch": false,
+                          "confidence": 0.1,
+                          "contradictions": [],
+                          "reason": "발화가 두 건뿐이라 판단할 수 없다"
+                        }""", MediaType.APPLICATION_JSON));
+
+        SuitabilityMismatch m = client.detectMismatch(
+                "S-1", Map.of(), Map.of("A", "네"), "s02-survey-v2");
+
+        assertThat(m.status())
+                .as("insufficient_input 이면 mismatch 가 항상 false 인데 그걸 NO_MISMATCH 로 "
+                        + "옮기면 판정 실패가 '적합' 이 된다")
+                .isEqualTo(SuitabilityStatus.UNKNOWN);
+        assertThat(m.reason())
+                .as("왜 판단할 수 없었는지가 남아야 UNKNOWN 이 그냥 빈 값과 구별된다")
+                .isEqualTo("발화가 두 건뿐이라 판단할 수 없다");
+    }
+
 }

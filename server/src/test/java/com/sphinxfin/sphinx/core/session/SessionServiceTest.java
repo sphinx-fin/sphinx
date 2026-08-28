@@ -109,7 +109,7 @@ class SessionServiceTest {
     void previewMatchesJudgeAfterEvaluation() {
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U1));
-        service.recordSuitability(s.id(), SuitabilityStatus.UNKNOWN);
+        service.recordSuitability(s.id(), mismatchOf(SuitabilityStatus.UNKNOWN));
 
         var preview = service.previewGate(s.id());
         assertThat(preview.signal()).isEqualTo(Signal.YELLOW);
@@ -212,6 +212,42 @@ class SessionServiceTest {
     }
 
     // ── F-DET-002 모순 배선 (이슈 #65 · 결정 10.9) ─────────────────────
+    @Test
+    @DisplayName("❗모순 판정이 근거와 함께 불변 기록으로 간다 — 세션 필드에만 두면 덮인다 (#169)")
+    void mismatchReachesTheImmutableRecordWithItsBasis() {
+        Session s = service.create(cmd(null));
+        var detected = new com.sphinxfin.sphinx.domain.SuitabilityMismatch(
+                SuitabilityStatus.MISMATCH,
+                "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
+                new java.math.BigDecimal("0.82"),
+                List.of(java.util.Map.of("axis", "risk_tolerance")));
+
+        service.recordSuitability(s.id(), detected);
+
+        assertThat(evidence.mismatches)
+                .as("이 판정이 R-02 로 게이트를 움직이는데, append 가 없으면 감사 기록에 "
+                        + "남는 것이 GateResult(signal, ruleTrace) 뿐이다 — 왜 모순인지에 "
+                        + "답할 것이 하나도 없다")
+                .hasSize(1);
+        assertThat(evidence.mismatches.get(0).reason())
+                .as("상태만 넘기면 ai-service 가 이미 만든 근거를 경계에서 버리게 된다")
+                .isEqualTo("설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다");
+    }
+
+    @Test
+    @DisplayName("❗기록은 세션 저장 뒤에 간다 — 기록 없는 판정도 무효다")
+    void theRecordFollowsTheSessionSave() {
+        Session s = service.create(cmd(null));
+        service.recordSuitability(s.id(), mismatchOf(SuitabilityStatus.MISMATCH));
+
+        assertThat(service.get(s.id()).suitabilityMismatch())
+                .as("세션에도 반영되고")
+                .isTrue();
+        assertThat(evidence.mismatches)
+                .as("같은 트랜잭션 안이라 append 가 실패하면 세션 저장도 함께 롤백된다")
+                .hasSize(1);
+    }
+
 
     @Test
     @DisplayName("모순 판정 전에는 NOT_EVALUATED — 모순도 미확인도 아니다")
@@ -225,11 +261,11 @@ class SessionServiceTest {
     @DisplayName("❗판정 못 함(UNKNOWN)은 모순 없음과 다르다 — 게이트가 YELLOW 로 받는다")
     void unknownIsNotSameAsNoMismatch() {
         Session unknown = service.create(cmd(null));
-        service.recordSuitability(unknown.id(), SuitabilityStatus.UNKNOWN);
+        service.recordSuitability(unknown.id(), mismatchOf(SuitabilityStatus.UNKNOWN));
         service.recordJudgment(unknown.id(), j("A", Grade.U1));
 
         Session clean = service.create(cmd(null));
-        service.recordSuitability(clean.id(), SuitabilityStatus.NO_MISMATCH);
+        service.recordSuitability(clean.id(), mismatchOf(SuitabilityStatus.NO_MISMATCH));
         service.recordJudgment(clean.id(), j("A", Grade.U1));
 
         // 같은 U1 인데 신호가 갈린다 — 그게 두 상태를 나눈 이유다
@@ -245,7 +281,7 @@ class SessionServiceTest {
                 "40대", "3년이상", "1천만원대", "CT-1", null, null));
         int before = s.coachingScore();
 
-        Session after = service.recordSuitability(s.id(), SuitabilityStatus.MISMATCH);
+        Session after = service.recordSuitability(s.id(), mismatchOf(SuitabilityStatus.MISMATCH));
 
         assertThat(after.coachingScore())
                 .as("모순이 확인됐는데 가산이 없으면 취약 임계값을 넘겨야 할 고객이 안 넘는다")
@@ -259,9 +295,16 @@ class SessionServiceTest {
                 "40대", "3년이상", "1천만원대", "CT-1", null, null));
         int before = s.coachingScore();
 
-        Session after = service.recordSuitability(s.id(), SuitabilityStatus.UNKNOWN);
+        Session after = service.recordSuitability(s.id(), mismatchOf(SuitabilityStatus.UNKNOWN));
 
         assertThat(after.coachingScore()).isEqualTo(before);
+    }
+
+    /** 근거를 들고 오는 모순 판정. 상태만 보던 테스트를 최소로 옮긴다(#169). */
+    private static com.sphinxfin.sphinx.domain.SuitabilityMismatch mismatchOf(
+            SuitabilityStatus status) {
+        return new com.sphinxfin.sphinx.domain.SuitabilityMismatch(
+                status, "테스트 사유", null, List.of());
     }
 
     /** evidence append 지점이 실제로 호출되는지 보려는 테스트 더블(구현은 정세현 evidence/). */
@@ -269,6 +312,8 @@ class SessionServiceTest {
         private final List<String> judgments = new ArrayList<>();
         private final List<Signal> gates = new ArrayList<>();
         private final List<String> askedQuestions = new ArrayList<>();
+        private final List<com.sphinxfin.sphinx.domain.SuitabilityMismatch> mismatches
+                = new ArrayList<>();
         private final List<EvidenceRecorder.QuestionSource> questionSources = new ArrayList<>();
 
         @Override
@@ -278,6 +323,14 @@ class SessionServiceTest {
             judgments.add(judgment.itemId() + ":" + judgment.grade() + ":" + reverifyCount);
             askedQuestions.add(askedQuestion);
             questionSources.add(questionSource);
+        }
+
+        @Override
+        public void appendMismatch(String sessionId,
+                com.sphinxfin.sphinx.domain.SuitabilityMismatch mismatch,
+                String surveySchemaVersion, java.util.Map<String, Object> surveyResult,
+                Instant at) {
+            mismatches.add(mismatch);
         }
 
         @Override
