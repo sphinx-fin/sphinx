@@ -258,3 +258,31 @@ def test_healthz_shows_where_data_comes_from():
     body = TestClient(app).get("/healthz").json()
     assert body["data_dir_env"] == "SPHINX_DATA_DIR"
     assert body["misconception_library_version"] >= 1
+
+
+# ── product_document 근거 종류 (이슈 #148) ───────────────────────────────────
+def test_product_document_is_an_accepted_source_type():
+    """상품문서 조항 자신이 근거인 유형을 넣을 칸. 정세현 요청(이슈 #148)."""
+    assert "product_document" in misconception.SOURCE_TYPES
+
+
+def test_product_document_is_citable_but_not_dispute_grounded():
+    """인용은 되지만 조정례와 같은 층은 아니다.
+
+    기획서 5절이 말하는 근거는 조정례·검사결과다. 심사에서 *"분쟁까지 간 오해만 들어간다"* 를
+    주장할 때 셀 수 있는 것은 `is_dispute_grounded` 가 참인 것뿐이므로, 여기에 새 값을 넣으면
+    그 주장이 넓어진다(이슈 #148 — 정세현도 그대로 두는 게 맞다고 했다).
+    """
+    from app.misconception import SourceRef
+
+    ref = SourceRef(type="product_document", ref="parsed_els_sample.json p14 560~579")
+    assert ref.is_citable
+    assert not ref.is_dispute_grounded
+
+
+def test_product_document_passes_the_loader_contract():
+    """`_parse_source()` 가 알 수 없는 type 을 로딩 시점에 터뜨린다 — 새 값이 통과해야 한다."""
+    parsed = misconception._parse_source(
+        {"id": "M99", "source": {"type": "product_document", "ref": "원문 p14"}}
+    )
+    assert parsed.type == "product_document"
