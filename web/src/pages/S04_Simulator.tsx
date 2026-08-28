@@ -37,7 +37,6 @@ import { ApiRequestError, get, post } from "../api/client";
 import type {
   PathMeta,
   RiskItem,
-  SessionResponse,
   SimulateRequest,
   SimulateResponse,
 } from "../api/types";
@@ -67,13 +66,16 @@ export default function S04Simulator() {
 
   const cardRefs = useRef(new Map<string, HTMLElement>());
 
-  /* ── E-SIM-01: 조건 불완전 여부 확인 ─────────────────────────────────────── */
+  /* ── E-SIM-01: 조건 불완전 여부 확인 ──────────────────────────────────────
+     항목을 **세션 경유**로 받는다(#164, 이슈 #158 1항). 카탈로그 경로는
+     `product:read`(scope org)라 고객에게 열면 무관한 상품까지 전부 열거된다 — 여기는
+     대상이 세션이라 범위가 own_session 이다. productId 하나 때문에 부르던 세션 조회도
+     같이 지웠다(왕복 2회 → 1회). */
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const session = await get<SessionResponse>(`/sessions/${sid}`);
-        const res = await get<{ items: RiskItem[] }>(`/products/${session.productId}/risk-items`);
+        const res = await get<{ items: RiskItem[] }>(`/sessions/${sid}/risk-items`);
         if (!alive) return;
         const failed = (res.items ?? []).filter((i) => i.status === "extraction_failed");
         if (failed.length > 0) {
