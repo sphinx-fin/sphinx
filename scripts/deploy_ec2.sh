@@ -88,7 +88,17 @@ echo "상태:"
 docker compose ps
 echo
 echo "확인:"
-echo "  curl -fsS http://localhost/            # 화면"
+# `#162` 로 nginx 가 사이트 전체에 auth_basic 을 건 뒤로 자격증명 없는 GET / 는 401 이다.
+# 예전 문구(`curl -fsS`)는 -f 때문에 비영점으로 죽었고, 붙여 넣은 사람이 **정상 동작을
+# 배포 실패로 읽는다** — 그 시점이 리허설 직전이다.
+#
+# -u 로 자격증명을 넣는 쪽은 안 쓴다. 셸 히스토리와 ps 에 남아 `#162` 가 값을 파일·환경변수
+# 로만 다루기로 한 것과 어긋난다. 그리고 상태코드를 그냥 찍는 편이 **더 많이 잡는다** —
+# 401 이 나오는 것 자체가 성공 신호라, 200 이 나오면 auth_basic 이 빠진 것이다.
+echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
 echo "  docker compose logs -f server          # 기동 로그"
 echo
-echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 ①③ 이 되살아난다."
+echo "화면까지 보려면 (값은 히스토리에 안 남는다):"
+echo "  curl -sS -o /dev/null -w '%{http_code}\n' -u \"\$SPHINX_API_USER:\$SPHINX_API_PASSWORD\" http://localhost/   # 200"
+echo
+echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 의 1·3항(permitAll · ai-service 무인증)이 되살아난다."
