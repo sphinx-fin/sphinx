@@ -412,19 +412,71 @@ def _failed_item(
     template_item: templates.TemplateItem, product_id: str,
     warnings: list[ExtractionWarning],
 ) -> RiskItem:
-    """E-EXT-03 — 실패를 은폐하지 않는다. 조건이 비어도 스키마는 값을 요구하므로
-    빈 스팬과 사유 문면을 넣고 status 로 구분한다."""
+    """E-EXT-03 — 실패를 은폐하지 않는다. **계약이 정한 모양으로** 낸다.
+
+    ## 가짜 `Condition` 을 만들지 않는다 (결정로그 10.31 의 잔여분)
+
+    이전에는 `condition` 이 required 라고 보고 사유 문면과 빈 스팬을 넣었다. 계약(`#77`)이
+    그걸 고쳤는데 **ai-service 반영이 반만 됐다** — `_minimal()` 만 고쳤고 여기는 그대로였다.
+    실측으로 추출 실패 13건 전부가 계약 위반이었다.
+
+        {"status": "extraction_failed",
+         "condition": {"value_text": "(추출 실패 — …)",
+                       "source_span": {"page": 1, "start": 0, "end": 0}}}
+          → jsonschema: is not of type 'null'
+
+    세 가지가 동시에 걸렸다.
+
+      · `value_text` 는 계약이 *"원문 인용만 허용 (P6)"* 로 못박은 자리인데 **문서에 없는
+        문장**이 들어갔다. 화면이 그것을 원문으로 표시한다
+      · `source_span {1,0,0}` 은 `text[0:0]` 인 빈 슬라이스를 가리킨다 — 이 파일이 계약
+        항등식으로 지키려는 것을 스스로 깬다. `reexplain._minimal` 이 폴백에서 막은 모양이다
+      · 사람이 읽을 사유가 갈 곳이 없어 `ExtractionWarning.message` 에만 남았다.
+        `failure_reason` 이 계약에 있는데 안 썼다
+
+    계약은 `status != "extracted"` 일 때 `condition: null` 을 `allOf/if/then/else` 로
+    **강제**한다. 그대로 낸다.
+
+    ## `failure_reason` 은 경고에서 만든다
+
+    문면을 따로 쓰면 같은 사실이 두 곳에 생기고 갈린다. 이 항목에 붙은 경고가 이미 왜
+    실패했는지를 말하고 있으므로 그것을 모아 쓴다 — `SPAN_UNRESOLVED` 처럼 원인이 더 구체적인
+    경고가 있으면 그것이 사유가 된다.
+    """
     return RiskItem(
         item_id=template_item.item_id,
         product_id=product_id,
         name=template_item.name,
         importance=_importance(template_item, warnings),
         status="extraction_failed",
-        condition=Condition(
-            value_text="(추출 실패 — 문서에서 해당 조건을 찾지 못했다)",
-            source_span=SourceSpan(page=1, start=0, end=0),
-        ),
+        condition=None,
+        failure_reason=_failure_reason(template_item.item_id, warnings),
     )
+
+
+#: `failure_reason` 이 이보다 길면 자른다. 사람이 화면에서 읽는 한 줄이고, 경고를 여러 개
+#: 이어붙이면 길어질 수 있다. 전체는 `warnings` 에 그대로 남는다.
+MAX_FAILURE_REASON_CHARS = 300
+
+
+def _failure_reason(item_id: str, warnings: list[ExtractionWarning]) -> str:
+    """이 항목의 경고에서 사람이 읽을 사유를 만든다.
+
+    `ITEM_NOT_FOUND` 는 *"문서에서 찾지 못했다"* 뿐이라 원인이 더 구체적인 경고가 있으면
+    그쪽을 앞세운다 — 인용은 받았는데 스팬을 못 풀었는지(`SPAN_UNRESOLVED`), 좁히기를
+    거부했는지(`NARROWING_REFUSED`), cue 판별을 걸 수 없었는지(`CUE_UNINFORMATIVE`)가
+    사람이 할 일을 가른다.
+
+    항목별 경고가 아닌 것(`IMPORTANCE_PLACEHOLDER` 는 `item_id` 가 없다)은 사유가 아니므로
+    빠진다 — `item_id` 일치로 걸러진다.
+    """
+    mine = [w for w in warnings if w.item_id == item_id]
+    specific = [w.message for w in mine if w.code != "ITEM_NOT_FOUND"]
+    generic = [w.message for w in mine if w.code == "ITEM_NOT_FOUND"]
+    reason = " · ".join(specific + generic) or "문서에서 해당 조건을 찾지 못했다"
+    if len(reason) > MAX_FAILURE_REASON_CHARS:
+        reason = reason[:MAX_FAILURE_REASON_CHARS - 1] + "…"
+    return reason
 
 
 def _importance(template_item: templates.TemplateItem, warnings: list[ExtractionWarning]) -> str:

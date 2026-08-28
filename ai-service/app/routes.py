@@ -20,6 +20,7 @@ from . import (extraction, misconception, mismatch, question_gen, reexplain, rub
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
+    ConditionNotExtracted,
     ExtractRequest,
     ExtractResponse,
     Judgment,
@@ -90,6 +91,10 @@ def extract(body: ExtractRequest) -> ExtractResponse:
 def question(body: QuestionRequest) -> QuestionResponse:
     try:
         return question_gen.generate(body.risk_item, body.asked_types, body.product_type)
+    except ConditionNotExtracted as exc:
+        # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 500 이 아니라
+        # 422 로 낸다 — 그 항목으로는 물을 것도 잴 것도 없다는 사실을 알린다 (이슈 #165 후속).
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except templates.TemplateNotFound as exc:
         # 템플릿 밖 항목은 인터뷰 대상이 아니다 — 500 이 아니라 422다
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -108,6 +113,10 @@ def score(body: ScoreRequest) -> Judgment:
         return scoring.score(
             body.item_id, body.question, body.answer_text, body.risk_item, body.product_type
         )
+    except ConditionNotExtracted as exc:
+        # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 500 이 아니라
+        # 422 로 낸다 — 그 항목으로는 물을 것도 잴 것도 없다는 사실을 알린다 (이슈 #165 후속).
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except rubrics.RubricNotFound as exc:
         # 루브릭이 없는 항목은 채점하지 않는다 — 근거 없는 판정은 무효다 (P4)
         raise HTTPException(status_code=422, detail=f"루브릭 없음: {body.item_id}") from exc
