@@ -185,7 +185,7 @@ export default function S08Dashboard() {
                         key={it}
                         className="s08__cell"
                         // 명도만으로 강도를 낸다 — 판정 3색을 여기서 쓰면 집계가 판정처럼 보인다.
-                        style={{ background: `color-mix(in srgb, var(--kohl-70) ${pct}%, var(--surface))` }}
+                        style={{ background: `color-mix(in srgb, var(--gray-800) ${pct}%, var(--surface))` }}
                       >
                         <span className={pct >= 55 ? "s08__pct s08__pct--strong" : "s08__pct"}>{pct}%</span>
                         <span className="s08__n">n={c.n}</span>

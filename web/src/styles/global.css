@@ -54,7 +54,7 @@ body {
   /* 기본 본문 = 타입 스케일의 Body 1 / Normal */
   font-size: calc(16px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em;
+  letter-spacing: -0.003em;
 
   -webkit-font-smoothing: antialiased;
   word-break: keep-all;   /* 한글 단어 중간 줄바꿈 방지 */
@@ -64,10 +64,19 @@ h1, h2, h3, p, figure { margin: 0; }
 
 button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
 
-/* 포커스는 절대 지우지 않는다 — 창구 태블릿·키보드 사용자 */
+/* 포커스는 절대 지우지 않는다 — 창구 태블릿·키보드 사용자.
+   윤곽선 2px + 바깥 링. 링만 두면 흰 배경 위에서 옅어 안 보이고, 윤곽선만 두면
+   각져 보인다. 둘을 겹쳐야 이 문법에서 자연스러우면서 대비도 남는다. */
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 누를 때 회색 사각형이 번쩍이면 앱이 아니라 웹페이지로 보인다. 대신 각 컴포넌트가
+   :active 에서 스스로 눌리는 모션을 준다. */
+button, a, [role="button"], [role="radio"], label {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* 스크린리더 전용 */
@@ -81,9 +90,41 @@ button, input, textarea, select { font: inherit; color: inherit; letter-spacing:
   border: 0;
 }
 
+/* ── 모션 프리미티브 ────────────────────────────────────────────────────────
+ *
+ * 화면마다 keyframes 를 새로 만들면 같은 동작이 화면마다 미세하게 달라진다. 여기 셋만
+ * 두고 각 화면이 지속시간만 고른다.
+ *
+ *   ui-rise    아래에서 살짝 올라오며 나타난다 — 카드·목록·화면 진입
+ *   ui-fade    투명도만 — 덮개·배경
+ *   ui-sheet   바닥에서 올라오는 시트
+ */
+@keyframes ui-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ui-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes ui-sheet {
+  from { transform: translateY(100%); }
+  to   { transform: none; }
+}
+
+/* 화면 전환 — 라우트가 바뀌면 <main> 이 새로 마운트되므로 여기 한 줄이면 전 화면에
+   같은 진입 모션이 걸린다. 화면마다 붙이면 빠뜨린 화면만 툭 튀어나온다. */
+main {
+  animation: ui-rise var(--dur) var(--ease) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+  /* 모션을 끄는 것이지 상태를 지우는 것이 아니다 — 눌림·선택은 색으로 계속 보인다. */
+  *:active { transform: none !important; }
 }

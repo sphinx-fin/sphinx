@@ -18,9 +18,9 @@
 
 .s06__head h1,
 .s06 > h1 {
-  font-size: calc(36px * var(--scale));
-  line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.027em;
+  font-size: calc(30px * var(--scale));
+  line-height: calc(1.34 * var(--leading-scale));
+  letter-spacing: -0.03em;
   font-weight: 700;
 }
 .s06__sid { margin-top: var(--space-2); color: var(--text-muted); font-size: calc(14px * var(--scale)); }
@@ -29,7 +29,7 @@
 .s06__error {
   background: var(--red-bg);
   color: var(--red);
-  border: 1px solid var(--red);
+  border: 0;
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
   line-height: calc(1.55 * var(--leading-scale));
@@ -39,16 +39,17 @@
    적색 판정 자체가 아니라 **오버라이드 진행 상태**다. 그래서 판정 3색을 쓰지 않는다 —
    여기에 적색을 쓰면 "승인됨"이 적색으로 보이는 모순이 생긴다. */
 .s06__state {
-  border: 1px solid var(--border);
+  border: 0;
+  box-shadow: var(--shadow-1);
   border-left-width: 5px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
   background: var(--surface);
   font-size: calc(16px * var(--scale));
 }
 .s06__state--none             { border-left-color: var(--border-strong); }
 .s06__state--pending-approval { border-left-color: var(--accent); background: var(--surface); }
-.s06__state--approved         { border-left-color: var(--kohl-70); }
+.s06__state--approved         { border-left-color: var(--gray-800); }
 
 /* ── 공통 ─────────────────────────────────────────────────────────────────── */
 .s06__request h2,
@@ -60,7 +61,7 @@
 
 .s06__warn {
   background: var(--yellow-bg);
-  border: 1px solid var(--yellow);
+  border: 0;
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
   font-size: calc(14px * var(--scale));
@@ -82,13 +83,14 @@
   font-size: calc(15px * var(--scale));
   line-height: calc(1.6 * var(--leading-scale));
   padding: var(--space-3);
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  background: var(--surface);
   color: var(--text);
   resize: vertical;
+  border: 1px solid transparent;
+  background: var(--surface-sunken);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
-.s06__textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
 
 .s06__counter {
   margin: var(--space-2) 0 var(--space-4);
@@ -131,10 +133,13 @@
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
+  min-height: var(--control-h);
+  font-weight: 700;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
+.s06__btn:active:not(:disabled) { transform: scale(0.98); }
 .s06__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s06__btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.s06__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.s06__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
 
 .s06__btn--primary {
   background: var(--accent);
@@ -144,3 +149,10 @@
 .s06__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .s06__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
 .s06__btn--quiet:hover:not(:disabled) { background: var(--surface-sunken); }
+
+.s06__textarea:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}

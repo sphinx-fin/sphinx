@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--space-5) var(--space-4) var(--space-8);
+  padding: var(--space-6) var(--space-4) var(--space-8);
 }
 
 .iv__shell { width: 100%; max-width: 46rem; }
@@ -29,60 +29,71 @@
 
 .iv__bar {
   height: calc(8px * var(--scale));
-  border-radius: 999px;
-  background: var(--surface-sunken);
+  border-radius: var(--radius-pill);
+  background: var(--border);
   overflow: hidden;
 }
+/* 진행이 "차오르는" 것이 보여야 한다 — 값이 튀면 답변이 반영된 줄 모른다. */
 .iv__bar-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
-  transition: width 240ms ease;
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-sheet) var(--ease);
 }
 
 .iv__mode {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  min-height: var(--control-h-sm);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
   background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text-muted);
   cursor: pointer;
   font-size: calc(14px * var(--scale));
   line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em;
+  letter-spacing: -0.003em;
+  font-weight: 600;
   white-space: nowrap;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease),
+              color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
+.iv__mode:active { transform: scale(0.96); }
 .iv__mode[aria-pressed="true"] {
-  background: var(--accent);
+  background: var(--accent-bg);
   border-color: var(--accent);
-  color: var(--text-inverse);
+  color: var(--accent-hover);
+  box-shadow: none;
 }
 
 /* ── 대필 방지 안내 (F-INT-003) ───────────────────────────────────────────── */
+/* 대필 방지 안내는 경고가 아니라 안내다 — 옅은 강조 면으로 두고 색으로 소리치지 않는다. */
 .iv__notice {
   display: flex;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   margin-bottom: var(--space-4);
-  border: 1px solid var(--border);
-  border-left: calc(4px * var(--scale)) solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
   font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em;
-  color: var(--text-muted);
+  line-height: calc(1.5 * var(--leading-scale));
+  letter-spacing: -0.003em;
+  color: var(--accent-hover);
 }
 .iv__notice b { color: var(--text); }
 
 /* ── 질문 카드 ────────────────────────────────────────────────────────────── */
 .iv__card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-5);
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-6) var(--space-5);
+  animation: ui-rise var(--dur) var(--ease) both;
 }
 
 .iv__item-name {
@@ -94,12 +105,12 @@
   margin-bottom: var(--space-2);
 }
 
+/* 고객이 보는 화면에서 제일 큰 글자. 질문 하나에 화면 하나가 이 문법의 기본이다. */
 .iv__question {
-  font-size: calc(24px * var(--scale));
-  line-height: calc(1.334 * var(--leading-scale));
-  letter-spacing: -0.023em;
+  font-size: calc(26px * var(--scale));
+  letter-spacing: -0.028em;
   font-weight: 700;
-  line-height: 1.45;
+  line-height: calc(1.42 * var(--leading-scale));
   margin-bottom: var(--space-5);
 }
 
@@ -109,15 +120,25 @@
   width: 100%;
   min-height: calc(9rem * var(--scale));
   padding: var(--space-4);
-  border: 2px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+  color: var(--text);
   font-size: calc(20px * var(--scale));
-  line-height: calc(1.4 * var(--leading-scale));
+  line-height: calc(1.45 * var(--leading-scale));
   letter-spacing: -0.012em;
   resize: vertical;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
 }
-.iv__textarea:disabled { background: var(--surface-sunken); }
+.iv__textarea::placeholder { color: var(--text-subtle); }
+.iv__textarea:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.iv__textarea:disabled { background: var(--surface-sunken); color: var(--text-subtle); }
 
 .iv__meta-row {
   display: flex;
@@ -132,43 +153,50 @@
 
 /* ── 안내/경고 배너 ───────────────────────────────────────────────────────── */
 .iv__alert {
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  letter-spacing: 0.0145em;
-  border: 1px solid transparent;
+  line-height: calc(1.5 * var(--leading-scale));
+  letter-spacing: -0.003em;
+  border: 0;
+  animation: ui-rise var(--dur) var(--ease) both;
 }
-.iv__alert--warn { background: var(--yellow-bg); border-color: var(--yellow); color: var(--yellow); }
-.iv__alert--error { background: var(--red-bg); border-color: var(--red); color: var(--red); }
-.iv__alert--info { background: var(--surface-sunken); border-color: var(--border); color: var(--text-muted); }
+.iv__alert--warn { background: var(--yellow-bg); color: var(--yellow); }
+.iv__alert--error { background: var(--red-bg); color: var(--red); }
+.iv__alert--info { background: var(--surface-sunken); color: var(--text-muted); }
 .iv__alert b { display: block; margin-bottom: var(--space-1); }
 
 /* ── 버튼 ─────────────────────────────────────────────────────────────────── */
+/* 고객 화면의 주 동작은 전폭이다 — 다음에 할 일이 하나뿐이라는 것을 배치가 말한다.
+   보조 동작이 같이 있을 때만 나란히 둔다. */
 .iv__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-5);
 }
+.iv__actions > .iv__btn { flex: 1 1 12rem; }
 
 .iv__btn {
+  min-height: var(--control-h);
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius);
   border: 1px solid transparent;
-  font-size: calc(16px * var(--scale));
+  font-size: calc(17px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
-  letter-spacing: 0.0057em;
-  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-weight: 700;
   cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
-.iv__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.iv__btn:active:not(:disabled) { transform: scale(0.98); }
+.iv__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
 
 .iv__btn--primary { background: var(--accent); color: var(--text-inverse); }
 .iv__btn--primary:not(:disabled):hover { background: var(--accent-hover); }
 
-.iv__btn--ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
-.iv__btn--ghost:not(:disabled):hover { background: var(--surface-sunken); }
+.iv__btn--ghost { background: var(--surface-sunken); border-color: transparent; color: var(--text-muted); }
+.iv__btn--ghost:not(:disabled):hover { background: var(--border); }
 
 .iv__state {
   text-align: center;
