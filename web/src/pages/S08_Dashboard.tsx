@@ -5,9 +5,13 @@
  * ── 이 화면은 세 가지를 "보이게" 하려고 있다 ────────────────────────────────
  *
  * ① **합성 데이터임을 숨기지 않는다** (F-DSH-003 연출 금지)
- *    `synthetic: true` 면 워터마크를 **상시** 노출한다. 접거나 각주로 내리지 않는다 —
+ *    `synthetic: true` 면 표식을 **상시** 노출한다. 접거나 각주로 내리지 않는다 —
  *    심사에서 "이 수치 진짜인가"가 나왔을 때 화면이 먼저 답하고 있어야 한다.
- *    실데이터로 바뀌면 워터마크가 저절로 사라진다(값으로 판단하므로).
+ *    실데이터로 바뀌면 표식이 저절로 사라진다(값으로 판단하므로).
+ *
+ *    문장("합성 세션 기반 — 실제 고객 데이터가 아닙니다")이었던 것을 **칩 한 개**로
+ *    줄였다. 대시보드는 수치를 읽는 곳이라 설명 문장이 값을 밀어낸다. 요건은 "노출"
+ *    이지 "문장"이 아니므로 표식으로 만족한다 — 뜻은 ⓘ 에 붙어 있다.
  *
  * ② **가려진 셀과 데이터 없는 셀을 구분한다** (소표본 마스킹)
  *    계약이 소표본(n<30) 셀을 **제거하지 않고** `masked: true` + `misrate: null` 로
@@ -34,7 +38,7 @@
  * `scope`(branch·org)를 헤더에 박는다. 무엇을 보고 있는지가 안 보이면 MGR 이 자기 지점
  * 수치를 전사 수치로 착각한다 — 집계 축(`groupBy`)과 다른 개념이라 특히 헷갈린다.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
 import type { HeatmapCell, HeatmapResponse, ProductSummary } from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
@@ -69,6 +73,36 @@ export default function S08Dashboard() {
   /** 집계는 상품 id 만 준다. 이름은 이미 있는 `/products` 로 푼다 — 새 계약이 필요 없다.
       못 풀면 id 를 그대로 보여준다(합성·구 상품이면 목록에 없을 수 있다). */
   const [names, setNames] = useState<Record<string, string>>({});
+  /**
+   * 툴팁 하나를 화면 좌표로 띄운다.
+   *
+   * ❗카드 안에 `position:absolute` 로 두면 **가려진다.** 두 가지가 겹쳐서다 —
+   *   ① 카드마다 `animation` 이 걸려 있어 각 카드가 **스태킹 컨텍스트**가 된다.
+   *      그러면 카드 안의 z-index 가 카드 밖으로 못 나가고, DOM 뒤에 오는 카드가
+   *      앞 카드의 툴팁을 덮는다.
+   *   ② 표는 `overflow-x: auto` 라 칸 툴팁이 그 상자에서 **잘린다.**
+   * 그래서 위치를 트리거의 화면 좌표에서 계산해 `position: fixed` 로 띄운다 —
+   * 어떤 상자에도 안 갇힌다.
+   */
+  const [tip, setTip] = useState<
+    { x: number; y: number; below: boolean; node: ReactNode } | null
+  >(null);
+
+  const showTip = useCallback((el: HTMLElement | null, node: ReactNode) => {
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // 표 맨 윗줄·첫 타일은 위로 띄우면 화면 밖으로 나간다. 자리가 없으면 아래로 뒤집는다.
+    const below = r.top < 140;
+    setTip({ x: r.left + r.width / 2, y: below ? r.bottom : r.top, below, node });
+  }, []);
+  const hideTip = useCallback(() => setTip(null), []);
+
+  /* 스크롤하면 `fixed` 툴팁만 제자리에 남아 트리거와 떨어진다 — 그냥 닫는다. */
+  useEffect(() => {
+    if (!tip) return;
+    window.addEventListener("scroll", hideTip, true);
+    return () => window.removeEventListener("scroll", hideTip, true);
+  }, [tip, hideTip]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,7 +201,7 @@ export default function S08Dashboard() {
   if (blocked) {
     return (
       <main className="s08">
-        <h1>오해 지도</h1>
+        <h1>대시보드</h1>
         <section className="s08__blocked">
           <h2>이 역할에는 집계가 열리지 않습니다</h2>
           <p>
@@ -188,18 +222,14 @@ export default function S08Dashboard() {
     <main className="s08">
       <header className="s08__head">
         <div>
-          <h1>오해 지도</h1>
-          <p className="s08__scope">
-            데이터 범위 <strong>{data ? SCOPE_LABEL[data.scope] : "—"}</strong>
-            <span className="s08__scope-note"> · 요청자 역할이 정합니다</span>
+          <h1>대시보드</h1>
+          {/* 범위와 합성 여부는 문장이 아니라 **표식**으로 남긴다. 둘 다 명세가 요구하는
+              것이라(F-DSH-001 표시 · 연출 금지) 지우지 않고 최소 형태로 줄였다. */}
+          <p className="s08__tags">
+            <span className="s08__tag">{data ? SCOPE_LABEL[data.scope] : "—"}</span>
+            {data?.synthetic && <span className="s08__tag s08__tag--synth">합성</span>}
           </p>
         </div>
-        {/* 설계 판단 ① — 상시 노출. 접지 않는다. */}
-        {data?.synthetic && (
-          <p className="s08__watermark" role="note">
-            합성 세션 기반 — 실제 고객 데이터가 아닙니다
-          </p>
-        )}
       </header>
 
       {error && <p className="s08__error" role="alert">{error}</p>}
@@ -240,6 +270,7 @@ export default function S08Dashboard() {
           "이게 무슨 비율인가" 는 ⓘ 에 붙여 둔다(마우스 hover · 키보드 포커스 둘 다). */}
       <section className="s08__kpis" aria-label="요약">
         <Kpi
+          show={showTip} hide={hideTip}
           label="오해율"
           value={stats.weighted == null ? "—" : `${Math.round(stats.weighted * 100)}%`}
           sub={stats.nShown ? `표본 ${stats.nShown.toLocaleString()}건` : "표본 부족"}
@@ -249,6 +280,7 @@ export default function S08Dashboard() {
                "부분이해·미이해는 이 수치에 들어가지 않습니다."}
         />
         <Kpi
+          show={showTip} hide={hideTip}
           label="표본"
           value={stats.nAll.toLocaleString()}
           sub={`판정 ${stats.cellCount}칸`}
@@ -256,6 +288,7 @@ export default function S08Dashboard() {
           tip="필터를 통과한 세션의 항목별 판정 건수 합계입니다. 개인은 식별되지 않습니다."
         />
         <Kpi
+          show={showTip} hide={hideTip}
           label="가려진 칸"
           value={String(stats.maskedCells)}
           sub="표본 30건 미만"
@@ -264,6 +297,7 @@ export default function S08Dashboard() {
                "칸을 지우지는 않습니다 — 가려졌다는 사실 자체가 마스킹이 동작한 증거입니다."}
         />
         <Kpi
+          show={showTip} hide={hideTip}
           label="최다 오해 항목"
           value={ranked[0] ? `${Math.round(ranked[0].rate * 100)}%` : "—"}
           sub={ranked[0]?.item ?? "값이 있는 칸 없음"}
@@ -322,7 +356,29 @@ export default function S08Dashboard() {
                     if (c.masked) {
                       // 가려짐 — 빈칸으로 두지 않는다. 마스킹이 동작한 증거다.
                       return (
-                        <td key={it} className="s08__cell s08__cell--masked">
+                        <td
+                          key={it}
+                          className="s08__cell s08__cell--masked"
+                          tabIndex={0}
+                          onMouseEnter={(e) => showTip(e.currentTarget, (
+                            <>
+                              <b>{names[p] ?? p}</b>{it}
+                              <span className="s08__tip-val">
+                                표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
+                              </span>
+                            </>
+                          ))}
+                          onMouseLeave={hideTip}
+                          onFocus={(e) => showTip(e.currentTarget, (
+                            <>
+                              <b>{names[p] ?? p}</b>{it}
+                              <span className="s08__tip-val">
+                                표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
+                              </span>
+                            </>
+                          ))}
+                          onBlur={hideTip}
+                        >
                           <span className="s08__masked-label">가려짐</span>
                           <span className="s08__n">{c.n}건</span>
                           <span className="sr-only">
@@ -337,6 +393,20 @@ export default function S08Dashboard() {
                         key={it}
                         className="s08__cell s08__cell--data"
                         tabIndex={0}
+                        onMouseEnter={(e) => showTip(e.currentTarget, (
+                          <>
+                            <b>{names[p] ?? p}</b>{it}
+                            <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
+                          </>
+                        ))}
+                        onMouseLeave={hideTip}
+                        onFocus={(e) => showTip(e.currentTarget, (
+                          <>
+                            <b>{names[p] ?? p}</b>{it}
+                            <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
+                          </>
+                        ))}
+                        onBlur={hideTip}
                         // 명도만으로 강도를 낸다 — 판정 3색을 여기서 쓰면 집계가 판정처럼 보인다.
                         //
                         // ❗잉크는 INK_MAX 까지만 쓴다. 100% 까지 칠하면 진한 칸에서 글자를
@@ -347,12 +417,6 @@ export default function S08Dashboard() {
                       >
                         <span className="s08__pct">{pct}%</span>
                         <span className="s08__n">{c.n}건 중</span>
-                        {/* hover·포커스에서만 뜨는 상세. 표에는 수치만 남긴다. */}
-                        <span className="s08__cell-tip" role="tooltip">
-                          <b>{names[p] ?? p}</b>
-                          {it}
-                          <span className="s08__cell-tip-val">오해율 {pct}% · 표본 {c.n}건</span>
-                        </span>
                         <span className="sr-only">
                             {c.n}건 중 {pct}퍼센트가 이 항목을 오해로 판정받았습니다
                         </span>
@@ -367,20 +431,17 @@ export default function S08Dashboard() {
         </section>
       )}
 
-      <section className="s08__legend">
-        {/* 문장으로만 적어 두면 표를 보는 사람이 농도를 눈대중한다. 눈금을 같이 둔다. */}
-        <div className="s08__scale">
-          <span className="s08__scale-end">0%</span>
-          <span className="s08__scale-bar" aria-hidden="true" />
-          <span className="s08__scale-end">100%</span>
+      {/* 화면 좌표에 뜨는 단 하나의 툴팁. `position: fixed` 라 카드의 스태킹 컨텍스트도,
+          표의 overflow 도 통과한다. 트리거가 여럿이어도 실체는 하나다. */}
+      {tip && (
+        <div
+          className={`s08__floattip ${tip.below ? "s08__floattip--below" : ""}`}
+          role="presentation"
+          style={{ left: tip.x, top: tip.y }}
+        >
+          {tip.node}
         </div>
-        <ul className="s08__keys">
-          <li><span className="s08__key s08__key--masked">가려짐</span>
-            표본 30건 미만이라 개인이 역추정되지 않도록 값을 감춘 셀입니다.</li>
-          <li><span className="s08__key s08__key--absent">—</span>
-            그 조합의 판정이 아직 없습니다. <strong>가려진 것과 다릅니다.</strong></li>
-        </ul>
-      </section>
+      )}
     </main>
   );
 }
@@ -391,18 +452,29 @@ export default function S08Dashboard() {
  * 정의·주의는 ⓘ 에 붙인다. hover 와 **키보드 포커스** 둘 다에서 열려야 해서 버튼이고,
  * `aria-describedby` 로 묶어 스크린리더에서는 열지 않아도 읽힌다.
  */
-function Kpi({ label, value, sub, tip, tipId }: {
+function Kpi({ label, value, sub, tip, tipId, show, hide }: {
   label: string; value: string; sub: string; tip: string; tipId: string;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
 }) {
   return (
     <article className="s08__kpi">
       <p className="s08__kpi-label">
         {label}
-        <button type="button" className="s08__info" aria-describedby={tipId}>
+        <button
+          type="button"
+          className="s08__info"
+          aria-describedby={tipId}
+          onMouseEnter={(e) => show(e.currentTarget, tip)}
+          onMouseLeave={hide}
+          onFocus={(e) => show(e.currentTarget, tip)}
+          onBlur={hide}
+        >
           <span aria-hidden="true">i</span>
           <span className="sr-only">{label} 설명</span>
         </button>
-        <span role="tooltip" id={tipId} className="s08__tooltip">{tip}</span>
+        {/* 눈에 보이는 툴팁은 화면 좌표로 따로 뜬다(가려짐 방지). 이건 스크린리더용 —
+            `aria-describedby` 가 가리키는 실체라 hover 없이도 읽힌다. */}
+        <span id={tipId} className="sr-only">{tip}</span>
       </p>
       <p className="s08__kpi-value">{value}</p>
       <p className="s08__kpi-sub">{sub}</p>
