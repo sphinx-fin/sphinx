@@ -67,14 +67,6 @@ public class SessionController {
     }
 
     /**
-     * S-05 판정 결과 화면 입력 — 세션에 쌓인 항목별 판정 목록.
-     * S-03(고객 화면)과 S-05(판매자 화면)는 다른 기기·다른 탭이라 화면이 메모리에 들고
-     * 갈 수 없다. 새로고침에도 살아남아야 한다.
-     *
-     * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
-     * grade → 색 매핑은 표시 관례이며 판정이 아니다.
-     */
-    /**
      * 이 세션이 검증할 이해항목 — <b>고객 화면(S-03·S-04)이 받는 경로</b>다 (이슈 #158).
      *
      * <h2>왜 카탈로그 경로를 안 쓰는가</h2>
@@ -99,12 +91,22 @@ public class SessionController {
     public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String sid) {
         Session session = sessionService.get(sid);   // 없는 세션이면 404
         // TODO(강희진): 추출(F-EXT-002)이 붙으면 session.productId() 로 실제 항목을 읽는다.
+        //   그때 이 라우트와 카탈로그 라우트의 목록이 갈린다 — 여기는 "이 세션이 검증할 항목",
+        //   저기는 "상품의 전체 항목"이다. SessionRiskItemsTest 의 카탈로그 대조도 같이 지운다.
         //   지금은 목이지만 **세션을 실제로 조회한 뒤** 낸다 — 그래야 없는 세션과 남의 세션이
         //   여기서 걸린다. 목을 그냥 돌려주면 @PreAuthorize 만 남고 404 가 사라진다.
         log.debug("세션 {} (상품 {}) 의 이해항목을 낸다", session.id(), session.productId());
         return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
     }
 
+    /**
+     * S-05 판정 결과 화면 입력 — 세션에 쌓인 항목별 판정 목록.
+     * S-03(고객 화면)과 S-05(판매자 화면)는 다른 기기·다른 탭이라 화면이 메모리에 들고
+     * 갈 수 없다. 새로고침에도 살아남아야 한다.
+     *
+     * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
+     * grade → 색 매핑은 표시 관례이며 판정이 아니다.
+     */
     @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {

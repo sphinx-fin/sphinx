@@ -53,8 +53,14 @@ class SessionRiskItemsTest {
         assertThat(items)
                 .as("항목이 비면 S-03 이 물어볼 것을 못 받는다")
                 .isNotEmpty();
+        // ❗이 대조는 **화면이 옮겨가는 동안만** 맞다. 지금 두 라우트가 같은
+        //   MockData.RISK_ITEMS 를 내므로 목록이 갈리면 그게 회귀다.
+        //   F-EXT-002(추출)가 붙으면 세션 경유는 "이 세션이 검증할 항목", 카탈로그는
+        //   "상품의 전체 항목"이라 **같을 이유가 없어진다.** 그때 이 단정을 지운다 —
+        //   안 지우면 다음 사람이 정상적인 차이를 결함으로 읽는다 (#164 리뷰).
         assertThat(items).extracting(i -> i.get("itemId"))
-                .as("카탈로그 경로와 같은 목록이어야 화면이 옮겨갈 수 있다")
+                .as("카탈로그 경로와 같은 목록이어야 화면이 옮겨갈 수 있다 "
+                        + "(F-EXT-002 가 붙으면 이 단정을 지운다)")
                 .containsExactlyElementsOf(catalogItemIds());
     }
 
