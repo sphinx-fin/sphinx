@@ -158,10 +158,10 @@
   padding: var(--space-4) var(--space-5);
 }
 /* 등급이 낮을수록 왼쪽 테두리가 진해진다 — 색상이 아니라 명도다. 판정 3색과 섞이지 않는다. */
-.s05__item--u1 { border-left-color: var(--gray-300); }
-.s05__item--u2 { border-left-color: var(--gray-500); }
-.s05__item--u3 { border-left-color: var(--gray-600); }
-.s05__item--u4 { border-left-color: var(--gray-800); }
+.s05__item--u1 { border-left-color: var(--limestone-80); }
+.s05__item--u2 { border-left-color: var(--kohl-30); }
+.s05__item--u3 { border-left-color: var(--kohl-50); }
+.s05__item--u4 { border-left-color: var(--kohl-70); }
 
 .s05__item-head {
   display: flex;
@@ -244,7 +244,7 @@
 }
 .s05__btn:active:not(:disabled) { transform: scale(0.98); }
 .s05__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s05__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.s05__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 /* 강조는 "누를 수 있는 것"에만 쓴다 — 상태를 뜻하지 않는다(tokens.css 규칙 2). */
 .s05__btn--primary {

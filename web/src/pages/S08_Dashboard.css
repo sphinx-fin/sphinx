@@ -17,7 +17,7 @@
 .s08__head h1 { font-size: calc(30px * var(--scale)); line-height: calc(1.34 * var(--leading-scale));
   letter-spacing: -0.03em; font-weight: 700; }
 .s08__scope { margin-top: var(--space-2); font-size: calc(14px * var(--scale)); color: var(--text-muted); }
-.s08__scope-note { color: var(--gray-500); }
+.s08__scope-note { color: var(--kohl-30); }
 
 /* 상시 노출. 눈에 띄되 판정색은 아니다. */
 .s08__watermark {
@@ -71,7 +71,7 @@
 /* 배경이 진해지면 먹색 글자가 안 읽힌다. 임계 위에서만 반전한다. */
 .s08__pct--strong { color: var(--text-inverse); }
 .s08__n { display: block; font-size: calc(11px * var(--scale)); color: var(--text-muted); }
-.s08__pct--strong + .s08__n { color: var(--gray-200); }
+.s08__pct--strong + .s08__n { color: var(--limestone-88); }
 
 /* 가려짐 — 빗금으로 "값이 없는 게 아니라 가려졌다"를 시각적으로 말한다. */
 .s08__cell--masked {
@@ -80,7 +80,7 @@
 }
 .s08__masked-label { display: block; font-size: calc(12px * var(--scale)); font-weight: 700; color: var(--text-muted); }
 
-.s08__cell--absent { color: var(--gray-500); }
+.s08__cell--absent { color: var(--kohl-30); }
 
 .s08__empty { color: var(--text-muted); padding: var(--space-5); background: var(--surface-sunken); border-radius: var(--radius); }
 .s08__legend { font-size: calc(13px * var(--scale)); color: var(--text-muted); line-height: calc(1.6 * var(--leading-scale)); }

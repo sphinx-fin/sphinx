@@ -190,7 +190,7 @@
   transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
 .iv__btn:active:not(:disabled) { transform: scale(0.98); }
-.iv__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.iv__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .iv__btn--primary { background: var(--accent); color: var(--text-inverse); }
 .iv__btn--primary:not(:disabled):hover { background: var(--accent-hover); }

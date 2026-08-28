@@ -166,7 +166,7 @@
 }
 .s07__btn:active:not(:disabled) { transform: scale(0.98); }
 .s07__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s07__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.s07__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .s07__btn--primary {
   background: var(--accent);

@@ -149,7 +149,7 @@
   transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
 }
 .sm__btn:active:not(:disabled) { transform: scale(0.98); }
-.sm__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.sm__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .sm__state { text-align: center; padding: var(--space-8) var(--space-4); color: var(--text-muted); }
 .sm__pending { font-size: calc(14px * var(--scale));

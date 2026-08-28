@@ -72,7 +72,7 @@
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2); color: var(--text-muted); background: var(--surface);
 }
-.s01__importance--required { color: var(--text); border-color: var(--gray-600); }
+.s01__importance--required { color: var(--text); border-color: var(--kohl-50); }
 
 /* 원문 인용 — 가공하지 않는다(P6). 인용 표시를 시각적으로 분명히 한다. */
 .s01__quote {
@@ -81,7 +81,7 @@
   font-size: calc(15px * var(--scale)); line-height: calc(1.6 * var(--leading-scale));
 }
 .s01__span { margin-top: var(--space-2); font-size: calc(12px * var(--scale)); color: var(--text-muted); }
-.s01__span-note { color: var(--gray-500); }
+.s01__span-note { color: var(--kohl-30); }
 
 /* ── 버튼 ─────────────────────────────────────────────────────────────────── */
 .s01__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
@@ -95,7 +95,7 @@
 }
 .s01__btn:active:not(:disabled) { transform: scale(0.98); }
 .s01__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s01__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.s01__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 .s01__btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); margin-top: var(--space-4); }
 .s01__btn--primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .s01__btn--quiet { border-color: transparent; background: transparent; color: var(--text-muted); }

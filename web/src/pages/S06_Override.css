@@ -49,7 +49,7 @@
 }
 .s06__state--none             { border-left-color: var(--border-strong); }
 .s06__state--pending-approval { border-left-color: var(--accent); background: var(--surface); }
-.s06__state--approved         { border-left-color: var(--gray-800); }
+.s06__state--approved         { border-left-color: var(--kohl-70); }
 
 /* ── 공통 ─────────────────────────────────────────────────────────────────── */
 .s06__request h2,
@@ -139,7 +139,7 @@
 }
 .s06__btn:active:not(:disabled) { transform: scale(0.98); }
 .s06__btn:hover:not(:disabled) { background: var(--surface-sunken); }
-.s06__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.s06__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .s06__btn--primary {
   background: var(--accent);

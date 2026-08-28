@@ -91,14 +91,16 @@
 select.ss__control {
   appearance: none;
   padding-right: var(--space-8);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%238b95a1' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  /* ❗data URI 안에는 var() 가 안 들어간다 — 이 한 곳만 안료값(kohl-30 #998d78)을
+     직접 적는다. 팔레트를 바꾸면 여기도 같이 고쳐야 하므로 근거를 남긴다. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 8L10 12.5L14.5 8' stroke='%23998d78' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right var(--space-4) center;
 }
 
 .ss__hint { font-size: calc(13px * var(--scale));
   line-height: calc(1.45 * var(--leading-scale));
-  letter-spacing: -0.003em; color: var(--text-subtle); }
+  letter-spacing: -0.003em; color: var(--text-muted); }
 .ss__hint--block { margin-bottom: var(--space-1); }
 
 /* ── 선택지 (채널·설문 공용) ──────────────────────────────────────────────── */
@@ -175,7 +177,7 @@ select.ss__control {
 .ss__btn--ghost { background: var(--surface-sunken); border-color: transparent; color: var(--text-muted); }
 .ss__btn--ghost:hover:not(:disabled) { background: var(--border); }
 /* 비활성은 흐리게가 아니라 **회색 버튼**이다. 흐린 파랑은 "곧 눌리는 파랑"처럼 보인다. */
-.ss__btn:disabled { background: var(--gray-200); color: var(--text-subtle); cursor: not-allowed; }
+.ss__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 .ss__foot > .ss__btn { width: 100%; }
 
 /* ── 생성 완료 ────────────────────────────────────────────────────────────── */
@@ -234,7 +236,7 @@ select.ss__control {
 .ss__overlay {
   position: fixed;
   inset: 0;
-  background: rgba(25, 31, 40, 0.45);
+  background: var(--scrim);
   display: flex;
   align-items: flex-end;
   justify-content: center;
