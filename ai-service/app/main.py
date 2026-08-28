@@ -9,10 +9,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import misconception, routes, rubrics
-from .config import DATA_DIR_ENV, settings
+from .config import DATA_DIR_ENV, configure_logging, effective_log_level, settings
+
 from .pii import PiiDetected, assert_payload_clean
 
 log = logging.getLogger(__name__)
+
+# 엔트리포인트에서 한 번 켠다. lifespan 이 아니라 모듈 수준인 이유: `TestClient(app)` 을
+# context manager 로 쓰지 않으면 lifespan 이 돌지 않고, 그러면 테스트에서 관측이 꺼진다.
+configure_logging()
 
 # starlette 버전에 따라 상수명이 UNPROCESSABLE_ENTITY/CONTENT로 갈린다 — 리터럴로 고정
 HTTP_422 = 422
@@ -150,6 +155,8 @@ def healthz() -> dict:
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
+        "log_level": effective_log_level(),     # **적용된** 레벨. 요청값이 아니다 (#121 리뷰)
+        "log_level_requested": cfg.log_level,   # 환경변수 원본. 둘이 다르면 오타가 있었다
         "data_dir": str(cfg.data_dir),      # 어디서 오해 라이브러리를 읽는지 (10.7)
         "data_dir_env": DATA_DIR_ENV,
         "misconception_library_version": misconception.library_version(),
