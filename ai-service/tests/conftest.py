@@ -15,6 +15,7 @@
 출력이고, 실문서 텍스트를 합성 PDF로 되돌려 다시 파싱하는 건 아무것도 검증하지 않는다.
 """
 import json
+import logging
 import pathlib
 import sys
 
@@ -55,6 +56,56 @@ REAL_CASES = {
         "fetch": "생보협 공시실에서 수동 취득 — python3 scripts/fetch_documents.py var-b2601",
     },
 }
+
+
+#: `app` 로거는 `propagate=False` 다 — `configure_logging()` 이 그렇게 켠다(PR #121).
+#: root 에도 핸들러가 있으면 같은 줄이 두 번 찍히고, **한 줄이 두 번 나오면 빈도 관측이
+#: 정확히 두 배로 틀린다.** 운영 설정으로는 맞다.
+#:
+#: 그런데 그 설정이 테스트에 새어 들어온다. `app.main` 을 임포트하는 순간(모듈 수준에서
+#: `configure_logging()` 을 부른다) `app.*` 레코드가 root 로 안 올라가고, `caplog` 은
+#: 기본적으로 **root 에 핸들러를 붙여** 잡는다. 그러면 `app.*` 로그를 보는 단정이
+#: **조용히 아무것도 못 보게** 된다.
+#:
+#: ## 지금은 pytest 버전이 이걸 가리고 있다
+#:
+#: 최신 pytest 는 `propagate=False` 인 로거에도 캡처 핸들러를 직접 붙여 준다. 그래서 같은
+#: 코드가 버전에 따라 갈린다 — 실측이다(`tests/test_skeleton.py` 가 `app.main` 을 임포트한다).
+#:
+#:     pytest 9.1.1   app.handlers = [StreamHandler, LogCaptureHandler, LogCaptureHandler]   통과
+#:     pytest 8.3.4   app.handlers = [StreamHandler]                                          1 failed
+#:     pytest 7.4.4   app.handlers = [StreamHandler]                                          1 failed
+#:
+#:     tests/test_mismatch.py::test_axis_mismatch_is_logged_not_silent
+#:       assert any("축 불일치" in r.message for r in caplog.records)   → AssertionError
+#:
+#: `requirements-dev.txt` 의 `pytest` 에 **핀이 없다.** 지금 초록인 것은 해석기가 최신을
+#: 고르기 때문이고, 그건 우리가 정한 것이 아니다. 그리고 깨질 때 나오는 실패 메시지가
+#: *"축 불일치 로그가 안 찍혔다"* 라 **원인과 전혀 다른 곳을 가리킨다.**
+#:
+#: ## 그래서 여기서 붙인다
+#:
+#: `propagate` 를 되돌리지 않는다 — 그러면 테스트가 운영과 **다른 로깅 설정**으로 돌고,
+#: `#121` 이 막은 이중 출력이 테스트에서만 되살아난다. 대신 최신 pytest 가 하는 일을 그대로
+#: 한다: `caplog` 의 핸들러를 `app` 로거에도 달아 두고 끝나면 뗀다. 이미 붙어 있으면(최신
+#: pytest) 아무것도 안 한다.
+@pytest.fixture(autouse=True)
+def _caplog_reaches_app_logger(caplog):
+    app_logger = logging.getLogger("app")
+    if app_logger.propagate:
+        # `configure_logging()` 이 아직 안 돌았다 — root 경유로 잡히므로 손대지 않는다.
+        # 여기서 붙이면 root 와 양쪽에 잡혀 `caplog.records` 에 같은 줄이 두 번 들어간다.
+        yield
+        return
+    handler = caplog.handler
+    if handler in app_logger.handlers:
+        yield                       # 최신 pytest 가 이미 붙였다
+        return
+    app_logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        app_logger.removeHandler(handler)
 
 
 @pytest.fixture(scope="session", autouse=True)
