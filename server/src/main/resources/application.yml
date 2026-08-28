@@ -40,9 +40,13 @@ sphinx:
     timeseries-dir: ${SPHINX_TIMESERIES_DIR:../data/timeseries}
   scoring:
     # 신뢰도 임계값은 gate_rules.yaml R-05가 단일 출처(게이트가 황색 강등을 결정, P1).
-    # max-reverify는 gate_rules.yaml R-03(reverifyFailed>=N)의 N과 같아야 한다 —
-    # 이 값(재설명 상한)만큼 실패하면 게이트가 RED로 잡는다. ReverifyThresholdSyncTest가 대조한다.
-    max-reverify: 2                      # F-INT-004
+    # ❗max-reverify 는 여기 없다 (이슈 #66). gate_rules.yaml R-03(reverifyFailed>=N)의 N 이
+    # 유일한 출처이고 SessionService 가 GateEngine.reverifyThreshold() 로 읽는다.
+    #
+    # 전에는 이 파일에도 같은 숫자가 있었다. 둘이 어긋나면 상한과 게이트가 따로 논다 —
+    # 상한 3인데 게이트가 2에서 RED 면 3번째 재설명 기회가 무의미해진다. 대조 테스트로
+    # 막고 있었지만 그건 어긋난 뒤에 잡는 것이고, 고칠 자리가 둘이면 언젠가 한 곳만 바뀐다.
+    # ADR-005 가 임계값의 단일 출처를 gate_rules.yaml 로 정해 뒀으니 그쪽으로 접었다.
 
   retention:
     # 기획서 437행 "원문 발화는 보관기간을 한정하고, 이후에는 판정 결과만 남긴다".

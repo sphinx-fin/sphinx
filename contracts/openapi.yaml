@@ -197,7 +197,8 @@ paths:
     post:
       summary: 재설명 (F-INT-004) — 이해 부족 항목을 다시 설명, 이후 같은 항목 재답변이 재검증
       description: >
-        재검증 상한(항목당 max-reverify) 도달 항목은 재설명 불가(400) → 판정으로 진행.
+        재검증 상한 도달 항목은 재설명 불가(400) → 판정으로 진행. 상한의 유일한 출처는
+          gate_rules.yaml R-03(reverifyFailed >= N)의 N 이다(이슈 #66 · ADR-005).
         400의 두 경우는 화면 처리가 다르므로 error.code로 구분한다(메시지 문자열은 계약이 아니다).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}

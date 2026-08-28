@@ -8,7 +8,6 @@ import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.domain.Signal;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +36,18 @@ public class SessionService {
     private final EvidenceRecorder evidenceRecorder;
     private final AiServiceClient aiServiceClient;
     private final ApplicationEventPublisher events;
-    private final int maxReverify;   // 항목당 재검증 상한(application.yml)
+    /**
+     * 항목당 재검증 상한. <b>게이트 룰에서 읽는다</b>(이슈 #66).
+     *
+     * <p>전에는 {@code application.yml sphinx.scoring.max-reverify} 였고, 같은 숫자가
+     * {@code gate_rules.yaml R-03}({@code reverifyFailed >= N})에도 있었다. 둘이 어긋나면
+     * 상한과 게이트가 따로 논다 — 대조 테스트로 막고 있었지만 <b>그건 어긋난 뒤에 잡는
+     * 것</b>이고, 고칠 자리가 둘이면 언젠가 한 곳만 바뀐다.
+     *
+     * <p>ADR-005 가 임계값의 단일 출처를 {@code gate_rules.yaml} 로 정해 뒀으니 그쪽으로
+     * 접었다. 룰이 숫자를 소유하고 여기서 읽는다.
+     */
+    private final int maxReverify;
 
     /**
      * evidenceRecorder는 Optional 주입 — evidence/ 구현(F-GTE-004)이 등록되기 전에도
@@ -51,15 +61,14 @@ public class SessionService {
                           CoachingScoreService coachingScoreService,
                           Optional<EvidenceRecorder> evidenceRecorder,
                           AiServiceClient aiServiceClient,
-                          ApplicationEventPublisher events,
-                          @Value("${sphinx.scoring.max-reverify:2}") int maxReverify) {
+                          ApplicationEventPublisher events) {
         this.repository = repository;
         this.gateEngine = gateEngine;
         this.coachingScoreService = coachingScoreService;
         this.evidenceRecorder = evidenceRecorder.orElse(EvidenceRecorder.NO_OP);
         this.aiServiceClient = aiServiceClient;
         this.events = events;
-        this.maxReverify = maxReverify;
+        this.maxReverify = gateEngine.reverifyThreshold();
     }
 
     public Session create(CreateSessionCommand cmd) {

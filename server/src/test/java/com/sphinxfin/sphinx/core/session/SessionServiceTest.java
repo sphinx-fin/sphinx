@@ -74,7 +74,7 @@ class SessionServiceTest {
                 nullable(String.class), nullable(String.class)))
                 .thenReturn(new AiServiceClient.ReExplanation(AI_REEXPLAIN, List.of()));
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
-                Optional.of(evidence), aiClient, events, 2);
+                Optional.of(evidence), aiClient, events);
     }
 
     /** 서비스의 3-arg reExplain 을 감싼다 — 항목 id 로 목 risk_item 을 만들어 넘긴다. */
@@ -585,7 +585,7 @@ class SessionServiceTest {
     @DisplayName("evidence 구현이 없어도(NO_OP) 세션 루프는 그대로 돈다")
     void worksWithoutEvidenceRecorder() {
         SessionService bare = new SessionService(repository, new GateEngine(),
-                new CoachingScoreService(), Optional.empty(), aiClient, events, 2);
+                new CoachingScoreService(), Optional.empty(), aiClient, events);
         Session s = bare.create(cmd(null));
         bare.recordJudgment(s.id(), j("A", Grade.U1));
         assertThat(bare.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
