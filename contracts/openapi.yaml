@@ -117,6 +117,32 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/NextQuestionApiResponse'}
 
+  /sessions/{id}/risk-items:
+    get:
+      summary: 이 세션이 검증할 이해항목 (S-03 · S-04)
+      description: >
+        고객 화면이 항목을 받는 경로다. `/products/{id}/risk-items` 를 쓰지 않는 이유는
+        그쪽이 `product:read`(scope org)라, 고객에게 열어 주면 자기 계약 건과 무관한
+        상품까지 전 카탈로그를 열거할 수 있게 되기 때문이다(이슈 #158). 여기서는 대상이
+        세션이므로 범위가 자연히 own_session 이 되고, productId 를 알려고 세션을 먼저
+        조회하는 왕복도 없어진다.
+        action 은 `session:read` 다 — 세션을 읽을 수 있으면 그 세션이 무엇을 묻는지도
+        읽을 수 있다. 다만 CUST 에게 그 그랜트가 아직 없어서(결정 10.5 대기) 고객 화면은
+        그랜트가 생겨야 열린다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 이해항목 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
+        '404':
+          description: 세션 없음
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions/{id}/judgments:
     get:
       summary: 세션에 쌓인 항목별 판정 목록 (S-05)

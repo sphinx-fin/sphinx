@@ -6,6 +6,7 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
+import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
@@ -71,6 +72,37 @@ public class SessionController {
      * 항목별 signal 은 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독 소유한다(P1).
      * grade → 색 매핑은 표시 관례이며 판정이 아니다.
      */
+    /**
+     * 이 세션이 검증할 이해항목 — <b>고객 화면(S-03·S-04)이 받는 경로</b>다 (이슈 #158).
+     *
+     * <h2>왜 카탈로그 경로를 안 쓰는가</h2>
+     *
+     * <p>화면 둘이 지금 {@code GET /sessions/{sid}} 로 productId 를 알아낸 뒤
+     * {@code GET /products/{productId}/risk-items} 를 부른다. 그 경로는
+     * {@code product:read}(scope org)라, 고객에게 열어 주면 <b>자기 계약 건과 무관한 상품까지
+     * 전 카탈로그를 열거</b>할 수 있게 된다. 고객이 필요한 것은 <i>"내 세션이 다루는 항목"</i>
+     * 이지 카탈로그가 아니다 — 지금 카탈로그를 쓰는 것은 이 라우트가 없어서지 그게 맞아서가
+     * 아니다.
+     *
+     * <p>여기서는 대상이 세션이므로 <b>범위가 자연히 {@code own_session}</b> 이 되고, 왕복도
+     * 하나 준다. action 은 {@code session:read} 를 쓴다 — 세션을 읽을 수 있으면 그 세션이
+     * 무엇을 묻는지도 읽을 수 있다는 뜻이고, 새 action 을 만들면 정책이 그만큼 넓어진다.
+     *
+     * <p>❗{@code CUST} 에게 {@code session:read} 가 아직 없다. 라우트를 옮겨도 고객 화면은
+     * 그 그랜트가 생겨야 열린다(이슈 #158 3항 · 결정 10.5 역할별 계정 분리). <b>이 라우트가
+     * 먼저인 이유</b>는 그 그랜트를 카탈로그 action 에 주지 않기 위해서다.
+     */
+    @PreAuthorize("@accessGuard.can('session:read', #sid)")
+    @GetMapping("/{sid}/risk-items")
+    public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String sid) {
+        Session session = sessionService.get(sid);   // 없는 세션이면 404
+        // TODO(강희진): 추출(F-EXT-002)이 붙으면 session.productId() 로 실제 항목을 읽는다.
+        //   지금은 목이지만 **세션을 실제로 조회한 뒤** 낸다 — 그래야 없는 세션과 남의 세션이
+        //   여기서 걸린다. 목을 그냥 돌려주면 @PreAuthorize 만 남고 404 가 사라진다.
+        log.debug("세션 {} (상품 {}) 의 이해항목을 낸다", session.id(), session.productId());
+        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+    }
+
     @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {
