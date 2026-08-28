@@ -44,6 +44,12 @@
 
 html, body, #root { height: 100%; }
 
+/* 브랜드 바가 라우트 위에 한 줄 붙으므로 #root 를 세로 흐름으로 두고 화면이 남은
+   높이를 먹게 한다. 안 그러면 각 화면의 min-height:100% 가 바 높이만큼 넘쳐서
+   모든 화면에 스크롤이 조금씩 생긴다. */
+#root { display: flex; flex-direction: column; }
+#root > main { flex: 1 1 auto; min-height: 0; }
+
 body {
   margin: 0;
   background: var(--bg);

@@ -235,9 +235,12 @@ export default function S02SessionStart() {
     <main className="ss">
       <div className="ss__shell">
         <header className="ss__head">
-          <h1 className="ss__title">세션 시작</h1>
+          {/* 제목은 이 화면이 하는 일이 아니라 **제품이 하는 일**을 말한다 — 심사·창구
+              어느 쪽이 봐도 첫 줄에서 무엇을 막는 화면인지 읽혀야 한다. 부제는 다음
+              동작(고객에게 넘기기)을 미리 알린다. 설계 판단 ④ 가 그 흐름의 근거다. */}
+          <h1 className="ss__title">계약 전 이해도 확인</h1>
           <p className="ss__sub">
-            계약 직전 이해도 검증 세션을 만듭니다. 고객 속성은 <b>구간 값</b>만 받습니다.
+            고객이 직접 답할 세션을 엽니다. 입력을 마치면 <b>화면을 고객에게 넘겨</b> 주세요.
           </p>
           <button type="button" className="ss__preset" onClick={applyDemoPreset} disabled={busy}>
             데모 입력값 채우기
