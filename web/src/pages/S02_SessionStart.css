@@ -18,26 +18,7 @@
 .ss__title { font-size: calc(32px * var(--scale));
   line-height: calc(1.32 * var(--leading-scale));
   letter-spacing: -0.03em; font-weight: 700; }
-.ss__sub { color: var(--text-muted); font-size: calc(16px * var(--scale));
-  line-height: calc(1.55 * var(--leading-scale));
-  letter-spacing: -0.003em; }
 
-/* 데모용 보조 동작이라 알약으로 가볍게 둔다 — 주 동작(세션 생성)과 무게가 같으면 안 된다. */
-.ss__preset {
-  margin-top: var(--space-1);
-  padding: var(--space-2) var(--space-4);
-  background: var(--accent-bg);
-  border: 0;
-  border-radius: var(--radius-pill);
-  color: var(--accent-hover);
-  font-size: calc(14px * var(--scale));
-  line-height: calc(1.429 * var(--leading-scale));
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
-}
-.ss__preset:active:not(:disabled) { transform: scale(0.96); }
-.ss__preset:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── 카드 ─────────────────────────────────────────────────────────────────── */
 /* 테두리 대신 그림자로 띄운다. 지면이 회색이라 흰 카드가 테두리 없이도 분리된다. */
