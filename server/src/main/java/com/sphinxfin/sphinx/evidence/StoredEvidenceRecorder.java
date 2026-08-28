@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.evidence;
 
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
 import org.springframework.stereotype.Component;
@@ -70,6 +71,25 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         Map<String, Object> payload = envelope("gate", sessionId, at);
         payload.put("signal", result.signal());
         payload.put("ruleTrace", result.ruleTrace());
+        store.append(streamOf(sessionId), payload);
+    }
+
+    @Override
+    @Transactional
+    public void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+                               String surveySchemaVersion, Map<String, Object> surveyResult,
+                               Instant at) {
+        Map<String, Object> payload = envelope("mismatch", sessionId, at);
+        payload.put("status", mismatch.status());
+        // 근거 셋. null 이어도 생략하지 않는다 — misconceptionType 과 같은 규약이다(#136).
+        // 여기서는 특히 중요하다: 호출 실패로 근거가 없는 것과 필드가 생기기 전 레코드가
+        // 같아 보이면, 감사 시점에 "판정은 했는데 근거가 없다" 를 못 가른다.
+        payload.put("reason", mismatch.reason());
+        payload.put("confidence", mismatch.confidence());
+        payload.put("contradictions", mismatch.contradictions());
+        // 판정을 만든 입력. 세션 테이블에만 있으면 재질문·재판정에 덮인다 (#169).
+        payload.put("surveySchemaVersion", surveySchemaVersion);
+        payload.put("surveyResult", surveyResult);
         store.append(streamOf(sessionId), payload);
     }
 

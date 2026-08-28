@@ -179,6 +179,13 @@ class OverrideServiceTest {
                                    Instant at) { }
 
         @Override
+        public void appendMismatch(String sessionId,
+                com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch mismatch,
+                String surveySchemaVersion, java.util.Map<String, Object> surveyResult,
+                Instant at) {
+        }
+
+        @Override
         public void appendGate(String sessionId, GateResult result, Instant at) { }
 
         @Override

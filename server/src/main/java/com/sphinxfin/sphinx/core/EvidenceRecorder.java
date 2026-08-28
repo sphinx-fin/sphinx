@@ -1,9 +1,11 @@
 package com.sphinxfin.sphinx.core;
 
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
 
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * 이해 기록 append 지점(PR #28 리뷰 결정, 2026-08-25). 인터페이스는 core, 구현은 evidence.
@@ -61,6 +63,30 @@ public interface EvidenceRecorder {
         SERVER_FALLBACK
     }
 
+    /**
+     * 적합성 모순 판정 1건 append. {@code judge()} 직전 <b>세션당 한 번</b> 들어온다 (이슈 #169).
+     *
+     * <p>게이트와 따로 뗀 이유가 둘이다. <b>발생 시점이 다르다</b> — 재검증마다 게이트는 다시
+     * 도는데 모순은 한 번만 돈다. 그리고 <b>판정의 종류가 다르다</b> — 게이트는 룰이 만든
+     * 결정이고 이것은 LLM 이 만든 측정이다(P1). {@code OverrideApprovedEvent} 를 별도 타입으로
+     * 둔 것과 같은 결이다.
+     *
+     * <p>❗<b>근거와 입력을 함께 남긴다.</b> 이 판정이 게이트를 움직이는데
+     * ({@code suitabilityMismatch} → R-02, {@code suitabilityUnknown} → R-02b) 지금까지 기록에
+     * 남은 것은 {@code GateResult(signal, ruleTrace)} 뿐이었다. 감사 시점에 보이는 것이
+     * <i>"R-02 로 YELLOW 였다"</i> 하나라서 <b>왜 모순이라고 판단했는지에 답할 수 없었다.</b>
+     *
+     * <p>{@code surveyResult} 는 원문으로 받는다. PII 가 아니고(구간 값·선택지),
+     * <b>해시만 실으면 "왜 모순인가" 를 못 읽는다</b> — 그게 이 기록의 목적이라 해시로는
+     * 목적을 못 채운다. 이것을 리포트에 낼지는 별개 판단이다(화이트리스트).
+     *
+     * <p>{@code surveySchemaVersion} 은 선택지 문면의 정의다. 같은 세트라고 적힌 두 기록이
+     * 서로 다른 문면을 담지 않게 한다 — {@code promptVersion} 이 {@code confidence} 의 정의인
+     * 것과 같은 자리다(결정 5.18).
+     */
+    void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+                        String surveySchemaVersion, Map<String, Object> surveyResult, Instant at);
+
     /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
     void appendGate(String sessionId, GateResult result, Instant at);
 
@@ -76,6 +102,12 @@ public interface EvidenceRecorder {
         public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
                                    String askedQuestion, QuestionSource questionSource, Instant at) {
             // F-GTE-004 미착수 — 구현 등록 시 자동으로 대체된다.
+        }
+
+        @Override
+        public void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+                                   String surveySchemaVersion, Map<String, Object> surveyResult,
+                                   Instant at) {
         }
 
         @Override

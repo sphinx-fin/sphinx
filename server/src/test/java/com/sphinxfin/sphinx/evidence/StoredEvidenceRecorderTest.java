@@ -1,10 +1,12 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.Signal;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -200,4 +202,93 @@ class StoredEvidenceRecorderTest {
                     .isEqualTo(new BigDecimal("0.91"));
         }
     }
+    @Nested
+    @DisplayName("모순 판정이 근거와 함께 남는다 (이슈 #169)")
+    class MismatchIsRecordedWithItsBasis {
+
+        private static final Map<String, Object> SURVEY = Map.of(
+                "SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다",
+                "SUIT-PRODUCT-EXPERIENCE", "있고 이득을 봤다");
+
+        private AiServiceClient.Mismatch detected() {
+            return new AiServiceClient.Mismatch(
+                    SuitabilityStatus.MISMATCH,
+                    "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
+                    new BigDecimal("0.82"),
+                    List.of(Map.of("axis", "risk_tolerance",
+                            "survey", "원금 손실은 감수할 수 있다",
+                            "utterance", "원금은 지켜지죠")));
+        }
+
+        @Test
+        @DisplayName("❗왜 모순인지가 기록에 남는다 — 전에는 게이트의 ruleTrace 뿐이었다")
+        void theBasisIsStored() {
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
+
+            Map<String, Object> p = payloads().get(0);
+            assertThat(p).containsEntry("type", "mismatch");
+            assertThat(p.get("reason"))
+                    .as("이 판정이 R-02 로 게이트를 움직이는데 게이트 기록에는 ruleTrace 밖에 "
+                            + "없다. 근거가 여기 없으면 감사 시점에 '왜 모순인가' 에 답할 것이 "
+                            + "하나도 없다(#169)")
+                    .isEqualTo("설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다");
+            assertThat(p.get("confidence")).isEqualTo(new BigDecimal("0.82"));
+            assertThat(p).extracting("contradictions").asList().hasSize(1);
+        }
+
+        @Test
+        @DisplayName("❗판정을 만든 입력도 남는다 — 세션 테이블은 덮인다")
+        void theInputIsStored() {
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
+
+            Map<String, Object> p = payloads().get(0);
+            assertThat(p)
+                    .as("설문 답변과 그 세트 버전은 세션 필드에만 있었다. 선택지 문면이 바뀌면 "
+                            + "같은 세트라고 적힌 두 기록이 서로 다른 문면을 담는다(결정 5.18 과 "
+                            + "같은 자리)")
+                    .containsEntry("surveySchemaVersion", "s02-survey-v2");
+            assertThat(p).extracting("surveyResult").asInstanceOf(
+                    org.assertj.core.api.InstanceOfAssertFactories.MAP)
+                    .containsEntry("SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다");
+        }
+
+        @Test
+        @DisplayName("❗호출 실패로 근거가 없으면 그 사유가 남는다 — 비어 있는 것과 다르다")
+        void unknownCarriesWhyItHasNoBasis() {
+            recorder.appendMismatch(SID,
+                    AiServiceClient.Mismatch.unknown("ai-service 호출 실패 — 판정하지 못했다"),
+                    "s02-survey-v2", SURVEY, T0);
+
+            Map<String, Object> p = payloads().get(0);
+            assertThat(p).containsEntry("status", SuitabilityStatus.UNKNOWN.name());
+            assertThat(p.get("reason"))
+                    .as("근거가 비었다와 못 받았다가 기록에서 같아 보이면 안 된다 — "
+                            + "E-EXT-03 과 같은 결이다")
+                    .isEqualTo("ai-service 호출 실패 — 판정하지 못했다");
+        }
+
+        @Test
+        @DisplayName("null 을 생략하지 않는다 — 필드 이전 레코드와 값 없는 판정을 가른다")
+        void nullsAreWrittenNotOmitted() {
+            recorder.appendMismatch(SID,
+                    new AiServiceClient.Mismatch(SuitabilityStatus.NO_MISMATCH, null, null, List.of()),
+                    null, Map.of(), T0);
+
+            assertThat(payloads().get(0))
+                    .containsKeys("reason", "confidence", "contradictions",
+                            "surveySchemaVersion", "surveyResult");
+        }
+
+        @Test
+        @DisplayName("게이트와 다른 사슬 항목이다 — 재검증마다 도는 게이트와 발생 시점이 다르다")
+        void mismatchIsItsOwnKind() {
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-02")), T0.plusSeconds(1));
+
+            assertThat(payloads()).extracting(p -> p.get("type"))
+                    .as("게이트에 얹으면 재검증마다 같은 모순 근거가 중복으로 쌓인다")
+                    .containsExactly("mismatch", "gate");
+        }
+    }
+
 }

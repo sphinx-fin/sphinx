@@ -172,12 +172,21 @@ public class SessionService {
      * 게이트가 R-02b 로 황색을 내서 재확인을 요구하는 것이 그 상태에 맞는 처리다.
      */
     @Transactional
-    public Session recordSuitability(String sessionId, SuitabilityStatus status) {
+    public Session recordSuitability(String sessionId, AiServiceClient.Mismatch mismatch) {
         Session session = get(sessionId);
+        SuitabilityStatus status = mismatch.status();
         session.recordSuitability(status);
         var coaching = coachingScoreService.score(session, status.isMismatch());
         session.applyCoaching(coaching.score(), coaching.vulnerable());
-        return repository.save(session);
+        repository.save(session);
+        // 세션 저장과 같은 트랜잭션이다(recordJudgment 와 같은 논리) — 근거 없는 판정이
+        // 무효라면 기록 없는 판정도 무효다(P4). 판정을 만든 근거와 입력을 함께 남긴다:
+        // 이 판정이 R-02·R-02b 로 게이트를 움직이는데 게이트 기록에는 ruleTrace 밖에 없어서
+        // "왜 모순인가" 에 답할 것이 없었다 (#169).
+        evidenceRecorder.appendMismatch(
+                sessionId, mismatch, session.surveySchemaVersion(), session.surveyResult(),
+                Instant.now());
+        return session;
     }
 
     /**

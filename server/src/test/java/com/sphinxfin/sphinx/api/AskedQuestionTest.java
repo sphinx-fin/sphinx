@@ -62,6 +62,9 @@ class AskedQuestionTest {
                     RECORDED.add(askedQuestion);
                     SOURCES.add(questionSource);
                 }
+                @Override public void appendMismatch(String sid,
+                        com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch m,
+                        String v, java.util.Map<String, Object> r, java.time.Instant at) { }
                 @Override public void appendGate(String sid,
                         com.sphinxfin.sphinx.domain.GateResult res, java.time.Instant at) { }
                 @Override public void appendOverride(String sid, String reason,
@@ -89,7 +92,7 @@ class AskedQuestionTest {
                                 "정확히 진술", null),
                         inv.getArgument(2)));
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
-                .thenReturn(SuitabilityStatus.NO_MISMATCH);
+                .thenReturn(new AiServiceClient.Mismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
     }
 
     private String createSession() throws Exception {
