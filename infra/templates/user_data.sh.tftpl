@@ -1,0 +1,28 @@
+#!/bin/bash
+# SphinX 인스턴스 부트스트랩. 로그는 /var/log/sphinx-bootstrap.log 에 남는다.
+#
+# **여기서 앱 코드를 받지 않는다.** 박스는 docker 가 도는 빈 상자로 뜨고, 코드는 CD 가
+# 커밋 스냅샷으로 넣는다(infra/README.md §5). 그래서 이 스크립트에는 GitHub 자격증명이
+# 없고, 부팅이 GitHub 가용성에 걸리지도 않는다.
+#
+# 이 파일을 고쳐도 **이미 떠 있는 인스턴스는 안 바뀐다**(ec2.tf 의 주석 참조).
+exec > >(tee -a /var/log/sphinx-bootstrap.log) 2>&1
+set -eux
+
+dnf -y update
+dnf -y install docker
+
+# compose v2 는 AL2023 리포에 없다. CLI 플러그인 자리에 직접 넣는다.
+install -d /usr/libexec/docker/cli-plugins
+curl -fsSL "https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64" \
+  -o /usr/libexec/docker/cli-plugins/docker-compose
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+install -d ${app_dir}
+
+docker --version
+docker compose version
+echo "부트스트랩 완료 — 코드는 CD 가 넣는다"
