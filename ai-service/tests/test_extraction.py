@@ -488,3 +488,53 @@ def test_tabular_threshold_has_margin_over_natural_language():
         f"cue 통과군 최대 숫자비율 {max(passing):.3f} ≥ 임계 "
         f"{extraction.TABULAR_DIGIT_RATIO} — 자연어가 표 셀로 잡힌다"
     )
+
+
+# ── 표 셀 판정의 모집단 (PR #152 리뷰, 정세현) ────────────────────────────────
+#: 정세현이 재현한 누출 조각. **p7 표에서 왔고 숫자비율 1.000 이다.**
+#: `ELS-NO-LISTING`(p14 자연어 항목, cue 0.182)의 인용에 이게 붙으면, 표 셀 판정을 창에
+#: 걸었을 때 이 조각만으로 된 창이 게이트를 통과했다.
+_TABULAR_BLEED = "× [100%+ 5.50%]"
+
+
+def test_natural_language_item_is_not_rescued_by_a_tabular_bleed_window():
+    """★ 창이 아니라 원 인용으로 표 셀을 판정한다 — 안 그러면 `#118` 결함이 다시 열린다.
+
+    이전 구현은 `_digit_ratio(narrowed)` 를 봤다. 창은 원 인용의 부분열이므로 자연어
+    항목의 인용에 표 열이 누출되면 **그 누출 조각만으로 된 창**이 숫자비율 1.000 으로
+    cue 게이트를 우회한다. 결과가 `extraction_failed`(안전한 실패)에서 **p7 표 셀 스팬을
+    p14 자연어 항목의 조건 원문으로 잡은 스팬**으로 뒤집혔고, 경고는 `사람 확인 필요` 도
+    아니라 *"수치는 전부 남았다"* 였다 — `want` 가 누출 조각에서 나온 수치라 겹침이 만점이라서다.
+
+    **모집단이 요지다.** 기존 테스트 셋은 전부 `_digit_ratio(value_text)`, 즉 계약 정답
+    원문 분포를 잰다. 런타임에 그 함수로 들어가는 것은 `narrowed` 이므로 임계값을 어떻게
+    바꿔도 이 경로가 안 보였다. 그래서 이 테스트는 `_rescue` 를 실제로 태운다.
+    """
+    doc = _doc()
+    expected = _expected(doc, "ELS-NO-LISTING")
+    candidate = ExtractedCandidate(
+        item_id="ELS-NO-LISTING", page=14,
+        quote=f"{expected['value_text']} {_TABULAR_BLEED}",
+    )
+    # 픽스처가 성립하는지: 누출 조각은 창 단위로 보면 표 셀이고, 원 인용은 자연어다
+    assert extraction._digit_ratio(_TABULAR_BLEED) >= extraction.TABULAR_DIGIT_RATIO
+    assert extraction._digit_ratio(candidate.quote) < extraction.TABULAR_DIGIT_RATIO
+    assert extraction._resolve(candidate, doc, []) is None, "이 인용은 원문에 없어야 한다"
+
+    warnings: list[Any] = []
+    span = extraction._rescue(candidate, doc, _tpl(candidate.item_id), warnings)
+    assert span is None, f"자연어 항목이 표 셀 경로로 구제됐다 — {span}"
+    assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
+
+
+def test_tabular_bleed_window_alone_would_have_resolved():
+    """픽스처가 실제로 함정인지 — 누출 조각만으로도 원문에서 해소된다.
+
+    이게 아니면 위 테스트는 "안 풀리는 것을 안 골랐다" 는 시시한 사실만 확인한다
+    (`test_bleed_fragment_alone_would_have_resolved` 와 같은 이유).
+    """
+    doc = _doc()
+    bleed_only = ExtractedCandidate(item_id="ELS-NO-LISTING", page=7, quote=_TABULAR_BLEED)
+    span = extraction._resolve(bleed_only, doc, [])
+    assert span is not None, "누출 조각이 원문에서 안 풀리면 함정이 성립하지 않는다"
+    assert span["source_span"]["page"] != _expected(doc, "ELS-NO-LISTING")["source_span"]["page"]
