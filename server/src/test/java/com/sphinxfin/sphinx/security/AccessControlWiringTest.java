@@ -172,9 +172,15 @@ class AccessControlWiringTest {
                 .sorted()
                 .toList();
         // 아직 엔드포인트가 없는 기능(F-GTE-003 신호 큐, 감사 조회, 계정 관리)은 제외한다.
+        //
+        // product:manage 는 성격이 다르다 — 엔드포인트는 **이미 있다**(POST /products/documents ·
+        // POST /products/{id}/extract). 정책이 없어서 어노테이션이 못 붙어 있던 것이고,
+        // 그 정책이 방금 생겼다(이슈 #69, 결정 10.36). 부착은 강희진 몫이라 이 PR 이 하지
+        // 않는다. **부착되면 이 줄을 지운다** — 목록이 줄어드는 것이 진척이다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
-                "admin:role:assign", "aggregate:indicator:read");
+                "admin:role:assign", "aggregate:indicator:read",
+                "product:manage");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
                         + "'접근이 없었다'로 읽힌다. 기능이 아직 없으면 예외 목록에 넣고 이유를 적어라")

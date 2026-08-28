@@ -298,4 +298,80 @@ class AccessPolicyTest {
                     .isFalse();
         }
     }
+
+    @Nested
+    @DisplayName("상품 카탈로그 — 판매 라인은 읽기만 한다 (이슈 #69, 결정 10.36)")
+    class ProductCatalogIsReadOnlyForSales {
+
+        /**
+         * 상품 카탈로그는 세션도 집계도 아니다. 두 action 모두 {@code scope: org} 라 대상의
+         * 종류가 판단을 바꾸지 않는데, 그 사실 자체를 여기서 고정한다 — 나중에 범위를 좁히면
+         * 이 테스트가 먼저 깨진다.
+         */
+        private static final Target CATALOG = Target.aggregate();
+
+        @Test
+        @DisplayName("❗SELLER 는 위험항목을 만들 수 없다 — 항목이 곧 게이트가 물을 질문이다")
+        void sellerCannotExtract() {
+            AccessPolicy.Decision decision = policy.decide(seller("seller-01"), "product:manage", CATALOG);
+
+            assertThat(decision.allowed())
+                    .as("판매 라인이 자기가 답해야 할 질문의 목록을 편집할 수 있으면 게이트가 "
+                            + "조용히 느슨해진다 — 기획 7-4 가 막으려는 경로 중 가장 짧다")
+                    .isFalse();
+            assertThat(decision.reason())
+                    .as("범위가 어긋난 것이 아니라 역할에 그랜트가 아예 없어야 한다 (ADR-001 과 같은 결)")
+                    .contains("SELLER", "그랜트가 없다");
+        }
+
+        @Test
+        @DisplayName("❗MGR 도 못 만든다 — 지점장이라는 이유로 분모를 바꿀 수 있으면 안 된다")
+        void mgrCannotExtract() {
+            assertThat(policy.permits(mgr("BR-1"), "product:manage", CATALOG))
+                    .as("운영 압박이 들어오는 자리가 지점이다")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("COMPL 도 못 만든다 — 점검하는 쪽과 만드는 쪽을 겹치지 않는다")
+        void complCannotExtract() {
+            assertThat(policy.permits(new Actor("compl-01", Role.COMPL, null), "product:manage", CATALOG))
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("등록·추출은 ADMIN 뿐이다")
+        void adminManages() {
+            assertThat(policy.permits(new Actor("admin-01", Role.ADMIN, null), "product:manage", CATALOG))
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("읽기는 판매·감독 전원에게 열린다 — S-02 가 상품을 고를 수 있어야 한다")
+        void everyoneWhoRunsSessionsCanRead() {
+            assertThat(policy.permits(seller("seller-01"), "product:read", CATALOG)).isTrue();
+            assertThat(policy.permits(mgr("BR-1"), "product:read", CATALOG)).isTrue();
+            assertThat(policy.permits(new Actor("compl-01", Role.COMPL, null), "product:read", CATALOG)).isTrue();
+        }
+
+        @Test
+        @DisplayName("❗CUST 는 카탈로그에 닿지 않는다 — 고객 화면은 세션을 통해서만 본다")
+        void custIsNotInTheCatalog() {
+            Actor cust = new Actor("cust-01", Role.CUST, null);
+
+            assertThat(policy.permits(cust, "product:read", CATALOG)).isFalse();
+            assertThat(policy.permits(cust, "product:manage", CATALOG)).isFalse();
+        }
+
+        @Test
+        @DisplayName("읽기와 관리가 같은 action 이 아니다 — 하나로 합치면 SELLER 가 추출까지 얻는다")
+        void readAndManageAreDistinct() {
+            Actor admin = new Actor("admin-01", Role.ADMIN, null);
+
+            assertThat(policy.permits(seller("seller-01"), "product:read", CATALOG)).isTrue();
+            assertThat(policy.permits(seller("seller-01"), "product:manage", CATALOG)).isFalse();
+            assertThat(policy.permits(admin, "product:read", CATALOG)).isTrue();
+            assertThat(policy.permits(admin, "product:manage", CATALOG)).isTrue();
+        }
+    }
 }

@@ -8,7 +8,7 @@
 #   ① 역할 부재 — 본부 영업·마케팅에 대응하는 역할이 존재하지 않는다 (명세서 0.4, ADR-001)
 #   ② 범위 분리 — 역할이 있어도 집계 데이터에 닿는 범위가 제한된다 (아래 scope)
 # ①만으로는 부족하다. SELLER 권한으로 대시보드가 열리면 같은 구멍이 난다.
-version: 5
+version: 6
 
 roles: [CUST, SELLER, MGR, COMPL, ADMIN]
 
@@ -103,12 +103,34 @@ permissions:
     - { roles: [COMPL], scope: org }
     - { roles: [MGR],   scope: branch }
 
+  # 상품 카탈로그 — 읽기와 등록·추출을 가른다 (이슈 #69, 결정 10.36).
+  #
+  # `POST /products/documents`(문서 업로드)·`POST /products/{id}/extract`(위험항목 생성)가
+  # 미인증으로 열려 있던 것을 닫는다. 읽기 둘과 성격이 다르다 — **`extract` 는 게이트가 물을
+  # 항목을 만든다.** 항목이 곧 질문이고 판정의 분모이므로, 항목을 줄이면 게이트가 조용히
+  # 느슨해진다. 기획 7-4 가 막으려는 경로 중 가장 짧은 것이고, 역할 부재 원칙(ADR-001)이
+  # 지키려는 것과 같은 자리다 — 판매 라인이 자기가 답해야 할 질문의 목록을 편집할 수 있으면
+  # 안 된다.
+  #
+  # 그래서 등록·추출을 **판매 라인에서 떼어놓는다.** SELLER·MGR 은 읽기만 한다.
+  product:read:                                      # 상품 목록·위험항목 조회 (S-02)
+    - { roles: [SELLER, MGR, COMPL, ADMIN], scope: org }
+  product:manage:                                    # 문서 업로드 · 위험항목 추출
+    - { roles: [ADMIN], scope: org }
+
   # 불공정영업 신호 (F-GTE-003) — 판매자 화면 비노출이 요건이므로 SELLER·MGR 부재
   signal:unfair:read:
     - { roles: [COMPL], scope: org }
 
   # 시스템 운영 — 데이터가 아니라 계정·설정만. 여기에 데이터 action을 추가하면
   # ADMIN이 ADR-001의 우회 경로가 된다.
+  #
+  # `product:manage`(위 상품 절)는 이 금지에 걸리지 않는다. ADR-001 데이터 범위 표가 ADMIN
+  # 에게 닫아 둔 것은 **개별 세션과 집계** — 고객이 무엇을 오해했는가 — 이고, 상품 카탈로그는
+  # 그 둘 중 어느 것도 아니다. 상품설명서 문면은 고객 데이터가 아니고 판매자별로 집계되지도
+  # 않는다. 반대로 그것을 SELLER 쪽에 두면 판매 라인이 자기 질문 목록을 편집하게 되므로,
+  # ADMIN 에 두는 것이 ADR-001 이 지키려는 것과 같은 방향이다. **데이터 action 을 ADMIN 에
+  # 붙이지 않는다는 규칙은 그대로다** — 세션·집계 action 은 여전히 여기 오지 않는다.
   admin:role:assign:
     - { roles: [ADMIN], scope: org }
 
@@ -124,3 +146,5 @@ audited:
   - aggregate:indicator:read
   - signal:unfair:read
   - admin:role:assign
+  # 상품 등록·추출은 게이트의 분모를 바꾼다 — 누가 언제 했는지가 남아야 한다 (결정 10.36).
+  - product:manage
