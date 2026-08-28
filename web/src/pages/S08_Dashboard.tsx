@@ -40,6 +40,18 @@ import type { HeatmapCell, HeatmapResponse, ProductSummary } from "../api/types"
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
 
+/**
+ * 칸을 칠하는 잉크의 상한(%). 오해율 100% 가 이 농도로 찍힌다.
+ *
+ * 100 이 아닌 이유는 대비다. 잉크가 60% 를 넘으면 먹색 글자가 4.5:1 아래로 떨어지고,
+ * 흰 글자로 뒤집자니 흰 글자는 잉크 70% 는 돼야 4.5:1 이 된다 — 그 사이가 **두 색 다
+ * 못 미치는 골짜기**다(kohl-70 → surface 램프 실측). 상한을 60 으로 두면 모든 칸이 한
+ * 가지 글자색으로 5:1 이상을 유지하고 색을 뒤집는 분기가 없어진다.
+ *
+ * 범례 눈금도 **같은 상한**을 쓴다. 다르면 눈금이 거짓말을 한다.
+ */
+const INK_MAX = 60;
+
 const SCOPE_LABEL: Record<HeatmapResponse["scope"], string> = {
   branch: "자기 지점",
   org: "전사",
@@ -101,7 +113,7 @@ export default function S08Dashboard() {
   /* ── 표 축 ──────────────────────────────────────────────────────────────
    * 셀 목록에서 축을 뽑는다. 서버가 축을 따로 주지 않고, 축을 화면에 하드코딩하면
    * 상품·항목이 늘 때 조용히 빠진다.                                              */
-  const { products, items, byKey, top } = useMemo(() => {
+  const { products, items, byKey, stats, ranked } = useMemo(() => {
     const cells = data?.cells ?? [];
     const ps: string[] = [];
     const its: string[] = [];
@@ -114,12 +126,37 @@ export default function S08Dashboard() {
       if (!its.includes(c.item)) its.push(c.item);
       map.set(`${c.product}\u0000${c.item}`, c);
     }
-    // 가장 높은 셀 하나를 뽑아 둔다. 표를 훑기 전에 "그래서 어디가 문제냐" 가 먼저
-    // 읽혀야 한다 — 가려진 셀은 값이 없으므로 후보가 아니다.
-    const top = cells
-      .filter((c) => !c.masked && c.misrate != null)
-      .sort((a, b) => (b.misrate ?? 0) - (a.misrate ?? 0))[0];
-    return { products: ps, items: its, byKey: map, top };
+    /* ── 요약 지표 ────────────────────────────────────────────────────────
+     * 가중 평균이다. 셀 평균을 내면 표본 12건짜리 셀과 900건짜리 셀이 같은 무게가 된다.
+     * **가려진 셀은 분자에서 빠진다** — 값이 없기 때문이고, 그래서 표본 합계도 두 개를
+     * 따로 센다(전체 n / 값이 있는 n). 하나로 합치면 "몇 건을 근거로 한 수치인가" 를
+     * 화면이 틀리게 말한다. */
+    const shown = cells.filter((c) => !c.masked && c.misrate != null);
+    const nAll = cells.reduce((a, c) => a + c.n, 0);
+    const nShown = shown.reduce((a, c) => a + c.n, 0);
+    const weighted = nShown === 0
+      ? null
+      : shown.reduce((a, c) => a + (c.misrate ?? 0) * c.n, 0) / nShown;
+
+    // 항목별 순위 — 같은 항목을 상품 넘어 합친다. 화면이 답해야 하는 질문이
+    // "어느 설명이 안 통하는가" 라서 축은 항목이다.
+    const byItem = new Map<string, { n: number; mis: number }>();
+    for (const c of shown) {
+      const cur = byItem.get(c.item) ?? { n: 0, mis: 0 };
+      cur.n += c.n;
+      cur.mis += (c.misrate ?? 0) * c.n;
+      byItem.set(c.item, cur);
+    }
+    const ranked = [...byItem.entries()]
+      .map(([item, v]) => ({ item, n: v.n, rate: v.mis / v.n }))
+      .sort((a, b) => b.rate - a.rate);
+
+    return {
+      products: ps, items: its, byKey: map,
+      stats: { weighted, nAll, nShown, maskedCells: cells.filter((c) => c.masked).length,
+               cellCount: cells.length },
+      ranked,
+    };
   }, [data]);
 
   if (loading) {
@@ -152,11 +189,6 @@ export default function S08Dashboard() {
       <header className="s08__head">
         <div>
           <h1>오해 지도</h1>
-          {/* 설계 판단 ④ — 정의를 각주로 내리지 않는다. */}
-          <p className="s08__lede">
-            상품의 <strong>어느 설명이 고객에게 잘 전달되지 않는지</strong>를 봅니다.
-            개인이 무엇을 알고 모르는지는 이 화면이 아니라 세션별 이해 기록에 있습니다.
-          </p>
           <p className="s08__scope">
             데이터 범위 <strong>{data ? SCOPE_LABEL[data.scope] : "—"}</strong>
             <span className="s08__scope-note"> · 요청자 역할이 정합니다</span>
@@ -203,31 +235,70 @@ export default function S08Dashboard() {
         </label>
       </section>
 
-      {/* 설계 판단 ④ — "41%" 를 보기 전에 그 41% 가 무엇인지 읽게 한다. */}
-      <section className="s08__what">
-        <p className="s08__what-def">
-          <strong>오해율</strong> = 그 항목을 <strong>오해(U4)</strong> 로 판정받은 세션의
-          비율입니다.
-        </p>
-        <p className="s08__what-cant">
-          ❗나머지가 이해했다는 뜻이 아닙니다 — <strong>부분이해·미이해는 이 수치에
-          들어가지 않습니다.</strong> 40%는 “10명 중 4명이 반대로 알고 있다”이지 “6명은
-          안다”가 아닙니다.
-        </p>
+      {/* ── 요약 타일 ─────────────────────────────────────────────────────
+          정의·주의는 화면에 문장으로 깔지 않는다. 대시보드는 수치를 보여주는 곳이고,
+          "이게 무슨 비율인가" 는 ⓘ 에 붙여 둔다(마우스 hover · 키보드 포커스 둘 다). */}
+      <section className="s08__kpis" aria-label="요약">
+        <Kpi
+          label="오해율"
+          value={stats.weighted == null ? "—" : `${Math.round(stats.weighted * 100)}%`}
+          sub={stats.nShown ? `표본 ${stats.nShown.toLocaleString()}건` : "표본 부족"}
+          tipId="tip-misrate"
+          tip={"그 항목을 오해(U4)로 판정받은 세션의 비율입니다. 표본으로 가중한 평균이고, " +
+               "가려진 셀은 값이 없어 빠집니다. 나머지가 이해했다는 뜻이 아닙니다 — " +
+               "부분이해·미이해는 이 수치에 들어가지 않습니다."}
+        />
+        <Kpi
+          label="표본"
+          value={stats.nAll.toLocaleString()}
+          sub={`판정 ${stats.cellCount}칸`}
+          tipId="tip-n"
+          tip="필터를 통과한 세션의 항목별 판정 건수 합계입니다. 개인은 식별되지 않습니다."
+        />
+        <Kpi
+          label="가려진 칸"
+          value={String(stats.maskedCells)}
+          sub="표본 30건 미만"
+          tipId="tip-masked"
+          tip={"표본이 30건 미만인 칸은 개인이 역추정될 수 있어 값을 감춥니다. " +
+               "칸을 지우지는 않습니다 — 가려졌다는 사실 자체가 마스킹이 동작한 증거입니다."}
+        />
+        <Kpi
+          label="최다 오해 항목"
+          value={ranked[0] ? `${Math.round(ranked[0].rate * 100)}%` : "—"}
+          sub={ranked[0]?.item ?? "값이 있는 칸 없음"}
+          tipId="tip-top"
+          tip="값이 있는 칸만 놓고 항목별로 합쳤을 때 오해율이 가장 높은 항목입니다."
+        />
       </section>
 
-      {top && (
-        <p className="s08__top" role="status">
-          가장 높은 곳은 <strong>{names[top.product] ?? top.product}</strong> 의{" "}
-          <strong>{top.item}</strong> — 오해율 {Math.round((top.misrate ?? 0) * 100)}%
-          <span className="s08__top-n"> · 표본 {top.n}건</span>
-        </p>
+      {/* ── 항목별 순위 ───────────────────────────────────────────────────
+          히트맵은 "어느 상품의 어느 항목" 을 보는 표라 항목 단위 비교가 눈으로 안 된다.
+          같은 데이터를 한 축(항목)으로 접어 막대로 세운다. */}
+      {ranked.length > 0 && (
+        <section className="s08__rank" aria-label="항목별 오해율">
+          <h2 className="s08__panel-title">항목별 오해율</h2>
+          <ol className="s08__rank-list">
+            {ranked.map((r) => (
+              <li key={r.item} className="s08__rank-row">
+                <span className="s08__rank-name">{r.item}</span>
+                <span className="s08__rank-track">
+                  <span className="s08__rank-bar" style={{ width: `${Math.max(r.rate * 100, 1)}%` }} />
+                </span>
+                <span className="s08__rank-val">{Math.round(r.rate * 100)}%</span>
+                <span className="s08__rank-n">{r.n.toLocaleString()}건</span>
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
 
       {products.length === 0 ? (
         <p className="s08__empty">집계된 셀이 없습니다.</p>
       ) : (
-        <div className="s08__table-wrap">
+        <section className="s08__matrix" aria-label="상품별 이해항목 오해율">
+          <h2 className="s08__panel-title">상품 × 이해항목</h2>
+          <div className="s08__table-wrap">
           <table className="s08__table">
             <thead>
               <tr>
@@ -264,12 +335,24 @@ export default function S08Dashboard() {
                     return (
                       <td
                         key={it}
-                        className="s08__cell"
+                        className="s08__cell s08__cell--data"
+                        tabIndex={0}
                         // 명도만으로 강도를 낸다 — 판정 3색을 여기서 쓰면 집계가 판정처럼 보인다.
-                        style={{ background: `color-mix(in srgb, var(--kohl-70) ${pct}%, var(--surface))` }}
+                        //
+                        // ❗잉크는 INK_MAX 까지만 쓴다. 100% 까지 칠하면 진한 칸에서 글자를
+                        //   흰색으로 뒤집어야 하는데, 뒤집는 구간(대략 55~70%)이 **두 색 다
+                        //   4.5:1 에 못 미치는 골짜기**다(실측). 상한을 두면 어느 칸에서도
+                        //   같은 글자색으로 5:1 이상이 남고 분기 자체가 사라진다.
+                        style={{ background: `color-mix(in srgb, var(--kohl-70) ${(pct * INK_MAX) / 100}%, var(--surface))` }}
                       >
-                        <span className={pct >= 55 ? "s08__pct s08__pct--strong" : "s08__pct"}>{pct}%</span>
+                        <span className="s08__pct">{pct}%</span>
                         <span className="s08__n">{c.n}건 중</span>
+                        {/* hover·포커스에서만 뜨는 상세. 표에는 수치만 남긴다. */}
+                        <span className="s08__cell-tip" role="tooltip">
+                          <b>{names[p] ?? p}</b>
+                          {it}
+                          <span className="s08__cell-tip-val">오해율 {pct}% · 표본 {c.n}건</span>
+                        </span>
                         <span className="sr-only">
                             {c.n}건 중 {pct}퍼센트가 이 항목을 오해로 판정받았습니다
                         </span>
@@ -280,7 +363,8 @@ export default function S08Dashboard() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </section>
       )}
 
       <section className="s08__legend">
@@ -298,6 +382,31 @@ export default function S08Dashboard() {
         </ul>
       </section>
     </main>
+  );
+}
+
+/**
+ * 요약 타일. 값이 주인공이고 라벨은 작다 — 대시보드는 문장이 아니라 수치를 읽는 곳이다.
+ *
+ * 정의·주의는 ⓘ 에 붙인다. hover 와 **키보드 포커스** 둘 다에서 열려야 해서 버튼이고,
+ * `aria-describedby` 로 묶어 스크린리더에서는 열지 않아도 읽힌다.
+ */
+function Kpi({ label, value, sub, tip, tipId }: {
+  label: string; value: string; sub: string; tip: string; tipId: string;
+}) {
+  return (
+    <article className="s08__kpi">
+      <p className="s08__kpi-label">
+        {label}
+        <button type="button" className="s08__info" aria-describedby={tipId}>
+          <span aria-hidden="true">i</span>
+          <span className="sr-only">{label} 설명</span>
+        </button>
+        <span role="tooltip" id={tipId} className="s08__tooltip">{tip}</span>
+      </p>
+      <p className="s08__kpi-value">{value}</p>
+      <p className="s08__kpi-sub">{sub}</p>
+    </article>
   );
 }
 
