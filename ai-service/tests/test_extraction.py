@@ -470,8 +470,13 @@ def test_cue_unreachable_set_is_exactly_what_we_measured():
     )
 
 
-def test_tabular_items_are_rescued_by_the_numeric_path():
-    """표 셀은 cue 가 원리적으로 안 통한다 — 숫자 비율로 갈라 수치 기준을 쓴다."""
+def test_tabular_classification_covers_only_cue_unreachable_items():
+    """표 셀 분류가 cue 통과 항목을 삼키지 않는지 — **분류만 본다.**
+
+    이름이 원래 `..._are_rescued_by_the_numeric_path` 였는데 `_rescue` 를 안 탄다.
+    구제가 실제로 일어나는지는 `test_tabular_rescue_recovers_the_contract_span` 이 본다
+    (PR #152 리뷰, 정세현 — 이름과 하는 일이 달라 구제 경로에 그물이 없었다).
+    """
     scores = _cue_scores()
     tabular = {iid for iid, (_, digits) in scores.items()
                if digits >= extraction.TABULAR_DIGIT_RATIO}
@@ -538,3 +543,69 @@ def test_tabular_bleed_window_alone_would_have_resolved():
     span = extraction._resolve(bleed_only, doc, [])
     assert span is not None, "누출 조각이 원문에서 안 풀리면 함정이 성립하지 않는다"
     assert span["source_span"]["page"] != _expected(doc, "ELS-NO-LISTING")["source_span"]["page"]
+
+
+# ── 표 셀 구제가 실제로 일어나는지 (PR #152 리뷰, 정세현) ─────────────────────
+#: 표 셀 인용 + 같은 표의 **다른 행 조각**. 두 조각이 이어붙은 문자열은 원문에 없으므로
+#: 원 인용은 해소에 실패하고 구제 경로로 떨어진다 — 10.45 가 고치려던 상태 그대로다.
+#:
+#: 정세현이 `#152` 리뷰에서 만들어 준 픽스처다. 승인은 났지만 반대 방향 변이
+#: (`tabular = False` 고정)에서 **254건이 전부 통과**했다 — 즉 이 변경이 산 것에
+#: 그물이 없었다. 누가 그 분기를 지우면 두 항목이 조용히 `extraction_failed` 로 돌아가고,
+#: 그건 F-EXT-003 재현율에서 **조용한 손실로만** 나타난다.
+_TABULAR_CASES = [
+    ("VAR-EARLY-SURRENDER-RATIO", " 9개월 2,700,000"),
+    ("VAR-LONG-TERM-RATIO", " 15년 27,000,000"),
+]
+
+
+def _tabular_candidate(item_id: str, extra: str):
+    doc = _doc("parsed_variable_sample.json")
+    expected = next(e for e in doc["_expected_risk_items"] if e["item_id"] == item_id)
+    candidate = ExtractedCandidate(
+        item_id=item_id, page=expected["source_span"]["page"],
+        quote=expected["value_text"] + extra,
+    )
+    return doc, expected, candidate
+
+
+@pytest.mark.parametrize("item_id,extra", _TABULAR_CASES)
+def test_tabular_rescue_recovers_the_contract_span(item_id, extra):
+    """★ 표 셀 항목이 구제되어 **계약 정답 스팬**으로 돌아오는지 — `_rescue` 를 실제로 탄다.
+
+    `cue` 포함도가 0.000 인 항목이라 cue 판별로는 어떤 창도 통과하지 못한다. 인용 숫자비율로
+    표 셀임을 알아보고 기준을 바꾸는 분기가 이 항목들을 사는 유일한 경로다.
+
+    "구제됐다" 가 아니라 **"정답 스팬으로 구제됐다"** 를 본다 — 아무 창이나 붙어도 스팬은
+    나오므로 일치 검사가 없으면 시시한 사실만 확인한다
+    (`test_rescue_recovers_the_contract_span_from_a_bleeding_quote` 와 같은 이유).
+    """
+    doc, expected, candidate = _tabular_candidate(item_id, extra)
+    assert extraction._resolve(candidate, doc, []) is None, "원 인용이 풀리면 구제가 필요 없다"
+    assert extraction._digit_ratio(candidate.quote) >= extraction.TABULAR_DIGIT_RATIO
+
+    warnings: list[Any] = []
+    span = extraction._rescue(candidate, doc, _tpl(item_id), warnings)
+    assert span is not None, "표 셀 구제 경로가 죽었다"
+    assert span["source_span"] == expected["source_span"]
+    assert span["value_text"] == expected["value_text"]
+    assert [w.code for w in warnings] == ["QUOTE_NARROWED"]
+
+
+@pytest.mark.parametrize("item_id,extra", _TABULAR_CASES)
+def test_without_the_tabular_branch_the_same_quote_is_not_rescued(monkeypatch, item_id, extra):
+    """★ 같은 픽스처를 표 셀 분기를 끈 상태로 재서 **이 변경이 무엇을 사는지** 고정한다.
+
+    위 테스트만 있으면 "구제됐다" 는 사실은 남지만 그것이 표 셀 분기 덕인지는 안 남는다.
+    임계값을 1.0 위로 올려 어떤 인용도 표 셀로 안 잡히게 하면 `#152` 이전 동작이 된다 —
+    cue 0.000 이라 모든 창이 거부되고 `extraction_failed` 로 떨어진다.
+
+    코드를 고치지 않고 임계값만 움직인다. 분기를 지우는 변이와 같은 결과를 내면서 테스트가
+    구현 세부에 붙지 않는다.
+    """
+    monkeypatch.setattr(extraction, "TABULAR_DIGIT_RATIO", 1.1)
+    doc, _expected, candidate = _tabular_candidate(item_id, extra)
+
+    warnings: list[Any] = []
+    assert extraction._rescue(candidate, doc, _tpl(item_id), warnings) is None
+    assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
