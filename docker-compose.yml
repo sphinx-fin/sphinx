@@ -115,6 +115,12 @@ services:
     ports:
       # EC2 보안그룹에서도 80 만 연다. 8000·8100 은 인바운드에 넣지 않는다(#41).
       - "80:80"
+    environment:
+      # server 와 **같은 값**이어야 한다. nginx 가 이 값으로 htpasswd 를 만들고, 브라우저가
+      # 실어 보낸 Authorization 이 그대로 server 로 넘어가 거기서 다시 검증되기 때문이다.
+      # 출처가 SSM 하나라 갈릴 일이 없다(scripts/deploy_ec2.sh).
+      SPHINX_API_USER: ${SPHINX_API_USER:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
+      SPHINX_API_PASSWORD: ${SPHINX_API_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
     networks: [edge]
     depends_on:
       server:

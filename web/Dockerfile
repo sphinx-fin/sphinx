@@ -21,7 +21,13 @@ RUN npm run build
 # ── 실행 ────────────────────────────────────────────────────────────────────
 FROM nginx:1.27-alpine
 
+# htpasswd 를 기동 때 만들기 위한 것. 이 이미지에는 openssl 도 apache2-utils 도 없다.
+RUN apk add --no-cache openssl
+
 COPY --from=build /src/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 공식 엔트리포인트가 nginx 기동 전에 이 디렉토리의 *.sh 를 실행한다. 자격증명이
+# 없으면 여기서 죽고 컨테이너가 안 뜬다 — 401 만 내는 화면이 뜨는 것보다 낫다.
+COPY docker-entrypoint.d/ /docker-entrypoint.d/
 
 EXPOSE 80
