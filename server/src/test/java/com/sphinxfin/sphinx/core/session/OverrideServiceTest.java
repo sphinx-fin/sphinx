@@ -180,7 +180,7 @@ class OverrideServiceTest {
 
         @Override
         public void appendMismatch(String sessionId,
-                com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch mismatch,
+                com.sphinxfin.sphinx.domain.SuitabilityMismatch mismatch,
                 String surveySchemaVersion, java.util.Map<String, Object> surveyResult,
                 Instant at) {
         }

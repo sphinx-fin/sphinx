@@ -216,7 +216,7 @@ class SessionServiceTest {
     @DisplayName("❗모순 판정이 근거와 함께 불변 기록으로 간다 — 세션 필드에만 두면 덮인다 (#169)")
     void mismatchReachesTheImmutableRecordWithItsBasis() {
         Session s = service.create(cmd(null));
-        var detected = new com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch(
+        var detected = new com.sphinxfin.sphinx.domain.SuitabilityMismatch(
                 SuitabilityStatus.MISMATCH,
                 "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
                 new java.math.BigDecimal("0.82"),
@@ -301,9 +301,9 @@ class SessionServiceTest {
     }
 
     /** 근거를 들고 오는 모순 판정. 상태만 보던 테스트를 최소로 옮긴다(#169). */
-    private static com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch mismatchOf(
+    private static com.sphinxfin.sphinx.domain.SuitabilityMismatch mismatchOf(
             SuitabilityStatus status) {
-        return new com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch(
+        return new com.sphinxfin.sphinx.domain.SuitabilityMismatch(
                 status, "테스트 사유", null, List.of());
     }
 
@@ -312,7 +312,7 @@ class SessionServiceTest {
         private final List<String> judgments = new ArrayList<>();
         private final List<Signal> gates = new ArrayList<>();
         private final List<String> askedQuestions = new ArrayList<>();
-        private final List<com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch> mismatches
+        private final List<com.sphinxfin.sphinx.domain.SuitabilityMismatch> mismatches
                 = new ArrayList<>();
         private final List<EvidenceRecorder.QuestionSource> questionSources = new ArrayList<>();
 
@@ -327,7 +327,7 @@ class SessionServiceTest {
 
         @Override
         public void appendMismatch(String sessionId,
-                com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch mismatch,
+                com.sphinxfin.sphinx.domain.SuitabilityMismatch mismatch,
                 String surveySchemaVersion, java.util.Map<String, Object> surveyResult,
                 Instant at) {
             mismatches.add(mismatch);

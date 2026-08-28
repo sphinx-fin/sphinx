@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.session;
 
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -172,7 +173,7 @@ public class SessionService {
      * 게이트가 R-02b 로 황색을 내서 재확인을 요구하는 것이 그 상태에 맞는 처리다.
      */
     @Transactional
-    public Session recordSuitability(String sessionId, AiServiceClient.Mismatch mismatch) {
+    public Session recordSuitability(String sessionId, SuitabilityMismatch mismatch) {
         Session session = get(sessionId);
         SuitabilityStatus status = mismatch.status();
         session.recordSuitability(status);

@@ -1,7 +1,7 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
-import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
 import org.springframework.stereotype.Component;
@@ -76,7 +76,7 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
 
     @Override
     @Transactional
-    public void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+    public void appendMismatch(String sessionId, SuitabilityMismatch mismatch,
                                String surveySchemaVersion, Map<String, Object> surveyResult,
                                Instant at) {
         Map<String, Object> payload = envelope("mismatch", sessionId, at);

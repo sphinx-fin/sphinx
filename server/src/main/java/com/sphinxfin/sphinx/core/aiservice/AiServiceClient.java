@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -114,7 +115,7 @@ public class AiServiceClient {
      *
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
-    public Mismatch detectMismatch(String sessionId,
+    public SuitabilityMismatch detectMismatch(String sessionId,
                                             Map<String, Object> surveyResult,
                                             Map<String, String> maskedUtterances,
                                             String surveySchemaVersion) {
@@ -241,36 +242,6 @@ public class AiServiceClient {
     /** 채점 결과 — 측정값과 그때 실제로 나간 마스킹 발화를 함께 돌려준다. */
     public record Scored(Judgment judgment, String maskedAnswer) {}
 
-    /**
-     * F-DET-002 모순 판정 결과 — <b>상태와 그 근거를 함께</b> 든다 (이슈 #169).
-     *
-     * <p>전에는 {@link SuitabilityStatus} 하나만 돌려주고 {@code reason}·{@code contradictions}·
-     * {@code confidence} 를 <b>경계에서 버렸다.</b> 레코드는 전부 받고 있었으므로 계약 위반은
-     * 아니었는데, 그 뒤로 안 흘러서 <b>불변 기록에 근거가 하나도 안 남았다.</b>
-     *
-     * <p>모순 판정은 게이트를 움직인다 — {@code suitabilityMismatch} → R-02,
-     * {@code suitabilityUnknown} → R-02b. 즉 YELLOW·RED 를 만드는 입력인데, 감사 시점에
-     * 보이는 것은 {@code GateResult(signal, ruleTrace)} 뿐이라 <i>"왜 모순이라고 판단했는가"</i>
-     * 에 답할 것이 없었다.
-     *
-     * <p>{@code Judgment} 는 {@code Evidence} 가 비면 생성자가 막는다(P4). <b>둘은 같은 종류의
-     * 판정이다</b> — 하나는 항목 이해도를, 하나는 설문↔발화 어긋남을 재는데 둘 다 LLM 측정이고
-     * 둘 다 게이트 입력이다. 한쪽만 근거를 요구하는 것이 일관되지 않다.
-     *
-     * <p>다만 여기서는 생성자로 강제하지 않는다 — ai-service 호출이 실패하면
-     * {@code UNKNOWN} 으로 진행시키는 것이 이미 정해진 규약이고(그 실패에 게이트를 막는 것은
-     * 비례하지 않는다), 그 경로에는 근거가 없다. 대신 {@link #unknown()} 이 <b>왜 근거가
-     * 없는지</b>를 사유로 적는다 — 빈 것과 못 받은 것을 가른다.
-     */
-    public record Mismatch(SuitabilityStatus status, String reason,
-                           BigDecimal confidence, List<Map<String, Object>> contradictions) {
-
-        /** ai-service 를 못 불렀을 때. 근거가 없는 이유를 사유로 남긴다. */
-        public static Mismatch unknown(String why) {
-            return new Mismatch(SuitabilityStatus.UNKNOWN, why, null, List.of());
-        }
-    }
-
     /** F-INT-002 질문 생성 결과. question_type ∈ {situation, amount, condition}. */
     public record Question(String question, String questionType) {}
 
@@ -306,9 +277,8 @@ public class AiServiceClient {
          * 판정 실패가 "적합" 이 된다 — 계약 주석이 명시적으로 금지한 오독이다.
          */
         /** 상태와 근거를 함께 넘긴다 — 근거를 버리면 불변 기록에 남길 것이 없다 (#169). */
-        Mismatch toMismatch() {
-            return new Mismatch(toStatus(), reason, confidence,
-                    contradictions == null ? List.of() : contradictions);
+        SuitabilityMismatch toMismatch() {
+            return new SuitabilityMismatch(toStatus(), reason, confidence, contradictions);
         }
 
         SuitabilityStatus toStatus() {

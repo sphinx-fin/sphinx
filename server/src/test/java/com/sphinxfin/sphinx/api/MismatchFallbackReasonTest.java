@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -47,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class MismatchFallbackReasonTest {
 
     /** 기록으로 넘어간 모순 판정. 폴백 경로가 무엇을 남기는지 본다. */
-    static final List<AiServiceClient.Mismatch> RECORDED = new java.util.ArrayList<>();
+    static final List<SuitabilityMismatch> RECORDED = new java.util.ArrayList<>();
 
     @org.springframework.boot.test.context.TestConfiguration
     static class RecordingCfg {
@@ -57,7 +58,7 @@ class MismatchFallbackReasonTest {
             return new com.sphinxfin.sphinx.core.EvidenceRecorder() {
                 @Override public void appendJudgment(String sid, Judgment j, int r,
                         String q, QuestionSource s, java.time.Instant at) { }
-                @Override public void appendMismatch(String sid, AiServiceClient.Mismatch m,
+                @Override public void appendMismatch(String sid, SuitabilityMismatch m,
                         String v, java.util.Map<String, Object> r, java.time.Instant at) {
                     RECORDED.add(m);
                 }

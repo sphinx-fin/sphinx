@@ -1,6 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
-import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -210,8 +210,8 @@ class StoredEvidenceRecorderTest {
                 "SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다",
                 "SUIT-PRODUCT-EXPERIENCE", "있고 이득을 봤다");
 
-        private AiServiceClient.Mismatch detected() {
-            return new AiServiceClient.Mismatch(
+        private SuitabilityMismatch detected() {
+            return new SuitabilityMismatch(
                     SuitabilityStatus.MISMATCH,
                     "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
                     new BigDecimal("0.82"),
@@ -256,7 +256,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("❗호출 실패로 근거가 없으면 그 사유가 남는다 — 비어 있는 것과 다르다")
         void unknownCarriesWhyItHasNoBasis() {
             recorder.appendMismatch(SID,
-                    AiServiceClient.Mismatch.unknown("ai-service 호출 실패 — 판정하지 못했다"),
+                    SuitabilityMismatch.unknown("ai-service 호출 실패 — 판정하지 못했다"),
                     "s02-survey-v2", SURVEY, T0);
 
             Map<String, Object> p = payloads().get(0);
@@ -271,7 +271,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("null 을 생략하지 않는다 — 필드 이전 레코드와 값 없는 판정을 가른다")
         void nullsAreWrittenNotOmitted() {
             recorder.appendMismatch(SID,
-                    new AiServiceClient.Mismatch(SuitabilityStatus.NO_MISMATCH, null, null, List.of()),
+                    new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, null, null, List.of()),
                     null, Map.of(), T0);
 
             assertThat(payloads().get(0))

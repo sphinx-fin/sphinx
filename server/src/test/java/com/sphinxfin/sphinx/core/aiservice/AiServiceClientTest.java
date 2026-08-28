@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.aiservice;
 
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -314,7 +315,7 @@ class AiServiceClientTest {
                           "survey_schema_version": "s02-survey-v2"
                         }""", MediaType.APPLICATION_JSON));
 
-        AiServiceClient.Mismatch m = client.detectMismatch(
+        SuitabilityMismatch m = client.detectMismatch(
                 "S-1", Map.of("SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다"),
                 Map.of("A", "원금은 지켜지죠"), "s02-survey-v2");
 
@@ -346,7 +347,7 @@ class AiServiceClientTest {
                           "reason": "발화가 두 건뿐이라 판단할 수 없다"
                         }""", MediaType.APPLICATION_JSON));
 
-        AiServiceClient.Mismatch m = client.detectMismatch(
+        SuitabilityMismatch m = client.detectMismatch(
                 "S-1", Map.of(), Map.of("A", "네"), "s02-survey-v2");
 
         assertThat(m.status())

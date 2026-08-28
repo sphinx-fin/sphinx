@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -63,7 +64,7 @@ class AskedQuestionTest {
                     SOURCES.add(questionSource);
                 }
                 @Override public void appendMismatch(String sid,
-                        com.sphinxfin.sphinx.core.aiservice.AiServiceClient.Mismatch m,
+                        com.sphinxfin.sphinx.domain.SuitabilityMismatch m,
                         String v, java.util.Map<String, Object> r, java.time.Instant at) { }
                 @Override public void appendGate(String sid,
                         com.sphinxfin.sphinx.domain.GateResult res, java.time.Instant at) { }
@@ -92,7 +93,7 @@ class AskedQuestionTest {
                                 "정확히 진술", null),
                         inv.getArgument(2)));
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
-                .thenReturn(new AiServiceClient.Mismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
+                .thenReturn(new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
     }
 
     private String createSession() throws Exception {

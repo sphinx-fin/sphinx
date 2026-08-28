@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.api.dto.AnswerRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentView;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
@@ -182,7 +183,7 @@ public class SessionController {
         if (!session.suitabilityNotEvaluated()) {
             return;
         }
-        AiServiceClient.Mismatch mismatch;
+        SuitabilityMismatch mismatch;
         try {
             mismatch = aiServiceClient.detectMismatch(
                     sid, session.surveyResult(), session.maskedUtterances(),
@@ -191,7 +192,7 @@ public class SessionController {
             log.warn("적합성 모순 판정 실패 — UNKNOWN 으로 기록한다 (session={})", sid, e);
             // 근거가 없는 이유를 사유로 남긴다 — 기록에서 "근거가 비었다" 와 "못 받았다" 가
             // 같아 보이면 안 된다(E-EXT-03 과 같은 결). #169
-            mismatch = AiServiceClient.Mismatch.unknown(
+            mismatch = SuitabilityMismatch.unknown(
                     "ai-service /internal/mismatch 호출 실패 — 판정하지 못했다");
         }
         sessionService.recordSuitability(sid, mismatch);

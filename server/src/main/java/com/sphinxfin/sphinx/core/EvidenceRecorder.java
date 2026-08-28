@@ -1,6 +1,6 @@
 package com.sphinxfin.sphinx.core;
 
-import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
 
@@ -84,7 +84,7 @@ public interface EvidenceRecorder {
      * 서로 다른 문면을 담지 않게 한다 — {@code promptVersion} 이 {@code confidence} 의 정의인
      * 것과 같은 자리다(결정 5.18).
      */
-    void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+    void appendMismatch(String sessionId, SuitabilityMismatch mismatch,
                         String surveySchemaVersion, Map<String, Object> surveyResult, Instant at);
 
     /** 게이트 판정 1건 append. judge() 호출마다 들어온다(최종 신호가 아니라 신호의 변천). */
@@ -105,7 +105,7 @@ public interface EvidenceRecorder {
         }
 
         @Override
-        public void appendMismatch(String sessionId, AiServiceClient.Mismatch mismatch,
+        public void appendMismatch(String sessionId, SuitabilityMismatch mismatch,
                                    String surveySchemaVersion, Map<String, Object> surveyResult,
                                    Instant at) {
         }
