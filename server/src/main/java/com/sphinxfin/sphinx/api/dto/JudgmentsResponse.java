@@ -15,12 +15,15 @@ import java.util.List;
  * 항목별 신호등을 여기에 싣지 않는다 — 게이트 판정은 /judge 의 signal 이 단독으로 소유한다
  * (P1). grade → 색은 표시 관례이며 판정이 아니다.
  */
-public record JudgmentsResponse(String sessionId, String state, List<Judgment> judgments) {
+public record JudgmentsResponse(String sessionId, String state, List<JudgmentView> judgments) {
 
     public static JudgmentsResponse of(Session s) {
         // 항목 ID 순으로 고정한다 — 맵 순회 순서에 화면이 흔들리면 안 된다.
-        List<Judgment> ordered = s.judgments().stream()
+        // JudgmentView 로 내리는 이유는 그 타입의 javadoc 에 있다 (#144) — 목록 경로로
+        // 새면 단건을 막은 것이 의미가 없다. 두 엔드포인트가 같은 값을 낸다.
+        List<JudgmentView> ordered = s.judgments().stream()
                 .sorted(Comparator.comparing(Judgment::itemId))
+                .map(JudgmentView::of)
                 .toList();
         return new JudgmentsResponse(s.id(), s.state().name(), ordered);
     }

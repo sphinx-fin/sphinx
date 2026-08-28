@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.api.dto.AnswerRequest;
+import com.sphinxfin.sphinx.api.dto.JudgmentView;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
@@ -107,7 +108,8 @@ public class SessionController {
 
     @PreAuthorize("@accessGuard.can('session:answer', #sid)")
     @PostMapping("/{sid}/answers")
-    public ApiResponse<Judgment> submitAnswer(@PathVariable String sid, @Valid @RequestBody AnswerRequest body) {
+    public ApiResponse<JudgmentView> submitAnswer(@PathVariable String sid,
+                                                  @Valid @RequestBody AnswerRequest body) {
         // 흐름(강희진): PiiGateway.mask(text) → ai-service /internal/score → Judgment (F-SCR-001).
         // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
@@ -121,8 +123,10 @@ public class SessionController {
         var scored = aiServiceClient.score(
                 item.itemId(), asked.text(), body.text(), item, productTypeOf(session));
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
-        return ApiResponse.ok(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source()));
+        // 화면에는 JudgmentView 로 낸다 — misconceptionType 이 신호 그 자체라 판매자에게
+        // 안 보낸다 (#144). 도메인 판정은 그대로 기록·재설명 경로로 간다.
+        return ApiResponse.ok(JudgmentView.of(sessionService.recordJudgment(
+                sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source())));
     }
 
     /**

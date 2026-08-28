@@ -668,6 +668,14 @@ components:
         inputMeta: {type: object, nullable: true, additionalProperties: true, description: "붙여넣기·지연·수정빈도 등(F-INT-003)"}
 
     # 웹 응답용 Judgment(camelCase). 내부 ai-service 계약은 judgment.schema.json(snake_case).
+    #
+    # ❗misconceptionType 은 여기 없다 (이슈 #144). 그 값이 불공정영업 신호 그 자체라서다 —
+    #   UnfairSalesTypes.isSignal 이 보는 필드이고 M08-TYING 이면 COMPL 로 사건이 나간다.
+    #   rbac_policy.yaml 이 signal:unfair:read 를 COMPL 로 좁혀 뒀는데 판정 응답으로 나가면
+    #   그 좁힘이 무의미하다. 판매자가 무엇이 탐지되는지 알면 문면만 바꿔 우회한다(기획 7-4).
+    #   신호일 때만 빼면 그 부재가 곧 신호이므로 항상 뺀다.
+    #   내부 계약(judgment.schema.json)에는 그대로 있다 — 재설명 프롬프트가 쓰고 불변 기록에도
+    #   남는다. 빠지는 것은 판매자 화면으로 가는 이 표현 하나다.
     JudgmentView:
       type: object
       required: [itemId, grade, confidence, evidence, reason]
@@ -682,7 +690,6 @@ components:
             utteranceQuote: {type: string}
             rubricClause:   {type: string}
         reason:            {type: string}
-        misconceptionType: {type: string, nullable: true}
     JudgmentApiResponse:
       type: object
       required: [success, data]
