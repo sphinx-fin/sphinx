@@ -2,6 +2,8 @@ package com.sphinxfin.sphinx.core.aiservice;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -97,32 +100,96 @@ class RiskItemWireContractTest {
     }
 
     /**
-     * 나가는 키 집합이 계약의 {@code properties} 와 <b>정확히 같아야 한다</b>.
+     * 나가는 키 집합이 계약과 <b>모든 겹에서</b> 정확히 같아야 한다.
      *
      * <p>부분집합으로 두지 않는다. 계약에 없는 키는 상대가 {@code extra_forbidden} 으로
      * 거절하고(#165 가 그것이다), 계약에 있는데 안 보내면 상대가 그 필드를 못 본다 —
      * {@code failure_reason} 이 안 가면 추출 실패가 은폐된다(E-EXT-03).
+     *
+     * <p>❗<b>재귀로 내려간다.</b> 처음에는 맨 위 한 겹만 봤는데, 스키마가 3단이고
+     * ({@code root → condition → source_span}) <b>상대 모델도 중첩까지 {@code extra="forbid"}</b>
+     * 다. 중첩에 계약에 없는 키가 하나 끼면 {@code #165} 와 문자 그대로 같은 422 가 나는데,
+     * 한 겹만 보는 대조는 그것을 통과시킨다. 실측으로 확인됐다(#167 리뷰) —
+     * 루트에 키를 얹으면 2건 실패, 같은 키를 {@code source_span} 에 얹으면 BUILD SUCCESSFUL.
+     * <b>두 변이는 상대에게 도달했을 때 같은 결과를 낸다. 차이는 깊이 하나뿐이다.</b>
      */
     private static void assertKeysMatchContract(JsonNode riskItem) throws Exception {
-        JsonNode props = MAPPER.readTree(Files.readString(SCHEMA)).get("properties");
-        assertThat(props)
+        JsonNode schema = MAPPER.readTree(Files.readString(SCHEMA));
+        assertThat(schema.get("properties"))
                 .as("risk_item.schema.json 에서 properties 를 못 읽었다 — 스키마 모양이 "
                         + "바뀌었으면 이 테스트도 같이 고친다. 안 그러면 양쪽이 다 비어서 "
                         + "집합이 같아지고 조용히 통과한다")
                 .isNotNull();
+        assertKeysMatch(riskItem, schema, "risk_item");
+    }
+
+    /**
+     * 한 겹을 대조하고 객체인 자식으로 내려간다.
+     *
+     * <p>{@code path} 를 들고 다니는 이유는 실패 메시지가 <b>어느 겹인지</b>를 말해야 하기
+     * 때문이다. 없으면 "키가 어긋났다" 만 나오고 3단 중 어디인지는 안 나온다.
+     *
+     * <p>{@code isObject()} 로 거르는 이유는 {@code status=extraction_failed} 일 때
+     * {@code condition} 이 null 이기 때문이다 — 그때 내려가면 NPE 로 죽는데, 그건 계약
+     * 위반이 아니라 <b>정상 상태</b>다.
+     */
+    private static void assertKeysMatch(JsonNode wire, JsonNode schema, String path) {
+        JsonNode props = schema.get("properties");
+        if (props == null || props.isEmpty()) {
+            return;   // leaf. 0건 가드는 최상위에서 한 번만 건다
+        }
 
         Set<String> contract = new TreeSet<>();
         props.fieldNames().forEachRemaining(contract::add);
-        Set<String> wire = new TreeSet<>();
-        riskItem.fieldNames().forEachRemaining(wire::add);
+        Set<String> keys = new TreeSet<>();
+        wire.fieldNames().forEachRemaining(keys::add);
 
-        assertThat(contract).isNotEmpty();
-        assertThat(wire)
-                .as("나가는 risk_item 의 키가 계약과 어긋났다. 계약에 없는 키는 ai-service 가 "
+        assertThat(keys)
+                .as(path + " 의 키가 계약과 어긋났다. 계약에 없는 키는 ai-service 가 "
                         + "422 extra_forbidden 으로 거절하고(#165), 계약에 있는데 안 보내면 "
                         + "상대가 그 필드를 못 본다 — failure_reason 이 안 가면 추출 실패가 "
                         + "은폐된다(E-EXT-03)")
                 .isEqualTo(contract);
+
+        props.fields().forEachRemaining(e -> {
+            JsonNode child = wire.get(e.getKey());
+            if (child != null && child.isObject()) {
+                assertKeysMatch(child, e.getValue(), path + "." + e.getKey());
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("추출 실패 항목도 통과한다 — condition 이 null 인 것은 계약 위반이 아니다")
+    void extractionFailedItemAlsoMatches() throws Exception {
+        RiskItem failed = RiskItem.failed(
+                "ELS-BROKEN", "mock-els-001", "파싱 실패 항목", "required", "표 구조를 못 읽었다");
+
+        JsonNode riskItem = captureRiskItem("/internal/question",
+                """
+                {"question": "질문", "question_type": "OPEN_ENDED", "fallback_used": true}""",
+                () -> client.question(failed, List.of(), "60대"));
+
+        // 재귀가 isObject() 로 안 거르면 여기서 NPE 로 죽는다 — 그건 계약 위반이 아니라
+        // E-EXT-03 이 정의한 정상 상태다.
+        assertKeysMatchContract(riskItem);
+    }
+
+    @Test
+    @DisplayName("❗/internal/reexplain 도 같은 모양을 싣는다 — risk_item 을 싣는 경로는 셋이다")
+    void reExplainRequestMatchesContract() throws Exception {
+        // 오늘은 셋이 같은 RiskItem 을 같은 매퍼로 직렬화하므로 구조적으로 갈릴 수 없다.
+        // 갈리는 날은 누가 ReExplainRequest 에 risk_item 대신 축약 투영을 싣는 순간이고,
+        // 그때 이 경로만 조용히 죽는다 (#167 리뷰).
+        Judgment judgment = new Judgment(EXTRACTED.itemId(), Grade.U3, new BigDecimal("0.8"),
+                new Judgment.Evidence("인용", "조항"), "사유", null, null);
+
+        JsonNode riskItem = captureRiskItem("/internal/reexplain",
+                """
+                {"item_id": "ELS-PRINCIPAL-LOSS-WARNING", "content": "다시 설명", "cited_spans": []}""",
+                () -> client.reExplain(EXTRACTED, judgment, "60대", "none"));
+
+        assertKeysMatchContract(riskItem);
     }
 
     /** 요청을 한 번 태우고 그 본문의 {@code risk_item} 노드를 집어 온다. */
