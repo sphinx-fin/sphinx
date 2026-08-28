@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { Judgment, NextQuestion, RiskItem, SessionResponse } from "../api/types";
+import type { Judgment, NextQuestion, RiskItem } from "../api/types";
 import { useElderlyMode } from "../hooks/useElderlyMode";
 import { useInputMeta } from "../hooks/useInputMeta";
 import { detectPii } from "../lib/pii";
@@ -90,15 +90,18 @@ export default function S03Interview() {
     setPhase("asking");
   }, [sid, meta]);
 
-  /* ── 최초 로드: 세션 → 검증 대상 항목 → 첫 질문 ───────────────────────── */
+  /* ── 최초 로드: 검증 대상 항목 → 첫 질문 ────────────────────────────────
+     항목을 **세션 경유**로 받는다(#164, 이슈 #158 1항). 예전에는 `GET /sessions/{sid}` 로
+     productId 를 알아낸 뒤 `GET /products/{productId}/risk-items` 를 불렀는데, 그쪽은
+     `product:read`(scope org)라 **고객에게 열어 주면 자기 계약 건과 무관한 상품까지 전
+     카탈로그가 열린다.** 세션 경유는 대상이 세션이라 범위가 자연히 own_session 이다.
+     세션 조회는 통째로 지웠다 — 이 화면이 응답에서 쓰던 것이 productId 하나뿐이었다.
+     그래서 최초 로드가 3회 → 2회(항목 → 첫 질문)가 된다. */
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const session = await get<SessionResponse>(`/sessions/${sid}`);
-        const res = await get<{ items: RiskItem[] }>(
-          `/products/${session.productId}/risk-items`,
-        );
+        const res = await get<{ items: RiskItem[] }>(`/sessions/${sid}/risk-items`);
         if (!alive) return;
         setItems(res.items ?? []);
         await loadQuestion();
