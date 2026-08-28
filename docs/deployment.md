@@ -165,8 +165,28 @@ git clone <repo> && cd sphinx
 
 ```bash
 docker compose ps                       # 세 서비스가 healthy 인가
-curl -fsS http://localhost/             # 화면
-curl -fsS -u "$USER:$PASS" http://localhost/api/products   # 프록시 + 인증
+
+# 인증이 걸려 있는가. **401 이 정상이다** — 사이트 전체에 auth_basic 이 걸려 있다(#162).
+# 200 이 나오면 auth_basic 이 빠진 것이라, 이 한 줄이 #41 1항의 회귀도 같이 잡는다.
+# `-f` 를 쓰지 않는다 — 401 에 비영점으로 죽어서 정상 동작을 배포 실패로 읽게 된다(#170).
+curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/
+
+# 자격증명이 통하는가. **값을 셸 변수로 먼저 채워야 한다** — `deploy_ec2.sh` 의 export 는
+# 그 스크립트 프로세스에만 살고 이 셸로 안 내려온다. 변수 이름도 스크립트와 같게 쓴다.
+# `-u` 대신 stdin(`-K -`)으로 넘기는 이유는 `-u` 가 argv 라 `ps` 에 보이기 때문이다.
+SSM_PREFIX="${SSM_PREFIX:-/sphinx/prod}"          # deploy_ec2.sh 와 같은 기본값
+SPHINX_API_USER=$(aws ssm get-parameter --name "$SSM_PREFIX/api-user" \
+  --with-decryption --query Parameter.Value --output text)
+SPHINX_API_PASSWORD=$(aws ssm get-parameter --name "$SSM_PREFIX/api-password" \
+  --with-decryption --query Parameter.Value --output text)
+
+# curl config 의 따옴표 안에서는 `\` 와 `"` 가 이스케이프 문자다. 그대로 넣으면 파싱이
+# 끊겨 **값이 맞는데도 401** 이 나고, 비밀번호가 틀린 것으로 읽힌다. 백슬래시를 먼저 친다.
+esc_user=${SPHINX_API_USER//\\/\\\\};     esc_user=${esc_user//\"/\\\"}
+esc_pass=${SPHINX_API_PASSWORD//\\/\\\\}; esc_pass=${esc_pass//\"/\\\"}
+
+printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
+  curl -sS -K - -o /dev/null -w '%{http_code}\n' http://localhost/api/products   # 200
 
 # ❗아래 둘은 **실패해야 정상이다**
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8100/healthz   # ai-service 직접 — 막혀야 한다

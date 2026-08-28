@@ -88,7 +88,43 @@ echo "상태:"
 docker compose ps
 echo
 echo "확인:"
-echo "  curl -fsS http://localhost/            # 화면"
+# `#162` 로 nginx 가 사이트 전체에 auth_basic 을 건 뒤로 자격증명 없는 GET / 는 401 이다.
+# 예전 문구(`curl -fsS`)는 -f 때문에 비영점으로 죽었고, 붙여 넣은 사람이 **정상 동작을
+# 배포 실패로 읽는다** — 그 시점이 리허설 직전이다.
+#
+# -u 로 자격증명을 넣는 쪽은 안 쓴다. 셸 히스토리와 ps 에 남아 `#162` 가 값을 파일·환경변수
+# 로만 다루기로 한 것과 어긋난다. 그리고 상태코드를 그냥 찍는 편이 **더 많이 잡는다** —
+# 401 이 나오는 것 자체가 성공 신호라, 200 이 나오면 auth_basic 이 빠진 것이다.
+echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
 echo "  docker compose logs -f server          # 기동 로그"
 echo
-echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 ①③ 이 되살아난다."
+
+# ❗**자격증명 확인은 안내하지 않고 여기서 한다** (PR #173 리뷰, 오준서).
+#
+# 위 57~58 의 export 는 이 스크립트 프로세스와 그 자식(docker compose)에만 산다. 오퍼레이터
+# 셸은 스크립트의 **부모**라 값이 안 내려간다 — `-u "$SPHINX_API_USER:..."` 를 안내 문구로
+# 찍으면 붙여 넣는 순간 `-u ":"` 가 되고, curl 이 빈 자격증명으로 Authorization 을 실제로
+# 보내므로 **401 이 나면서 안내에는 "# 200" 이라고 적혀 있다.** `#170` 과 같은 종류이고,
+# 이번엔 배포 실패가 아니라 "SSM 비밀번호가 틀렸나" 로 읽힌다.
+#
+# 값을 가진 것은 이 스크립트뿐이므로 확인도 여기서 하고 결과만 찍는다. `-K -` 로 stdin 에
+# 넘기는 이유는 `-u` 가 argv 라 `ps` 에 보이기 때문이다 — 히스토리·`ps` 둘 다 안 남는다.
+# curl config 의 따옴표 안에서는 `\` 와 `"` 가 이스케이프 문자다. 그대로 넣으면 파싱이
+# 끊겨 **자격증명이 맞는데도 401** 이 나고, 이 스크립트는 "SSM 값과 htpasswd 가 다르다" 라고
+# 찍는다 — 이 PR 이 고치려는 것과 정확히 같은 모양(정상을 다른 원인으로 읽게 만든다)이
+# 한 겹 아래에서 반복된다(PR #173 리뷰, 강희진 실측). 따옴표를 빼는 것도 답이 아니다 —
+# 그러면 공백에서 깨진다.
+#
+# 백슬래시를 **먼저** 치환한다. 순서를 바꾸면 방금 이스케이프한 백슬래시를 다시 이스케이프한다.
+auth_user=${SPHINX_API_USER//\\/\\\\};     auth_user=${auth_user//\"/\\\"}
+auth_pass=${SPHINX_API_PASSWORD//\\/\\\\}; auth_pass=${auth_pass//\"/\\\"}
+auth_code=$(printf 'user = "%s:%s"\n' "$auth_user" "$auth_pass" |
+            curl -sS -K - -o /dev/null -w '%{http_code}' http://localhost/ || true)
+case "$auth_code" in
+  200)      echo "자격증명 확인: 200 — 통과" ;;
+  401)      echo "자격증명 확인: 401 — SSM 값과 nginx htpasswd 가 다르다. 둘 다 SSM 에서 나오는지 본다" ;;
+  ''|000)   echo "자격증명 확인: 요청 자체가 안 갔다 — nginx 가 떴는지 본다 (docker compose ps)" ;;
+  *)        echo "자격증명 확인: $auth_code — 예상 밖이다. server 로그를 본다" ;;
+esac
+echo
+echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 의 1·3항(permitAll · ai-service 무인증)이 되살아난다."
