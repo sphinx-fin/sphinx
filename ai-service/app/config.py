@@ -81,12 +81,24 @@ def _resolve_level(name: str) -> int | None:
     **숫자도 받는다** — 파이썬 로깅이 숫자 레벨을 정식으로 지원하므로 아는 사람이
     `SPHINX_LOG_LEVEL=10` 으로 쓸 수 있다. 안 받으면 그게 오타와 같은 경고를 받고, 그러면
     경고가 두 가지 뜻을 갖는다(PR #121 리뷰, 정세현).
+
+    **범위 조건이 두 분기에 똑같이 걸린다.** 숫자 `0` 만 막고 이름 `NOTSET` 을 통과시키면
+    같은 상태로 가는 문이 하나 열린 채로 남는다 — `getattr(logging, "NOTSET")` 이 `0` 이고
+    `isinstance(0, int)` 가 참이라 유효한 레벨로 받아졌다(PR #121 리뷰 2차, 정세현 실측).
+
+    `NOTSET` 이 나쁜 이유는 오타보다 조용하기 때문이다. `app` 로거 레벨이 `0` 이면
+    `getEffectiveLevel()` 이 root 로 상속돼 `WARNING` 이 되고 `log.info` 관측이 전부 꺼지는데,
+    **경고가 하나도 안 난다.** 이 PR 이 세운 기준(*"오타가 관측을 끄는데 그게 안 보이면
+    안 된다"*)에 `NOTSET` 도 같은 자리에 있다.
+
+    `app` 로거를 root 에 되돌리려는 사람이 있다면 그건 `SPHINX_LOG_LEVEL` 이 아니라 다른
+    스위치여야 한다 — 이 변수의 뜻은 "관측 레벨" 이지 "상속 여부" 가 아니다.
     """
     if name.isdigit():
         value = int(name)
         return value if 0 < value <= logging.CRITICAL else None
     level = getattr(logging, name, None)
-    return level if isinstance(level, int) else None
+    return level if isinstance(level, int) and 0 < level <= logging.CRITICAL else None
 
 log = logging.getLogger(__name__)
 

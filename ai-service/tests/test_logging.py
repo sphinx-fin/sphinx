@@ -159,14 +159,32 @@ def test_numeric_levels_are_accepted(monkeypatch):
     assert _logging.getLogger(config.APP_LOGGER).getEffectiveLevel() == _logging.DEBUG
 
 
-def test_out_of_range_numeric_level_falls_back(monkeypatch, caplog):
+def test_out_of_range_numeric_level_falls_back(monkeypatch):
     """`0` 은 NOTSET 이라 상속으로 새고, 범위를 벗어난 값도 오타와 같다."""
-    import logging as _logging
-
     for bad in ("0", "999"):
         monkeypatch.setenv(config.LOG_LEVEL_ENV, bad)
         config.settings.cache_clear()
         assert config.configure_logging() == config.DEFAULT_LOG_LEVEL, bad
+
+
+def test_notset_by_name_is_refused_like_the_number(monkeypatch):
+    """★ 숫자 `0` 을 막고 이름 `NOTSET` 을 통과시키면 같은 상태로 가는 문이 남는다.
+
+    `getattr(logging, "NOTSET")` 이 `0` 이고 `isinstance(0, int)` 가 참이라 유효한 레벨로
+    받아졌다(PR #121 리뷰 2차, 정세현 실측). 결과가 오타보다 나쁘다 — `app` 로거 레벨이
+    `0` 이면 `getEffectiveLevel()` 이 root 로 상속돼 `WARNING` 이 되고 `log.info` 관측이
+    전부 꺼지는데 **경고가 하나도 안 난다.**
+
+    그래서 두 가지를 같이 본다: 폴백했는가(반환값), 그리고 **실제로 관측이 살아 있는가**
+    (실효 레벨). 반환값만 보면 상속이 남아도 초록일 수 있다.
+    """
+    monkeypatch.setenv(config.LOG_LEVEL_ENV, "NOTSET")
+    config.settings.cache_clear()
+    assert config.configure_logging() == config.DEFAULT_LOG_LEVEL
+
+    logger = logging.getLogger(config.APP_LOGGER)
+    assert logger.level != logging.NOTSET, "레벨이 0 이면 root 로 상속된다"
+    assert logger.getEffectiveLevel() == getattr(logging, config.DEFAULT_LOG_LEVEL)
 
 
 def test_fallback_warning_goes_through_our_handler(monkeypatch, capsys):
