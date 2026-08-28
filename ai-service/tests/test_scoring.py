@@ -339,7 +339,66 @@ def test_the_floor_is_derived_from_the_shortest_clause():
         for clause in rubric.required_elements
     )
     assert scoring.min_echo_bigrams() < shortest, (
-        f"하한 {scoring.min_echo_bigrams()} ≥ 조항 최단 {shortest} — 그 조항 복창을 놓친다"
+        f"하한 {scoring.min_echo_bigrams()} ≥ 조항 최단 {shortest} — 그 조항 복창을 놓친다.\n"
+        "★ 하한이 4 이하로 내려가야 하면 **개수 기준을 버리고 조항 길이에 상대적인 임계로 "
+        "옮겨야 한다** — 오발동 상한(3bg)과 1 차이가 되면 개수로는 두 군을 못 가른다. "
+        "하한만 한 칸 내리고 지나가지 말 것 (PR #114 리뷰)."
+    )
+
+
+def test_the_floor_sits_below_real_utterances():
+    """하한이 실제 발화 쪽으로 올라오면 복창 판정이 아무 발화에도 도달하지 않는다.
+
+    **`..._derived_from_the_shortest_clause` 와 겹치지 않는다.** 하한을 조항에서 유도하도록
+    바꾼 뒤로 이 둘은 서로 다른 것을 본다 — 그쪽은 유도의 정의(조항 최단보다 작다), 이쪽은
+    유도 결과가 **실제 데이터에 대해** 쓸 만한지다. 조항과 발화 중 어느 쪽이 더 타이트한지는
+    데이터에 따라 뒤집힌다(`#112` 가 조항 최단을 13bg → 6bg 로 바꿨을 때 실제로 뒤집혔다).
+    그래서 둘을 다 둔다 — PR #114 리뷰에서 정세현이 포섭 지적을 접은 근거가 그 사건이다.
+    """
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    from app import textsim
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "utterances"
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(case["answer"])))
+        for path in sorted(fixtures.glob("*.yaml"))
+        for case in yaml.safe_load(path.read_text(encoding="utf-8"))["cases"]
+    )
+    assert scoring.min_echo_bigrams() < shortest, (
+        f"하한 {scoring.min_echo_bigrams()} ≥ 실제 발화 최단 {shortest}bg — "
+        "어떤 발화도 복창 판정을 받지 못한다"
+    )
+
+
+def test_the_floor_sits_below_every_condition_text():
+    """`echo_score` 는 조항 **+ 조건 원문**을 대조한다. 하한은 조항에서만 유도된다.
+
+    조건 원문이 조항보다 짧아지면 **그 원문을 그대로 옮긴 복창을 놓친다.** 지금은 조건 원문
+    최단이 11bg 로 조항 최단(6bg)보다 크지만 그건 현재 데이터의 사실이고, 유도식에는 그
+    보장이 없다 — 계약 샘플이 바뀌면 조용히 깨진다(PR #114 리뷰, 정세현).
+    """
+    import sys
+    from pathlib import Path
+
+    from app import textsim
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from run_devset import load_risk_items
+
+    shortest = min(
+        len(textsim.bigrams(textsim.normalize(item.condition.value_text)))
+        for product_type in ("ELS", "VARIABLE_INSURANCE")
+        for item in load_risk_items(product_type).values()
+    )
+    assert scoring.min_echo_bigrams() < shortest, (
+        f"하한 {scoring.min_echo_bigrams()} ≥ 조건 원문 최단 {shortest}bg — "
+        "그 원문을 옮긴 복창을 놓친다. 유도는 조항만 보므로 여기서만 드러난다"
     )
 
 

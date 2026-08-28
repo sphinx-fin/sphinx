@@ -88,7 +88,6 @@ class MisconceptionType:
 #: 정규화·바이그램·포함도는 `textsim` 한 벌만 쓴다 — F-SCR-001 복창 판정이 같은 계산을
 #: 쓰므로 두 곳에서 따로 정규화하면 임계값을 서로 비교할 수 없게 된다.
 _normalize = textsim.normalize
-_bigrams = textsim.bigrams
 _containment = textsim.containment
 
 
