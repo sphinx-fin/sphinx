@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import java.util.Optional;
 
 /**
  * 컨트롤러 @PreAuthorize가 부르는 단일 진입점. 소유: 강희진
@@ -77,6 +78,28 @@ public class AccessGuard {
      */
     public boolean canAggregate(String action) {
         return can(action, null);
+    }
+
+    /**
+     * 집계 요청에 <b>허용된 범위</b>. 불리언으로는 부족한 자리다 (결정 5.10).
+     *
+     * <p>{@code canAggregate} 는 <i>"닿을 수 있는가"</i> 만 말한다. 집계 서비스는 그 위에
+     * <b>질의를 어디까지 좁힐지</b>를 알아야 한다 — {@code scope: branch} 인 MGR 에게 org
+     * 전체를 주면 정책이 통과시킨 의미가 없다.
+     *
+     * <p>❗<b>요청 파라미터로 받지 않는다.</b> 범위를 쿼리로 받으면 MGR 이 {@code scope=org}
+     * 를 적어 보내는 것으로 정책을 우회한다. 서버가 정해서 응답에 싣는다.
+     *
+     * <p>{@code enforce=false} 면 {@code ORG} 다 — 목 개발용이고, 그때는 정책 자체가 안 돈다.
+     * 그 상태를 {@code Optional.empty()} 로 두면 호출부가 <i>"권한 없음"</i> 과 구별 못 한다.
+     *
+     * @return 허용된 범위. 닿을 수 없으면 {@code Optional.empty()}
+     */
+    public Optional<AccessPolicy.Scope> grantedScope(String action) {
+        if (!enforce) {
+            return Optional.of(AccessPolicy.Scope.ORG);
+        }
+        return policy.grantedScope(currentActor(), action, AccessPolicy.Target.aggregate());
     }
 
     /**

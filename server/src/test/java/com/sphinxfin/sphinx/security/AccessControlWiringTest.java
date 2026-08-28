@@ -204,9 +204,12 @@ class AccessControlWiringTest {
         // POST /products/{id}/extract). 정책이 없어서 어노테이션이 못 붙어 있던 것이고,
         // 그 정책이 방금 생겼다(이슈 #69, 결정 10.36). 부착은 강희진 몫이라 이 PR 이 하지
         // 않는다. **부착되면 이 줄을 지운다** — 목록이 줄어드는 것이 진척이다.
+        //
+        // aggregate:indicator:read 는 뺐다 — GET /dashboard/leading-indicators 가 붙었다
+        // (이슈 #178). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
-                "admin:role:assign", "aggregate:indicator:read",
+                "admin:role:assign",
                 "product:manage");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
