@@ -203,3 +203,109 @@ def test_fallback_warning_goes_through_our_handler(monkeypatch, capsys):
     captured = capsys.readouterr().err
     assert config.LOG_LEVEL_ENV in captured
     assert "WARNING" in captured, f"포맷 없는 lastResort 출력이다: {captured!r}"
+
+
+# ── conftest fixture 계약 (#182 · pytest 핀) ─────────────────────────────────
+#: `_caplog_reaches_app_logger`(`tests/conftest.py`, 정세현 소유)에는 분기가 셋이고
+#: **어느 것을 밟는지가 pytest 버전에 달렸다.**
+#:
+#:     (1) propagate=True            아무것도 안 한다 — root 경유로 잡힌다
+#:     (2) 핸들러가 이미 붙어 있다      아무것도 안 한다 — 최신 pytest 가 붙였다
+#:     (3) 그 외                      fixture 가 직접 붙이고, 끝나면 뗀다
+#:
+#: `pytest==9.1.1` 핀을 걸면 (2)만 밟히고 **(1)·(3)은 CI 에서 영원히 안 돈다.** 핀을 올리는
+#: 날 처음 실행되면서 문제가 드러나는 종류다. 그래서 세 경로를 **버전과 무관하게** 검증한다 —
+#: 핀이 만든 사각을 핀과 함께 막는다.
+#:
+#: **fixture 본체를 직접 돌린다.** `caplog` 을 실제로 써서 검증할 수는 없다 — fixture 는
+#: 테스트 **시작 시점**의 상태로 분기하는데, 검증하려면 테스트 안에서 그 상태를 만들어야
+#: 하고 그때는 이미 분기가 지나갔다(정세현이 `#121` 에서 지적한 그 한계다).
+#: `conftest.py` 는 그쪽 파일이라 건드리지 않고 여기서 계약만 확인한다.
+def _fixture_body():
+    """conftest fixture 의 원본 제너레이터 함수."""
+    import conftest
+
+    return conftest._caplog_reaches_app_logger.__wrapped__
+
+
+class _FakeCaplog:
+    def __init__(self, handler):
+        self.handler = handler
+
+
+def _run_fixture(handler):
+    """fixture 를 한 번 돌리고 (본문 중 핸들러 목록, 종료 후 목록) 을 돌려준다."""
+    logger = logging.getLogger(config.APP_LOGGER)
+    gen = _fixture_body()(_FakeCaplog(handler))
+    next(gen)
+    during = list(logger.handlers)
+    try:
+        next(gen)
+    except StopIteration:
+        pass
+    return during, list(logger.handlers)
+
+
+def test_fixture_branch_1_leaves_propagating_logger_alone():
+    """(1) `propagate=True` 면 붙이지 않는다 — 붙이면 root 와 양쪽에 잡혀 두 번 들어간다.
+
+    `#121` 이 `propagate=False` 를 둔 근거가 *"한 줄이 두 번 나오면 빈도 관측이 정확히 두
+    배로 틀린다"* 였다. 그 근거는 테스트 수집 경로에서도 지켜져야 한다.
+    """
+    logger = logging.getLogger(config.APP_LOGGER)
+    logger.propagate = True
+    logger.handlers[:] = []
+    handler = logging.NullHandler()
+
+    during, after = _run_fixture(handler)
+    assert handler not in during, "propagate=True 인데 붙였다 — 레코드가 두 번 들어간다"
+    assert handler not in after
+
+
+def test_fixture_branch_2_does_not_double_attach():
+    """(2) 이미 붙어 있으면(최신 pytest) 손대지 않는다 — 그리고 **떼지도 않는다.**
+
+    떼면 pytest 가 붙인 것을 우리가 치우는 것이라 그 테스트의 caplog 이 죽는다.
+    """
+    logger = logging.getLogger(config.APP_LOGGER)
+    logger.propagate = False
+    handler = logging.NullHandler()
+    logger.handlers[:] = [handler]
+
+    during, after = _run_fixture(handler)
+    assert during.count(handler) == 1, "두 번 붙였다"
+    assert handler in after, "남의 핸들러를 뗐다"
+
+
+def test_fixture_branch_3_attaches_and_detaches():
+    """(3) 구버전 pytest — 직접 붙이고 끝나면 뗀다. 안 떼면 테스트 간 누수가 된다."""
+    logger = logging.getLogger(config.APP_LOGGER)
+    logger.propagate = False
+    logger.handlers[:] = [logging.StreamHandler()]
+    handler = logging.NullHandler()
+
+    during, after = _run_fixture(handler)
+    assert handler in during, "propagate=False 인데 안 붙였다 — caplog 이 app.* 를 못 본다"
+    assert handler not in after, "끝나고 안 뗐다 — 다음 테스트로 샌다"
+
+
+def test_caplog_actually_reaches_app_logger(caplog):
+    """계약이 아니라 **결과**를 본다 — 지금 설치된 pytest 로 실제로 잡히는가.
+
+    위 셋이 분기를 재고, 이 하나가 그 분기가 실제로 목적을 달성하는지 잰다.
+    """
+    with caplog.at_level(logging.INFO, logger="app.probe"):
+        logging.getLogger("app.probe").info("닿아야 한다")
+    assert sum("닿아야 한다" in r.message for r in caplog.records) == 1, caplog.text
+
+
+def test_pytest_is_pinned():
+    """핀이 사라지면 위 검증이 다시 버전 운에 맡겨진다."""
+    from pathlib import Path
+
+    req = (Path(__file__).resolve().parents[1] / "requirements-dev.txt").read_text(encoding="utf-8")
+    pins = [l.strip() for l in req.splitlines()
+            if l.strip().startswith("pytest") and not l.strip().startswith("#")]
+    assert pins == [f"pytest=={pytest.__version__}"], (
+        f"핀과 실행 버전이 다르다: {pins} vs 실행 중 {pytest.__version__}"
+    )

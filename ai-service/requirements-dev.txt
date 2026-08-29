@@ -1,6 +1,22 @@
 # 테스트 전용 의존성. 런타임(requirements.txt, 소유: 윤지석)과 섞지 않는다.
-#   pip install -r requirements-dev.txt && pytest
+#   pip install -r requirements-dev.txt && python -m pytest tests/ -q
 -r requirements.txt
-pytest
+
+# pytest 는 **정확한 버전으로 핀한다.** 결함을 막는 것이 아니라 **경로 비결정성**을 막는다.
+#
+# `tests/conftest.py` 의 `_caplog_reaches_app_logger` 는 `caplog` 이 `app.*` 로거에 닿게
+# 하는데, 그 안에 분기가 셋이고 **어느 것을 밟는지가 pytest 버전에 달렸다**(#182 실측).
+#
+#     9.1.1   최신 pytest 가 propagate=False 로거에도 캡처 핸들러를 붙인다 → 분기 (2)
+#     8.3.4   안 붙인다 → fixture 가 직접 붙인다               → 분기 (3)
+#
+# 핀이 없으면 CI 가 어느 경로를 밟는지 **그날 해석기가 정한다.** 재현되지 않는 초록은
+# 초록이 아니다. `#182` 덕에 지금은 두 버전 다 307 passed 지만(8.3.4 로 실측), **그 사실이
+# 버전에 따라 달라지지 않게** 고정하는 것이 핀의 목적이다.
+#
+# 올릴 때: `tests/test_logging.py` 의 fixture 계약 테스트가 세 분기를 버전과 무관하게
+# 검증한다. 핀만 올리고 전체를 돌려 초록이면 된다.
+pytest==9.1.1
+
 jsonschema      # contracts/*.schema.json 으로 파서 출력을 실제 검증 (테스트 전용)
 reportlab       # 픽스처 PDF 생성 — 수집 문서(git 제외) 없이도 파서 테스트가 돌아야 한다
