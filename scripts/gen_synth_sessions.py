@@ -17,8 +17,10 @@
 
 ## 재현성
 
-`seed` 와 파라미터가 같으면 같은 산출물이 나온다. 산출물을 커밋하는 이유가 그것이다 —
-**리뷰에서 눈으로 볼 수 있고**, 대시보드 수치가 달라지면 이 파일의 diff 가 그 이유를 말한다.
+`seed` 와 파라미터가 같으면 같은 산출물이 나온다. **산출물은 커밋하지 않는다**
+(`.gitignore`) — 커밋해 두고 테스트가 그걸 읽으면 로컬에 남은 생성물이 러너에서도 있는
+것처럼 보여 **초록이 근거 없이 초록**이 된다. 대신 파라미터를 커밋하고 `--check` 로 현재
+파일과 대조한다. 대시보드 수치가 달라지면 `distribution.yaml` 의 diff 가 그 이유를 말한다.
 
     python3 scripts/gen_synth_sessions.py            # 생성 후 data/ 에 쓴다
     python3 scripts/gen_synth_sessions.py --check    # 쓰지 않고 현재 파일과 대조만
@@ -62,6 +64,33 @@ def _load_related() -> dict[str, list[str]]:
     return out
 
 
+def _assert_weights_cover(related: dict[str, list[str]], weight: dict) -> None:
+    """루브릭이 선언한 오해 유형이 가중치 표에 다 있는지. 없으면 **터뜨린다**.
+
+    `weight.get(m, 0)` 은 모르는 유형을 조용히 0 으로 본다 — 생성은 성공하고 값만 틀린다.
+    유형을 새로 넣은 효과가 히트맵에 안 나타나는데 **예외도 경고도 없다**(#194 리뷰, 윤지석).
+
+    그 일이 예정돼 있다. `#148` 이 들어오면 `ELS-MIDWAY-REDEMPTION-COST` 에 `M09`,
+    `ELS-NO-LISTING` 에 `M10` 이 붙는데 `distribution.yaml` 이 안 따라오면 두 항목이
+    가중치 0 인 채로 지나간다. 그리고 `misrate_of` 가 `lo/hi` 로 **선형 사상**하므로
+    최댓값이 바뀌면 **모든 항목의 오해율이 재계산된다** — 틀리는 것이 두 항목에 그치지 않는다.
+
+    이 PR 의 근거가 *"손으로 적으면 라이브러리가 바뀌어도 안 따라온다"* 인데 유도의 입력
+    절반(가중치 표)이 손으로 적혀 있다. 그 절반이 낡는 순간을 **실패로** 알린다 —
+    `assert_related_misconceptions_exist()` 가 로딩 시점에 죽는 것과 같은 결이다(결정 3.18).
+
+    반대 방향(표에는 있는데 루브릭이 안 쓰는 유형)은 막지 않는다. 라이브러리에 유형이 먼저
+    들어오고 루브릭이 나중에 붙는 순서가 정상이고, 그건 값을 틀리게 만들지 않는다.
+    """
+    unknown = {m for types in related.values() for m in types} - set(weight)
+    if unknown:
+        raise ValueError(
+            f"오해 유형이 가중치 표에 없다: {sorted(unknown)} — 루브릭이 늘었으면 "
+            f"{PARAMS.name} 의 misconception_weight 도 같이 올린다. 조용히 0 으로 두면 "
+            "새 유형을 넣은 효과가 히트맵에 안 나타나고 생성은 그대로 성공한다"
+        )
+
+
 def misrate_of(item_id: str, related: dict[str, list[str]], params: dict) -> float:
     """항목의 U4 비율. **손으로 적지 않고 라이브러리 가중치에서 유도한다.**
 
@@ -74,6 +103,7 @@ def misrate_of(item_id: str, related: dict[str, list[str]], params: dict) -> flo
     빠뜨린 것이 아니라 **그 항목에 묶인 오해 유형이 라이브러리에 아직 없다**는 사실이다.
     """
     weight = params["misconception_weight"]
+    _assert_weights_cover(related, weight)
     scores = {k: sum(weight.get(m, 0) for m in v) for k, v in related.items()}
     lo, hi = min(scores.values()), max(scores.values())
     rng = params["misrate_range"]
