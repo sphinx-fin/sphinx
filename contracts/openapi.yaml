@@ -943,6 +943,26 @@ components:
             소표본(n<30) 마스킹 여부. **셀을 제거하지 않는다** — 제거하면 화면이
             "데이터 없음"과 "가려짐"을 구분할 수 없고, 감사·심사 관점에서는 가려졌다는
             사실 자체가 마스킹이 동작한 증거다. 근거: rbac_policy.yaml 집계 절.
+        grades:
+          allOf: [{$ref: '#/components/schemas/GradeDistribution'}]
+          nullable: true
+          description: >
+            등급 분포. **masked 면 null 이다 — misrate 와 같은 규칙이다.**
+            분포만 남기면 U4 건수 ÷ n 으로 misrate 가 그대로 복원되므로 마스킹이 뚫린다.
+    GradeDistribution:
+      type: object
+      required: [u1, u2, u3, u4]
+      description: >
+        등급별 **건수**(비율이 아니다. 이슈 #177). 건수로 주면 화면이 비율·합계를 다 만들 수
+        있고 `u1+u2+u3+u4 == n` 검산이 성립한다 — 비율이면 반올림 때문에 그 검산이 사라진다.
+        misrate(U4 비율) 하나만으로는 화면이 **"이해했는가"** 를 말할 수 없다: 41% 만 보이면
+        "59%는 이해했다" 로 읽히는데 그 안에 부분이해·미이해가 섞여 있고 U1 이 0 건이어도
+        같은 값이 나온다. 개인 식별자는 나가지 않는다 — 등급별 건수는 집계 수치다(기획 7-4).
+      properties:
+        u1: {type: integer, minimum: 0, description: "이해"}
+        u2: {type: integer, minimum: 0, description: "부분이해"}
+        u3: {type: integer, minimum: 0, description: "미이해"}
+        u4: {type: integer, minimum: 0, description: "오해 — 이 건수가 misrate 의 분자다"}
     HeatmapResponse:
       type: object
       required: [synthetic, scope, cells]

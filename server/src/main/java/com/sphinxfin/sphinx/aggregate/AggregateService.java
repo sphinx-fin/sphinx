@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.IsoFields;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -86,7 +87,19 @@ public class AggregateService {
         }
     }
 
-    public record Cell(String product, String item, BigDecimal misrate, long n, boolean masked) {}
+    /**
+     * 셀의 등급 분포. <b>비율이 아니라 건수다</b>(이슈 #177).
+     *
+     * <p>건수로 주면 화면이 비율·합계를 다 만들 수 있고, 무엇보다 <b>{@code u1+u2+u3+u4 == n}
+     * 이라는 검산이 성립한다.</b> 비율로 내리면 반올림 때문에 그 검산이 사라지고, 어느 칸이
+     * 몇 건인지 되짚을 수 없다.
+     *
+     * <p>개인 식별자는 여전히 나가지 않는다 — 등급별 건수는 집계 수치다(기획 7-4 · ADR-001).
+     */
+    public record Grades(long u1, long u2, long u3, long u4) {}
+
+    public record Cell(String product, String item, BigDecimal misrate, long n, boolean masked,
+                       Grades grades) {}
 
     public record HeatmapView(boolean synthetic, String scope, List<Cell> cells) {}
 
@@ -125,7 +138,8 @@ public class AggregateService {
 
         List<Cell> cells = new ArrayList<>();
         byCell.forEach((key, tally) -> cells.add(new Cell(
-                key.product(), key.item(), tally.misrateOrNull(), tally.n(), tally.masked())));
+                key.product(), key.item(), tally.misrateOrNull(), tally.n(), tally.masked(),
+                tally.gradesOrNull())));
         return new HeatmapView(SYNTHETIC, label(scope), cells);
     }
 
@@ -299,13 +313,21 @@ public class AggregateService {
      * <p>미이해율이 따로 필요하면 <b>같은 셀의 뜻을 넓히는 것이 아니라 지표를 하나 더 두는
      * 것</b>이 맞다. 한 숫자에 두 뜻을 담으면 나중에 어느 쪽으로 읽어야 하는지 알 수 없다 —
      * {@code confidence} 가 프롬프트 버전마다 뜻이 달라 이슈 #136 이 된 것과 같은 모양이다.
+     *
+     * <p><b>이슈 #177 이 정확히 그 길로 갔다.</b> {@code misrate} 의 정의는 그대로 두고
+     * {@link Grades} 를 따로 실었다. 화면에 41% 만 있으면 <i>"59% 는 이해했다"</i> 로 읽히는데
+     * 그 59% 안에 부분이해·미이해가 섞여 있고, <b>이해(U1)가 한 건도 없어도 41% 가 나온다.</b>
+     * 오해율이 낮다는 이유로 <i>"설명이 잘 통했다"</i> 는 결론이 나가면 기획 4절이 비판하는
+     * 그 관행을 지표로 재생산하는 것이 된다 — 문면으로 막을 일이 아니라 데이터로 막을 일이다.
      */
     private static final class Tally {
         private long total;
         private long misunderstood;
+        private final EnumMap<Grade, Long> byGrade = new EnumMap<>(Grade.class);
 
         void add(Judgment judgment) {
             total++;
+            byGrade.merge(judgment.grade(), 1L, Long::sum);
             if (judgment.grade() == Grade.U4) {
                 misunderstood++;
             }
@@ -317,6 +339,25 @@ public class AggregateService {
 
         boolean masked() {
             return total < MIN_CELL_SAMPLE;
+        }
+
+        /**
+         * 등급 분포. <b>마스킹 규칙이 {@code misrate} 와 같다</b> — 가려진 칸은 분포도 안 준다.
+         *
+         * <p>둘을 다르게 두면 마스킹이 뚫린다. {@code misrate} 를 가려도 분포를 주면
+         * <b>U4 건수 ÷ n 으로 그 값이 그대로 복원된다.</b> 소표본을 가리는 이유가 셀 하나가
+         * 몇 사람인지 드러나지 않게 하는 것이므로, 같은 셀의 다른 필드로 되돌릴 수 있으면
+         * 가린 것이 아니다.
+         */
+        Grades gradesOrNull() {
+            if (masked() || total == 0) {
+                return null;
+            }
+            return new Grades(count(Grade.U1), count(Grade.U2), count(Grade.U3), count(Grade.U4));
+        }
+
+        private long count(Grade grade) {
+            return byGrade.getOrDefault(grade, 0L);
         }
 
         /** 마스킹된 셀은 값을 안 낸다 — {@code n} 은 그대로 내려간다. */

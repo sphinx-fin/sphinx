@@ -138,6 +138,91 @@ class AggregateServiceTest {
     }
 
     @Nested
+    @DisplayName("등급 분포 (이슈 #177)")
+    class GradeDistribution {
+
+        /**
+         * ❗이 이슈의 본체다. {@code misrate} 만 있으면 화면이 <b>"이해했는가"</b> 를 못 말한다.
+         *
+         * <p>41% 를 본 사람은 <i>"59% 는 이해했다"</i> 로 읽는데, 그 59% 안에 부분이해도
+         * 미이해도 섞여 있다. 오해율이 낮다는 이유로 <i>"설명이 잘 통했다"</i> 는 결론이
+         * 나가면 기획 4절이 비판하는 그 관행을 우리가 지표로 재생산하는 것이 된다.
+         */
+        @Test
+        @DisplayName("❗이해(U1)가 0건이어도 오해율은 낮게 나온다 — 그 사실이 분포에만 보인다")
+        void aLowMisrateDoesNotMeanTheyUnderstood() {
+            seedMany(25, "BR-1", Grade.U3);
+            seedMany(5, "BR-2", Grade.U4);
+
+            AggregateService.Cell cell = orgHeatmap().cells().get(0);
+
+            assertThat(cell.misrate())
+                    .as("오해율만 보면 17% — '83% 는 이해했다' 로 읽힌다")
+                    .isEqualByComparingTo("0.1667");
+            assertThat(cell.grades().u1())
+                    .as("실제로는 이해가 한 건도 없다. 이 사실이 misrate 에는 안 나타난다")
+                    .isZero();
+            assertThat(cell.grades().u3()).isEqualTo(25);
+        }
+
+        @Test
+        @DisplayName("분포 합이 n 과 같다 — 건수로 주는 이유가 이 검산이다")
+        void theDistributionAddsUpToTheSampleSize() {
+            seedMany(12, "BR-1", Grade.U1);
+            seedMany(8, "BR-1", Grade.U2);
+            seedMany(6, "BR-2", Grade.U3);
+            seedMany(4, "BR-2", Grade.U4);
+
+            AggregateService.Cell cell = orgHeatmap().cells().get(0);
+            AggregateService.Grades g = cell.grades();
+
+            assertThat(g.u1() + g.u2() + g.u3() + g.u4())
+                    .as("비율로 내리면 반올림 때문에 이 검산이 사라진다")
+                    .isEqualTo(cell.n());
+            assertThat(g).isEqualTo(new AggregateService.Grades(12, 8, 6, 4));
+            assertThat(cell.misrate())
+                    .as("U4 건수가 그대로 misrate 의 분자다")
+                    .isEqualByComparingTo("0.1333");   // 4 / 30
+        }
+
+        /**
+         * ❗분포를 남기면 <b>마스킹이 뚫린다</b> — U4 건수 ÷ n 으로 {@code misrate} 가 그대로
+         * 복원된다. 소표본을 가리는 이유가 셀 하나가 몇 사람인지 드러나지 않게 하는 것이므로,
+         * 같은 셀의 다른 필드로 되돌릴 수 있으면 가린 것이 아니다.
+         */
+        @Test
+        @DisplayName("❗가려진 칸은 분포도 안 준다 — 남기면 U4÷n 으로 오해율이 복원된다")
+        void maskedCellsHideTheDistributionToo() {
+            seedMany(AggregateService.MIN_CELL_SAMPLE - 1, "BR-1", Grade.U4);
+
+            AggregateService.Cell cell = orgHeatmap().cells().get(0);
+
+            assertThat(cell.masked()).isTrue();
+            assertThat(cell.misrate()).isNull();
+            assertThat(cell.grades())
+                    .as("misrate 를 가려도 분포를 주면 같은 값이 복원된다 — 가린 것이 아니다")
+                    .isNull();
+            assertThat(cell.n())
+                    .as("n 은 그대로 내려간다 — misrate 와 같은 규칙이다")
+                    .isEqualTo(AggregateService.MIN_CELL_SAMPLE - 1);
+        }
+
+        @Test
+        @DisplayName("등급 넷을 다 세지 않으면 합이 n 과 어긋난다 — 한 등급만 세는 구현을 막는다")
+        void everyGradeIsCounted() {
+            for (Grade grade : Grade.values()) {
+                seedMany(10, "BR-" + grade, grade);
+            }
+
+            AggregateService.Grades g = orgHeatmap().cells().get(0).grades();
+
+            assertThat(List.of(g.u1(), g.u2(), g.u3(), g.u4()))
+                    .as("Grade 에 값이 늘면 여기서 먼저 어긋난다")
+                    .containsExactly(10L, 10L, 10L, 10L);
+        }
+    }
+
+    @Nested
     @DisplayName("범위는 호출자가 준다")
     class ScopeComesFromTheCaller {
 
