@@ -95,22 +95,38 @@ def test_a_number_absent_from_the_table_is_still_fabrication():
     assert numerics.fabricated("해약환급금은 700,000 입니다.", allowed) == ["700000"]
 
 
-def test_unit_attached_to_a_bare_table_cell_is_still_refused():
-    """**아직 안 풀린 절반을 명시한다** (이슈 #175 후속).
+def test_unit_attached_to_a_bare_table_cell_is_refused_without_a_declaration():
+    """단위 선언이 **없으면** 지금도 거부한다 — 기본값은 엄격한 쪽이다 (이슈 #175).
 
-    표의 단위는 **열 머리글**에 있고 `condition.value_text` 는 행 하나뿐이라 단위가 없다.
-    그래서 `526,240원`·`58.4%` 처럼 단위를 붙여 쓴 재설명은 여전히 환각으로 걸린다 —
-    자연스러운 문장이 막히는 자리다.
-
-    맨숫자를 허용하듯 단위 부착까지 허용하면 안 된다. 그건 **원문에 없는 단위를 모델이
+    맨숫자를 허용하듯 단위 부착을 무조건 허용하면 안 된다. 그건 **원문에 없는 단위를 모델이
     주장하는 것**이라 P6 이 막으려는 그 경우다(`45%` 배리어를 `45년` 으로 바꿔 말하기).
-    올바른 해법은 열 머리글을 `value_text` 에 넣는 쪽이고 그건 F-EXT-002 몫이다.
 
-    지금 상태를 테스트로 박아 두는 이유: 고쳐지면 여기서 깨지고, 그때 이 주석이 근거가 된다.
+    처음에는 열 머리글을 `value_text` 에 넣는 것(F-EXT-002)을 해법으로 적어 뒀는데
+    **실측에서 안 됐다** — 스팬을 넓혀도 `526240` 의 단위는 `None` 인 채였다. 단위가 열
+    머리글이 아니라 **표 상단 선언**(`(단위 : 원, %)`)에 있고, 그건 스팬을 아무리 늘려도
+    행과 붙지 않기 때문이다. 그래서 항목이 그 선언을 옮겨 적는 쪽으로 갔다(아래 짝 테스트).
     """
     allowed = numerics.source_values(TABLE_ROW)
     assert numerics.fabricated("해약환급금은 526,240원입니다.", allowed) == ["526240원"]
     assert numerics.fabricated("환급률은 58.4%입니다.", allowed) == ["58.4%"]
+
+
+def test_declared_units_admit_only_that_unit_on_a_bare_cell():
+    """선언된 단위만 맨숫자에 붙일 수 있다 (이슈 #175).
+
+    구멍이 세 방향으로 막혀 있다 — **맨숫자였던 값에만**, **선언된 부류만**,
+    **원문에 있던 숫자만**. 셋 중 하나라도 어긋나면 환각이다.
+    """
+    allowed = numerics.source_values(TABLE_ROW)
+    units = ("원", "pct")
+
+    assert numerics.fabricated("해약환급금은 526,240원입니다.", allowed, units) == []
+    assert numerics.fabricated("환급률은 58.4%입니다.", allowed, units) == []
+
+    # 선언 밖 단위 — `45%` 를 `45년` 으로 바꿔 말하는 그 경우다
+    assert numerics.fabricated("58.4년 뒤에 돌려받습니다.", allowed, units) == ["58.4년"]
+    # 원문에 없는 숫자 — 선언이 있어도 지어낼 수는 없다
+    assert numerics.fabricated("환급률은 99.9%입니다.", allowed, units) == ["99.9%"]
 
 
 # ── 이슈 #183 — 누출 대조는 양쪽이 같은 정규화를 지나야 한다 ──────────────────

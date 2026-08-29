@@ -56,6 +56,21 @@ class TemplateItem:
     #: F-INT-002 — 생성 질문이 정답 노출 검사를 통과하지 못할 때 쓰는 기본 질문.
     #: 인터뷰가 멈추면 세션이 진행되지 않으므로 폴백이 없으면 안 된다.
     fallback_question: str | None = None
+    #: 이 항목의 값이 쓰는 단위. **표 셀 항목에만 있다** (이슈 #175).
+    #:
+    #: 표에서는 단위가 **표 상단 선언**에 있고 값이 든 행에는 없다. `value_text` 는 행
+    #: 하나뿐이라 `source_values()` 가 `('526240', None)` 을 낸다 — 그 상태에서 재설명이
+    #: `"526,240원"` 이라고 쓰면 **값은 원문에 그대로 있는데 환각으로 걸린다.** 자연스러운
+    #: 문장이 3회 재시도 끝에 버려지고 최소 문면으로 내려간다.
+    #:
+    #: **손으로 지어낸 값이 아니다 — 원문의 선언을 옮긴 것이다.**
+    #:
+    #:     원문 p12  "(단위 : 원, %)"   →   units: [원, pct]
+    #:
+    #: `test_declared_units_come_from_the_document` 가 계약 샘플에서 그 선언을 찾아 대조한다.
+    #: 회차·발행사가 바뀌어도 표의 단위는 안 바뀐다(환급률은 언제나 %). `cue` 에 숫자를
+    #: 금지한 것과 성격이 다르다 — 그건 회차 값이고 이건 표의 성질이다.
+    units: tuple[str, ...] = ()
 
     @property
     def importance_assigned(self) -> bool:
@@ -116,6 +131,7 @@ def _parse(path: Path) -> ProductTemplate:
                 found_in=tuple(entry.get("found_in") or ()),
                 conflict=entry.get("conflict"),
                 fallback_question=entry.get("fallback_question"),
+                units=tuple(entry.get("units") or ()),
             )
         )
     return ProductTemplate(
