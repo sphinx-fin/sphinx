@@ -1,6 +1,7 @@
 """ai-service 엔트리포인트. 내부 전용 (Spring server만 호출). 소유: 윤지석"""
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -9,7 +10,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import misconception, routes, rubrics
-from .config import DATA_DIR_ENV, configure_logging, effective_log_level, settings
+from .config import (
+    DATA_DIR_ENV,
+    INTERNAL_TOKEN_ENV,
+    REQUIRE_INTERNAL_AUTH_ENV,
+    configure_logging,
+    effective_log_level,
+    settings,
+)
 
 from .pii import PiiDetected, assert_payload_clean
 
@@ -21,6 +29,73 @@ configure_logging()
 
 # starlette 버전에 따라 상수명이 UNPROCESSABLE_ENTITY/CONTENT로 갈린다 — 리터럴로 고정
 HTTP_422 = 422
+
+
+#: 공유 시크릿을 싣는 헤더. Spring `AiServiceClient` 가 `RestClient.Builder` 의
+#: `defaultHeader` 로 붙인다(강희진 영역 — 이 PR 은 받는 쪽만 만든다).
+INTERNAL_TOKEN_HEADER = "x-sphinx-internal-token"
+
+#: 인증을 요구하는 경로 접두어. `/healthz` 는 뺀다 — 헬스체크가 토큰을 알아야 하면
+#: 컨테이너 오케스트레이터가 시크릿을 들고 있어야 하고, 그건 시크릿이 사는 곳을 늘린다.
+#: `/openapi.json`·`/docs` 도 뺀다(스키마는 비밀이 아니고, 계약은 이미 레포에 있다).
+GUARDED_PREFIX = "/internal/"
+
+
+class InternalAuthMiddleware:
+    """`/internal/*` 공유 시크릿 검증. **네트워크 격리가 1차, 이건 2차다**(결정 10.4).
+
+    `ai-service` 는 브라우저가 직접 부르지 않고 Spring 만 부른다는 전제 위에 P3 가 서 있다.
+    :8100 이 퍼블릭 서브넷에 뜨면 그 전제가 깨지고, **PII 마스킹을 건너뛴 경로가 생긴다**
+    (이슈 #41 ③). 입구 PII 재검사는 마스킹 누락을 막는 방어선이지 접근 통제가 아니다.
+
+    `PiiGuardMiddleware` 보다 **바깥**에 둔다 — 인증되지 않은 요청의 본문을 읽고 검사할
+    이유가 없다. `add_middleware` 는 나중에 추가한 것이 바깥이므로 등록 순서가 그렇게 된다.
+
+    토큰이 설정되지 않으면 **통과시키되 조용히 통과시키지 않는다** — 기동 시 경고를 남기고
+    `/healthz` 가 상태를 낸다. 배포에서는 `SPHINX_REQUIRE_INTERNAL_AUTH` 로 기동을 막는다.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").startswith(GUARDED_PREFIX):
+            await self.app(scope, receive, send)
+            return
+
+        cfg = settings()
+        if not cfg.internal_auth_enabled:
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+        supplied = headers.get(INTERNAL_TOKEN_HEADER, "")
+        # 상수 시간 비교 — 길이·내용이 응답 시간으로 새지 않게 한다.
+        # **바이트로 비교한다**: `compare_digest` 는 비ASCII 문자열에 `TypeError` 를 낸다.
+        # 토큰은 `config` 가 ASCII 로 강제하지만, 헤더 값은 통제 밖이라 여기서도 안전해야 한다
+        # — 아니면 이상한 헤더 하나가 401 이 아니라 500 을 만든다(실측으로 재현했다).
+        if not hmac.compare_digest(supplied.encode("utf-8"), cfg.internal_token.encode("utf-8")):
+            # 토큰 값을 로그에 남기지 않는다. 있었는지 없었는지만 남긴다.
+            log.warning(
+                "내부 토큰 불일치로 거부: path=%s 헤더=%s",
+                scope.get("path"), "있음" if supplied else "없음",
+            )
+            await _json_response(send, 401, {
+                "detail": f"{INTERNAL_TOKEN_HEADER} 헤더가 없거나 일치하지 않는다. "
+                          "ai-service 는 내부망 전용이다 (결정 10.4)",
+            })
+            return
+
+        await self.app(scope, receive, send)
+
+
+async def _json_response(send, status: int, body: dict) -> None:
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                            (b"content-length", str(len(payload)).encode())]})
+    await send({"type": "http.response.body", "body": payload})
 
 
 class PiiGuardMiddleware:
@@ -96,6 +171,29 @@ class PiiGuardMiddleware:
         await self.app(scope, replay, send)
 
 
+def _check_internal_auth() -> None:
+    """내부 인증 상태를 기동 시점에 드러낸다 (결정 10.4).
+
+    **꺼진 것이 조용하면 안 된다.** 목 개발 중이라 기본은 꺼짐이고 그건 의도지만, 배포에서
+    꺼진 채로 뜨면 `:8100` 이 무인증으로 열린다 — 그 상태가 로그 어디에도 안 보이면 데모 전
+    점검에서 못 찾는다. `SPHINX_REQUIRE_INTERNAL_AUTH` 를 켜면 기동 자체를 막는다.
+    """
+    cfg = settings()
+    if cfg.internal_auth_enabled:
+        log.info("내부 인증 켜짐 — /internal/* 는 %s 헤더를 요구한다", INTERNAL_TOKEN_HEADER)
+        return
+    if cfg.require_internal_auth:
+        raise RuntimeError(
+            f"{REQUIRE_INTERNAL_AUTH_ENV} 가 켜져 있는데 {INTERNAL_TOKEN_ENV} 가 비어 있다. "
+            "배포에서 무인증으로 뜨는 것을 막기 위해 기동을 중단한다 (결정 10.4)"
+        )
+    log.warning(
+        "⚠ 내부 인증 꺼짐 — /internal/* 가 무인증이다. %s 를 설정하면 켜진다. "
+        "배포에서는 %s=1 로 기동 자체를 막을 것 (결정 10.4 · 이슈 #41)",
+        INTERNAL_TOKEN_ENV, REQUIRE_INTERNAL_AUTH_ENV,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """기동 시점에 데이터 파일을 실제로 읽는다 — 첫 요청 때 죽지 않게.
@@ -107,6 +205,7 @@ async def lifespan(_: FastAPI):
     루브릭↔오해 라이브러리 교차 참조도 여기서 본다. `assert_related_misconceptions_exist`
     는 로더 안에 넣을 수 없다 — 두 로더가 서로를 부르면 순환이 된다.
     """
+    _check_internal_auth()           # 인증이 꺼져 있으면 기동 로그에서 보여야 한다
     misconception.library()          # 파일 읽기 + products 계약 검증
     rubrics.all_rubrics()            # 루브릭 파싱
     rubrics.assert_related_misconceptions_exist()
@@ -124,6 +223,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(PiiGuardMiddleware)
+# **나중에 추가한 것이 바깥**이다 — 인증이 PII 검사보다 먼저 돈다.
+app.add_middleware(InternalAuthMiddleware)
 app.include_router(routes.router)
 
 
@@ -156,6 +257,9 @@ def healthz() -> dict:
         "llm_configured": cfg.llm_configured,
         "env_files": list(cfg.env_files),   # 어느 .env를 읽었는지. 값은 노출하지 않는다
         "log_level": effective_log_level(),     # **적용된** 레벨. 요청값이 아니다 (#121 리뷰)
+        # 토큰 값은 절대 내지 않는다 — 켜졌는지만. LLM 키를 안 내는 것과 같은 규칙이다.
+        "internal_auth": "enabled" if cfg.internal_auth_enabled else "disabled",
+        "internal_auth_required": cfg.require_internal_auth,
         "log_level_requested": cfg.log_level,   # 환경변수 원본. 둘이 다르면 오타가 있었다
         "data_dir": str(cfg.data_dir),      # 어디서 오해 라이브러리를 읽는지 (10.7)
         "data_dir_env": DATA_DIR_ENV,

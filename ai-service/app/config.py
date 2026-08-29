@@ -54,6 +54,23 @@ DEFAULT_LOG_LEVEL = "INFO"
 #: root 에 붙이므로 `basicConfig(force=True)` 로 덮으면 access 로그 형식까지 바뀐다.
 APP_LOGGER = "app"
 
+
+#: `/internal/*` 공유 시크릿. **네트워크 격리가 1차 방어이고 이건 2차다**(결정 10.4).
+#: compose network 설정 실수 한 번으로 전체가 열리는 구조를 피한다.
+#:
+#: 왜 필요한가(이슈 #41 ③): `ai-service` 는 브라우저가 직접 부르지 않고 Spring 만 부른다는
+#: 전제 위에 P3 가 서 있다 — *"고객 텍스트가 나가는 유일한 경로는 `PiiGateway.mask()` →
+#: `AiServiceClient`"*. **:8100 이 퍼블릭 서브넷에 뜨면 그 유일한 경로가 유일하지 않게 된다.**
+#: 입구 PII 재검사가 있지만 그건 마스킹 누락을 막는 방어선이지 접근 통제가 아니다.
+INTERNAL_TOKEN_ENV = "SPHINX_INTERNAL_TOKEN"
+
+#: 토큰이 없을 때 **기동을 막을지**. 배포에서 켠다.
+#:
+#: 기본이 꺼짐인 이유: 목 개발 중이고 팀원이 토큰 없이 로컬에서 돌린다. 다만 **꺼진 상태가
+#: 조용하면 안 된다** — 기동 로그에 경고를 남기고 `/healthz` 가 `internal_auth` 로 상태를
+#: 낸다. 데모 전 점검에서 눈으로 확인할 수 있어야 한다.
+REQUIRE_INTERNAL_AUTH_ENV = "SPHINX_REQUIRE_INTERNAL_AUTH"
+
 #: 우리가 붙인 핸들러임을 표시한다. `if not logger.handlers` 로 판단하면 **남이 붙인
 #: 핸들러가 하나라도 있을 때 우리 것을 안 붙인다** — pytest 가 `app` 로거에 캡처 핸들러
 #: 넷을 붙이는 것으로 실측했다(전체 실행에서 5개). 운영에서는 uvicorn 이 `uvicorn.*` 만
@@ -109,6 +126,34 @@ REPO_ROOT = SERVICE_ROOT.parent
 ENV_FILES = (SERVICE_ROOT / ".env", REPO_ROOT / ".env")
 
 
+def _ascii_token(token: str) -> str:
+    """토큰이 ASCII 인지 확인한다. 아니면 **설정 시점에** 터뜨린다.
+
+    HTTP 헤더 값은 규격상 ASCII 다. 비ASCII 토큰을 설정하면 클라이언트가 UTF-8 로 실어
+    보내고 서버는 latin-1 로 읽어 **값이 조용히 달라진다** — 결과는 "토큰을 맞게 넣었는데
+    401" 이고 원인을 찾기 어렵다.
+
+    그리고 `hmac.compare_digest` 는 비ASCII **문자열**에 `TypeError` 를 낸다. 실측으로
+    재현했다 — 한글 토큰을 넣으니 401 이 아니라 **500** 이 나왔다. 거부도 통과도 아닌
+    서버 오류이고, 그 경로는 인증이 있는지 없는지조차 알려주지 않는다.
+    """
+    if token and not token.isascii():
+        raise ValueError(
+            f"{INTERNAL_TOKEN_ENV} 는 ASCII 여야 한다 — HTTP 헤더 값 규격이고, "
+            "비ASCII 면 전송 중 값이 달라져 '맞게 넣었는데 401' 이 된다"
+        )
+    return token
+
+
+def _truthy(value: str | None) -> bool:
+    """`1`·`true`·`yes`·`on` 을 참으로 본다. 빈 문자열과 미설정은 거짓.
+
+    `bool(os.getenv(...))` 로 두면 `SPHINX_REQUIRE_INTERNAL_AUTH=0` 이 **참**이 된다 —
+    끄려고 적은 값이 켜는 결과가 되는 종류다.
+    """
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _load_env_files() -> list[Path]:
     """찾아서 로드한 파일 목록을 돌려준다. python-dotenv가 없으면 조용히 건너뛴다."""
     try:
@@ -138,6 +183,12 @@ class Settings:
     env_files: tuple[str, ...]
     log_level: str
     data_dir: Path
+    internal_token: str
+    require_internal_auth: bool
+
+    @property
+    def internal_auth_enabled(self) -> bool:
+        return bool(self.internal_token)
 
     @property
     def llm_configured(self) -> bool:
@@ -162,6 +213,8 @@ def settings() -> Settings:
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),
 
         log_level=(os.getenv(LOG_LEVEL_ENV) or DEFAULT_LOG_LEVEL).upper(),
+        internal_token=_ascii_token(os.getenv(INTERNAL_TOKEN_ENV, "").strip()),
+        require_internal_auth=_truthy(os.getenv(REQUIRE_INTERNAL_AUTH_ENV)),
 
         data_dir=Path(os.getenv(DATA_DIR_ENV) or (REPO_ROOT / "data")).expanduser(),
 
