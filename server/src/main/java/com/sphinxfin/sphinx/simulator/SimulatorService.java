@@ -33,14 +33,15 @@ import java.util.OptionalDouble;
  *       만들지 않는다. 데이터가 아예 부족하면 추정하지 않고 빈 값을 낸다.
  * </ul>
  *
- * <h2>REST 응답 형태와 시계열 패키징은 여기서 정하지 않는다</h2>
- * 스텁에 있던 {@code simulate(long, Map, String)} 자리표시자를 뺐다. {@link Outcome} 을 REST 로
- * 어떻게 노출할지는 {@code contracts/openapi.yaml}(소유: 강희진) 등재와 함께 결정할 사항이고,
- * 데모 표 라벨("최선/중간/최악")도 미결이다 — 지금 코드로 굳히면 그 결정을 앞질러 못박는다.
- * 같은 이유로 CSV 를 클래스패스 리소스로 복사하지 않았다: {@code /server/build.gradle} 이
- * 강희진 소유여서 복사 태스크를 넣을 수 없고, {@code data/timeseries/} 를 한 벌 더 커밋하면
- * 18,089 줄이 중복되면서 sha256 으로 고정한 원본과 조용히 갈라질 수 있다. 적재 경로를 호출자가
- * 정하게 두고, 배포 시 패키징은 API 등재 PR 에서 함께 정한다.
+ * <h2>REST 응답 형태는 계약이 정했고, 매핑은 옆 클래스가 한다</h2>
+ * 이 클래스는 <b>계산만</b> 한다. {@code severity}(worst·mid·best) 는 화면 배치 키라
+ * 계산 결과가 아니고, 어느 전개를 대표로 고를지는 표시 판단이다 — 그 선택을 여기 두면
+ * 엔진이 화면 배치를 알게 된다. {@link SimulationScenarios} 가 고르고 봉투를 씌운다.
+ *
+ * <p>CSV 는 여전히 클래스패스로 복사하지 않는다. {@code /server/build.gradle} 이 강희진
+ * 소유여서 복사 태스크를 넣을 수 없고, {@code data/timeseries/} 를 한 벌 더 커밋하면
+ * 18,089 줄이 중복되면서 sha256 으로 고정한 원본과 조용히 갈라질 수 있다. 적재 경로는 계속
+ * 호출자가 정하고({@code SimulatorProperties}), 배포는 읽기 전용 볼륨 마운트다(이슈 #37).
  */
 public final class SimulatorService {
 
@@ -225,13 +226,22 @@ public final class SimulatorService {
     /**
      * 한 번의 시뮬레이션 결과.
      *
-     * @param result      {@code "early_1".."early_5"} | {@code "maturity"} | {@code "loss"}
-     * @param pnlRate     원금 대비 손익률. 손실이면 음수
-     * @param worstFinal  만기까지 간 경우 만기평가일의 최저 종목 비율. 조기상환이면 null
-     * @param initial     최초기준가격. 기초자산 키 → 종가
+     * <p>{@code endDate}·{@code worstUnderlying} 은 계약({@code PathMeta})이 요구하는 값이고
+     * <b>여기서 낸다.</b> 판정하면서 이미 각 평가일의 최저 종목을 구하므로, 매핑 층에서
+     * 다시 구하면 <b>같은 계산이 두 벌</b>이 된다 — 한쪽만 고쳐지는 날 화면의 "역사 구간
+     * 라벨"이 판정과 다른 구간을 가리키는데 그 어긋남은 눈으로 안 보인다.
+     *
+     * @param endDate         상환일. 조기상환이면 그 평가일, 아니면 만기평가일
+     * @param result          {@code "early_1".."early_5"} | {@code "maturity"} | {@code "loss"}
+     * @param pnlRate         원금 대비 손익률. 손실이면 음수
+     * @param worstFinal      <b>상환일</b>의 최저 종목 비율(최초기준가격 대비). 조기상환도 낸다 —
+     *                        계약이 {@code required} 로 두고, 화면이 "그때 얼마였나"를 그린다
+     * @param worstUnderlying 그 최저 종목의 키. 손실 판정의 기준이 된 종목이다
+     * @param initial         최초기준가격. 기초자산 키 → 종가
      */
-    public record Outcome(LocalDate startDate, String result, double pnlRate, Double worstFinal,
-                          boolean knockedIn, Map<String, Double> initial) {
+    public record Outcome(LocalDate startDate, LocalDate endDate, String result, double pnlRate,
+                          Double worstFinal, String worstUnderlying, boolean knockedIn,
+                          Map<String, Double> initial) {
 
         public Outcome {
             initial = Map.copyOf(initial);
@@ -283,27 +293,37 @@ public final class SimulatorService {
         for (int i = 0; i < product.observationMonths().size() - 1; i++) {
             LocalDate evalDate = addMonths(start, product.observationMonths().get(i));
             double worst = Double.POSITIVE_INFINITY;
+            String worstKey = null;
             for (String key : product.underlyings()) {
                 Optional<Quote> got = series.get(key).closeOnOrBefore(evalDate);
                 if (got.isEmpty()) {
                     return Optional.empty();
                 }
-                worst = Math.min(worst, got.get().close() / initial.get(key));
+                double ratio = got.get().close() / initial.get(key);
+                if (ratio < worst) {
+                    worst = ratio;
+                    worstKey = key;
+                }
             }
             if (worst >= product.barriers().get(i)) {
-                return Optional.of(new Outcome(start, "early_" + (i + 1), product.payoutRate(i),
-                        null, false, initial));
+                return Optional.of(new Outcome(start, evalDate, "early_" + (i + 1),
+                        product.payoutRate(i), worst, worstKey, false, initial));
             }
         }
 
         // 만기 판정
         double worstFinal = Double.POSITIVE_INFINITY;
+        String worstFinalKey = null;
         for (String key : product.underlyings()) {
             Optional<Quote> got = series.get(key).closeOnOrBefore(maturity);
             if (got.isEmpty()) {
                 return Optional.empty();
             }
-            worstFinal = Math.min(worstFinal, got.get().close() / initial.get(key));
+            double ratio = got.get().close() / initial.get(key);
+            if (ratio < worstFinal) {
+                worstFinal = ratio;
+                worstFinalKey = key;
+            }
         }
 
         boolean knockedIn = false;
@@ -323,10 +343,12 @@ public final class SimulatorService {
         // 문서 p10: 낙인이 발생했고(and) 만기평가일 최저 종목이 만기배리어 미만인 경우에만 손실.
         // 둘 중 하나만 해당하면 쿠폰을 받는다 — 노낙인 보호가 여기서 작동한다.
         if (knockedIn && worstFinal < maturityBarrier) {
-            return Optional.of(new Outcome(start, "loss", worstFinal - 1.0, worstFinal, true, initial));
+            return Optional.of(new Outcome(start, maturity, "loss", worstFinal - 1.0,
+                    worstFinal, worstFinalKey, true, initial));
         }
 
-        return Optional.of(new Outcome(start, "maturity", fullCoupon, worstFinal, knockedIn, initial));
+        return Optional.of(new Outcome(start, maturity, "maturity", fullCoupon,
+                worstFinal, worstFinalKey, knockedIn, initial));
     }
 
     /** 굴릴 수 있는 모든 계약일. 기준이 되는 지수는 데이터가 가장 늦게 시작하는 것. */
