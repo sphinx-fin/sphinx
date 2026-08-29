@@ -21,6 +21,8 @@ import org.springframework.web.client.RestClient;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -51,7 +53,39 @@ class AiServiceClientTest {
     void setUp() {
         builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new AiServiceClient(builder, BASE);
+        client = new AiServiceClient(builder, BASE, "");   // 로컬 목: 토큰 없음 → 헤더 안 붙음
+    }
+
+    private static final String SCORE_OK = """
+            {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","grade":"U4","confidence":0.91,
+             "evidence":{"utterance_quote":"원금은 지켜지죠","rubric_clause":"원금손실 조건"},
+             "reason":"원금 보장으로 오해","misconception_type":"M01-PRINCIPAL-GUARANTEE"}""";
+
+    @Test
+    @DisplayName("(#41③) 토큰이 설정되면 /internal 호출에 x-sphinx-internal-token 을 붙인다")
+    void sendsInternalTokenHeaderWhenConfigured() {
+        RestClient.Builder b = RestClient.builder();
+        MockRestServiceServer srv = MockRestServiceServer.bindTo(b).build();
+        AiServiceClient tokened = new AiServiceClient(b, BASE, "s3cr3t-token");
+        srv.expect(requestTo(BASE + "/internal/score"))
+                .andExpect(header(AiServiceClient.INTERNAL_TOKEN_HEADER, "s3cr3t-token"))
+                .andRespond(withSuccess(SCORE_OK, MediaType.APPLICATION_JSON));
+
+        tokened.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", "원금은 지켜지죠", ITEM, "ELS");
+
+        srv.verify();
+    }
+
+    @Test
+    @DisplayName("(#41③) 토큰이 비면(로컬 목) 헤더를 붙이지 않는다 — 받는 쪽도 인증 꺼짐이라 대칭")
+    void omitsInternalTokenHeaderWhenBlank() {
+        server.expect(requestTo(BASE + "/internal/score"))
+                .andExpect(headerDoesNotExist(AiServiceClient.INTERNAL_TOKEN_HEADER))
+                .andRespond(withSuccess(SCORE_OK, MediaType.APPLICATION_JSON));
+
+        client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", "원금은 지켜지죠", ITEM, "ELS");
+
+        server.verify();
     }
 
     @Test
