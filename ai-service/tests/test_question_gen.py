@@ -282,3 +282,61 @@ def test_the_comma_fix_does_not_block_normal_questions():
             question = templates_by_id[other.item_id].fallback_question
             hits = qg.leaked_fragments(question, forbidden)
             assert not hits, f"{other.item_id} 질문이 {item.item_id} 금지목록에 걸린다: {hits}"
+
+
+# ── 짧은 조각 오탐 (이슈 #183 후속) ──────────────────────────────────────────
+#: 짧은 수치를 **부분열**로 찾으면 다른 수 안에 들어 있어도 걸린다. `MIN_LEAK_NGRAM` 은
+#: 그 문제를 길이로 우회한 것이지 푼 것이 아니었다 — 6자 이상은 우연 일치가 드물어 안 보였다.
+#:
+#: **임계값은 안 바꿨다.** `MIN_LEAK_NGRAM = 6` 그대로고 짧은 조각의 **비교 방식**만 바꿨다.
+#: 정세현이 `#183` 에서 *"지금 임계를 정하면 근거가 폴백 질문 23건뿐"* 이라고 한 지적을
+#: 임계를 안 건드리는 것으로 피한다.
+_LEAK_CASES = [
+    # (조각, 질문, 잡혀야 하나, 설명)
+    ("45", "낙인 45% 아래로 떨어지면 어떻게 되는지 말씀해 주시겠어요?", True, "진짜 누출"),
+    ("45", "2045년 만기까지 어떻게 되는지 말씀해 주시겠어요?", False, "연도 안"),
+    ("45", "환급률이 145% 라면 어떻게 되나요?", False, "큰 수 안"),
+    ("3", "3개월 만에 해지하시면 어떻게 되나요?", True, "진짜 누출"),
+    ("3", "13% 손실이 나면 어떻게 되나요?", False, "13 안의 3"),
+    ("70", "만기에 70% 미만이면 어떻게 되나요?", True, "진짜 누출"),
+    ("70", "1970년대 상품과 다른 점을 아시나요?", False, "연도 안"),
+    ("85", "85 아래로 내려가면 어떻게 되나요?", True, "단위 없이도 잡는다"),
+]
+
+
+@pytest.mark.parametrize("fragment,question,should_hit,label", _LEAK_CASES)
+def test_short_numeric_fragment_needs_a_number_boundary(fragment, question, should_hit, label):
+    """짧은 수치는 **하나의 수로서** 있을 때만 잡는다 — 다른 수 안에 든 것은 아니다."""
+    hit = bool(qg.leaked_fragments(question, (fragment,)))
+    assert hit is should_hit, f"{label}: {fragment!r} in {question!r}"
+
+
+def test_unit_is_still_not_required():
+    """`numbers()` 의 근거는 *"단위를 떼고 말해도 답을 알려준 것"* 이다.
+
+    경계만 보게 바꿨지 **단위를 요구하지 않는다** — 요구하면 `"85 아래로"` 같은 누출을
+    놓치고, 그건 이 검사가 존재하는 이유와 반대다.
+    """
+    assert qg.leaked_fragments("85 아래로 내려가면 어떻게 되나요?", ("85",))
+
+
+def test_comma_notation_still_caught():
+    """`#184` 가 닫은 것 — 문서 표기를 그대로 옮긴 질문. 경계 검사가 그걸 되돌리면 안 된다."""
+    assert qg.leaked_fragments("526,240원만 돌아온다는 뜻인가요?", ("526240",))
+
+
+def test_long_fragments_keep_substring_matching():
+    """긴 어구는 부분 포함으로도 잡는다 — 루브릭 조항을 그대로 쓰지 않아도 핵심 구절만
+    옮기면 답을 알려준 것이다. 경계 규칙은 짧은 조각에만 적용된다."""
+    clause = "투자원금의 손실이 발생할 수 있음"
+    assert qg.leaked_fragments(f"...{clause}... 이라는 뜻인가요?", (clause,))
+
+
+def test_boundary_helper_scans_every_occurrence():
+    """첫 등장이 큰 수 안이어도 뒤에 독립된 등장이 있으면 잡아야 한다.
+
+    `find` 를 한 번만 부르면 첫 자리에서 판단하고 끝난다 — 그러면 `"145% 인데 45% 아래로"`
+    같은 질문이 통과한다.
+    """
+    assert qg._appears_as_whole_number("45", "145%인데45%아래로")
+    assert not qg._appears_as_whole_number("45", "145%와2045년")

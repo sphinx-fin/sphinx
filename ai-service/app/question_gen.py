@@ -120,12 +120,50 @@ def leaked_fragments(question: str, forbidden: tuple[str, ...]) -> list[str]:
         if not f:
             continue
         if len(f) < MIN_LEAK_NGRAM:
-            if f in q:                                  # 수치 등 짧은 조각
+            if _appears_as_whole_number(f, q):          # 수치 등 짧은 조각
                 hits.append(fragment)
             continue
         if f in q or _shares_long_run(f, q):
             hits.append(fragment)
     return hits
+
+
+def _appears_as_whole_number(fragment: str, question: str) -> bool:
+    """짧은 조각이 **하나의 수로서** 질문에 있는지. 부분열이 아니다 (이슈 #183 후속).
+
+    ## 왜 부분열이면 안 되나
+
+    `f in q` 로 두면 짧은 수치가 **다른 수 안에 들어 있어도** 걸린다. 실측이다.
+
+        조각 45   "낙인 45% 아래로"        잡아야 한다  ✅
+        조각 45   "2045년 만기까지"        ❗오탐 — 연도 안
+        조각 45   "환급률이 145% 라면"      ❗오탐 — 큰 수 안
+        조각  3   "13% 손실이 나면"        ❗오탐 — 13 안의 3
+        조각 70   "1970년대 상품과"        ❗오탐
+
+    한 자리·두 자리 수치는 한국어 질문에서 연도·비율·개월 수로 흔하게 나오므로 **구조적으로
+    오탐이 난다.** `MIN_LEAK_NGRAM` 은 그 문제를 길이로 우회한 것이지 푼 것이 아니었다 —
+    6자 이상은 부분열로도 우연 일치가 드물어서 안 보였을 뿐이다.
+
+    오탐의 대가는 작지 않다. 걸리면 질문을 다시 만들고(`MAX_ATTEMPTS = 3`), 세 번 실패하면
+    **템플릿 폴백으로 내려간다.** 즉 오탐이 잦으면 개인화된 질문이 조용히 사라지고 모든
+    세션이 같은 문장을 받는다 — 에러도 로그도 없다.
+
+    ## 규칙 — 양옆이 숫자가 아니어야 한다
+
+    소수점·콤마는 `for_leak_check()` 가 이미 지웠으므로 여기서는 숫자만 본다. 단위는 보지
+    않는다 — `numbers()` 의 근거가 *"원문의 숫자 자체가 정답이다. 단위를 떼고 말해도 답을
+    알려준 것이다"* 이고 그건 그대로다. **바꾸는 것은 "어디까지가 그 수인가" 뿐이다.**
+    """
+    start = 0
+    while (idx := question.find(fragment, start)) != -1:
+        before = question[idx - 1] if idx > 0 else ""
+        after_at = idx + len(fragment)
+        after = question[after_at] if after_at < len(question) else ""
+        if not before.isdigit() and not after.isdigit():
+            return True
+        start = idx + 1
+    return False
 
 
 def _shares_long_run(fragment: str, question: str) -> bool:
