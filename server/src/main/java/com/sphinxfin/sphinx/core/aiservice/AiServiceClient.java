@@ -44,21 +44,31 @@ public class AiServiceClient {
 
     private final RestClient restClient;
 
+    /** /internal/* 공유 시크릿 헤더명 — ai-service(PR #198)와 문자열이 같아야 한다. */
+    static final String INTERNAL_TOKEN_HEADER = "x-sphinx-internal-token";
+
     public AiServiceClient(RestClient.Builder builder,
-                           @Value("${sphinx.ai-service.base-url}") String baseUrl) {
+                           @Value("${sphinx.ai-service.base-url}") String baseUrl,
+                           @Value("${sphinx.ai-service.internal-token:}") String internalToken) {
         // 이 경계 전용 매퍼 — 전역 Jackson과 분리한다(웹은 camelCase 유지).
         ObjectMapper snakeMapper = JsonMapper.builder()
                 .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
                 .build();
         MappingJackson2HttpMessageConverter snakeConverter =
                 new MappingJackson2HttpMessageConverter(snakeMapper);
-        this.restClient = builder
+        RestClient.Builder configured = builder
                 .baseUrl(baseUrl)
                 .messageConverters(converters -> {
                     converters.removeIf(c -> c instanceof MappingJackson2HttpMessageConverter);
                     converters.add(snakeConverter);
-                })
-                .build();
+                });
+        // #41③ /internal/* 공유 시크릿(결정 10.4) — ai-service가 x-sphinx-internal-token 을
+        // 검증한다(PR #198). 토큰이 설정된 배포에서만 붙인다. 비어 있으면(로컬 목 개발) 안 붙인다
+        // — 받는 쪽도 토큰이 비면 인증을 끄므로(internal_auth_enabled=bool(token)) 대칭이다.
+        if (internalToken != null && !internalToken.isBlank()) {
+            configured = configured.defaultHeader(INTERNAL_TOKEN_HEADER, internalToken);
+        }
+        this.restClient = configured.build();
     }
 
     /**

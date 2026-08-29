@@ -29,6 +29,10 @@ management:
 sphinx:
   ai-service:
     base-url: http://localhost:8100      # ai-service (FastAPI, 윤지석)
+    # #41③ /internal/* 공유 시크릿(결정 10.4). 비어 있으면(로컬 목) 헤더를 안 붙인다 —
+    # 받는 쪽(ai-service PR #198)도 SPHINX_INTERNAL_TOKEN 이 비면 인증을 끄므로 대칭이다.
+    # 배포에서는 양쪽에 같은 값을 주입한다(ai-service도 같은 env 이름을 읽는다).
+    internal-token: ${SPHINX_INTERNAL_TOKEN:}
   gate:
     rules-path: classpath:gate_rules.yaml
   simulator:

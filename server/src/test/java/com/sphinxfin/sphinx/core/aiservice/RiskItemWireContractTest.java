@@ -72,7 +72,7 @@ class RiskItemWireContractTest {
     void setUp() {
         builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new AiServiceClient(builder, BASE);
+        client = new AiServiceClient(builder, BASE, "");
     }
 
     @Test
