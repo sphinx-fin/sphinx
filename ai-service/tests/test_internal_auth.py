@@ -165,3 +165,70 @@ def test_auth_runs_before_pii_guard(authed):
     r = authed.post("/internal/misconception",
                     json={"text": "제 주민번호는 900101-1234567 입니다", "product_type": "ELS"})
     assert r.status_code == 401, "PII 검사가 인증보다 먼저 돌았다"
+
+
+# ── 헤더명이 server 와 같은가 (#200 리뷰) ────────────────────────────────────
+#: 헤더명이 **두 벌**이고 문자열로만 묶여 있다. `AiServiceClient` 주석이 *"#198 과 문자열이
+#: 같아야 한다"* 로 그 사실을 적어 뒀는데, **적어둔 것과 대조하는 것은 다르다**
+#: (`ErrorCodeContractTest` 가 세 벌을 대조하는 이유가 그것이다).
+#:
+#: 어긋났을 때가 문제다.
+#:
+#:     토큰 있음(배포)   틀린 헤더명 → 401 → 모든 판정이 502 → 데모가 죽는다.  시끄럽다
+#:     토큰 없음(로컬)   인증을 아예 안 본다 → 헤더명이 뭐든 통과.  **아무 일도 안 난다**
+#:
+#: 팀 전체가 토큰 없이 개발하므로 **로컬·CI 에서는 절대 안 보이고 배포에서 처음 드러난다.**
+#: 대칭 설계(토큰 비면 양쪽 다 끔)가 옳은 판단인데, 그 대가로 불일치를 가려주는 구간이 생겼다.
+#:
+#: `server/` 는 강희진 파일이라 **읽기만** 한다 — `test_survey_contract.py` 가
+#: `web/src/lib/survey.ts` 를 읽어 축 매핑과 대조하는 방식 그대로다(`#113`).
+_JAVA_CLIENT = "server/src/main/java/com/sphinxfin/sphinx/core/aiservice/AiServiceClient.java"
+
+
+def _java_client_source() -> str:
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / _JAVA_CLIENT
+    if not path.is_file():
+        pytest.fail(
+            f"Java 클라이언트를 못 찾았다: {path}. 옮겨졌으면 이 경로를 갱신한다 — "
+            "조용히 skip 하면 대조가 없어지는데 초록으로 보인다"
+        )
+    return path.read_text(encoding="utf-8")
+
+
+def _java_header_constant() -> str | None:
+    """Java 쪽 헤더명 상수. **보내는 쪽(`#200`)이 아직 머지 전이면 없다.**
+
+    파일이 없으면 `fail` 이지만 상수가 없으면 `None` 이다 — 둘은 다르다. 앞은 경로가 낡은
+    것이고, 뒤는 **아직 안 온 것**이다. 상대 PR 이 머지되는 순간 자동으로 대조가 켜진다.
+    """
+    import re
+
+    found = re.findall(r'INTERNAL_TOKEN_HEADER\s*=\s*"([^"]+)"', _java_client_source())
+    return found[0] if found else None
+
+
+def test_header_name_matches_the_java_client():
+    """★ 양쪽 상수가 문자 그대로 같아야 배포에서 인증이 성립한다.
+
+    보내는 쪽(`#200`)이 머지되기 전에는 대조할 상대가 없다. **`#200` 이 머지되는 순간
+    자동으로 켜진다** — 그때까지 skip 이지만 사유가 명시되므로 조용하지 않다.
+    """
+    header = _java_header_constant()
+    if header is None:
+        pytest.skip("보내는 쪽(#200)이 아직 머지 전 — 머지되면 이 대조가 자동으로 켜진다")
+    assert header == main.INTERNAL_TOKEN_HEADER, (
+        f"헤더명이 갈렸다 — server={header!r} · ai-service={main.INTERNAL_TOKEN_HEADER!r}. "
+        "토큰이 없는 로컬에서는 이 불일치가 안 드러나고 배포에서 401 로 처음 보인다"
+    )
+
+
+def test_env_var_name_matches_the_java_config():
+    """토큰이 같은 환경변수에서 와야 배포에서 **한 값**을 주입할 수 있다."""
+    if _java_header_constant() is None:
+        pytest.skip("보내는 쪽(#200)이 아직 머지 전")
+    assert config.INTERNAL_TOKEN_ENV in _java_client_source(), (
+        f"{config.INTERNAL_TOKEN_ENV} 가 Java 쪽에 없다 — 양쪽이 다른 변수를 읽으면 "
+        "배포에서 한쪽만 채워지고 그 상태가 401 로만 드러난다"
+    )
