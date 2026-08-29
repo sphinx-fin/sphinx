@@ -332,11 +332,38 @@ def test_long_fragments_keep_substring_matching():
     assert qg.leaked_fragments(f"...{clause}... 이라는 뜻인가요?", (clause,))
 
 
-def test_boundary_helper_scans_every_occurrence():
-    """첫 등장이 큰 수 안이어도 뒤에 독립된 등장이 있으면 잡아야 한다.
+def test_every_occurrence_is_considered():
+    """첫 등장이 큰 수 안이어도 뒤에 독립된 등장이 있으면 잡아야 한다."""
+    assert qg.leaked_fragments("145%인데 45%아래로", ("45",))
+    assert not qg.leaked_fragments("145%와 2045년", ("45",))
 
-    `find` 를 한 번만 부르면 첫 자리에서 판단하고 끝난다 — 그러면 `"145% 인데 45% 아래로"`
-    같은 질문이 통과한다.
+
+def test_numbers_split_only_by_whitespace_are_still_two_numbers():
+    """★ PR #199 리뷰(정세현)가 잡은 것 — 내 첫 구현이 진짜 누출을 놓쳤다.
+
+    `for_leak_check()` 는 공백을 **지운다**. 그래서 나란한 두 수가 숫자로 인접해지고,
+    문자열을 훑어 *"양옆이 숫자가 아닌지"* 로 판단하면 둘을 **하나의 수**로 읽는다.
+
+        '3개월 시점 900,000 526,240 58.4'  →  '3개월시점90000052624058.4'
+                                                       ^^^^^^^^^^^^ 붙었다
+
+    표 한 행을 그대로 옮긴 질문이 이 모양이고(`#175`), `#184` 가 *"가장 자연스러운 누출"*
+    이라고 닫은 경로가 여기서 되살아났다. **긴 조각은 잡히고 짧은 것만 조용히 빠진다.**
+
+    `numbers()` 토큰과 대조하면 닫힌다 — 그 함수는 공백을 **접는** 정규화 위에서 돌아
+    경계를 이미 안다.
     """
-    assert qg._appears_as_whole_number("45", "145%인데45%아래로")
-    assert not qg._appears_as_whole_number("45", "145%와2045년")
+    q = "3개월 시점 900,000 526,240 58.4"
+    assert qg.leaked_fragments(q, ("58.4",)), "공백으로만 갈린 뒤쪽 수를 놓쳤다"
+    assert qg.leaked_fragments(q, ("526240",)), "#184 가 닫은 콤마 표기가 되살아났다"
+    assert qg.leaked_fragments("환급률 45 58.4 입니다", ("45",))
+    assert not qg.leaked_fragments(q, ("45",)), "표에 없는 수를 잡으면 오탐이다"
+
+
+def test_non_numeric_short_fragments_use_substring():
+    """짧은 **비숫자** 조각은 토큰 대조로 안 걸린다 — 부분열 그대로 둔다.
+
+    `leaked_fragments` docstring 이 *"짧은 조각은 숫자에 한해서만 본다"* 라고 적고 있으므로
+    숫자 여부로 가른다. 문면과 동작을 맞추는 것이다(정세현 지적).
+    """
+    assert qg.leaked_fragments("원금 손실이 나면 어떻게 되나요?", ("손실",))

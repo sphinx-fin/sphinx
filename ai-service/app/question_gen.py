@@ -120,7 +120,7 @@ def leaked_fragments(question: str, forbidden: tuple[str, ...]) -> list[str]:
         if not f:
             continue
         if len(f) < MIN_LEAK_NGRAM:
-            if _appears_as_whole_number(f, q):          # 수치 등 짧은 조각
+            if _short_fragment_leaked(f, question, q):
                 hits.append(fragment)
             continue
         if f in q or _shares_long_run(f, q):
@@ -128,42 +128,45 @@ def leaked_fragments(question: str, forbidden: tuple[str, ...]) -> list[str]:
     return hits
 
 
-def _appears_as_whole_number(fragment: str, question: str) -> bool:
-    """짧은 조각이 **하나의 수로서** 질문에 있는지. 부분열이 아니다 (이슈 #183 후속).
+def _short_fragment_leaked(fragment: str, question: str, normalized: str) -> bool:
+    """짧은 조각이 질문에 있는지. **수치는 토큰 동일성, 나머지는 부분열.**
 
-    ## 왜 부분열이면 안 되나
-
-    `f in q` 로 두면 짧은 수치가 **다른 수 안에 들어 있어도** 걸린다. 실측이다.
+    ## 수치를 부분열로 찾으면 안 된다 (이슈 #183 후속)
 
         조각 45   "낙인 45% 아래로"        잡아야 한다  ✅
         조각 45   "2045년 만기까지"        ❗오탐 — 연도 안
-        조각 45   "환급률이 145% 라면"      ❗오탐 — 큰 수 안
         조각  3   "13% 손실이 나면"        ❗오탐 — 13 안의 3
-        조각 70   "1970년대 상품과"        ❗오탐
 
-    한 자리·두 자리 수치는 한국어 질문에서 연도·비율·개월 수로 흔하게 나오므로 **구조적으로
-    오탐이 난다.** `MIN_LEAK_NGRAM` 은 그 문제를 길이로 우회한 것이지 푼 것이 아니었다 —
-    6자 이상은 부분열로도 우연 일치가 드물어서 안 보였을 뿐이다.
+    한 자리·두 자리 수치는 한국어 질문에서 연도·비율·개월 수로 흔하므로 **구조적으로**
+    오탐이 난다. `MIN_LEAK_NGRAM` 은 그 문제를 길이로 우회한 것이지 푼 것이 아니었다.
 
-    오탐의 대가는 작지 않다. 걸리면 질문을 다시 만들고(`MAX_ATTEMPTS = 3`), 세 번 실패하면
-    **템플릿 폴백으로 내려간다.** 즉 오탐이 잦으면 개인화된 질문이 조용히 사라지고 모든
-    세션이 같은 문장을 받는다 — 에러도 로그도 없다.
+    ## 경계를 여기서 다시 정의하지 않는다 (PR #199 리뷰, 정세현)
 
-    ## 규칙 — 양옆이 숫자가 아니어야 한다
+    처음엔 문자열을 훑어 **양옆이 숫자가 아닌지**로 판단했다. 그게 `canonical()` 과 맞물려
+    **진짜 누출을 놓쳤다.** `for_leak_check()` 는 공백을 지우므로 나란한 두 수가 숫자로
+    인접해지고, 그 판단이 둘을 **하나의 수**로 읽는다.
 
-    소수점·콤마는 `for_leak_check()` 가 이미 지웠으므로 여기서는 숫자만 본다. 단위는 보지
-    않는다 — `numbers()` 의 근거가 *"원문의 숫자 자체가 정답이다. 단위를 떼고 말해도 답을
-    알려준 것이다"* 이고 그건 그대로다. **바꾸는 것은 "어디까지가 그 수인가" 뿐이다.**
+        질문   '3개월 시점 900,000 526,240 58.4'
+        정규화 '3개월시점90000052624058.4'
+                          ^^^^^^^^^^^^ 526240 과 58.4 가 붙었다
+        조각 '58.4'  →  놓친다
+
+    표 한 행을 그대로 옮긴 질문이 정확히 이 모양이고(`#175`), `#184` 가 *"가장 자연스러운
+    누출 방식"* 이라고 닫은 경로가 여기서 되살아난다. 긴 조각은 부분열 분기라 그대로 잡히고
+    **짧은 것만 조용히 빠진다.**
+
+    그래서 `numbers()` 가 이미 아는 것을 다시 만들지 않는다. 그 함수는 `_for_numbers()`
+    (공백을 **접는다**, 지우지 않는다) 위에서 돌아 *"어디까지가 한 수인가"* 를 안다.
+    **경계 정의를 추출기 한 곳에 남긴다** — 이 레포가 정규화를 한 벌로 두는 이유와 같다.
+
+    ## 비숫자 조각은 부분열 그대로
+
+    2~5자 한글 어구는 토큰 대조로는 안 걸린다. docstring 이 *"짧은 조각은 숫자에 한해서만
+    본다"* 라고 이미 적고 있으므로 숫자 여부로 가른다 — 문면과 동작을 맞춘다.
     """
-    start = 0
-    while (idx := question.find(fragment, start)) != -1:
-        before = question[idx - 1] if idx > 0 else ""
-        after_at = idx + len(fragment)
-        after = question[after_at] if after_at < len(question) else ""
-        if not before.isdigit() and not after.isdigit():
-            return True
-        start = idx + 1
-    return False
+    if fragment.replace(".", "").isdigit():
+        return fragment in numerics.numbers(question)
+    return fragment in normalized
 
 
 def _shares_long_run(fragment: str, question: str) -> bool:
