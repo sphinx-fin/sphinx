@@ -7,11 +7,14 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+
+import java.util.List;
 
 /**
  * F-CMN-002 필터체인 등록. 소유: 강희진
@@ -29,6 +32,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * ────────────────────────────────────────────────────────────────────
  */
 @Configuration
+@lombok.extern.slf4j.Slf4j
 public class SecurityConfig {
 
     /** 인증 없이 열어 두는 경로 — 컨테이너·로드밸런서 헬스체크만. */
@@ -80,24 +84,71 @@ public class SecurityConfig {
     }
 
     /**
-     * 배포용 자격증명. 환경변수(SPHINX_API_USER·SPHINX_API_PASSWORD)에서만 읽는다.
+     * 배포용 계정 — <b>명부에서 만든다</b>({@code demo_accounts.yaml}, 결정 10.5 · 이슈 #41).
      *
-     * 미설정이면 기동을 거부한다. 이 빈이 없으면 Spring Boot 가 임의 비밀번호를 만들어
-     * 기동 로그에 찍는데, 그 로그가 남는 곳이 곧 자격증명이 노출되는 곳이 된다.
+     * <h2>왜 단일 계정으로는 안 되나</h2>
+     *
+     * <p>전에는 {@code roles("API")} 짜리 한 명이었다. 그러면 <b>인증은 서는데 인가가 아무것도
+     * 안 가른다</b> — 실측했다.
+     *
+     * <pre>
+     * GET /dashboard/heatmap  무인증        → 401
+     * GET /dashboard/heatmap  demo(API)     → 200   ← SELLER 였다면 403 이어야 한다
+     * </pre>
+     *
+     * <p>ADR-001 시연(<i>"SELLER 는 집계에 닿지 못한다"</i>)이 그 상태로는 성립하지 않는다.
+     * {@code AccessGuard} 가 {@code Role.valueOf(권한이름)} 으로 역할을 읽으므로, 권한이
+     * {@code ROLE_API} 면 정책에 대응하는 역할이 없다.
+     *
+     * <h2>자격증명은 명부에 없다</h2>
+     *
+     * <p>{@code demo_accounts.yaml} 은 <i>"누가 있고 무엇인가"</i> 까지만 말한다(#163). 비밀번호를
+     * 거기 적으면 그 값이 곧 배포 자격증명이 되고 파일을 지워도 git 이력에 남는다. 그래서
+     * <b>계정 목록은 명부에서, 비밀번호는 환경변수에서</b> 온다.
+     *
+     * <p>❗<b>일곱 계정이 같은 비밀번호다.</b> 하나를 알면 어느 역할로도 로그인할 수 있다 —
+     * 그리고 <b>데모에서는 그게 필요하다.</b> 심사에서 역할을 바꿔 가며 차단을 보여줘야 하는데
+     * 계정마다 다른 값을 두면 환경변수가 일곱 개가 된다. 실제 운영 계정 체계가 아니라
+     * <b>역할별 차단을 시연하기 위한 구성</b>이고, 그 사실이 여기 적혀 있어야 다음 사람이
+     * 이걸 운영용으로 오해하지 않는다.
+     *
+     * <p>미설정이면 기동을 거부한다. 이 빈이 없으면 Spring Boot 가 임의 비밀번호를 만들어
+     * 기동 로그에 찍는데, <b>그 로그가 남는 곳이 곧 자격증명이 노출되는 곳</b>이 된다.
      * 조용히 뜨는 것보다 안 뜨는 편이 낫다.
+     *
+     * <p>{@code SPHINX_API_USER} 는 그대로 받는다 — nginx {@code auth_basic}(#162)이 그 값으로
+     * htpasswd 를 만들고 브라우저가 실어 보낸 {@code Authorization} 이 여기까지 온다. 그 계정도
+     * 명부에 있어야 통과하므로, <b>둘이 어긋나면 화면이 열리는데 API 가 401</b> 이 된다.
      */
     @Bean
     @Profile("prod")
     public UserDetailsService prodUsers(@Value("${sphinx.api.auth.username:}") String username,
                                         @Value("${sphinx.api.auth.password:}") String password,
+                                        DemoAccountsFile roster,
                                         PasswordEncoder encoder) {
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
             throw new IllegalStateException(
                     "prod 프로파일에는 SPHINX_API_USER·SPHINX_API_PASSWORD 환경변수가 필요하다. "
                     + "설정하지 않으면 Spring 이 임의 비밀번호를 생성해 기동 로그에 남긴다.");
         }
-        return new InMemoryUserDetailsManager(
-                User.withUsername(username).password(encoder.encode(password)).roles("API").build());
+        if (roster.byId(username).isEmpty()) {
+            throw new IllegalStateException(
+                    "SPHINX_API_USER 가 명부에 없다: " + username + ". nginx 가 이 계정으로 "
+                    + "htpasswd 를 만들므로(#162) 화면은 열리는데 API 가 전부 401 이 된다. "
+                    + "demo_accounts.yaml 의 id 중 하나여야 한다 (결정 10.5)");
+        }
+        String hashed = encoder.encode(password);
+        List<UserDetails> users = roster.accounts().stream()
+                .map(a -> (UserDetails) User.withUsername(a.actorId())
+                        .password(hashed)
+                        .roles(a.role().name())     // AccessGuard 가 ROLE_ 접두어를 떼고 Role.valueOf 한다
+                        .build())
+                .toList();
+        log.info("prod 계정 {}건 등록 — {} (비밀번호 {}자, 전 계정 공통)",
+                users.size(),
+                roster.accounts().stream().map(a -> a.actorId() + ":" + a.role()).toList(),
+                password.length());
+        return new InMemoryUserDetailsManager(users);
     }
 
     @Bean
