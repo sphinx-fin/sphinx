@@ -57,14 +57,23 @@ export LLM_API_KEY;       LLM_API_KEY=$(get llm-api-key)
 export SPHINX_API_USER;   SPHINX_API_USER=$(get api-user)
 export SPHINX_API_PASSWORD; SPHINX_API_PASSWORD=$(get api-password)
 
+# `/internal/*` 공유 시크릿 (이슈 #41 3항 · 결정 10.4). **server 와 ai-service 가 같은 값을
+# 받는다** — 여기서 한 번 읽어 compose 가 양쪽에 같은 변수를 넘기므로 갈릴 수가 없다.
+# `api-user`/`api-password` 를 nginx 와 server 가 나눠 쓰는 것과 같은 구조다(#162).
+#
+# 값이 없으면 위 get() 이 죽는다. 그게 맞다 — 양쪽 코드가 *"토큰이 비면 인증을 끈다"* 로
+# 대칭이라, 빠뜨리면 **배포는 성공하고 2차 방어만 조용히 꺼진 채로 뜬다.**
+export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
+
 # 선택값. 없으면 코드 기본값을 쓴다(config.py 의 DEFAULT_MODEL 등).
 export LLM_API_BASE="${LLM_API_BASE:-}"
 export LLM_MODEL="${LLM_MODEL:-}"
 
 # 값 자체는 절대 찍지 않는다. 길이만 보여 "받긴 받았다"를 확인한다.
-echo "  LLM_API_KEY         ${#LLM_API_KEY}자"
-echo "  SPHINX_API_USER     ${#SPHINX_API_USER}자"
-echo "  SPHINX_API_PASSWORD ${#SPHINX_API_PASSWORD}자"
+echo "  LLM_API_KEY           ${#LLM_API_KEY}자"
+echo "  SPHINX_API_USER       ${#SPHINX_API_USER}자"
+echo "  SPHINX_API_PASSWORD   ${#SPHINX_API_PASSWORD}자"
+echo "  SPHINX_INTERNAL_TOKEN ${#SPHINX_INTERNAL_TOKEN}자"
 
 if [ "$CHECK_ONLY" = 1 ]; then
   echo "--check 라 여기서 멈춘다."

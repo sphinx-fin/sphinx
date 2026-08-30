@@ -115,11 +115,17 @@ for K in llm-api-key api-user api-password; do
   read -rs -p "$K: " V && echo
   aws ssm put-parameter --name "/sphinx/alpha/$K" --type SecureString --value "$V" --overwrite
 done
+
+# internal-token 만 손으로 안 넣는다 — 외울 값이 아니고, 사람이 고르면 짧아진다.
+aws ssm put-parameter --name /sphinx/alpha/internal-token --type SecureString \
+  --value "$(openssl rand -hex 32)" --overwrite
 ```
 
-세 값 모두 `scripts/deploy_ec2.sh` 가 읽어 compose 환경변수로만 넘긴다. `api-user` ·
+네 값 모두 `scripts/deploy_ec2.sh` 가 읽어 compose 환경변수로만 넘긴다. `api-user` ·
 `api-password` 는 nginx 의 htpasswd 와 server 의 prod 인증이 **같은 값**을 쓰므로
-출처가 SSM 하나로 유지된다(#162).
+출처가 SSM 하나로 유지된다(#162). `internal-token` 도 같은 이유로 한 값이다 — `server` 와
+`ai-service` 가 갈리면 `/internal/*` 이 전부 401 이 되고 인터뷰 경로가 통째로 죽는다
+(이슈 #41 3항 · 결정 10.4).
 
 ## 7. 접속 — 22번은 안 연다
 
