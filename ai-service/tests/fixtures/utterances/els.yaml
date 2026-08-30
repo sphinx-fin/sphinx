@@ -99,8 +99,8 @@ cases:
     question: 만기 전에 돈이 필요해지면 어떻게 되는지 말씀해 주시겠어요?
     answer: 급하면 중간에 빼면 되는 거죠, 넣은 돈은 그대로 나올 테고.
     expected_grade: U4
-    expected_misconception: null
-    deterministic: false  # ★ 라이브러리 공백
+    expected_misconception: M10-MIDWAY-REDEMPTION-COST
+    deterministic: true   # 라이브러리 공백이 #203 으로 메워졌다 (이슈 #148)
 
   - id: NO-LISTING-SELLABLE
     source: 합성 — 비상장 증권을 주식처럼 매도 가능하다고 본다
@@ -108,8 +108,8 @@ cases:
     question: 이 증권을 만기 전에 팔 수 있는지 어떻게 이해하고 계신가요?
     answer: 주식처럼 팔고 싶을 때 팔면 되는 거 아닌가요?
     expected_grade: U4
-    expected_misconception: null
-    deterministic: false  # ★ 라이브러리 공백
+    expected_misconception: M09-NO-LISTING
+    deterministic: true   # 라이브러리 공백이 #203 으로 메워졌다 (이슈 #148)
 
   # importance 미결(#100 은 recommended, 나는 required 주장). 케이스는 미리 둔다.
   - id: ISSUER-CREDIT-DISMISSED

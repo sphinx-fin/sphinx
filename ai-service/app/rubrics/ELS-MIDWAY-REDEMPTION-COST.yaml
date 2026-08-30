@@ -16,3 +16,6 @@ misconception_conditions:
   - 손실은 만기에만 난다
 related_misconceptions:
   - M01-PRINCIPAL-GUARANTEE
+  # 중도상환에 비용이 없다고 보는 오해다. 근거는 간이투자설명서 p13
+  # 「5. 중도상환에 대한 사항」 — 기준가의 95%(6개월 내 90%) 수준 (이슈 #148 · PR #203).
+  - M10-MIDWAY-REDEMPTION-COST

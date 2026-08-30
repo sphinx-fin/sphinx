@@ -11,3 +11,6 @@ misconception_conditions:
   - 급하면 시장에 내놓으면 된다
 related_misconceptions:
   - M01-PRINCIPAL-GUARANTEE
+  # 상장 안 되는 것을 '주식처럼 팔면 된다' 로 뒤집는 오해다. 근거는 간이투자설명서
+  # p14 「환금성 제약의 위험」 (이슈 #148 · PR #203).
+  - M09-NO-LISTING
