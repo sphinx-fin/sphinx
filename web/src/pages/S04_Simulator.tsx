@@ -35,8 +35,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
-  PathMeta,
   RiskItem,
+  SimScenario,
   SimulateRequest,
   SimulateResponse,
 } from "../api/types";
@@ -211,7 +211,7 @@ export default function S04Simulator() {
                     className={`sm__card ${loss ? "sm__card--loss" : "sm__card--gain"}`}
                   >
                     <h2 className="sm__card-name">{s.name}</h2>
-                    <p className="sm__card-path">{describePath(s.pathMeta) ?? ""}</p>
+                    <p className="sm__card-path">{describePath(s) ?? ""}</p>
                     <p className="sm__flow">
                       <span className="sm__flow-from">{formatKrw(amount)}</span>
                       <span className="sm__flow-arrow" aria-hidden="true">→</span>
@@ -265,14 +265,41 @@ export default function S04Simulator() {
  * 통째로 백지가 되므로 라벨만 비운다 — 리허설 중에 이 화면이 사라지는 것보다 낫다.
  * 대신 조용히 넘기지 않고 콘솔에 계약 위반으로 남긴다.
  */
-function describePath(m: PathMeta | undefined): string | null {
-  if (!m?.startDate) {
+function describePath(s: SimScenario | undefined): string | null {
+  if (!s?.pathMeta?.startDate) {
     console.warn("[S-04] 계약 위반: SimScenario.pathMeta 가 없다 (openapi.yaml required). 역사 구간 라벨을 생략한다.");
     return null;
   }
+  const m = s.pathMeta;
   const period = `${m.startDate.slice(0, 7)} ~ ${m.endDate.slice(0, 7)}`;
-  const worst = `최저 ${m.worstUnderlying} ${Math.round(m.worstFinal * 1000) / 10}%`;
-  return m.knockedIn ? `${period} · ${worst} · 낙인 하회` : `${period} · ${worst}`;
+  const worst = `최저 ${indexLabel(m.worstUnderlying)} ${Math.round(m.worstFinal * 1000) / 10}%`;
+  if (!m.knockedIn) return `${period} · ${worst}`;
+
+  // 낙인을 하회했다는 사실만으로는 손실이 아니다 — 스텝다운은 만기평가일에 배리어 위로
+  // 돌아오면 쿠폰을 다 준다. 실제로 `best` 칸이 그 전개다(2008-01 계약 · 낙인 하회 ·
+  // 만기 +33%). 거기에 "낙인 하회" 만 붙으면 **최선 카드가 사고처럼 읽힌다.**
+  // 회복한 전개라는 것이 오히려 이 화면이 설명해야 하는 것이라 문면을 가른다.
+  return `${period} · ${worst} · ${s.pnl < 0 ? "낙인 하회" : "낙인 하회 후 회복"}`;
+}
+
+/**
+ * 기초자산 키 → 화면 표기. 계약은 키(`sp500`)를 주는데 그건 **식별자이지 표시명이 아니다** —
+ * 고객이 보는 자리에 원문 키가 그대로 나가면 안 된다.
+ *
+ * 출처는 `data/timeseries/VERSION` 의 `label` 이다(P2 재현성의 근거가 되는 그 파일이다).
+ * 접미어 "지수"만 뺐다 — `최저 EuroStoxx50 지수 70.5%` 는 문장 안에서 겹쳐 읽힌다.
+ *
+ * 모르는 키는 **키를 그대로 보인다.** 빈칸으로 두면 기초자산이 하나 늘었을 때 화면이 조용히
+ * 아무 말도 안 하게 된다 — 낯선 문자열이 보이는 편이 그 사실을 드러낸다.
+ */
+const INDEX_LABEL: Record<string, string> = {
+  sp500: "S&P500",
+  nikkei225: "NIKKEI225",
+  eurostoxx50: "EuroStoxx50",
+};
+
+function indexLabel(key: string): string {
+  return INDEX_LABEL[key] ?? key;
 }
 
 function describe(e: unknown): string {
