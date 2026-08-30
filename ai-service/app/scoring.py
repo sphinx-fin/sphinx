@@ -367,3 +367,36 @@ def _source_tier(type_id: str) -> str:
                 return f"{mtype.source.type} {mtype.source.ref}"
             return mtype.source.type or "미기재"
     return "미기재"
+
+
+# ── F-GTE-003 — 컴플라이언스 상신 신호 (#160) ─────────────────────────────────
+def escalation_signal(matched: MisconceptionResponse, rubric: rubrics.Rubric) -> bool:
+    """이 발화가 컴플라이언스로 올라갈 신호인가.
+
+    ## ❗`related_misconceptions` 를 거치지 않는다 — 그게 `#160` 의 결함이었다
+
+    `apply_misconception_floor` 는 **루브릭이 관련 유형으로 선언한 오해만** 본다. 그건
+    옳다 — 다른 항목의 오해가 이 항목 *등급* 을 끌어내리면 안 되니까. 그런데 그 필터가
+    상신 신호까지 같이 삼켰다.
+
+        M08-TYING 탐지 = 만점(score 1.0 · escalate true)
+        어느 루브릭도 M08 을 related_misconceptions 에 안 걺
+        → floor 가 첫 줄에서 반환 → misconception_type 이 안 실림
+        → publishIfUnfairSales 가 첫 줄에서 반환 → **기획 [기능2] 가 한 번도 발행되지 않음**
+
+    등급과 신호는 **묻는 것이 다르다.** 등급은 *"이 고객이 이 항목을 이해했는가"* 이고,
+    꺾기는 *"판매자가 무엇을 했는가"* 다. 후자는 어느 위험항목을 채점 중이었는지와 무관하게
+    성립한다 — 원금손실을 채점하다 들어도 꺾기는 꺾기다. 그래서 루브릭으로 거르지 않는다.
+
+    `rubric` 을 받고도 안 쓰는 것은 **의도다.** 호출부에서 두 함수가 같은 입력을 받으면서
+    한쪽만 필터를 쓴다는 것이 보이고, 나중에 누가 "일관성" 을 이유로 필터를 다는 것을
+    `test_escalation_ignores_the_rubric_filter` 가 막는다.
+
+    ## 유형ID 를 코드에 박지 않는다
+
+    `misconception.match()` 가 라이브러리의 `escalate: compliance` 를 읽어 이미 계산해 둔
+    값을 그대로 쓴다. `M08-TYING` 이 여기 문자열로 나타나면 안 된다 — 라이브러리에 유형이
+    늘어도 코드가 안 바뀌어야 하고, 그게 `misconception.py` 가 세운 규칙이다.
+    """
+    del rubric                          # 위 docstring 참고 — 안 쓰는 것이 계약이다
+    return matched.escalate
