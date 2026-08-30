@@ -62,7 +62,7 @@ export SPHINX_API_PASSWORD; SPHINX_API_PASSWORD=$(get api-password)
 # `api-user`/`api-password` 를 nginx 와 server 가 나눠 쓰는 것과 같은 구조다(#162).
 #
 # 값이 없으면 위 get() 이 죽는다. 그게 맞다 — 양쪽 코드가 *"토큰이 비면 인증을 끈다"* 로
-# 대칭이라, 빠뜨리면 **배포는 성공하고 2차 방어만 조용히 꺼진 채로 뜬다.**
+# 대칭이라, 빠뜨리면 **배포는 성공하고 시크릿 방어선만 조용히 꺼진 채로 뜬다.**
 export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
 
 # 선택값. 없으면 코드 기본값을 쓴다(config.py 의 DEFAULT_MODEL 등).
