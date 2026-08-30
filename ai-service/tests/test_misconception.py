@@ -17,6 +17,14 @@ def _cases():
     return yaml.safe_load((FIXTURES / "utterances" / "els.yaml").read_text(encoding="utf-8"))
 
 
+def _case(case_id: str) -> dict:
+    """dev set 케이스 하나. 없으면 조용히 통과하지 않고 여기서 터진다."""
+    for case in _cases()["cases"]:
+        if case["id"] == case_id:
+            return case
+    raise AssertionError(f"dev set 에 {case_id} 가 없다")
+
+
 def test_library_type_count():
     """현재 9종이다. 기획서·역할분담표는 "오해 라이브러리 8종"이라고 쓰는데 **양쪽으로**
     어긋나 있다 — M07-YIELD-OVERCONFIDENCE 가 인용 가능한 근거를 찾지 못해 빠졌고
@@ -241,16 +249,53 @@ def test_library_validates_products_at_load_time(monkeypatch, tmp_path, clean_ca
 
 
 def test_startup_fails_when_data_is_missing(monkeypatch, tmp_path, clean_caches):
-    """기동 때 죽어야 한다 — 지연 로딩이면 기동은 성공하고 첫 고객 요청에서 500 이다."""
+    """기동 때 죽어야 한다 — 지연 로딩이면 기동은 성공하고 첫 고객 요청에서 500 이다.
+
+    ## ❗`setenv` 뒤에 캐시를 한 번 더 지운다 — 없으면 **파일 단독 실행에서 실패했다**
+
+    `app.main` 은 모듈 수준에서 `configure_logging()` 을 부르고 그게 `settings()` 를 부른다.
+    그래서 **import 하는 행위 자체가 캐시를 채운다.** `clean_caches` 가 setup 에서 지워도
+    아래 import 가 다시 채우고, 그 다음 줄의 `setenv` 는 이미 늦다.
+
+        clean_caches      캐시 비움
+        import app.main   configure_logging() → settings() → 진짜 data/ 로 캐시 채움
+        setenv            ← 무력하다
+        lifespan          진짜 data/ 를 읽어서 성공한다 → DID NOT RAISE
+
+    전체 스위트에서는 **다른 파일이 `app.main` 을 먼저 import 해서** 이 import 가 no-op 이
+    되고, 그래서 통과하고 있었다. 즉 이 테스트는 **파일 순서 덕분에 통과하던 것**이고
+    단독으로는 계속 실패했다(`pytest tests/test_misconception.py` 로 재현된다).
+
+    CI 는 전체 스위트만 돌려서 초록이었다. 이건 `#176`·`#192` 에서 겪은 것과 같은 모양이다 —
+    **테스트가 런타임과 다른 상태를 재고 있으면 결함 경로가 안 보인다.**
+    """
     from fastapi.testclient import TestClient
 
     from app import config
     from app.main import app
 
     monkeypatch.setenv(config.DATA_DIR_ENV, str(tmp_path / "없는곳"))
+    config.settings.cache_clear()     # ↑ import 가 채운 것을 지운다. 위 docstring 참고
     with pytest.raises(misconception.MisconceptionLibraryMissing):
         with TestClient(app):
             pass
+
+
+def test_this_file_alone_is_a_valid_run():
+    """★ 위 함정을 일반화한다 — 이 파일이 **혼자 돌아도** 같은 답을 내야 한다.
+
+    `settings()` 를 캐시에 채우는 경로가 import 부작용이라, 다른 테스트가 먼저 돌았는지에
+    따라 결과가 갈리는 자리가 또 생길 수 있다. 그런 테스트를 찾아내는 그물은 아니고,
+    **캐시를 지우는 헬퍼가 실제로 지우는지**를 잰다.
+
+    `_reset_caches()` 뒤에 `settings()` 가 비어 있어야 한다. 누가 캐시를 하나 더 만들고
+    여기에 안 넣으면 이 단정이 아니라 그 테스트가 이상하게 깨진다 — 그러면 여기를 본다.
+    """
+    from app import config
+
+    _reset_caches()
+    assert config.settings.cache_info().currsize == 0
+    assert misconception.library.cache_info().currsize == 0
 
 
 def test_healthz_shows_where_data_comes_from():
@@ -289,3 +334,76 @@ def test_product_document_passes_the_loader_contract():
         {"id": "M99", "source": {"type": "product_document", "ref": "원문 p14"}}
     )
     assert parsed.type == "product_document"
+
+
+# ── #148 배선: 라이브러리 → 루브릭 → dev set 이 셋 다 서야 유형이 실린다 ──────
+_M148 = {
+    "ELS-NO-LISTING": ("M09-NO-LISTING", "NO-LISTING-SELLABLE"),
+    "ELS-MIDWAY-REDEMPTION-COST": ("M10-MIDWAY-REDEMPTION-COST", "MIDWAY-FULL-WITHDRAWAL"),
+}
+
+
+@pytest.mark.parametrize("item_id", sorted(_M148))
+def test_m09_m10_are_wired_all_three_places(item_id):
+    """라이브러리에만 있으면 **매칭은 되는데 판정에 안 실린다.**
+
+    `apply_misconception_floor` 가 `rubric.related_misconceptions` 로 거르므로,
+    라이브러리 등재(#203)만으로는 `misconception_type` 이 Judgment 에 안 붙는다.
+    `#160` 이 정확히 그 모양의 결함이었다 — 탐지는 만점인데 실리지 않았다.
+    """
+    from app import rubrics, scoring
+    from app.schemas import Evidence, Grade, Judgment
+
+    type_id, case_id = _M148[item_id]
+    utterance = _case(case_id)["answer"]
+
+    matched = misconception.match(utterance, "ELS")
+    assert [m.type_id for m in matched.matches] == [type_id]
+    assert matched.matches[0].score == 1.0, "결정론 경로가 아니다"
+    assert type_id in rubrics.get(item_id).related_misconceptions
+
+    judgment = Judgment(
+        item_id=item_id, grade=Grade.U1, confidence=0.9,
+        evidence=Evidence(utterance_quote=utterance, rubric_clause="(테스트)"),
+        reason="(테스트)",
+    )
+    out = scoring.apply_misconception_floor(judgment, matched, rubrics.get(item_id))
+    assert out.misconception_type == type_id, "라이브러리·루브릭은 섰는데 판정에 안 실린다"
+    assert out.grade is Grade.U4, "오해 라이브러리 매칭은 U4 아래로 내려가지 않는다"
+
+
+@pytest.mark.parametrize("item_id", sorted(_M148))
+def test_devset_case_is_marked_deterministic(item_id):
+    """dev set 표기가 실물과 같아야 한다.
+
+    `deterministic` 이 `false` 인 채로 남으면 `run_devset.py` 가 이 케이스를 LLM 으로
+    돌린다 — 쿼터를 쓰고 재현성이 없어진다. 세 곳 중 여기만 빠뜨리기 쉬워서 박아 둔다.
+    """
+    type_id, case_id = _M148[item_id]
+    case = _case(case_id)
+    assert case["deterministic"] is True
+    assert case["expected_misconception"] == type_id
+
+
+def test_devset_patterns_that_came_from_this_file_are_disclosed():
+    """★ 패턴이 내 dev set 발화에서 온 2건을 README 가 밝히고 있어야 한다.
+
+    그 2건의 매칭 성공은 구성상 보장된 값이라 **놓침 0 의 근거가 되지 못한다.**
+    결정론 10/24 를 성능 수치로 인용할 때 붙어야 하는 사실이고, 나는 F-CMN-003 라벨링에서
+    배제된 사람이라 이런 종류의 사실은 내가 먼저 적어 둔다(fixtures/README.md 머리말).
+
+    문서와 실물이 갈리는 것을 막으려고 **패턴 == 발화** 인지를 여기서 직접 잰다.
+    """
+    import pathlib
+
+    readme = (pathlib.Path(__file__).parent / "fixtures" / "README.md").read_text(encoding="utf-8")
+    lib = {m.type_id: m for m in misconception.library()}
+
+    for item_id, (type_id, case_id) in _M148.items():
+        answer = _case(case_id)["answer"].rstrip(".?! ")
+        assert answer in lib[type_id].patterns, (
+            f"{type_id} 패턴이 더는 dev set 발화와 같지 않다 — 좁혀졌다면 README 의 "
+            "그 문단도 같이 고쳐야 한다(그때 이 테스트를 지운다)"
+        )
+        assert type_id in readme, f"README 가 {type_id} 의 출처를 밝히지 않는다"
+        assert case_id in readme, f"README 가 {case_id} 를 밝히지 않는다"
