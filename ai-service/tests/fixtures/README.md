@@ -41,3 +41,36 @@ dev set 이 쓰는 RiskItem 은 `contracts/samples/*.json` 의 `_expected_risk_i
 `SURVEY_SCHEMA_VERSION` 이 올라가고(오준서, 이슈 #44) 파일명이 먼저 틀려 보인다.
 
 두 세트 다 `python tools/run_devset.py` 가 돈다. 케이스 id 부분일치로 필터된다.
+
+## ❗`deterministic: true` 가 무엇을 증명하고 무엇을 증명하지 않나
+
+`deterministic` 은 *"오해 라이브러리 패턴이 이 발화를 잡는다"* 는 뜻이다. LLM 이 안 불리고
+`stage=pattern score 1.0` 으로 확정되므로 재현성이 있고 쿼터를 안 쓴다. 10/24 다.
+
+**그중 2건은 패턴이 이 파일의 발화에서 나왔다.**
+
+```
+M09-NO-LISTING              ← NO-LISTING-SELLABLE.answer
+M10-MIDWAY-REDEMPTION-COST  ← MIDWAY-FULL-WITHDRAWAL.answer
+```
+
+둘 다 `source: 합성` 이다. 즉 **내가 지어낸 문장을 정세현이 패턴으로 옮겼고**(이슈 #148 ·
+PR #203), 그 패턴을 같은 문장으로 검증한다. 그러므로 이 2건의 매칭 성공은 *구성상 보장된
+값*이고 **일반화의 증거가 아니다.**
+
+증거인 것은 따로 있다 — 그 두 패턴이 **나머지 22건과 부딪히지 않는다**는 것. 특히 정답
+대조군(`UNDERSTOOD-BASELINE` · `KNOCKIN-UNDERSTOOD` · `VAR-PRINCIPAL-UNDERSTOOD` ·
+`VAR-RATIO-UNDERSTOOD` · `PARROTED-RUBRIC-CLAUSE`)이 하나도 안 걸린다. 오탐이 0 이라는
+말은 할 수 있고, 놓침이 0 이라는 말은 이 2건에 대해서는 할 수 없다.
+
+**결정론 10/24 를 평가에서 인용할 때 이 문단이 같이 가야 한다.** `M04-EARLY-REDEMPTION`
+(`SPEC-DIALOGUE-EARLY`)도 패턴과 발화가 같지만 그건 **기획서 대화문이 원본**이라 방향이
+반대다 — 문서에서 뽑은 문장을 양쪽에 넣은 것과, 내가 지어낸 문장을 패턴으로 올린 것은 다르다.
+
+실측한 한계도 적어 둔다. 두 패턴은 문장 전체라 **어미 변형을 하나도 못 잡는다**(0/5 · 0/4).
+`빼면 되는 거죠` 처럼 긍정 어미를 포함한 조각으로 좁히면 4/4 를 잡으면서 부정·양보 정답
+(`중간에 빼면 되긴 하는데 손해라면서요`)에 오탐이 0 인 것까지 쟀다(PR #203 리뷰). 데이터가
+정세현 소유라 권고로 넘겼고, 지금 상태에서 그 몫은 F-DET-001 3단계(임베딩)에 남아 있다.
+
+이 파일이 F-CMN-003 공식 평가셋과 무관하다는 것은 위에 적은 그대로다 — 나는 프롬프트
+당사자라 라벨링에서 배제된 사람이고, 그래서 이런 종류의 사실을 **내가 먼저 적어 둔다.**
