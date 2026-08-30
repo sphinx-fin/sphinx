@@ -178,14 +178,30 @@ public final class SimulatorService {
     /**
      * 스텝다운 ELS 조건.
      *
+     * <h2>이름이 둘인 이유 — 하나는 원문, 하나는 화면 (PR #202 리뷰)</h2>
+     *
+     * <p>기획서가 <b>"데모와 제출물에서는 상품명과 발행사를 가명 처리하고 조건만 인용한다"</b>
+     * 로 못박았다. 그런데 원문 이름을 아예 없앨 수도 없다 — 조건의 근거가 어느 문서인지
+     * 대조해야 하고 {@code data/timeseries/VERSION} 주석도 그 이름을 쓴다.
+     *
+     * <p>그래서 <b>둘을 갈라 두고 이름으로 용도를 못박는다.</b> 한 필드에 담고 "화면에서는
+     * 가리자" 로 두면 다음 사람이 반사적으로 그것을 꺼내 화면에 실으므로, 그런 필드를 애초에
+     * 남기지 않는다 — {@code #202} 에서 실제로 그렇게 됐다({@code KIWOOM_4181.name()} 을
+     * 그대로 {@code SimulationView.productName} 에 실어 S-04 머리말이 발행사 실명을 달았고,
+     * S-02 목록은 가명이라 <b>한 화면 안에서 규약이 갈렸다</b>).
+     *
+     * @param sourceName        <b>원문 상품명. 화면에 내보내지 않는다.</b> 조건 출처 대조·주석용
+     * @param displayName       <b>화면·응답에 나가는 가명.</b> S-02 목록({@code MockData.PRODUCTS})과
+     *                          같은 문면이어야 한 상품이 화면마다 다른 이름으로 보이지 않는다
      * @param underlyings       기초자산 키. worst-of 판정 순서에 쓰인다
      * @param observationMonths 조기상환·만기 평가 시점(계약일로부터 개월). 마지막 항목이 만기평가일
      * @param barriers          각 평가일의 배리어(최초기준가격 대비 비율). observationMonths 와 길이가 같다
      * @param couponAnnual      연 쿠폰율. i번째 평가일 지급률 = couponAnnual × months/12 (스텝다운 관행)
      * @param knockIn           낙인 배리어. null 이면 노낙인형
      */
-    public record Product(String name, List<String> underlyings, List<Integer> observationMonths,
-                          List<Double> barriers, double couponAnnual, Double knockIn, String note) {
+    public record Product(String sourceName, String displayName, List<String> underlyings,
+                          List<Integer> observationMonths, List<Double> barriers,
+                          double couponAnnual, Double knockIn, String note) {
 
         public Product {
             if (observationMonths.size() != barriers.size()) {
@@ -214,6 +230,9 @@ public final class SimulatorService {
      */
     public static final Product KIWOOM_4181 = new Product(
             "키움증권 제4181회 ELS",
+            // ❗화면에 나가는 것은 이쪽이다. MockData.PRODUCTS 의 같은 상품과 문면이 같아야
+            // 하고, ProductDisplayNameTest 가 그 두 벌을 대조한다.
+            "A증권 제4181회 ELS (원금비보장형)",
             List.of("sp500", "nikkei225", "eurostoxx50"),
             List.of(6, 12, 18, 24, 30, 36),
             List.of(0.85, 0.85, 0.85, 0.80, 0.75, 0.70),

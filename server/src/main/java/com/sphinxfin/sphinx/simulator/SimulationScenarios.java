@@ -104,8 +104,10 @@ public class SimulationScenarios {
         List<Scenario> scenarios = new ArrayList<>();
         picked.picks().forEach((severity, outcome) ->
                 scenarios.add(scenario(severity, outcome, amount, picked.shareOf(outcome))));
+        // ❗`sourceName` 이 아니라 `displayName` 이다. 이 값은 S-04 머리말에 그대로 찍힌다
+        // (`web/src/pages/S04_Simulator.tsx`) — 기획서의 가명 규약이 걸리는 자리다(#202 리뷰).
         return new SimulationView(List.copyOf(scenarios), picked.snapshot(),
-                SimulatorService.KIWOOM_4181.name());
+                SimulatorService.KIWOOM_4181.displayName());
     }
 
     private Scenario scenario(String severity, SimulatorService.Outcome outcome, long amount,

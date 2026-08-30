@@ -74,7 +74,9 @@ class SimulationScenariosTest {
         void envelopeCarriesItsProvenance() {
             SimulationScenarios.SimulationView v = view();
 
-            assertThat(v.productName()).isEqualTo(SimulatorService.KIWOOM_4181.name());
+            assertThat(v.productName())
+                    .as("화면에 나가는 것은 가명이다 — 가명 규약 자체는 ProductDisplayNameTest 가 잰다")
+                    .isEqualTo(SimulatorService.KIWOOM_4181.displayName());
             assertThat(v.timeseriesVersion())
                     .as("data/timeseries/VERSION 의 snapshot — 상수로 두면 CSV 를 갈아도 "
                             + "화면이 옛 스냅샷을 말한다")
