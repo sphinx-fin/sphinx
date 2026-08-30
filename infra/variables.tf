@@ -10,6 +10,24 @@ variable "github_repo" {
   default     = "sphinx-fin/sphinx"
 }
 
+variable "github_repo_ids" {
+  description = <<-EOT
+    같은 레포를 **숫자 ID 로 적은 표기**: `<org>@<org_id>/<repo>@<repo_id>`.
+
+    GitHub 이 OIDC 토큰의 `sub` 를 이 표기로 발급한다(불변 subject). 이름은 바뀌어도
+    ID 는 안 바뀌므로, 레포를 지우고 같은 이름을 남이 차지해도 신뢰가 넘어가지 않는다.
+
+    값은 짐작하지 말고 레포가 알려주는 것을 그대로 쓴다:
+
+      gh api /repos/sphinx-fin/sphinx/actions/oidc/customization/sub
+      → {"sub_claim_prefix":"repo:sphinx-fin@319472519/sphinx@1342489616", ...}
+
+    `repo:` 접두어는 locals 에서 붙이므로 여기에는 넣지 않는다.
+  EOT
+  type        = string
+  default     = "sphinx-fin@319472519/sphinx@1342489616"
+}
+
 variable "ssh_cidrs" {
   description = <<-EOT
     22번을 열 CIDR. **기본은 빈 목록 = 22번을 아예 안 연다.**
