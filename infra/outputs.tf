@@ -5,7 +5,10 @@ output "env" {
 
 output "url" {
   description = "화면 주소"
-  value       = "http://${aws_eip.app.public_ip}/"
+  # 도메인이 있으면 https 다 — 인증서가 선 뒤로 :80 은 그쪽으로 튕기므로(web/nginx.conf)
+  # IP 주소를 계속 찍으면 **리다이렉트를 한 번 거치는 주소**를 안내하게 된다.
+  # 인증서 발급 전에는 이 주소가 아직 안 뜬다(docs/deployment.md §9.2).
+  value = local.cfg.public_host != "" ? "https://${local.cfg.public_host}/" : "http://${aws_eip.app.public_ip}/"
 }
 
 output "instance_id" {
