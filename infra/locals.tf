@@ -3,6 +3,31 @@ locals {
   # 키를 못 찾아 죽는다 — 그게 의도다. 환경을 안 고르고 올라가는 경로를 없앤다.
   env = terraform.workspace
 
+  # ── oidc_subs 는 왜 한 환경에 두 줄인가 (이슈 #206) ────────────────────────
+  #
+  # GitHub 이 이 레포의 OIDC `sub` 를 **숫자 ID 표기로 발급**하고 있다. 신뢰 정책에
+  # 이름 표기만 적혀 있어서 도입 이후 14회가 전부 같은 자리에서 죽었다:
+  #
+  #   ##[error]Could not assume role with OIDC:
+  #            Not authorized to perform sts:AssumeRoleWithWebIdentity
+  #
+  # 로그만으로는 *역할이 없음* 과 *sub 불일치* 가 같은 문면이라 안 갈린다. 실제로
+  # 온 값은 CloudTrail 에 남아 있었다(userIdentity.userName):
+  #
+  #   repo:sphinx-fin@319472519/sphinx@1342489616:ref:refs/heads/main
+  #   ↑ 정책에 적혀 있던 것은 repo:sphinx-fin/sphinx:ref:refs/heads/main
+  #
+  #   aws cloudtrail lookup-events \
+  #     --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity
+  #
+  # 이름 표기를 **남겨 두는** 이유는 전환 중이기 때문이다. 레포 설정은 아직
+  # `use_immutable_subject:false` 인데 발급값은 ID 표기다 — GitHub 쪽 전환이라
+  # 되돌아가면 이름 표기로 다시 온다. 그때 배포가 또 죽는 것보다 두 줄이 낫다.
+  # 전환이 끝나면(설정이 immutable 로 굳으면) 이름 표기 줄을 지운다.
+  #
+  # ❗**와일드카드로 합치지 않는다.** `repo:sphinx-fin*/sphinx*:...` 는 남이 만든
+  # `sphinx-finance/sphinxx` 도 통과시킨다. 두 값을 그대로 적는 편이 짧지 않아도 안전하다.
+
   env_cfg = {
     alpha = {
       # ❗**타입을 아무거나 못 고른다.** 이 계정은 AWS Free Plan 이라 free-tier 대상
@@ -23,7 +48,10 @@ locals {
       http_cidrs = ["0.0.0.0/0"]
 
       # main 에 머지되면 자동으로 여기로 나간다.
-      oidc_subs = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      oidc_subs = [
+        "repo:${var.github_repo_ids}:ref:refs/heads/main",
+        "repo:${var.github_repo}:ref:refs/heads/main",
+      ]
     }
 
     prod = {
@@ -36,7 +64,10 @@ locals {
 
       # prod 는 브랜치로 안 나간다. alpha 에서 확인된 커밋에 태그를 달아야 간다.
       # 브랜치를 하나 더 만드는 대신 태그를 쓰는 이유는 infra/README.md 참조.
-      oidc_subs = ["repo:${var.github_repo}:ref:refs/tags/demo-*"]
+      oidc_subs = [
+        "repo:${var.github_repo_ids}:ref:refs/tags/demo-*",
+        "repo:${var.github_repo}:ref:refs/tags/demo-*",
+      ]
     }
   }
 
