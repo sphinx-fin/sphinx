@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app import templates
@@ -183,3 +185,66 @@ def test_ops_manual_sample_is_not_the_denominator():
     assert templates.CONTRACT_SAMPLE_BY_PRODUCT["VARIABLE_INSURANCE"] == \
         "parsed_variable_sample.json"
     assert len(templates.contract_item_ids("VARIABLE_INSURANCE")) == 10
+
+
+# ── 표 셀 항목의 단위 선언 (이슈 #175) ───────────────────────────────────────
+#: 표에서는 단위가 **표 상단 선언**에 있고 값이 든 행에는 없다. `value_text` 가 행 하나라
+#: `source_values()` 가 `('526240', None)` 을 내고, 재설명이 `"526,240원"` 이라고 쓰면
+#: **값은 원문에 그대로 있는데 환각으로 걸린다.**
+#:
+#: 그래서 항목이 단위를 선언한다. **손으로 지어낸 값이면 안 된다** — 아래 테스트가 계약
+#: 샘플에서 그 선언을 실제로 찾아 대조한다.
+_UNIT_DECLARATION = re.compile(r"\(단위\s*[:：]\s*([^)]*)\)")
+
+#: 선언 문면의 단위 → `numerics.UNIT_CLASSES` 의 부류.
+_UNIT_TOKEN_TO_CLASS = {"원": "원", "%": "pct"}
+
+
+def test_declared_units_come_from_the_document():
+    """★ 템플릿의 `units` 가 **원문 선언과 같아야 한다.**
+
+    이 대조가 없으면 `units` 는 손으로 적은 값이 되고, 그러면 재설명이 쓸 수 있는 단위를
+    사람이 임의로 넓히는 통로가 된다 — P6(수치는 원문 인용만)이 막으려는 그 방향이다.
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    from run_devset import CONTRACT_SAMPLES, SAMPLE_BY_PRODUCT
+
+    checked = 0
+    for product_type, name in SAMPLE_BY_PRODUCT.items():
+        raw = json.loads((CONTRACT_SAMPLES / name).read_text(encoding="utf-8"))
+        pages = {p["page"]: p["text"] for p in raw["pages"]}
+        spans = {e["item_id"]: e["source_span"] for e in raw["_expected_risk_items"]}
+        for item in templates.get(product_type).items:
+            if not item.units:
+                continue
+            span = spans.get(item.item_id)
+            assert span, f"{item.item_id}: units 를 선언했는데 계약 정답이 없다"
+            before = pages[span["page"]][: span["start"]]
+            found = _UNIT_DECLARATION.findall(before)
+            assert found, (
+                f"{item.item_id}: 원문에 `(단위 : …)` 선언이 없는데 units 를 적었다 — "
+                "손으로 지어낸 값이면 안 된다"
+            )
+            tokens = [tok.strip() for tok in found[-1].split(",")]
+            declared = {_UNIT_TOKEN_TO_CLASS.get(tok, tok) for tok in tokens}
+            assert set(item.units) == declared, (
+                f"{item.item_id}: 템플릿 {item.units} ↔ 원문 선언 {sorted(declared)}"
+            )
+            checked += 1
+    assert checked, "units 를 선언한 항목이 없다 — 이 대조가 아무것도 안 하고 있다"
+
+
+def test_only_table_items_declare_units():
+    """자연어 항목이 units 를 달면 재설명이 쓸 수 있는 단위가 근거 없이 넓어진다."""
+    from app import numerics
+
+    for product_type in PRODUCT_TYPES:
+        for item in templates.get(product_type).items:
+            if not item.units:
+                continue
+            unknown = set(item.units) - set(numerics.UNIT_CLASSES.values())
+            assert not unknown, f"{item.item_id}: numerics 가 모르는 단위 부류 {sorted(unknown)}"

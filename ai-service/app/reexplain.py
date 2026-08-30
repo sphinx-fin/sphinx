@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import numerics
+from . import numerics, templates
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, ReexplainResponse, RiskItem, SourceSpan
 
@@ -55,6 +55,7 @@ def reexplain(
         return _minimal(risk_item)
 
     allowed = source_numerics(risk_item)
+    units = declared_units(risk_item)
     client_ = llm or default_client()
 
     for _ in range(MAX_ATTEMPTS):
@@ -67,7 +68,7 @@ def reexplain(
             )
         except LlmError:
             break                      # 루프를 멈추지 않는다 — 최소 설명으로 내려간다
-        if fabricated_numerics(draft.content, allowed):
+        if fabricated_numerics(draft.content, allowed, units):
             continue
         return ReexplainResponse(
             item_id=risk_item.item_id,
@@ -84,14 +85,28 @@ def source_numerics(risk_item: RiskItem) -> frozenset[tuple[str, str | None]]:
     return numerics.source_values(risk_item.require_condition().value_text)
 
 
-def fabricated_numerics(content: str, allowed) -> list[str]:
+def declared_units(risk_item: RiskItem) -> tuple[str, ...]:
+    """항목이 선언한 단위. 표 셀 항목에만 있다 (이슈 #175).
+
+    템플릿을 못 찾으면 빈 튜플이다 — **없는 쪽이 엄격한 방향**이므로 조용히 느슨해지지
+    않는다. 상품유형은 `item_id` 접두어가 아니라 템플릿 대조로 찾는다(접두어 규약은
+    계약에 없다).
+    """
+    for template in templates.all_templates().values():
+        for item in template.items:
+            if item.item_id == risk_item.item_id:
+                return item.units
+    return ()
+
+
+def fabricated_numerics(content: str, allowed, units: tuple[str, ...] = ()) -> list[str]:
     """설명에 있는데 원문에는 없는 수치. 비어있어야 통과다.
 
     **단위 부류까지 본다**(numerics.UNIT_CLASSES). 숫자만 재사용하면 `45%` 배리어를
     "45년 기다리면 원금을 돌려받는다" 로 바꿔 말하는 것이 통과하고, 그건 오해를 잡겠다면서
     새 오해를 만드는 것이다(PR #60 리뷰 ③).
     """
-    return numerics.fabricated(content, allowed)
+    return numerics.fabricated(content, allowed, units)
 
 
 def _cited_spans(

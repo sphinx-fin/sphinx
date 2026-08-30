@@ -106,6 +106,9 @@ items:
     found_in: [상품요약서]
 
   - item_id: VAR-EARLY-SURRENDER-RATIO
+    # 원문 p12 표 상단 선언 `(단위 : 원, %)` 을 옮긴 것이다 (이슈 #175).
+    # 값이 든 행에는 단위가 없어서 source_values() 가 단위를 모른다.
+    units: [원, pct]
     name: 조기해지 환급률
     importance: required    # M06. 초기 시점 환급률이 분쟁이 나는 지점이다
     cue: 경과기간별 해약환급금 예시표의 **초기 시점** 환급률 수치
@@ -114,6 +117,9 @@ items:
     found_in: [상품요약서]
 
   - item_id: VAR-LONG-TERM-RATIO
+    # 원문 p12 표 상단 선언 `(단위 : 원, %)` 을 옮긴 것이다 (이슈 #175).
+    # 값이 든 행에는 단위가 없어서 source_values() 가 단위를 모른다.
+    units: [원, pct]
     name: 장기 경과 환급률
     importance: recommended    # 장기 환급률은 회복 전망이고, 오해의 핵심은 초기 시점이다
     cue: 경과기간별 해약환급금 예시표의 **장기 시점** 환급률 수치

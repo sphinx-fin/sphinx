@@ -159,15 +159,42 @@ def source_values(text: str) -> frozenset[tuple[str, str | None]]:
     return frozenset(extract(text))
 
 
-def fabricated(content: str, allowed: frozenset[tuple[str, str | None]]) -> list[str]:
-    """`content` 에 있는데 원문에는 없는 수치. 사람이 읽을 표기로 돌려준다."""
+def fabricated(
+    content: str,
+    allowed: frozenset[tuple[str, str | None]],
+    declared_units: tuple[str, ...] = (),
+) -> list[str]:
+    """`content` 에 있는데 원문에는 없는 수치. 사람이 읽을 표기로 돌려준다.
+
+    ## `declared_units` — 표 상단 선언이 있는 항목 (이슈 #175)
+
+    표에서는 단위가 **표 상단 선언**에 있고 값이 든 행에는 없다. `value_text` 가 행 하나라
+    `source_values()` 가 `('526240', None)` 을 내고, 재설명이 `"526,240원"` 이라고 쓰면
+    **값은 원문에 그대로 있는데 환각으로 걸린다.**
+
+    그렇다고 단위 검사를 통째로 완화하면 안 된다 — 이 함수의 존재 이유가 `45%` 배리어를
+    `45년` 으로 바꿔 말하는 것을 막는 것이다(PR #60 리뷰 ③). **원문이 그 값의 단위를 말한
+    경우는 그대로 막는다.**
+
+    그래서 항목이 **선언한 단위 집합 안에서만** 단위 부착을 허용한다. 그 집합은 템플릿에
+    있고 원문의 `(단위 : 원, %)` 를 옮긴 것이다.
+
+        원문 (45, 'pct')      출력 '45년'       → 환각. 단위가 확정인데 다르다
+        원문 (526240, None)   출력 '526,240원'  → 허용. 항목이 `원` 을 선언했다
+        원문 (58.4, None)     출력 '58.4년'     → 환각. `년` 은 선언에 없다
+    """
     numbers_in_source = {n for n, _ in allowed}
+    unitless_in_source = {n for n, u in allowed if u is None}
+    declared = set(declared_units)
     found = []
     for number, unit in extract(content):
         if (number, unit) in allowed:
             continue
         # 단위 없는 출력은 숫자가 원문에 있으면 허용한다 — 단위를 새로 주장하지 않았다
         if unit is None and number in numbers_in_source:
+            continue
+        # 표 상단 선언이 있는 항목: 그 집합 안의 단위만 붙일 수 있다 (이슈 #175)
+        if unit in declared and number in unitless_in_source:
             continue
         found.append(number if unit is None else f"{number}{_display(unit)}")
     return found
