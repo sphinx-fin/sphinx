@@ -91,6 +91,37 @@ def _assert_weights_cover(related: dict[str, list[str]], weight: dict) -> None:
         )
 
 
+def _assert_weights_match_counts(related: dict[str, list[str]], weight: dict) -> None:
+    """가중치가 **실제로 세어 본 횟수와 같은지.** 다르면 터뜨린다.
+
+    `distribution.yaml` 은 *"가중치 = 루브릭이 그 유형을 related 로 선언한 횟수"* 라고
+    적어 두고 값을 손으로 옮겨 놨다. `_assert_weights_cover` 는 **빠진 유형**만 잡으므로,
+    루브릭이 어느 항목에서 유형을 하나 떼면 그 표는 낡은 채로 통과한다 — 그리고 값이
+    틀리는 것이 그 유형에 그치지 않는다. `misrate_of` 가 `lo/hi` 로 선형 사상하므로
+    **한 칸이 틀리면 모든 항목의 오해율이 재계산된다.**
+
+    ## 세어 본 횟수가 0 인 유형은 안 본다
+
+    `_assert_weights_cover` 가 반대 방향(표에는 있는데 루브릭이 안 쓰는 유형)을 일부러
+    안 막는 것과 같은 이유다 — **라이브러리·표가 먼저 오고 루브릭이 나중에 붙는 순서가
+    정상이고**, 그 상태는 값을 틀리게 만들지 않는다(그 유형을 아무도 안 더하므로).
+    실제로 `M09`·`M10` 이 그 순서로 들어왔다(`#148` · `#207`).
+    """
+    counts: dict[str, int] = {}
+    for types in related.values():
+        for m in types:
+            counts[m] = counts.get(m, 0) + 1
+
+    wrong = {m: (weight[m], n) for m, n in counts.items() if weight.get(m) != n}
+    if wrong:
+        detail = " · ".join(f"{m}: 표 {w} ≠ 실제 {n}" for m, (w, n) in sorted(wrong.items()))
+        raise ValueError(
+            f"misconception_weight 가 루브릭과 다르다 — {detail}. 루브릭에서 유형을 "
+            f"떼거나 붙였으면 {PARAMS.name} 의 표와 그 위 주석의 횟수를 같이 고친다. "
+            "가중치는 손으로 고르는 값이 아니라 세어 본 값이다"
+        )
+
+
 def misrate_of(item_id: str, related: dict[str, list[str]], params: dict) -> float:
     """항목의 U4 비율. **손으로 적지 않고 라이브러리 가중치에서 유도한다.**
 
@@ -104,6 +135,7 @@ def misrate_of(item_id: str, related: dict[str, list[str]], params: dict) -> flo
     """
     weight = params["misconception_weight"]
     _assert_weights_cover(related, weight)
+    _assert_weights_match_counts(related, weight)
     scores = {k: sum(weight.get(m, 0) for m in v) for k, v in related.items()}
     lo, hi = min(scores.values()), max(scores.values())
     rng = params["misrate_range"]
