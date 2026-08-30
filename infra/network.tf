@@ -42,6 +42,23 @@ resource "aws_vpc_security_group_ingress_rule" "http" {
   ip_protocol       = "tcp"
 }
 
+# ❗80 을 닫고 443 만 여는 것이 아니다 — **둘 다 필요하다.**
+#
+# Let's Encrypt HTTP-01 은 `http://<도메인>/.well-known/acme-challenge/…` 를 :80 으로 읽는다.
+# 80 을 닫으면 첫 발급도 90일 뒤 갱신도 실패하고, 갱신 실패는 **만료되는 날까지 조용하다.**
+# 평상시 브라우저 트래픽은 nginx 가 :80 에서 https 로 튕기므로(web/nginx.conf) 80 이 열려
+# 있다고 평문으로 서비스되는 것은 아니다.
+resource "aws_vpc_security_group_ingress_rule" "https" {
+  for_each = toset(local.cfg.http_cidrs)
+
+  security_group_id = aws_security_group.app.id
+  description       = "web UI (nginx, TLS)"
+  cidr_ipv4         = each.value
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}
+
 # ssh_cidrs 기본값이 빈 목록이라 보통은 규칙이 **하나도 안 생긴다.** 평상시 접속은
 # `aws ssm start-session` 이다. variables.tf 의 ssh_cidrs 주석 참조.
 resource "aws_vpc_security_group_ingress_rule" "ssh" {

@@ -26,8 +26,15 @@ RUN apk add --no-cache openssl
 
 COPY --from=build /src/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 앱 본체는 80·443 **양쪽이 include 하는 한 파일**이다. 두 블록에 복사해 두면 한쪽만
+# 고치는 날이 오고, 그 차이는 프로토콜에 따라서만 드러나 눈에 안 보인다.
+COPY app.conf /etc/nginx/snippets/app.conf
 # 공식 엔트리포인트가 nginx 기동 전에 이 디렉토리의 *.sh 를 실행한다. 자격증명이
 # 없으면 여기서 죽고 컨테이너가 안 뜬다 — 401 만 내는 화면이 뜨는 것보다 낫다.
 COPY docker-entrypoint.d/ /docker-entrypoint.d/
 
-EXPOSE 80
+# ACME 챌린지 웹루트. compose 가 certbot 과 공유 볼륨으로 덮어쓰지만, 볼륨 없이 띄워도
+# `root` 가 없는 디렉토리를 가리켜 404 대신 500 이 나는 일이 없도록 미리 만든다.
+RUN mkdir -p /var/www/certbot
+
+EXPOSE 80 443

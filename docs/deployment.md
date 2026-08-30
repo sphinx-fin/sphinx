@@ -221,3 +221,85 @@ curl --max-time 3 http://<EC2 퍼블릭 IP>:8000/products  # server 직접 — �
 
 마지막 두 줄을 배포 때마다 실제로 돌린다. 노출은 설정이 한 줄 바뀌면 조용히 되살아나는
 종류라, "안 열려 있음"을 확인하는 명령이 있어야 한다.
+
+---
+
+## 9. 도메인과 https (alpha)
+
+```
+sphinx2026.duckdns.org   →  43.201.87.150 (alpha EIP)   DuckDNS A 레코드
+인증서                    →  Let's Encrypt · HTTP-01 · certbot 컨테이너
+```
+
+### 9.1 왜 :80 을 계속 열어 두는가
+
+HTTP-01 챌린지가 `http://<도메인>/.well-known/acme-challenge/…` 를 **:80 으로** 읽는다.
+80 을 닫으면 첫 발급도 90일 뒤 갱신도 실패하고, **갱신 실패는 만료되는 날까지 조용하다.**
+평상시 브라우저 트래픽은 nginx 가 :80 에서 https 로 튕기므로 평문으로 서비스되지는 않는다.
+
+`web/nginx.conf` 에서 그 리다이렉트가 **챌린지 경로만 비켜 간다.** server 레벨 `if` 는
+location 을 고르기 전에 돌아서 그냥 두면 챌린지까지 튕긴다 — 실측으로 잡았고, map 두 개로
+갈라 뒀다.
+
+### 9.2 첫 발급 (한 번)
+
+인증서가 없으면 nginx 는 :443 을 **아예 안 세운다**(`20-tls.sh`). `ssl_certificate` 를
+무조건 적어 두면 파일이 없는 첫 기동에서 설정 검사가 죽어 :80 까지 안 뜨고, 그러면
+발급 자체가 불가능해진다. 그래서 배포 → 발급 → 재기동 순서다.
+
+```bash
+# 박스에서 (aws ssm start-session --target <instance-id>)
+cd /opt/sphinx
+
+# 값이 필요하므로 SSM 에서 받는 경로를 그대로 쓴다
+export SPHINX_PUBLIC_HOST=sphinx2026.duckdns.org
+export LETSENCRYPT_EMAIL=""        # 비우면 등록 없이 발급한다(만료 알림을 못 받는다)
+
+docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
+  -d "$SPHINX_PUBLIC_HOST" --agree-tos -n \
+  ${LETSENCRYPT_EMAIL:+--email "$LETSENCRYPT_EMAIL"} \
+  ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
+
+docker compose restart web        # 20-tls.sh 가 다시 돌아 443 이 선다
+```
+
+❗**발급을 배포 스크립트에 넣지 않았다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
+1시간 5회)을 매긴다. 배포마다 자동으로 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를
+태워서 정작 필요한 순간에 못 받는다.** 갱신은 그 위험이 없어서(이미 받은 인증서가 있고
+만료 30일 전에만 움직인다) certbot 컨테이너가 12시간마다 돌린다.
+
+갱신된 파일을 nginx 가 다시 읽는 것은 `30-cert-reload.sh` 가 맡는다 — certbot 의
+`--deploy-hook` 은 자기 컨테이너 안에서 도므로 nginx 를 reload 하려면 도커 소켓을 붙여야
+하고, 그건 컨테이너 하나에 호스트 전체 권한을 주는 것이라 안 한다.
+
+### 9.3 alpha 는 **개방 모드**로 뜬다 (결정 10.57)
+
+대회 데모라 심사위원이 로그인 없이 바로 보는 것이 요구사항이다. `SPHINX_DEMO_OPEN=1` 이면
+nginx 가 `auth_basic` 을 끄고 **데모 계정으로 대신 로그인해서** `/api` 로 넘긴다.
+
+```
+/api/dashboard/…                      compl-01   집계는 COMPL(org)·MGR(branch) 뿐이다
+/api/sessions/{sid}/override/approve  mgr-01     요청자 ≠ 승인자 (ADR-002)
+그 밖의 /api/…                        seller-01  세션 생성·면담·판정·리포트·상품
+```
+
+**인증을 끄는 것이 아니다.** Spring 의 prod 체인은 그대로 `anyRequest().authenticated()` 이고
+`@PreAuthorize` 도 그대로 돈다 — 진짜로 끄면(`permitAll`) 익명은 역할이 없어서 세션 생성부터
+403 이라 **로그인 창만 사라지고 화면은 더 안 된다.**
+
+한 계정으로는 전 화면이 안 열려서 경로별로 가른다. 대가는 **감사 로그의 "누가" 가 이 세
+계정으로 굳는 것**이다 — nginx 가 고른 값이라 "그 사람이 했다" 는 뜻이 아니다.
+
+❗**prod 에는 주지 않는다.** 워크플로가 환경으로 가른다(`deploy.yml` 의 `환경·커밋 결정`).
+prod 배포의 노출 확인은 여전히 `401` 이 아니면 실패하므로 `#41` 1항 회귀 검사가 산다.
+
+### 9.4 확인
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' http://sphinx2026.duckdns.org/     # 301 (https 로)
+curl -sS -o /dev/null -w '%{http_code}\n' https://sphinx2026.duckdns.org/    # 200 (로그인 없음)
+curl -sS https://sphinx2026.duckdns.org/api/dashboard/heatmap | head -c 200   # 200 · compl-01 로 나간다
+```
+
+`http://` 가 200 이면 인증서가 아직 없는 것이다(§9.2). `https://` 가 401 이면 개방 모드가
+안 켜진 것이라 `docker compose logs web | grep 모드` 를 본다.
