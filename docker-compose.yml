@@ -152,6 +152,14 @@ services:
       # 출처가 SSM 하나라 갈릴 일이 없다(scripts/deploy_ec2.sh).
       SPHINX_API_USER: ${SPHINX_API_USER:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
       SPHINX_API_PASSWORD: ${SPHINX_API_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
+      # htpasswd 에 넣을 **명부 전체**의 id 목록(쉼표 구분). 없으면 위 한 계정만 만들어지고
+      # 나머지 역할은 nginx 에서 401 이라 역할 분리 시연이 안 된다(이슈 #213).
+      #
+      # ❗여기에 목록을 적지 않는다. 값은 `scripts/deploy_ec2.sh` 가 `demo_accounts.yaml`
+      # 에서 뽑아 넣는다 — 명부가 근거이고, 여기 적으면 계정 목록이 두 벌이 된다.
+      # `:?` 를 안 쓰는 이유는 손으로 띄우는 compose 를 막지 않기 위해서다. 그때는
+      # 엔트리포인트가 한 계정만 만들고 **경고를 남긴다**(조용히 줄지 않는다).
+      SPHINX_API_USERS: ${SPHINX_API_USERS:-}
     networks: [edge]
     depends_on:
       server:

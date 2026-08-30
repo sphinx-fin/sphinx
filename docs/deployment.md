@@ -86,6 +86,15 @@ aws ssm put-parameter --region ap-northeast-2 \
   --name /sphinx/prod/internal-token --type SecureString --value "$(openssl rand -hex 32)"
 ```
 
+❗`api-user` 값은 **명부(`server/src/main/resources/demo_accounts.yaml`)의 id 중 하나**여야
+한다. `SecurityConfig.prodUsers` 가 아니면 기동을 거부하고(결정 10.5), `deploy_ec2.sh` 도
+같은 이유로 먼저 죽는다. 위 예시의 `sphinx` 는 명부에 없다 — `seller-01` 처럼 실제 id 를 넣는다.
+
+**나머지 계정은 SSM 에 넣지 않는다.** nginx htpasswd 에 들어갈 id 목록은 `deploy_ec2.sh` 가
+명부에서 뽑아 `SPHINX_API_USERS` 로 넘긴다(이슈 #213). 명부가 근거이고, SSM 에 목록을 또 두면
+계정이 두 벌이 되어 갈리는 날 **화면은 열리는데 그 계정만 401** 이 된다. 비밀번호는
+전 계정 공통이라 `api-password` 하나로 충분하다.
+
 네 값 모두 `scripts/deploy_ec2.sh` 가 읽어 **환경변수로만** 넘긴다. `internal-token` 은
 `server` 와 `ai-service` 가 **같은 값**을 받는다 — 다르면 `/internal/*` 이 전부 401 이라
 인터뷰 경로가 통째로 죽으므로, 출처를 SSM 하나로 둔다(`api-user`/`api-password` 를 nginx 와
@@ -213,6 +222,15 @@ esc_pass=${SPHINX_API_PASSWORD//\\/\\\\}; esc_pass=${esc_pass//\"/\\\"}
 
 printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
   curl -sS -K - -o /dev/null -w '%{http_code}\n' http://localhost/api/products   # 200
+
+# 역할이 갈리는가 (#213 · ADR-001 시연). 같은 비밀번호로 **계정만 바꿔** 두 번 부른다.
+# nginx 401 이 나오면 htpasswd 에 그 id 가 없는 것이고(= 이 확인의 요점), Spring 까지
+# 갔는데 막힌 것이라면 403 이다. **401 과 403 을 구별해서 읽는다.**
+for u in seller-01 compl-01; do
+  printf 'user = "%s:%s"\n' "$u" "$esc_pass" |
+    curl -sS -K - -o /dev/null -w "$u %{http_code}\n" http://localhost/api/dashboard/heatmap
+done
+# seller-01 403 · compl-01 200 이 정상이다. seller-01 이 401 이면 명부가 htpasswd 에 안 들어간 것.
 
 # ❗아래 둘은 **실패해야 정상이다**
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8100/healthz   # ai-service 직접 — 막혀야 한다
