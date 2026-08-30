@@ -276,6 +276,51 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("데모 흐름(전체): 생성→U4답변→RED→오버라이드 요청→MGR 승인. 승인해도 신호는 RED로 남는다")
+    void demoFlow_redThenOverrideApproved() throws Exception {
+        // 기획 7-2 관통 — 조각 테스트가 못 잡는 create→judge→override 배선 회귀를 리허설 전에 잡는다.
+        String reason = "적색이지만 고객이 재설명 후 원금손실 위험을 서면으로 재확인하여 진행을 요청합니다.";  // 30자 이상
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.grade").value("U4"));
+
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(jsonPath("$.data.signal").value("RED"));
+
+        // 적색 세션에 오버라이드 요청 → 승인 대기
+        mvc.perform(post("/sessions/" + sid + "/override").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"" + reason + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PENDING_APPROVAL"));
+
+        // MGR 승인
+        mvc.perform(post("/sessions/" + sid + "/override/approve"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("APPROVED"));
+
+        // 세션 응답이 승인 사실을 노출한다(S-06/S-07 입력): 상태·사유·승인자
+        mvc.perform(get("/sessions/" + sid))
+                .andExpect(jsonPath("$.data.overrideStatus").value("APPROVED"))
+                .andExpect(jsonPath("$.data.overrideReason").value(reason))
+                .andExpect(jsonPath("$.data.overrideApprover").isNotEmpty());
+
+        // ❗불변식: 오버라이드는 게이트 신호를 바꾸지 않는다 — /judge는 멱등이고 여전히 RED다.
+        // "적색인데 승인으로 진행" 이 별도로 기록될 뿐, 신호가 녹색이 되는 게 아니다.
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(jsonPath("$.data.signal").value("RED"))
+                .andExpect(jsonPath("$.data.ruleTrace[0]").value("R-01"));
+    }
+
+    @Test
     @DisplayName("매핑 안 된 경로 → 404 NOT_FOUND — 포괄 핸들러가 500으로 삼키지 않는다")
     void unmappedPathIs404() throws Exception {
         // 오타 난 URL 이 500 INTERNAL_ERROR 로 나가면 프론트는 "서버가 죽었다"로 읽고
