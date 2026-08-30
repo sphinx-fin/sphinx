@@ -25,7 +25,17 @@ AWS_REGION="${AWS_REGION:-ap-northeast-2}"
 SSM_PREFIX="${SSM_PREFIX:-/sphinx/prod}"
 
 CHECK_ONLY=0
-[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+CERT_ONLY=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  # ── ❗왜 인증서 발급이 여기 있나 ─────────────────────────────────────────
+  #
+  # `docker compose run --rm certbot …` 을 손으로 치면 **안 된다.** compose 는 명령이
+  # 무엇이든 파일 전체를 먼저 해석하고, 이 파일의 비밀들은 `${VAR:?}` 라 값이 없으면
+  # 거기서 죽는다. 값을 가진 것은 이 스크립트뿐이므로(SSM 에서 받는다) 발급도 여기서 한다.
+  # `#173` 이후 자격증명 확인을 여기서 하기로 한 것과 같은 이유다.
+  --cert)  CERT_ONLY=1 ;;
+esac
 
 command -v aws >/dev/null || { echo "aws CLI 가 없다. EC2 에 설치하거나 AWS_REGION 을 확인한다." >&2; exit 1; }
 command -v docker >/dev/null || { echo "docker 가 없다." >&2; exit 1; }
@@ -81,6 +91,34 @@ if [ "$CHECK_ONLY" = 1 ]; then
 fi
 
 cd "$(dirname "$0")/.."
+
+# ── --cert : Let's Encrypt 첫 발급 (한 번) ──────────────────────────────────
+#
+# ❗**배포 때마다 자동으로 하지 않는다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
+# 1시간 5회)을 매긴다. 배포마다 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를 태워서
+# 정작 필요한 순간에 못 받는다.** 갱신은 그 위험이 없어서(이미 받은 인증서가 있고 만료
+# 30일 전에만 움직인다) certbot 컨테이너가 12시간마다 알아서 돌린다.
+if [ "$CERT_ONLY" = 1 ]; then
+  : "${SPHINX_PUBLIC_HOST:?--cert 에는 도메인이 필요하다: SPHINX_PUBLIC_HOST=… $0 --cert}"
+
+  # web 이 :80 으로 챌린지를 내보내야 발급이 된다. 안 떠 있으면 먼저 띄운다 —
+  # `--cert` 를 배포 직후가 아니라 나중에 부르는 경우가 있다.
+  docker compose up -d web
+
+  echo "인증서 발급 — $SPHINX_PUBLIC_HOST"
+  # LETSENCRYPT_EMAIL 이 비면 등록 없이 받는다. 만료 알림을 못 받는다는 뜻이라
+  # 대회가 끝나고도 쓸 도메인이면 채우는 편이 낫다.
+  docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
+    -d "$SPHINX_PUBLIC_HOST" --agree-tos -n \
+    ${LETSENCRYPT_EMAIL:+--email "$LETSENCRYPT_EMAIL"} \
+    ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
+
+  # 20-tls.sh 는 **기동 때** 인증서 유무를 본다. 재기동해야 443 이 선다.
+  echo "web 재기동 — 443 을 세운다"
+  docker compose up -d --force-recreate web
+  docker compose logs --tail 20 web | grep -E "TLS|모드" || true
+  exit 0
+fi
 
 # data/ 가 있어야 한다. 읽기 전용 볼륨의 원본이고, 없으면 docker 가 빈 디렉토리를 만들어
 # 마운트해서 **오해 라이브러리 없이 컨테이너가 뜬다** — ai-service 는 로딩 시점에 죽으니

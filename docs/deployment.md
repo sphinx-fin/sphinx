@@ -250,18 +250,15 @@ location 을 고르기 전에 돌아서 그냥 두면 챌린지까지 튕긴다 
 ```bash
 # 박스에서 (aws ssm start-session --target <instance-id>)
 cd /opt/sphinx
-
-# 값이 필요하므로 SSM 에서 받는 경로를 그대로 쓴다
-export SPHINX_PUBLIC_HOST=sphinx2026.duckdns.org
-export LETSENCRYPT_EMAIL=""        # 비우면 등록 없이 발급한다(만료 알림을 못 받는다)
-
-docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
-  -d "$SPHINX_PUBLIC_HOST" --agree-tos -n \
-  ${LETSENCRYPT_EMAIL:+--email "$LETSENCRYPT_EMAIL"} \
-  ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
-
-docker compose restart web        # 20-tls.sh 가 다시 돌아 443 이 선다
+SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinx2026.duckdns.org ./scripts/deploy_ec2.sh --cert
 ```
+
+발급하고 web 을 재기동하는 것까지 한 줄이다. 끝나면 `TLS 켜짐 — https://…` 이 찍힌다.
+만료 알림을 받으려면 `LETSENCRYPT_EMAIL=…` 을 같이 넘긴다(비우면 등록 없이 받는다).
+
+❗**`docker compose run --rm certbot …` 을 손으로 치면 안 된다.** compose 는 명령이 무엇이든
+**파일 전체를 먼저 해석하고**, 이 파일의 비밀들은 `${VAR:?}` 라 값이 없으면 거기서 죽는다.
+값을 가진 것은 `deploy_ec2.sh` 뿐이라(SSM 에서 받는다) 발급도 그 안에 있다.
 
 ❗**발급을 배포 스크립트에 넣지 않았다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
 1시간 5회)을 매긴다. 배포마다 자동으로 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를
