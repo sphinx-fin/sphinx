@@ -79,7 +79,32 @@ aws ssm put-parameter --region ap-northeast-2 \
   --name /sphinx/prod/api-user     --type SecureString --value 'sphinx'
 aws ssm put-parameter --region ap-northeast-2 \
   --name /sphinx/prod/api-password --type SecureString --value '…'
+
+# `/internal/*` 공유 시크릿 (이슈 #41 3항 · 결정 10.4). **사람이 고르지 않는다** —
+# 외울 필요가 없는 값이고, 고르면 짧고 짐작 가능한 값이 된다.
+aws ssm put-parameter --region ap-northeast-2 \
+  --name /sphinx/prod/internal-token --type SecureString --value "$(openssl rand -hex 32)"
 ```
+
+네 값 모두 `scripts/deploy_ec2.sh` 가 읽어 **환경변수로만** 넘긴다. `internal-token` 은
+`server` 와 `ai-service` 가 **같은 값**을 받는다 — 다르면 `/internal/*` 이 전부 401 이라
+인터뷰 경로가 통째로 죽으므로, 출처를 SSM 하나로 둔다(`api-user`/`api-password` 를 nginx 와
+server 가 나눠 쓰는 것과 같은 구조 · #162).
+
+❗**빠뜨리면 배포가 실패한다. 그게 의도다.** 양쪽 코드가 *"토큰이 비면 인증을 끈다"* 로
+대칭이라, 이 두 겹이 없으면 **배포는 성공하고 시크릿 방어선만 조용히 꺼진 채로 뜬다.**
+
+두 겹이 막는 입력이 다르다(#212 리뷰).
+
+| 입력 | `${VAR:?}` | `SPHINX_REQUIRE_INTERNAL_AUTH=1` |
+|---|---|---|
+| 미설정 | 거부 | — |
+| 빈 문자열 | 거부 | — |
+| **공백만** (`" "`) | **통과** | 거부 (`.strip()` 뒤 빈 값 → 기동 중단) |
+
+`:?` 가 빈 문자열도 막는다는 것은 실측이다(`TT= docker compose config` → 거부, `TT=" "` →
+통과). 즉 `REQUIRE=1` 은 보험이 아니라 **`:?` 가 못 보는 자리**를 맡는다 — *"compose 가 이미
+막는데 왜 둘이냐"* 로 하나를 떼면 공백 값이 그대로 무인증으로 뜬다.
 
 ### 4.2 인스턴스 역할
 
@@ -153,11 +178,12 @@ git clone <repo> && cd sphinx
 |---|---|---|
 | `ai-service` 미노출 · SG · LLM 키 · 리전 | 오준서 | **이 PR 로 닫힘** |
 | H2 콘솔 · `ddl-auto` · `permitAll` | 강희진 | `application-prod.yml` · `SecurityConfig` 로 **닫힘** |
-| `/internal/*` 공유 시크릿 헤더 | 윤지석 | 미착수 — 네트워크 격리가 1차, 이건 2차 |
+| `/internal/*` 공유 시크릿 헤더 | 윤지석 | 코드 `#198`·`#200`, 배포 주입 `#212` 로 **닫힘** |
 | `permitAll` 제거 시점의 `AccessPolicy` | 정세현 | F-CMN-002 일정과 맞춰야 함 |
 
 `ai-service` 의 시크릿 헤더가 없어도 이 compose 에서는 외부에서 못 부른다. 다만 **compose
-네트워크 설정 실수 한 번으로 전체가 열리는 구조**라 2차 방어는 여전히 필요하다.
+네트워크 설정 실수 한 번으로 전체가 열리는 구조**라 시크릿 방어선이 여전히 필요하다 —
+그 실수 위에 남는 것이 그것뿐이다.
 
 ---
 
