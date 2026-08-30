@@ -80,6 +80,17 @@ for d in data/timeseries data/misconception_library contracts/samples; do
   [ -d "$d" ] || { echo "$d 가 없다. 레포를 통째로 clone 했는지 확인한다." >&2; exit 1; }
 done
 
+# ── F-DSH-003 합성 세션 ──────────────────────────────────────────────────────
+#
+# 산출물(`data/synth_sessions/sessions.json`)은 **추적하지 않는다** — `.gitignore` 가 첫
+# 커밋부터 그렇게 정해 뒀다. `data/timeseries` 를 `fetch_timeseries.py` 로 받아오는 것과
+# 같은 모양이라, 생성물은 배포 때 만든다.
+#
+# 없으면 대시보드가 빈 표가 된다(이슈 #179) — 집계가 세는 세션이 없어서 모든 칸이
+# MIN_CELL_SAMPLE(30) 아래로 떨어진다. 생성은 seed 고정이라 매번 같은 값이 나온다.
+echo "합성 세션 생성 (F-DSH-003)"
+python3 scripts/gen_synth_sessions.py
+
 echo "compose 기동"
 docker compose up -d --build
 
