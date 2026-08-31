@@ -19,6 +19,7 @@ import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionService;
 import com.sphinxfin.sphinx.evidence.ReportService;
+import com.sphinxfin.sphinx.simulator.SimulationScenarios;
 import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +44,7 @@ public class SessionController {
     private final AiServiceClient aiServiceClient;
     private final CurrentActor currentActor;
     private final ReportService reportService;
+    private final SimulationScenarios simulationScenarios;
 
     @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
@@ -301,64 +303,21 @@ public class SessionController {
     }
 
     /**
-     * 봉투만 씌운다. 안의 시나리오 스키마는 F-SIM-001 소유자 몫이라 여기서 타입을 굳히지
-     * 않는다(#45 에서 논의 중). 봉투는 프론트 전역 규약이라 스키마와 무관하게 지금 맞춘다.
+     * 역사 시뮬레이션 3열 (F-SIM-001 · 이슈 #45 · #54 ④).
+     *
+     * <p><b>목을 걷었다.</b> 목은 기획서 7-2 표의 수치를 손으로 옮겨 둔 것이었는데, 그 값이
+     * 실제로 {@link SimulationScenarios} 가 내는 값과 같다(최악 상환비율 0.5066 · 비중
+     * 0.857·0.029·0.015). 즉 <b>답은 맞았고 근거가 코드에 없었다</b> — 시계열을 바꿔도 표가
+     * 안 움직이므로 P2 재현성의 근거로는 쓸 수 없는 상태였다. 이제 {@code data/timeseries/}
+     * 스냅샷에서 나오고, 스냅샷 값도 {@code VERSION} 에서 읽는다.
+     *
+     * <p>금액은 화면 슬라이더가 정한다. 서버 기본값을 두지 않는 이유는 계약이 적어 뒀다 —
+     * 기본값이 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
      */
     @PostMapping("/{sid}/simulate")
-    public ApiResponse<Map<String, Object>> simulate(@PathVariable String sid,
-                                                     @Valid @RequestBody SimulateRequest body) {
-        // TODO(정세현): SimulatorService 연결 (F-SIM-001, 결정론 P2).
-        // 목이지만 **계약(SimulateApiResponse)의 필수 필드를 전부 채운다.** 빠뜨리면 S-04가
-        // 백지가 되고, 특히 severity 가 없으면 카드가 최선→중간→최악 순으로 서서 기획서
-        // 4절이 요구하는 것("최선만 강조하는 관행의 정반대")과 반대가 된다.
-        //
-        // 수치는 기획서 7-2 표 확정본이다(낙인 45%·쿠폰 연 11.00%·만기 3년). 가입금액이
-        // 5,000만 원이 아니면 표 비율로 환산한다 — 목이라도 슬라이더를 움직였을 때 금액이
-        // 안 바뀌면 시뮬레이터로 안 보인다.
-        long amount = body.amount();
-        return ApiResponse.ok(Map.of(
-                "timeseriesVersion", TIMESERIES_SNAPSHOT,
-                "productName", "A증권 제4181회 ELS (원금비보장형)",
-                "scenarios", List.of(
-                        scenario("worst", "loss", "낙인 45% 하회 후 만기 손실", amount, 0.5066, 0.029,
-                                "2007-10-31", "2010-10-29", "eurostoxx50", 0.507, true),
-                        scenario("mid", "early_1", "6개월 뒤 첫 조기상환", amount, 1.055, 0.857,
-                                "2012-05-02", "2012-11-01", "nikkei225", 1.031, false),
-                        scenario("best", "maturity", "조기상환 없이 만기 상환", amount, 1.33, 0.015,
-                                "2013-01-04", "2016-01-04", "sp500", 1.142, false))));
-    }
-
-    /** data/timeseries/VERSION 의 snapshot. 화면에 표시해 P2 재현성의 근거를 보인다. */
-    private static final String TIMESERIES_SNAPSHOT = "2026-08-24";
-
-    /**
-     * 계약(SimScenario)의 필수 6필드를 채운 목 시나리오.
-     *
-     * severity 는 화면 배치·정렬 키이지 표시 라벨이 아니다 — 기획서 7-2 표가 평가어를 버리고
-     * 금액 순으로 간 이유가 스텝다운은 조기상환 시점과 무관하게 연 수익률이 같아서
-     * "가장 자주 일어나는 전개(85.7%)가 금액으로는 중간"이기 때문이다. 사람에게 보일 문면은
-     * name 을 쓴다.
-     */
-    private static Map<String, Object> scenario(String severity, String result, String name,
-                                                long amount, double payoutRatio, double share,
-                                                String startDate, String endDate,
-                                                String worstUnderlying, double worstFinal,
-                                                boolean knockedIn) {
-        long payout = Math.round(amount * payoutRatio);
-        return Map.of(
-                "severity", severity,
-                "result", result,
-                "name", name,
-                "payout", payout,
-                "pnl", payout - amount,
-                "share", share,
-                "pathMeta", Map.of(
-                        "startDate", startDate,
-                        "endDate", endDate,
-                        "underlyings", List.of("sp500", "nikkei225", "eurostoxx50"),
-                        "worstUnderlying", worstUnderlying,
-                        "worstFinal", worstFinal,
-                        "knockedIn", knockedIn));
+    public ApiResponse<SimulationScenarios.SimulationView> simulate(
+            @PathVariable String sid, @Valid @RequestBody SimulateRequest body) {
+        return ApiResponse.ok(simulationScenarios.view(body.amount()));
     }
 
     /**

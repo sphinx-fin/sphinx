@@ -37,6 +37,9 @@ case "${1:-}" in
   --cert)  CERT_ONLY=1 ;;
 esac
 
+# 아래 `cd` 는 --check 를 지난 뒤에 온다. 명부는 --check 에서도 읽으므로 여기서 절대경로를 잡는다.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 command -v aws >/dev/null || { echo "aws CLI 가 없다. EC2 에 설치하거나 AWS_REGION 을 확인한다." >&2; exit 1; }
 command -v docker >/dev/null || { echo "docker 가 없다." >&2; exit 1; }
 
@@ -75,6 +78,57 @@ export SPHINX_API_PASSWORD; SPHINX_API_PASSWORD=$(get api-password)
 # 대칭이라, 빠뜨리면 **배포는 성공하고 시크릿 방어선만 조용히 꺼진 채로 뜬다.**
 export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
 
+# ── nginx htpasswd 에 넣을 계정 목록 (이슈 #213 · #195 후속) ─────────────────
+#
+# `auth_basic` 이 server 블록에 걸려 있어 **htpasswd 에 없는 id 는 Spring 까지 오지도
+# 못한다.** 한 계정만 만들던 때는 `compl-01` 이 로그인 창에서 401 로 끝났고, 그래서
+# 역할 분리 시연(ADR-001 · 기획 7-4)이 배포에서 성립하지 않았다.
+#
+# ❗**명부가 근거고 htpasswd 가 따라간다.** 목록을 compose 나 SSM 에 따로 두면 계정 명부가
+# 두 벌이 되고, 갈리는 날 화면은 열리는데 API 가 401 이다. 그래서 SSM 이 아니라 **레포의
+# 명부에서 뽑는다** — `SecurityConfig.prodUsers` 가 등록하는 것과 같은 파일이라 갈릴 수 없다.
+# (비밀번호는 여기 없다. 전 계정 공통이고 SSM 의 api-password 하나다.)
+ROSTER="$REPO_ROOT/server/src/main/resources/demo_accounts.yaml"
+[ -f "$ROSTER" ] || { echo "명부가 없다: $ROSTER (레포를 통째로 받았는지 확인한다)" >&2; exit 1; }
+
+# `accounts:` 아래만 본다. 위쪽 `branches:` 와 주석에도 id 처럼 생긴 문자열이 있다.
+accounts_block() {
+  awk '/^accounts:/ { inblock = 1; next }
+       /^[^[:space:]#]/ { inblock = 0 }
+       inblock' "$ROSTER"
+}
+
+# 항목 형식: `  - { id: seller-01, role: SELLER, branch: BR-001, name: 김창구 }`
+# `id:` 를 줄 어디에서든 받는다 — 키 순서가 바뀌거나 블록 스타일(`- id: …`)이 돼도 산다.
+roster_ids=$(accounts_block | sed -n 's/^.*[^A-Za-z0-9_-]id:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p')
+
+# ❗**파싱이 어긋나면 조용히 계정이 줄어든다** — 이 이슈가 고치는 그 상태로 되돌아간다.
+# 그래서 **목록 항목 수**(`- ` 로 시작하는 줄)와 **뽑아낸 id 수**를 대조한다. 둘이 같은
+# 정규식에서 나오면 안 된다 — 형식이 바뀔 때 함께 줄어들어 가드가 눈을 감는다(실측으로
+# 확인했다: `- {` 만 세던 첫 판은 블록 스타일에서 4건이 조용히 사라졌는데 통과했다).
+entries=$(accounts_block | grep -c '^[[:space:]]*-[[:space:]]' || true)
+found=$(printf '%s\n' "$roster_ids" | grep -c . || true)
+if [ "$entries" -eq 0 ] || [ "$entries" != "$found" ]; then
+  echo "명부에서 계정 id 를 못 뽑았다 (항목 ${entries}건 · 추출 ${found}건): $ROSTER" >&2
+  echo "형식이 바뀌었으면 이 스크립트의 추출도 같이 고친다 — 안 고치면 nginx 가 아는 계정이" >&2
+  echo "줄고 COMPL·MGR 로그인이 401 로 막힌다 (이슈 #213)." >&2
+  exit 1
+fi
+
+# `SPHINX_API_USER` 가 명부에 없으면 Spring 이 기동을 거부한다(SecurityConfig.prodUsers).
+# 배포를 다 돌리고 server 가 안 뜨는 것보다 여기서 죽는 편이 빠르고, 원인도 한 줄로 나온다.
+case "
+$roster_ids
+" in *"
+$SPHINX_API_USER
+"*) ;; *)
+  echo "SSM 의 api-user($SPHINX_API_USER)가 명부에 없다: $ROSTER" >&2
+  echo "server 가 같은 이유로 기동을 거부한다 (결정 10.5)." >&2
+  exit 1 ;;
+esac
+
+export SPHINX_API_USERS; SPHINX_API_USERS=$(printf '%s\n' "$roster_ids" | paste -sd, -)
+
 # 선택값. 없으면 코드 기본값을 쓴다(config.py 의 DEFAULT_MODEL 등).
 export LLM_API_BASE="${LLM_API_BASE:-}"
 export LLM_MODEL="${LLM_MODEL:-}"
@@ -84,6 +138,9 @@ echo "  LLM_API_KEY           ${#LLM_API_KEY}자"
 echo "  SPHINX_API_USER       ${#SPHINX_API_USER}자"
 echo "  SPHINX_API_PASSWORD   ${#SPHINX_API_PASSWORD}자"
 echo "  SPHINX_INTERNAL_TOKEN ${#SPHINX_INTERNAL_TOKEN}자"
+# id 는 값이 아니라 명부다(레포에 있다). 길이가 아니라 **그대로** 찍는 이유가 그것이고,
+# 데모 중 "이 계정으로 왜 안 되지" 를 이 한 줄로 가른다.
+echo "  SPHINX_API_USERS      $SPHINX_API_USERS"
 
 if [ "$CHECK_ONLY" = 1 ]; then
   echo "--check 라 여기서 멈춘다."
