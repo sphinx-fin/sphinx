@@ -45,7 +45,14 @@ locals {
       root_gb       = 30
 
       # alpha 는 팀이 보는 곳이다. 전체 공개로 두되 심사 대상이 아니므로 부담이 없다.
+      # 443 도 같은 목록을 쓴다(network.tf) — https 는 여기서 발급받은 인증서로 선다.
       http_cidrs = ["0.0.0.0/0"]
+
+      # 공개 도메인. DuckDNS A 레코드가 이 환경의 EIP 를 가리킨다(결정 10.57).
+      # ❗**이 값은 출력용이다.** 실제로 nginx 가 인증서를 찾는 이름은 배포 워크플로가
+      # `SPHINX_PUBLIC_HOST` 로 넘긴다(.github/workflows/deploy.yml). 두 곳이 갈리면
+      # 화면 주소만 틀리게 찍히고 서비스는 멀쩡하므로, 여기를 근거로 삼지 않는다.
+      public_host = "sphinx2026.duckdns.org"
 
       # main 에 머지되면 자동으로 여기로 나간다.
       oidc_subs = [
@@ -61,6 +68,9 @@ locals {
 
       # 심사 IP 를 알면 여기를 좁힌다. 문서 §3 의 "0.0.0.0/0 (또는 심사 IP)".
       http_cidrs = ["0.0.0.0/0"]
+
+      # prod 는 아직 도메인이 없다. 비면 아래 url 출력이 IP 를 그대로 쓴다.
+      public_host = ""
 
       # prod 는 브랜치로 안 나간다. alpha 에서 확인된 커밋에 태그를 달아야 간다.
       # 브랜치를 하나 더 만드는 대신 태그를 쓰는 이유는 infra/README.md 참조.
