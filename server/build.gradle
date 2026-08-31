@@ -19,6 +19,31 @@ dependencies {
     runtimeOnly 'com.h2database:h2'                       // MVP: H2 → 필요 시 교체
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml' // gate_rules.yaml 로드
 
+    // F-GTE-004 PDF 리포트 (이슈 #233). Apache-2.0 이라 제출물에서 답할 것이 없다.
+    //
+    // ❗**HTML→PDF(openhtmltopdf 계열)를 안 고른 이유는 라이선스만이 아니다.** 그쪽은 CSS
+    // 레이아웃 엔진을 거치므로 **엔진·폰트 판본이 바뀌면 같은 내용이 다른 지면**이 된다.
+    // 이 리포트는 contentHash 를 지면에 찍고 그 해시로 불변 기록과 대조하는 문서라
+    // (ADR-003·ADR-008), 렌더가 입력의 함수가 아니게 되는 순간 그 대조의 뜻이 흐려진다.
+    // PDFBox 는 우리가 그리는 대로 나온다 — 레이아웃 코드가 느는 대신 그 성질을 얻는다.
+    //
+    // 한글 줄바꿈은 의존성이 더 필요 없다. PDFBox 에 줄바꿈기가 없다는 것이 곧 직접 짜야
+    // 한다는 뜻은 아니다 — java.text.BreakIterator.getLineInstance(Locale.KOREAN) 이 끊을 수
+    // 있는 자리를 준다. 실측하면 한글은 음절마다(한국어 조판이 원래 그렇다), 라틴 낱말은
+    // 통째로(`ELS`·`barrier`), 문장부호는 앞 글자에 붙여서(`다.`·`100%)`) 끊는다.
+    //   "홍콩H지수 ELS 상품의 knock-in barrier 는 45% 입니다."
+    //   → [홍, 콩, H, 지, 수 , ELS , 상, 품, 의 , knock-, in , barrier , 는 , 45% , 입, 니, 다.]
+    // 글자 단위로 자르면 `ELS` 가 갈리고 마침표가 다음 줄로 떨어진다.
+    //
+    // ❗commons-logging 을 뺀다. PDFBox 가 그걸 끌고 오는데 Spring Boot 는 **같은 패키지**를
+    // spring-jcl 로 제공한다(둘 다 org/apache/commons/logging/*.class 를 담는다 — 실측:
+    // spring-jcl 15개 · commons-logging 27개). 둘이 같이 오르면 클래스패스 순서가 이기는
+    // 쪽을 정하고, 그러면 로그가 Logback 을 안 거치거나 두 번 찍힌다 — **기동은 되고 로그만
+    // 조용히 틀린다.** Spring Boot 가 자기 스타터에서 이걸 빼 두는 것과 같은 조치다.
+    implementation('org.apache.pdfbox:pdfbox:3.0.3') {
+        exclude group: 'commons-logging', module: 'commons-logging'
+    }
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
