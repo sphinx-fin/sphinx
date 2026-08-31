@@ -60,6 +60,6 @@ EOF
         echo "TLS 꺼짐 — SPHINX_PUBLIC_HOST 가 없다. :80 만 뜬다."
     else
         echo "TLS 꺼짐 — $CERT_DIR 에 인증서가 없다. :80 만 뜬다."
-        echo "  발급: docker compose run --rm certbot  (docs/deployment.md §9)"
+        echo "  발급: SPHINX_PUBLIC_HOST=$HOST ./scripts/deploy_ec2.sh --cert  (docs/deployment.md §9.2)"
     fi
 fi

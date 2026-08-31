@@ -274,9 +274,16 @@ SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinx2026.duckdns.org ./scripts/dep
 발급하고 web 을 재기동하는 것까지 한 줄이다. 끝나면 `TLS 켜짐 — https://…` 이 찍힌다.
 만료 알림을 받으려면 `LETSENCRYPT_EMAIL=…` 을 같이 넘긴다(비우면 등록 없이 받는다).
 
-❗**`docker compose run --rm certbot …` 을 손으로 치면 안 된다.** compose 는 명령이 무엇이든
-**파일 전체를 먼저 해석하고**, 이 파일의 비밀들은 `${VAR:?}` 라 값이 없으면 거기서 죽는다.
-값을 가진 것은 `deploy_ec2.sh` 뿐이라(SSM 에서 받는다) 발급도 그 안에 있다.
+❗**`docker compose run --rm certbot …` 을 손으로 치면 안 된다.** 두 가지가 걸린다.
+
+1. compose 는 명령이 무엇이든 **파일 전체를 먼저 해석하고**, 이 파일의 비밀들은 `${VAR:?}`
+   라 값이 없으면 거기서 죽는다. 값을 가진 것은 `deploy_ec2.sh` 뿐이라(SSM 에서 받는다)
+   발급도 그 안에 있다.
+2. 값이 있어도 그대로는 안 돈다. **`docker compose run` 은 `command` 만 덮고 `entrypoint`
+   는 안 덮는데**, `certbot` 서비스의 entrypoint 는 갱신 루프 때문에 `/bin/sh` 다. 그래서
+   argv 가 `/bin/sh certonly --webroot …` 가 되고 sh 가 `certonly` 를 스크립트 파일로 읽어
+   `certonly: No such file or directory`(exit 127) 로 끝난다 — **certbot 이 안 불린 것인데
+   certbot 이 실패한 것처럼 보인다.** 꼭 손으로 쳐야 하면 `--entrypoint certbot` 을 붙인다.
 
 ❗**발급을 배포 스크립트에 넣지 않았다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
 1시간 5회)을 매긴다. 배포마다 자동으로 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를

@@ -58,7 +58,14 @@ if [ "${SPHINX_DEMO_OPEN:-0}" = "1" ]; then
 # 개방 모드: auth_basic 을 끄고 경로에 맞는 데모 계정으로 nginx 가 대신 로그인한다.
 map \$host \$sphinx_auth_realm { default off; }
 
-map \$request_uri \$sphinx_api_auth {
+# ❗**\$uri 로 고른다 — \$request_uri 가 아니다.** \$request_uri 는 정규화·디코딩 전
+# 원문이라, 실제로 상류에 프록시되는 경로(\$uri)와 갈릴 수 있다. 갈리면 경로에 맞지 않는
+# 계정이 실린다 — 실측: /api/%64ashboard/heatmap 은 상류에 /dashboard/heatmap 으로 가는데
+# \$request_uri 로는 default 라 seller-01 이 실려 403 이고, /api/sessions/…/approve/../..
+# 은 mgr-01 을 달고 임의 세션 경로로 간다(파일이 말하는 규칙과 도는 규칙이 갈린다).
+# 앞쪽은 화면이 조용히 깨지고 뒤쪽은 선언과 어긋난다(PR #221 리뷰, 정세현 실측).
+# 쿼리스트링은 계정 선택과 무관하므로 \$uri 로 잃는 것이 없다.
+map \$uri \$sphinx_api_auth {
     default                                 "Basic $(b64 "$seller")";
     ~^/api/dashboard/                       "Basic $(b64 "$compl")";
     ~^/api/sessions/[^/]+/override/approve  "Basic $(b64 "$mgr")";
@@ -74,7 +81,9 @@ else
 # 자동 생성 — docker-entrypoint.d/15-demo-mode.sh. 손으로 고치지 않는다.
 # 잠금 모드(기본): 브라우저가 보낸 자격증명을 그대로 넘긴다 — nginx 기본 동작과 같다.
 map $host $sphinx_auth_realm { default "sphinx"; }
-map $request_uri $sphinx_api_auth { default $http_authorization; }
+# 개방 모드와 소스 변수를 맞춰 둔다($uri). 여기서는 default 하나라 무엇으로 골라도
+# 같지만, 두 모드가 다른 변수를 쓰면 개방 쪽만 고치는 날이 온다.
+map $uri $sphinx_api_auth { default $http_authorization; }
 EOF
     chmod 640 "$MODE_CONF"
     echo "잠금 모드 — auth_basic 이 걸린다(기본값)."
