@@ -71,8 +71,17 @@ import java.util.Map;
 @Component
 public class ReportPdf {
 
-    /** 폰트에 없는 글자를 대신하는 문자. 지면에서 눈에 띄어야 하므로 공백이 아니다. */
-    static final char UNRENDERABLE = '□';   // □
+    /**
+     * 폰트에 없는 글자를 대신하는 문자. 지면에서 눈에 띄어야 하므로 공백이 아니다.
+     *
+     * <p>❗<b>이 문자 자신이 폰트에 있어야 대체 경로가 성립한다.</b> {@link Painter#sanitize}
+     * 가 모든 코드포인트를 검사하면서 자기가 넣는 이 문자는 검사하지 않으므로, 없는 폰트로
+     * 바꾸면 <b>드문 글자가 든 리포트만 실패하는 것이 아니라 전부 실패한다</b> — 그리고 예외가
+     * {@code U+25A1} 을 가리켜 <i>"왜 리포트가 네모 때문에 죽지"</i> 로 읽힌다.
+     * {@link #loadFont} 가 그 전제를 로드 때 확인하고, {@code ReportPdfTest} 가 지금 쓰는
+     * 폰트에 이 글자가 있다는 것을 단정한다(PR #244 리뷰, 강희진이 라틴 전용 폰트로 실측).
+     */
+    static final char UNRENDERABLE = '□';   // U+25A1
 
     private static final String FONT = "/fonts/Pretendard-Regular.ttf";
 
@@ -202,7 +211,29 @@ public class ReportPdf {
                         + " — server/src/main/resources/fonts/ 를 본다 (이슈 #233)");
             }
             // ❗embedSubset=true. 클래스 javadoc 참조 — 커밋 파일을 서브셋하지 않는 것과 다른 얘기다.
-            return PDType0Font.load(doc, in, true);
+            PDType0Font font = PDType0Font.load(doc, in, true);
+            assertCanRenderTheReplacement(font);
+            return font;
+        }
+    }
+
+    /**
+     * ❗<b>대체 문자가 없는 폰트는 여기서 거부한다.</b> 조용히 내려가지 않는 이유는 이 문서의
+     * 성격이다 — 대체 문자가 없다는 것은 <i>"폰트 선택이 잘못됐다"</i> 이지 <i>"이 리포트만 좀
+     * 흐리다"</i> 가 아니다. {@code '?'} 로 내려가는 길도 있지만, 그러면 교부 문서가 조용히
+     * 나빠지고 그 사실이 아무 데도 안 남는다(PR #244 리뷰에서 같은 판단).
+     */
+    private static void assertCanRenderTheReplacement(PDType0Font font) {
+        try {
+            font.getStringWidth(String.valueOf(UNRENDERABLE));
+        } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+            // ❗IOException 으로 던지지 않는다 — 바깥 catch 가 "리포트 PDF 를 만들지 못했다"
+            // 로 감싸서 **원인이 한 겹 아래로 들어간다.** 폰트를 바꾼 사람이 첫 줄에서
+            // 알아야 하는 종류라 그대로 올라가게 둔다.
+            throw new IllegalStateException(String.format(
+                    "이 폰트에는 대체 문자(U+%04X '%s')가 없다 — 그릴 수 없는 글자를 대신할 수 "
+                    + "없으므로 대체 경로가 성립하지 않는다. 폰트를 바꿨으면 그 글자가 있는지 "
+                    + "먼저 본다 (이슈 #233 · PR #244)", (int) UNRENDERABLE, UNRENDERABLE), e);
         }
     }
 

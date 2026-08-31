@@ -47,6 +47,24 @@ class ReportPdfTest {
     }
 
     @Test
+    @DisplayName("★ 쓰는 폰트가 **대체 문자 자신**을 그릴 수 있다 — 아니면 모든 리포트가 실패한다")
+    void theFontCanRenderItsOwnReplacementCharacter() throws Exception {
+        // sanitize 는 모든 코드포인트를 검사하면서 **자기가 넣는 문자는 검사하지 않는다.**
+        // 그래서 이 전제가 깨지면 드문 글자가 든 리포트만이 아니라 **전부** 실패한다
+        // (PR #244 리뷰, 강희진이 라틴 전용 폰트로 실측 — 7건 전부 U+25A1 에서 죽었다).
+        //
+        // 폰트를 바꾸는 PR 은 이 단정을 먼저 만난다. 구현 쪽 loadFont 도 같은 것을 보지만,
+        // 배포 전에 잡히는 쪽이 낫다.
+        String withUnrenderable = "이름이 𠮷 입니다";   // 𠮷 는 CJK 확장 B — 대체를 유발한다
+
+        String text = textOf(pdf.render(content("S-0", withUnrenderable), "h", AT));
+
+        assertThat(text)
+                .as("대체 문자를 못 그리는 폰트로 바뀌었다면 여기까지 오지 못하고 예외가 난다")
+                .contains(String.valueOf(ReportPdf.UNRENDERABLE));
+    }
+
+    @Test
     @DisplayName("★ contentHash 가 지면에 찍힌다 — 이 문서가 기록과 대조되는 이유 전부다")
     void theHashIsOnThePage() throws Exception {
         String hash = "9f2b7c1a4e" + "0".repeat(54);
