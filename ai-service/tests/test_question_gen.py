@@ -415,6 +415,32 @@ def test_successful_generation_logs_nothing(caplog):
     assert not [r for r in caplog.records if "폴백" in r.message], caplog.text
 
 
+def test_fallback_log_stays_at_info(caplog):
+    """★ 레벨을 `INFO` 로 고정한다 (PR #238 리뷰, 정세현).
+
+    `info` 인 근거는 **폴백이 설계된 정상 경로**라는 것이다(`#121` 이 로그 레벨 설정을 넣으며
+    세운 기준 — 관측 로그와 진짜 경고를 같은 레벨에 섞지 않는다). 그 판단은 맞는데 **붙들어
+    두는 것이 없었다.**
+
+    실측으로 확인했다.
+
+        변조  log.info( → log.warning(     369 passed   ← 안 잡힌다
+
+    올리기 쉬운 자리다 — *"폴백이 26% 나 나는데 info 냐"* 는 다음 사람의 반응이 자연스럽다.
+    올라가면 `#121` 이 세운 것이 조용히 풀리고, 그때 이 테스트가 근거를 되돌려 준다.
+    """
+    leaky = _draft(f"원금이 {numerics.numbers(RISK_ITEM.condition.value_text)[0]}% 아래로 가면요?")
+    with caplog.at_level(logging.DEBUG, logger="app.question_gen"):
+        _gen(leaky)
+
+    fallback = [r for r in caplog.records if "F-INT-002 폴백" in r.getMessage()]
+    assert len(fallback) == 1, f"폴백 로그가 {len(fallback)}건 — 한 번만 남아야 한다"
+    assert fallback[0].levelname == "INFO", (
+        f"레벨이 {fallback[0].levelname} 다 — 폴백은 설계된 정상 경로이고, 경고로 올리면 "
+        "진짜 경고와 같은 레벨에 섞인다(#121)"
+    )
+
+
 def test_repeated_reasons_are_collapsed(caplog):
     """같은 사유 반복은 `×N` 으로 접는다 — 시도 횟수는 이미 `시도=` 에 있다.
 
