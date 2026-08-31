@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 이해 기록 리포트. 소유: 정세현
@@ -29,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 계약이 요약본에도 *"전문과 같은 해시"* 를 싣게 한 이유가 그것이다.
  */
 @DataJpaTest
-@Import({JpaImmutableStore.class, StoredEvidenceRecorder.class, ReportService.class})
+@Import({JpaImmutableStore.class, StoredEvidenceRecorder.class, ReportService.class, ReportPdf.class})
 @DisplayName("ReportService — 이해 기록 리포트")
 class ReportServiceTest {
 
@@ -449,6 +450,94 @@ class ReportServiceTest {
                     .as("리포트는 기록이 아니라 기록에서 만든 문서다. 값을 지운 게 아니라 "
                             + "그 문서에 안 실은 것이고, COMPL 은 audit:read 로 체인을 읽는다")
                     .contains("M08-TYING");
+        }
+    }
+
+    @Nested
+    @DisplayName("PDF — 발행 시점 지면을 다시 그린다 (F-GTE-004 2번)")
+    class Pdf {
+
+        private String textOf(byte[] bytes) throws Exception {
+            try (org.apache.pdfbox.pdmodel.PDDocument doc = org.apache.pdfbox.Loader.loadPDF(bytes)) {
+                return new org.apache.pdfbox.text.PDFTextStripper().getText(doc);
+            }
+        }
+
+        @Test
+        @DisplayName("발행 전에는 PDF 가 없다 — 없는 문서를 그려 주지 않는다")
+        void nothingToRenderBeforeIssuing() {
+            seedSession();
+
+            assertThatThrownBy(() -> reports.pdf(SID))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("발행된 리포트가 없다");
+        }
+
+        @Test
+        @DisplayName("❗발행 뒤에 판정이 더 쌓여도 PDF 는 **발행 시점** 지면이다")
+        void thePdfShowsWhatWasIssuedNotWhatIsNow() throws Exception {
+            seedSession();
+            ReportService.Report issued = reports.issue(SID, T0.plusSeconds(100));
+
+            // 교부 뒤에 재검증이 한 번 더 있었다. 스트림은 append-only 라 이게 그대로 쌓인다.
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U4, "0.99"), 0, "나중 질문",
+                    EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(200));
+            em.flush();
+            em.clear();
+
+            String text = textOf(reports.pdf(SID));
+
+            assertThat(text)
+                    .as("지금 전체를 재생하면 교부한 적 없는 항목이 종이에 실린다")
+                    .doesNotContain("ELS-C");
+            assertThat(text)
+                    .as("발행 시점에 있던 것은 그대로 있어야 한다")
+                    .contains("ELS-A")
+                    .contains("ELS-B")
+                    .contains(issued.contentHash());
+        }
+
+        @Test
+        @DisplayName("❗재현한 내용의 해시가 발행 기록과 같다 — 종이와 기록이 갈리지 않는다")
+        void theReproducedContentMatchesTheIssuedHash() throws Exception {
+            seedSession();
+            ReportService.Report issued = reports.issue(SID, T0.plusSeconds(100));
+
+            // pdf() 가 내부에서 이 대조를 하고, 다르면 던진다. 여기서는 지면에 찍힌 값으로 본다.
+            assertThat(textOf(reports.pdf(SID))).contains(issued.contentHash());
+        }
+
+        @Test
+        @DisplayName("❗재현이 발행 기록과 다르면 **그려 주지 않는다** — 조용히 다른 지면을 내주지 않는다")
+        void aMismatchRefusesInsteadOfRenderingSomethingElse() {
+            seedSession();
+
+            // 발행 기록의 해시만 어긋난 상태를 만든다. 체인이 상했거나 조립 규칙이 바뀐
+            // 경우가 실물에서 이 모양이다 — 재현한 내용과 기록된 해시가 다르다.
+            Map<String, Object> tampered = new java.util.LinkedHashMap<>();
+            tampered.put("type", "report");
+            tampered.put("sessionId", SID);
+            tampered.put("at", T0.plusSeconds(100));
+            tampered.put("contentHash", "0".repeat(64));
+            store.append(StoredEvidenceRecorder.streamOf(SID), tampered);
+            em.flush();
+            em.clear();
+
+            assertThatThrownBy(() -> reports.pdf(SID))
+                    .as("그려 주면 고객이 받은 종이와 불변 기록이 갈리고, 그 사실은 분쟁 시점까지 안 드러난다")
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("재현하지 못했다");
+        }
+
+        @Test
+        @DisplayName("같은 발행이면 PDF 도 같다 — 발행 기록의 시각을 쓰기 때문이다")
+        void thePdfIsStableAcrossCalls() {
+            seedSession();
+            reports.issue(SID, T0.plusSeconds(100));
+
+            assertThat(reports.pdf(SID))
+                    .as("지금 시각을 넣으면 부를 때마다 다른 파일이 된다")
+                    .isEqualTo(reports.pdf(SID));
         }
     }
 }
