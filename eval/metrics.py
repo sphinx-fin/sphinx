@@ -36,9 +36,28 @@ from typing import Iterable, Sequence
 # contracts/judgment.schema.json 의 enum 과 같은 순서다.
 GRADES: tuple[str, ...] = ("U1", "U2", "U3", "U4")  # 이해 · 부분이해 · 미이해 · 오해
 
-#: 미탐으로 세는 조합. 정답이 U4(오해)인데 모델이 "이해했다" 쪽으로 읽은 경우다.
-#: U3(미이해)는 포함하지 않는다 — 게이트가 U3 도 통과시키지 않으므로 판매가 막힌다.
-MISS_PREDICTIONS: frozenset[str] = frozenset({"U1", "U2"})
+# ── 미탐은 **게이트 결과**로 정의한다 ────────────────────────────────────────
+#
+# ❗처음엔 `{U1, U2}` 로 뒀고 주석에 *"U3 는 게이트가 통과시키지 않으므로 판매가 막힌다"*
+# 라고 적었다. **틀렸다.** `gate_rules.yaml` 을 보면 U2 와 U3 가 같은 분기다.
+#
+#     R-01  anyGrade == 'U4'          → RED      판매 차단
+#     R-04  anyGrade in ['U2','U3']   → YELLOW   재설명 → 재검증
+#     R-06  allGrade == 'U1'          → GREEN    통과
+#
+# 즉 U2 를 미탐으로 세고 U3 를 안 세던 것은 **게이트가 가르지 않는 자리에 선을 그은 것**
+# 이었고, 그래서 미탐율이 실제보다 낮게 나왔다(PR #229 리뷰, 강희진).
+#
+# 지금은 정답이 U4 인데 모델이 **U4 가 아닌 것**을 낸 경우를 전부 센다 — 그게 곧
+# "게이트가 RED 를 못 낸다" 이고, docstring 이 원래 말하려던 것이다. 다만 그 안에서
+# 대가가 갈리므로 아래 `miss_breakdown` 이 둘로 나눠 보여 준다.
+
+#: 게이트가 통과(GREEN)까지 가는 오판. 제일 나쁘다.
+MISS_PASSES: frozenset[str] = frozenset({"U1"})
+#: RED 가 YELLOW 로 내려앉는 오판. 재설명은 걸리지만 차단은 안 된다.
+MISS_DOWNGRADES: frozenset[str] = frozenset({"U2", "U3"})
+#: 미탐 전체 = 정답이 U4 인데 RED 가 안 나오는 모든 경우.
+MISS_PREDICTIONS: frozenset[str] = MISS_PASSES | MISS_DOWNGRADES
 
 
 class EvalError(ValueError):
@@ -115,7 +134,10 @@ def weighted_kappa(gold: Sequence[str], pred: Sequence[str], *, weights: str = "
 
 
 def miss_rate(gold: Sequence[str], pred: Sequence[str]) -> tuple[float, int, int]:
-    """미탐율 — 정답이 U4(오해)인데 모델이 U1·U2 로 읽은 비율.
+    """미탐율 — 정답이 U4(오해)인데 모델이 **U4 가 아닌 것**을 낸 비율.
+
+    곧 "게이트가 RED 를 못 낸다" 다. 어느 등급으로 잘못 읽었는지에 따라 대가가 다르므로
+    `miss_breakdown` 이 그 안을 가른다.
 
     ❗**카파에 접어 넣지 않고 따로 낸다.** 미탐은 게이트가 위험을 그냥 통과시키는 경우라
     다른 오류와 성격이 다르고, 표본에서 U4 가 소수면 **카파가 높은 채로 미탐율이 나쁠 수
@@ -135,6 +157,30 @@ def miss_rate(gold: Sequence[str], pred: Sequence[str]) -> tuple[float, int, int
     if total == 0:
         return float("nan"), 0, 0
     return missed / total, missed, total
+
+
+def miss_breakdown(gold: Sequence[str], pred: Sequence[str]) -> dict[str, int]:
+    """미탐을 **게이트 결과별로** 가른다. 한 숫자로 합치면 대가의 차이가 안 보인다.
+
+    ``passes`` 는 게이트가 GREEN 까지 갈 수 있는 경우이고, ``downgrades`` 는 RED 가
+    YELLOW 로 내려앉는 경우다. 둘 다 "오해를 못 잡았다" 지만 **판매가 진행되는지**가
+    다르므로 나눠 센다(`gate_rules.yaml` R-01·R-04·R-06).
+    """
+    if len(gold) != len(pred):
+        raise EvalError(f"길이가 다르다: 정답 {len(gold)} · 예측 {len(pred)}")
+    _check(gold, "정답")
+    _check(pred, "예측")
+    out = {"passes": 0, "downgrades": 0, "caught": 0}
+    for g, p in zip(gold, pred):
+        if g != "U4":
+            continue
+        if p in MISS_PASSES:
+            out["passes"] += 1
+        elif p in MISS_DOWNGRADES:
+            out["downgrades"] += 1
+        else:
+            out["caught"] += 1
+    return out
 
 
 def agreement_rate(a: Sequence[str], b: Sequence[str]) -> float:

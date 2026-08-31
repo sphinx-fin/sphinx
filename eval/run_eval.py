@@ -50,6 +50,7 @@ from metrics import (  # noqa: E402
     agreement_rate,
     confusion,
     distribution,
+    miss_breakdown,
     miss_rate,
     weighted_kappa,
 )
@@ -233,7 +234,12 @@ def main() -> int:
             lines.append("  ❗표본이 오해 케이스를 안 담고 있다는 뜻이라, 이 회차로는 게이트의")
             lines.append("  핵심 실패 모드를 아예 재지 못한다. 표본 구성을 먼저 고친다.")
         else:
-            lines.append(f"  미탐 {missed}/{total} = {rate:.1%}")
+            b = miss_breakdown(gold, pred)
+            lines.append(f"  미탐 {missed}/{total} = {rate:.1%}   (U4 를 U4 로 읽은 것 {b['caught']}건)")
+            lines.append("")
+            lines.append("  게이트 결과로 가른다 — 둘 다 오해를 못 잡은 것이지만 대가가 다르다.")
+            lines.append(f"    U4 → U1     {b['passes']:>3}건   게이트가 GREEN 까지 갈 수 있다 (R-06)")
+            lines.append(f"    U4 → U2·U3  {b['downgrades']:>3}건   RED 가 YELLOW 로 내려앉는다 (R-04)")
     lines += ["", f"  정답 분포 {distribution(gold)}", f"  모델 분포 {distribution(pred)}"]
 
     # ── 5. 목표선 ───────────────────────────────────────────────────────────
