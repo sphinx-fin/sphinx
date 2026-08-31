@@ -209,8 +209,95 @@ python3 scripts/gen_synth_sessions.py
 # 안 켜면 산출물이 있어도 서버가 안 읽어 대시보드가 전부 "가려짐" 으로 뜬다(이슈 #179).
 export SPHINX_DEMO_SYNTHETIC_SESSIONS=true
 
+# ── 디스크 — 박스 위에서 빌드하므로 여기가 차면 배포가 아니라 **런타임이** 먼저 상한다 ──
+#
+# 루트 30GB(infra/locals.tf)인데 배포마다 `--build` 가 돌아 이미지와 빌드 캐시가 쌓인다.
+# 차면 healthcheck 의 `docker exec` 이 실패해서 **코드가 그대로인데 컨테이너가 unhealthy**
+# 가 되고, 그 상태는 아래 `--build` 로도 안 낫는다(이슈 #240 ②③). 매 배포에 남겨서
+# 다음 사람이 추이를 볼 수 있게 한다 — CloudWatch 에이전트가 없어 이게 유일한 기록이다.
+echo "디스크:"
+df -h / | tail -1
+docker system df 2>/dev/null | sed 's/^/  /' || true
+
+# `df -P` 는 POSIX 다. `df --output=pcent` 는 GNU 전용이라 busybox·macOS 에서 **옵션 에러로
+# 죽는다** — `set -euo pipefail` 아래서는 그게 스크립트 전체를 끝낸다(실측). 배포 대상은
+# 리눅스지만, 손으로 돌려 보는 자리가 늘 리눅스라는 보장이 없어 이식되는 쪽을 쓴다.
+avail_pct=$(df -P / 2>/dev/null | awk 'NR==2 { gsub(/%/,"",$5); print $5 }' || true)
+if [ -n "${avail_pct:-}" ] && [ "$avail_pct" -ge 90 ]; then
+  echo "::warning::루트 사용률 ${avail_pct}% — 90% 를 넘었다. 아래 정리로도 안 내려가면 #240 을 본다." >&2
+fi
+
+# ── ❗이전 배포가 남긴 비정상 컨테이너를 걷어낸다 (이슈 #240 ③) ──────────────
+#
+# compose 는 **이미지·설정이 안 바뀐 컨테이너를 재생성하지 않는다.** 그래서 한 번
+# unhealthy 가 되면 그 서비스를 안 건드리는 배포는 전부 `Running` 으로 보고 healthy 가
+# 되기를 기다리다 `dependency failed to start` 로 죽는다 — **자력으로 복구되는 경로가
+# 없다.** 실제로 8/30 12:40 이후 배포 13회가 ai-service 하나 때문에 연속 실패했고,
+# 그 사이 ai-service 커밋은 0건이었다.
+#
+# `--force-recreate` 로 매번 전부 새로 만들지 않는 이유는 그 반대쪽이 더 비싸서다 —
+# 멀쩡한 서비스까지 내렸다 올리면 배포마다 불필요한 다운타임이 생긴다. 상한 것만 건다.
+#
+# 볼륨은 안 지운다(`docker rm` 은 named volume 을 건드리지 않는다) — certbot 인증서가
+# 거기 있고, 지우면 rate limit 때문에 정작 필요할 때 재발급을 못 받는다.
+# ❗**이 compose 프로젝트 것만 본다.** `docker ps --filter health=unhealthy` 로 전역을 훑으면
+# 박스에 우리 것 아닌 컨테이너가 있을 때 그것까지 지운다. `compose ps -aq` 로 대상을 먼저
+# 좁히고 상태는 `docker inspect` 로 읽는다 — `compose ps --format` 의 템플릿 지원은 버전을
+# 타는데 `inspect --format` 은 안 탄다.
+stuck=""
+for cid in $(docker compose ps -aq 2>/dev/null); do
+  info=$(docker inspect --format \
+    '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+    "$cid" 2>/dev/null) || continue
+  name=${info%% *};  name=${name#/}
+  rest=${info#* };   state=${rest%% *};  health=${rest##* }
+  if [ "$health" = unhealthy ] || [ "$state" = restarting ]; then
+    stuck="${stuck}${stuck:+ }${name}"
+  fi
+done
+if [ -n "$stuck" ]; then
+  echo "비정상 컨테이너를 걷어낸다 — compose 가 새로 만든다 (#240 ③):"
+  printf '  %s\n' $stuck
+  # 지우기 전에 로그를 남긴다. 여기서 안 남기면 재생성과 함께 **원인이 사라진다.**
+  for c in $stuck; do
+    echo "── $c 마지막 로그 40줄 ──"
+    docker logs --tail 40 "$c" 2>&1 | sed 's/^/    /' || true
+  done
+  # shellcheck disable=SC2086
+  docker rm -f $stuck >/dev/null
+fi
+
 echo "compose 기동"
-docker compose up -d --build
+# ❗실패해도 여기서 죽지 않는다 — 죽으면 아래 진단이 안 돌고, 그러면 CI 에 남는 것이
+# `unhealthy` 한 줄뿐이라 매번 SSM 으로 들어가야 한다(이슈 #240 ④).
+# ❗`if ! docker compose …; then rc=$?` 로 쓰면 안 된다 — `!` 가 뒤집은 뒤라 `$?` 가 **0** 이고
+# 그대로 `exit 0` 이 되어 **실패가 성공으로 보고된다.** 상태를 먼저 받는다.
+rc=0
+docker compose up -d --build || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "::error::compose 기동 실패 — 아래 상태·로그를 본다 (이슈 #240)" >&2
+  echo "── docker compose ps ──"
+  docker compose ps -a || true
+  # 서비스별로 고르지 않고 프로젝트 로그를 통째로 낸다 — 어느 서비스가 원인인지 모르는
+  # 상태에서 고르면 **정작 원인인 쪽을 빼고** 찍을 수 있다. 위 `compose ps -a` 가 어느
+  # 줄을 볼지 알려 주므로 양이 많은 건 문제가 안 된다.
+  echo "── docker compose logs (서비스별 60줄) ──"
+  docker compose logs --tail 60 --no-color 2>&1 | sed 's/^/    /' || true
+  echo "── 디스크 ──"
+  df -h / | tail -1
+  docker system df 2>/dev/null || true
+  exit "$rc"
+fi
+
+# ── 정리 — 위 디스크 참을 막는 쪽 ──────────────────────────────────────────
+#
+# dangling 이미지는 방금 빌드가 밀어낸 옛 레이어라 참조가 없고, 빌드 캐시는 7일치만
+# 남긴다(다음 빌드가 조금 느려지는 대신 30GB 가 안 찬다). 태그 붙은 이미지는 안 지운다 —
+# 롤백이 그걸 쓴다.
+echo "정리:"
+docker image prune -f 2>/dev/null | tail -1 || true
+docker builder prune -f --filter 'until=168h' 2>/dev/null | tail -1 || true
+df -h / | tail -1
 
 echo
 echo "상태:"
