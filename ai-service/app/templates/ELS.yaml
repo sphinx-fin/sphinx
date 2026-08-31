@@ -90,7 +90,7 @@ items:
   - item_id: ELS-TOTAL-LOSS-SCENARIO
     name: 전액손실 사례
     importance: required    # M03 확률 오인 — '반토막 날 리가' 의 반대편
-    cue: 최대손실 시 투자원금 전액을 잃을 수 있다는 사례·수치
+    cue: 원금 전액손실 상환 사례
     fallback_question: 가장 나쁜 경우에 얼마를 잃을 수 있다고 이해하고 계신가요?
     section_hint: 손실 사례 · 수익률조견표
 
@@ -104,7 +104,7 @@ items:
   - item_id: ELS-MIDWAY-REDEMPTION-COST
     name: 중도상환 원금손실
     importance: required    # 중도상환 시 원금 미달 — 금전 결과가 직접 바뀐다
-    cue: 중도상환 시 공정가액 대비 차감이 발생해 원금에 미달할 수 있다는 조건
+    cue: 실제 중도상환금액이 공정가액(기준가) 대비 일정 비율 이상이라는 조건
     fallback_question: 만기 전에 중간에 돈을 빼려면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 중도상환 · 유동성 위험
 
@@ -118,7 +118,7 @@ items:
   - item_id: ELS-NO-LISTING
     name: 환금성 제약(비상장)
     importance: required    # 비상장 = 만기 전 현금화 불가. 유동성 오해가 금전 결과다
-    cue: 거래소에 상장하지 않아 만기 전 환금이 제약된다는 고지
+    cue: 본 증권을 거래소에 상장하지 않을 예정이라는 고지
     fallback_question: 가입한 뒤에 이 상품을 팔고 싶으면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 유동성 위험
 

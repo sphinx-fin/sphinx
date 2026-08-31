@@ -412,27 +412,35 @@ def test_cue_threshold_separates_the_two_groups():
 
 # ── cue 임계값 전수 측정 (결정 10.45) ────────────────────────────────────────
 #: **cue 판별이 도달하지 못하는 계약 정답 항목.** 정세현 전수 실측(결정로그 10.45)에서
-#: 나왔다 — 항목 2개로 잡은 임계값이 전수에서는 7건을 거부한다.
+#: 나왔다 — 항목 2개로 잡은 임계값이 전수에서는 **7건**을 거부했다.
 #:
-#: 성격이 둘로 갈린다.
+#: 성격이 둘로 갈렸고, 그 갈래마다 답이 달랐다.
 #:
-#:   표 셀        숫자 비율 0.889·0.955 — cue 가 **원리적으로** 안 통한다(순수 수치라
-#:                자연어와 어휘가 안 겹친다). `TABULAR_DIGIT_RATIO` 로 우회한다.
-#:   자연어 5건    cue 문면이 원문과 다른 어휘를 쓴다. **cue 품질 문제**이고 임계값으로는
-#:                못 푼다 — 0.07 아래로 내리면 누출 조각(0.040·0.200)과 겹쳐 판별력이 사라진다.
+#:   표 셀 2건    숫자 비율 0.889·0.955 — cue 가 **원리적으로** 안 통한다(순수 수치라
+#:                자연어와 어휘가 안 겹친다). `TABULAR_DIGIT_RATIO` 로 우회한다(`#152`).
+#:   자연어 5건    cue 문면이 원문과 **다른 어휘로 같은 사실**을 말하고 있었다.
+#:                → `#127` 에서 cue 를 문서 어휘로 고쳐 전부 통과시켰다. 목록에서 빠졌다.
+#:
+#: ## 자연어 5건은 왜 임계값·지표로 못 풀었나 (`#127` 실측)
+#:
+#: 두 방향을 먼저 시도했고 둘 다 안 됐다.
+#:
+#:   서술 꼬리 제거   `고지`·`조건`·`안내`·`여부` 를 분모에서 빼도 **5건은 그대로**였다
+#:                    (0.071 → 0.071 · 0.333 → 0.333). 통과군만 올라간다(0.444 → 1.000).
+#:   지표 방향 변경   containment 역방향·overlap coefficient 전부 **진짜와 오답이 겹친다.**
+#:                    최악 혼동이 `ELS-NO-DEPOSIT-INSURANCE` cue ↔ `VAR-PARTIAL-DEPOSIT-INSURANCE`
+#:                    값 0.706 — 둘 다 예금자보호를 말하니 구조적이다.
+#:
+#: 남은 길이 cue 문면이었다. **회차 수치를 넣은 것이 아니라 제도·법령 어휘로 바꿨다** —
+#: `상장하지 않을 예정` · `공정가액(기준가)` · `예금자보호법에 따라 보호` 는 발행사가 달라도
+#: 쓰는 말이다(`test_cue_is_product_agnostic` 이 수치 혼입을 계속 막는다).
 #:
 #: 이 목록을 박아 두는 이유: 지금 상태를 드러내고, **새로 늘면 잡히게** 하는 것이다.
-#: 줄어들면(cue 를 고치면) 그것도 잡힌다 — 목록을 같이 갱신하게 된다.
+#: 줄어들면(cue 를 고치면) 그것도 잡힌다 — `#127` 이 그 경로로 이 목록을 5건 줄였다.
 _CUE_UNREACHABLE = {
-    # 표 셀 — TABULAR_DIGIT_RATIO 로 우회된다
+    # 표 셀 — TABULAR_DIGIT_RATIO 로 우회된다. cue 로는 원리적으로 못 잡는다.
     "VAR-EARLY-SURRENDER-RATIO",
     "VAR-LONG-TERM-RATIO",
-    # 자연어 — cue 문면 개선이 근본이다 (결정 10.45, 3주차 정량평가 전)
-    "VAR-WITHDRAWAL-FEE",
-    "ELS-TOTAL-LOSS-SCENARIO",
-    "ELS-NO-LISTING",
-    "ELS-MIDWAY-REDEMPTION-COST",
-    "VAR-PARTIAL-DEPOSIT-INSURANCE",
 }
 
 
@@ -609,3 +617,85 @@ def test_without_the_tabular_branch_the_same_quote_is_not_rescued(monkeypatch, i
     warnings: list[Any] = []
     assert extraction._rescue(candidate, doc, _tpl(item_id), warnings) is None
     assert [w.code for w in warnings] == ["NARROWING_REFUSED"]
+
+
+# ── 구제 경로 전수 (이슈 #127) ────────────────────────────────────────────────
+#: 비수치 누출 조각. **수치를 넣으면 안 된다** — `_rescue` 의 P6 규칙(수치가 하나도 안 남는
+#: 좁히기는 거부)에 걸려 조건에 숫자가 없는 항목이 cue 게이트와 무관하게 실패한다.
+#: `#127` 을 처음 잴 때 `(연 11.00%)` 를 붙였다가 15/23 실패로 읽었다 — 그중 10건이 P6
+#: 경로였고 cue 문제가 아니었다. **무엇을 재는지 흐리는 픽스처는 측정을 망친다.**
+_NON_NUMERIC_BLEED = " 환 다음과 같습니다"
+
+
+def test_every_contract_item_is_rescued_from_a_bleeding_quote():
+    """★ 계약 정답 전건이 누출 섞인 인용에서 **정답 스팬으로** 구제된다 (이슈 #127).
+
+    `#127` 은 cue 임계값이 6건을 거부한다고 보고했다. 그 뒤로 두 갈래로 풀렸다.
+
+        표 셀 2건    `#152` — 숫자 비율로 갈라 수치 겹침으로 고른다
+        자연어 4건   `#127` — cue 를 문서 어휘로 고쳤다
+
+    구제 경로는 1차 해소가 실패했을 때만 도는데, **1차 실패의 주된 원인이 표 열 누출**이다.
+    그래서 "지금 13/13 이 초록" 은 이 경로가 맞다는 근거가 되지 못한다 — 그 항목들은 1차에서
+    풀려 구제에 들어오지도 않는다. 전건을 강제로 구제 경로에 태워 확인한다.
+
+    `assert _resolve() is None` 이 그 강제를 확인한다. 이게 없으면 "1차에서 풀린 것"을
+    "구제가 됐다"로 잘못 읽는다.
+    """
+    checked = 0
+    for product_type, name in templates.CONTRACT_SAMPLE_BY_PRODUCT.items():
+        doc = _doc(name)
+        by_id = {i.item_id: i for i in templates.get(product_type).items}
+        for entry in doc["_expected_risk_items"]:
+            candidate = ExtractedCandidate(
+                item_id=entry["item_id"], page=entry["source_span"]["page"],
+                quote=entry["value_text"] + _NON_NUMERIC_BLEED,
+            )
+            assert extraction._resolve(candidate, doc, []) is None, (
+                f"{entry['item_id']}: 인용이 1차에서 풀리면 구제 경로를 안 탄다 — 픽스처 무효"
+            )
+            warnings: list[Any] = []
+            span = extraction._rescue(candidate, doc, by_id[entry["item_id"]], warnings)
+            assert span is not None, (
+                f"{entry['item_id']}: 구제 실패 — {[w.code for w in warnings]}"
+            )
+            assert span["source_span"] == entry["source_span"], (
+                f"{entry['item_id']}: 구제됐지만 정답 스팬이 아니다"
+            )
+            checked += 1
+    assert checked == 23, f"계약 정답 수가 바뀌었다: {checked}"
+
+
+def test_rewritten_cues_still_beat_the_bleed_fragments():
+    """cue 를 문서 어휘로 고쳤다고 **누출 조각과 구별이 흐려지면** 안 된다.
+
+    `#127` 에서 고친 4건은 문서 어휘를 쓰므로 진짜 조건 쪽 점수가 올랐다. 그 대가로 누출
+    조각 쪽도 같이 오르면 `#118`·`#152` 가 막은 결함이 다시 열린다. 여유를 고정한다.
+
+    실측(고친 4건):
+
+        ELS-NO-LISTING                  0.500  누출최고 0.000  여유 +0.500
+        ELS-MIDWAY-REDEMPTION-COST      0.500  누출최고 0.071  여유 +0.429
+        ELS-TOTAL-LOSS-SCENARIO         0.444  누출최고 0.222  여유 +0.222
+        VAR-WITHDRAWAL-FEE              0.412  누출최고 0.235  여유 +0.294
+    """
+    from app import textsim
+
+    bleeds = [
+        "(연 11.00%)", _NON_NUMERIC_BLEED.strip(), _ELDERLY_BLEED, _TABULAR_BLEED,
+        "발행인의 재무현황 및 신용등급 파악", "3개월 900,000 526,240 58.4",
+    ]
+    rewritten = ["ELS-NO-LISTING", "ELS-MIDWAY-REDEMPTION-COST",
+                 "ELS-TOTAL-LOSS-SCENARIO", "VAR-WITHDRAWAL-FEE"]
+    for product_type, name in templates.CONTRACT_SAMPLE_BY_PRODUCT.items():
+        by_id = {i.item_id: i for i in templates.get(product_type).items}
+        for entry in _doc(name)["_expected_risk_items"]:
+            if entry["item_id"] not in rewritten:
+                continue
+            cue = by_id[entry["item_id"]].cue
+            true_score = textsim.containment(cue, entry["value_text"])
+            bleed_max = max(textsim.containment(cue, b) for b in bleeds)
+            assert true_score >= extraction.CUE_CONTAINMENT_MIN, entry["item_id"]
+            assert true_score - bleed_max >= 0.2, (
+                f"{entry['item_id']}: 진짜 {true_score:.3f} · 누출 {bleed_max:.3f} — 여유가 없다"
+            )
