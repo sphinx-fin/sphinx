@@ -43,7 +43,7 @@ class SimulatorServiceTest {
 
     /** 테스트용 상품. 기초자산 2종, 1년/6개월, 배리어 90-80, 낙인 50, 연 10%. */
     private static final Product TOY = new Product(
-            "toy", List.of("a", "b"), List.of(6, 12), List.of(0.90, 0.80), 0.10, 0.50, "");
+            "toy", "toy", List.of("a", "b"), List.of(6, 12), List.of(0.90, 0.80), 0.10, 0.50, "");
 
     private static final LocalDate START = LocalDate.of(2020, 1, 1);
 
@@ -257,7 +257,7 @@ class SimulatorServiceTest {
     @Test
     void productRejectsMismatchedBarriers() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> new Product("bad", List.of("a"), List.of(6, 12), List.of(0.9), 0.1, 0.5, ""));
+                () -> new Product("bad", "bad", List.of("a"), List.of(6, 12), List.of(0.9), 0.1, 0.5, ""));
         assertTrue(e.getMessage().contains("길이가 다르다"), e.getMessage());
     }
 
