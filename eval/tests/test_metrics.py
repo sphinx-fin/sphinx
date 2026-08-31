@@ -24,6 +24,7 @@ from metrics import (  # noqa: E402
     agreement_rate,
     confusion,
     distribution,
+    miss_breakdown,
     miss_rate,
     weighted_kappa,
 )
@@ -106,11 +107,28 @@ class TestWeightedKappa:
 
 
 class TestMissRate:
-    def test_counts_only_u1_and_u2_as_missed(self):
-        # 정답 U4 세 건 중 U1·U2 로 읽은 것이 둘. U3 는 미탐이 아니다(게이트가 막는다).
+    def test_anything_that_is_not_u4_counts_as_missed(self):
+        """❗게이트가 가르는 자리에 선을 긋는다 — U2 와 U3 는 같은 분기다(R-04).
+
+        예전에는 `{U1, U2}` 만 셌다. U2 를 세고 U3 를 안 세는 것은 게이트가 구별하지
+        않는 자리에 선을 그은 것이라, 미탐율이 실제보다 낮게 나왔다(PR #229 리뷰, 강희진).
+        """
         rate, missed, total = miss_rate(["U4", "U4", "U4", "U1"], ["U1", "U2", "U3", "U1"])
-        assert (missed, total) == (2, 3)
-        assert rate == pytest.approx(2 / 3)
+        assert (missed, total) == (3, 3), "U3 도 RED 를 못 내므로 미탐이다"
+        assert rate == pytest.approx(1.0)
+
+    def test_u4_read_as_u4_is_not_missed(self):
+        rate, missed, total = miss_rate(["U4", "U4"], ["U4", "U1"])
+        assert (missed, total) == (1, 2) and rate == pytest.approx(0.5)
+
+    def test_breakdown_splits_by_gate_outcome(self):
+        """통과(GREEN 가능)와 강등(YELLOW)은 대가가 다르므로 나눠 센다."""
+        b = miss_breakdown(["U4"] * 5 + ["U1"], ["U1", "U1", "U2", "U3", "U4", "U1"])
+        assert b == {"passes": 2, "downgrades": 2, "caught": 1}
+
+    def test_breakdown_checks_length(self):
+        with pytest.raises(EvalError, match="길이"):
+            miss_breakdown(["U4", "U4"], ["U1"])
 
     def test_no_u4_in_gold_is_nan_not_zero(self):
         """❗U4 가 없으면 0.0 이 아니라 NaN 이다 — 0.0 은 '미탐이 없었다'로 읽힌다."""
