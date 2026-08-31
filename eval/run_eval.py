@@ -120,6 +120,22 @@ def load_labelers() -> "OrderedDict[str, OrderedDict[tuple[str, str], str]]":
             "한 사람 라벨로는 평가자 간 일치도(상한)를 낼 수 없고, 상한을 모르면 "
             "모델 점수가 좋은 것인지 나쁜 것인지 말할 수 없다"
         )
+    if len(files) > 2:
+        # ❗**조용히 둘만 쓰지 않는다.** 아래 계산이 `names[0]`·`names[1]` 만 보므로,
+        # 파일이 셋이면 한 명이 상한에서도 합의에서도 빠지는데 리포트 문면은 2인 회차와
+        # 똑같다 — 25% 밖에 안 맞는 라벨러가 있어도 §5 가 "달성" 을 찍는다(실측, PR #225
+        # 리뷰 오준서). 이 파일이 세운 원칙("못 잰 경우와 재서 나쁜 경우가 리포트에서
+        # 반드시 달라 보여야 한다")이 여기서만 안 걸리던 자리다.
+        #
+        # 실제 방아쇠는 `오준서.v2.jsonl` 같은 **잔여 파일 하나**다. 그래서 거부하되
+        # 무엇을 찾았는지 이름으로 보여 준다.
+        found = " · ".join(p.name for p in files)
+        raise InputError(
+            f"라벨 파일이 {len(files)}개다 — **2인 독립이 전제다**(eval/README.md).\n"
+            f"  찾은 파일: {found}\n"
+            "  셋 이상이면 어느 둘로 상한을 낼지가 정해지지 않는다. 잔여 파일이면 지우고, "
+            "라벨러를 늘리는 결정이면 이 스크립트의 상한·합의 계산부터 고친다"
+        )
     return OrderedDict((p.stem, load_jsonl(p, f"라벨({p.stem})")) for p in files)
 
 
@@ -204,6 +220,12 @@ def main() -> int:
     lines.append("❗카파와 **따로** 본다. 표본에서 U4 가 소수면 카파가 높은 채로 미탐율이")
     lines.append("나쁠 수 있고, 그 조합이 이 시스템에서 제일 나쁜 상태다.")
     lines.append("")
+    if not consensus_keys:
+        # ❗U4 0건과 같은 계열의 자리다. 합의가 0이면 아래 분포가 전부 0 으로 찍히는데,
+        # 그 문면만으로는 "안 쟀다" 와 "재서 0" 이 구별되지 않는다.
+        lines.append("  두 라벨러가 **합의한 항목이 하나도 없다** — 미탐율을 정의할 수 없다.")
+        lines.append("  ❗표본이 나쁜 것이 아니라 라벨 기준이 갈렸다는 신호다. 위 1절의")
+        lines.append("  평가자 간 일치도를 먼저 본다(guideline.md 로 기준을 맞춘 뒤 다시 붙인다).")
     if consensus_keys:
         rate, missed, total = miss_rate(gold, pred)
         if total == 0:

@@ -123,6 +123,11 @@ def miss_rate(gold: Sequence[str], pred: Sequence[str]) -> tuple[float, int, int
 
     :return: (비율, 미탐 건수, U4 정답 건수). U4 가 0건이면 비율은 ``float('nan')``
     """
+    # 여기만 길이 검사가 없었다 — `zip` 이 짧은 쪽으로 잘라서 **조용히 표본이 줄어든다**.
+    # 러너는 항상 같은 키 목록으로 만들어 넣지만, 순수 함수로 내놓은 이상 나머지와 같은
+    # 모양이어야 한다(PR #225 리뷰, 오준서).
+    if len(gold) != len(pred):
+        raise EvalError(f"길이가 다르다: 정답 {len(gold)} · 예측 {len(pred)}")
     _check(gold, "정답")
     _check(pred, "예측")
     total = sum(1 for g in gold if g == "U4")

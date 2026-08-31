@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -26,6 +27,24 @@ from metrics import (  # noqa: E402
     miss_rate,
     weighted_kappa,
 )
+
+
+class TestGradesMatchTheContract:
+    """❗`GRADES` 는 계약을 **옮겨 적은 것**이다 — 대조가 없으면 갈려도 아무도 말하지 않는다.
+
+    갈리면 조용히 벌점이 뒤바뀐다. `metrics.py` 머리말이 스스로 *"틀린 방향이 하필 미탐을
+    싸게 만드는 쪽일 수 있다"* 고 적어 둔 그 경우다. (PR #225 리뷰, 오준서)
+    """
+
+    def test_grades_match_the_contract_enum_including_order(self):
+        schema = json.loads(
+            (Path(__file__).resolve().parents[2] / "contracts" / "judgment.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        assert tuple(schema["properties"]["grade"]["enum"]) == GRADES, (
+            "계약의 등급 enum 과 갈렸다. **순서까지 같아야 한다** — 순서가 곧 거리이고, "
+            "가중 카파가 그 인덱스 차이를 제곱해 벌점으로 쓴다"
+        )
 
 
 class TestWeightedKappa:

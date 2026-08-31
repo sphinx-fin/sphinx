@@ -75,6 +75,20 @@ class TestRefusesRatherThanFaking:
         r = run(tmp_path)
         assert r.returncode != 0 and "두 번 나온다" in r.stderr
 
+    def test_three_labelers_is_refused_not_silently_truncated(self, tmp_path):
+        """❗셋이면 한 명이 상한에서도 합의에서도 빠지는데 리포트는 2인 회차와 똑같다.
+
+        실제 방아쇠는 `오준서.v2.jsonl` 같은 잔여 파일 하나다 (PR #225 리뷰, 오준서).
+        """
+        gold, model = corpus(40)
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        for name in ("강희진", "오준서", "오준서.v2"):
+            write_jsonl(tmp_path / "data" / "labels" / f"{name}.jsonl", gold)
+        r = run(tmp_path)
+        assert r.returncode != 0
+        assert "2인 독립이 전제다" in r.stderr
+        assert "오준서.v2.jsonl" in r.stderr, "무엇을 찾았는지 이름으로 보여 줘야 한다"
+
     def test_bad_grade_is_refused(self, tmp_path):
         gold, model = corpus(40)
         write_jsonl(tmp_path / "data" / "model.jsonl", model)
@@ -125,6 +139,18 @@ class TestReport:
         r = run(tmp_path)
         assert r.returncode == 0, r.stderr
         assert "U4 가 **0건**" in r.stdout
+
+    def test_zero_consensus_says_so_instead_of_printing_zeros(self, tmp_path):
+        """❗합의 0이면 분포가 전부 0 으로 찍힌다 — "안 쟀다" 와 "재서 0" 이 구별돼야 한다."""
+        gold, model = corpus(40)
+        # 두 라벨러가 전 항목에서 어긋나게 만든다(한 칸씩 민다).
+        shifted = [{**g, "grade": {"U1": "U2", "U2": "U3", "U3": "U4", "U4": "U1"}[g["grade"]]} for g in gold]
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", shifted)
+        r = run(tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "합의 0건" in r.stdout or "합의한 항목이 하나도 없다" in r.stdout
 
     def test_ceiling_is_reported_next_to_the_model_score(self, tmp_path):
         gold, model = corpus(40)
