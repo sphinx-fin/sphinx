@@ -299,6 +299,11 @@ class CanonicalJsonTest {
                     .as("적재 쪽이 Map 으로 풀지 않고 레코드를 그대로 넘겨도 된다는 확인이다 "
                             + "— Grade(enum) · Evidence(중첩 레코드) · null 이 전부 지원 타입이다")
                     .isEqualTo("{\"confidence\":0.91,"
+                            // escalate 는 boolean 이라 안 실린 응답도 false 로 들어온다(#160).
+                            // 이 줄이 늘어난 것은 **정규화가 바뀐 것이 아니라 판정이 바뀐 것**이다 —
+                            // append-only 라 이전 항목은 그대로이고, 이후 항목부터 이 키가 있다
+                            // (promptVersion 이 들어올 때와 같은 모양, 결정 10.38).
+                            + "\"escalate\":false,"
                             + "\"evidence\":{\"rubricClause\":\"원금손실 조건\",\"utteranceQuote\":\"원금은 지켜지죠\"},"
                             + "\"grade\":\"U4\","
                             + "\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\","

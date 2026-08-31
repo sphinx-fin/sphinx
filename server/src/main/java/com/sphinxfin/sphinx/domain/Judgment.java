@@ -20,7 +20,23 @@ public record Judgment(
          * 감사 시점에 0.65 가 두 가지 뜻일 수 있게 되고, <b>그때는 이미 못 고친다</b>
          * (결정 10.38 · 이슈 #136).
          */
-        String promptVersion
+        String promptVersion,
+
+        /**
+         * 이 판정이 컴플라이언스로 올라갈 신호인가 (F-GTE-003 · 이슈 #160).
+         * 오해 라이브러리의 {@code escalate: compliance} 에서 온다.
+         *
+         * <p>❗<b>{@code Boolean} 이 아니라 {@code boolean} 이다.</b> 값이 안 실린 응답은
+         * {@code false} 가 된다 — <i>"신호 없음"</i> 쪽으로 떨어지는 것이 안전한 방향이다.
+         * 없는 값을 <i>"신호 있음"</i> 으로 읽으면 판매를 막지 않아도 될 세션이 COMPL 로 간다.
+         * <i>"측정했는데 아니다"</i> 와 <i>"아직 안 싣는다"</i> 를 갈라야 할 때는
+         * {@code promptVersion} 이 그 정보를 이미 들고 있다.
+         *
+         * <p>❗<b>판매자 응답에 싣지 않는다.</b> 어떤 발화가 탐지되는지 알면 문면만 바꿔 같은
+         * 영업을 한다(기획 7-4 역이용 방지). {@code JudgmentView} 가 필드를 골라 담고,
+         * {@code JudgmentViewFieldsTest}·{@code UnfairSignalNotExposedTest} 가 그 상태를 잠근다.
+         */
+        boolean escalate
 ) {
     /**
      * P4 강제: 근거(발화 인용 + 루브릭 조항)가 비면 판정 자체가 성립하지 않는다.
@@ -58,7 +74,17 @@ public record Judgment(
      */
     public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
                     String reason, String misconceptionType) {
-        this(itemId, grade, confidence, evidence, reason, misconceptionType, null);
+        this(itemId, grade, confidence, evidence, reason, misconceptionType, null, false);
+    }
+
+    /**
+     * 상신 신호를 모르는 판정. ai-service 가 아직 {@code escalate} 를 안 싣는 동안의
+     * 역직렬화·기존 호출부용이다. {@code false} 는 <b>"신호 없음"</b> 으로 읽는다 — 위 필드
+     * javadoc 대로 그쪽이 안전한 방향이다.
+     */
+    public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
+                    String reason, String misconceptionType, String promptVersion) {
+        this(itemId, grade, confidence, evidence, reason, misconceptionType, promptVersion, false);
     }
 
     public record Evidence(String utteranceQuote, String rubricClause) {}
