@@ -208,12 +208,8 @@ class AccessControlWiringTest {
         // aggregate:indicator:read 는 뺐다 — GET /dashboard/leading-indicators 가 붙었다
         // (이슈 #178). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         //
-        // session:simulate 도 product:manage 와 같은 자리다 — 엔드포인트는 **이미 있다**
-        // (POST /sessions/{sid}/simulate). 정책이 없어서 어노테이션이 못 붙어 있던 것이고,
-        // 그 정책이 방금 생겼다(이슈 #214). 부착은 강희진 몫이라 이 PR 이 하지 않는다.
-        // **부착되면 이 줄을 지운다** — 그때 아래 unannotatedEndpointsAreEnumerated 의
-        // session:simulate 는 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214).
-        // 목록이 줄어드는 것이 진척이다.
+        // session:simulate 도 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214 · #222).
+        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
                 "admin:role:assign",
