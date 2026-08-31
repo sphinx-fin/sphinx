@@ -60,7 +60,7 @@ items:
   - item_id: VAR-PARTIAL-DEPOSIT-INSURANCE
     name: 예금자보호 범위
     importance: required    # M02 계열. #57 로 결정론 경로가 없어져 루브릭이 유일한 탐지 수단이다
-    cue: 예금자보호가 적용되는 급부의 범위와 보호 한도
+    cue: 예금자보호법에 따라 보호되지 않으나 일부 급부에 한하여 보호된다는 고지와 보호 한도
     fallback_question: 이 계약이 예금자보호를 받는지, 받는다면 어디까지인지 말씀해 주시겠어요?
     section_hint: 표지 · 유의사항
     found_in: [상품요약서, 운용설명서]
@@ -68,7 +68,7 @@ items:
   - item_id: VAR-WITHDRAWAL-FEE
     name: 중도인출 수수료
     importance: recommended    # 수수료율. 금전이지만 분쟁 근거가 없다
-    cue: 중도인출 시 부과되는 수수료율·한도
+    cue: 인출금액 대비 작은 금액 이내의 중도인출 수수료
     fallback_question: 중간에 돈을 일부 빼 쓰려면 어떻게 되는지 말씀해 주시겠어요?
     section_hint: 중도인출
     found_in: [상품요약서]
