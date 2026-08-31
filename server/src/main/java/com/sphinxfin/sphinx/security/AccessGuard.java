@@ -64,7 +64,7 @@ public class AccessGuard {
             return true;
         }
         AccessPolicy.Actor actor = currentActor();
-        return policy.permits(actor, action, targetOf(resourceId));
+        return decided(actor, action, resourceId, targetOf(resourceId));
     }
 
     /**
@@ -99,7 +99,14 @@ public class AccessGuard {
         if (!enforce) {
             return Optional.of(AccessPolicy.Scope.ORG);
         }
-        return policy.grantedScope(currentActor(), action, AccessPolicy.Target.aggregate());
+        AccessPolicy.Actor actor = currentActor();
+        Optional<AccessPolicy.Scope> scope =
+                policy.grantedScope(actor, action, AccessPolicy.Target.aggregate());
+        if (scope.isEmpty()) {
+            logDenial(actor, action, null,
+                    policy.decide(actor, action, AccessPolicy.Target.aggregate()).reason());
+        }
+        return scope;
     }
 
     /**
@@ -119,8 +126,47 @@ public class AccessGuard {
             return true;
         }
         AccessPolicy.Actor actor = currentActor();
-        return policy.permits(actor, action,
+        return decided(actor, action, null,
                 AccessPolicy.Target.session(null, actor.actorId(), actor.branchId()));
+    }
+
+    /**
+     * 판단하고, <b>거부면 사유를 남긴다.</b>
+     *
+     * <p>{@link AccessPolicy.Decision} 은 <i>"막았다"</i> 와 <i>"판단할 수 없다"</i> 를 가르려고
+     * 사유를 만든다. 그런데 이 클래스가 {@code permits()}(불리언)만 불러서 <b>그 사유가
+     * 계산되고 버려졌다</b> — 아래 {@link #targetOf} 의 javadoc 이 <i>"거부 사유가 '지점을 알 수
+     * 없다' 가 아니라 '세션이 없다' 여야 운영 중에 원인을 가를 수 있다"</i> 고 적어 놓고, 정작
+     * 그 사유가 프로세스 밖으로 나가는 경로가 없었다.
+     *
+     * <p>드러나는 자리가 리허설이다. {@code enforce=true} 아래서 403 은 전부 같은 문면
+     * ({@code FORBIDDEN} · <i>"이 작업을 수행할 권한이 없습니다"</i>)이고 감사 로그도
+     * {@code "403"} 만 남기므로, <b>정책이 옳게 막은 것</b>(SELLER 가 집계를 시도 — 시연할
+     * 항목이다)과 <b>판단할 근거가 없어 막힌 것</b>(CUST 는 대조할 식별자가 세션에 없다,
+     * 이슈 #166)이 화면·로그 어디에서도 구별되지 않는다.
+     *
+     * <p>❗<b>사유를 응답에 싣지 않는다.</b> <i>"세션이 없다"</i> 와 <i>"자기 세션이 아니다"</i>
+     * 가 갈리면 남의 세션 ID 의 존재 여부를 응답으로 물어볼 수 있다. 서버 로그에만 남긴다 —
+     * 원인을 가르는 것은 운영자이지 요청자가 아니다.
+     */
+    private boolean decided(AccessPolicy.Actor actor, String action,
+                            String resourceId, AccessPolicy.Target target) {
+        AccessPolicy.Decision decision = policy.decide(actor, action, target);
+        if (!decision.allowed()) {
+            logDenial(actor, action, resourceId, decision.reason());
+        }
+        return decision.allowed();
+    }
+
+    /**
+     * 거부 한 건. 개인정보는 싣지 않는다 — {@code actorId} 는 계정 식별자이고
+     * {@code resourceId} 는 세션 UUID 라 둘 다 P3 의 고객 텍스트가 아니다.
+     */
+    private void logDenial(AccessPolicy.Actor actor, String action,
+                           String resourceId, String reason) {
+        log.warn("접근 거부 actor={} role={} action={} resource={} 사유={}",
+                actor.actorId(), actor.role(), action,
+                resourceId == null ? "-" : resourceId, reason);
     }
 
     /**
