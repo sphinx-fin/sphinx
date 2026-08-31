@@ -441,4 +441,71 @@ class AccessPolicyTest {
             assertThat(policy.permits(seller("seller-01"), "session:answer", AS_WIRED)).isTrue();
         }
     }
+
+    @Nested
+    @DisplayName("손실 시뮬레이터 — 진행 행위지 감독 대상이 아니다 (이슈 #214)")
+    class SimulatorIsInterviewNotOversight {
+
+        private final RbacPolicyFile file = new RbacPolicyFile();
+
+        /** seller-01 이 BR-1 에서 진행 중인 세션. S-04 는 이 위에서 돈다. */
+        private static final Target OWN = Target.session("S-1", "seller-01", "BR-1");
+
+        @Test
+        @DisplayName("면담을 진행하는 SELLER 가 자기 세션에서 돌린다 — 데모 경로")
+        void theSellerRunsItOnTheirOwnSession() {
+            assertThat(policy.permits(seller("seller-01"), "session:simulate", OWN)).isTrue();
+        }
+
+        @Test
+        @DisplayName("남의 세션에서는 못 돌린다 — own_session 이 그대로 선다")
+        void notOnSomeoneElsesSession() {
+            assertThat(policy.permits(seller("seller-02"), "session:simulate", OWN)).isFalse();
+        }
+
+        /**
+         * ❗<b>이 두 단정이 #214 에서 내린 판단이다.</b> MGR·COMPL 은 같은 세션을 <i>읽는다</i>.
+         * 그런데 시뮬레이션은 못 돌린다 — 그 대비가 여기 나란히 있어야 판단이 보인다.
+         *
+         * <p>읽기에 감독 역할이 붙는 이유는 그 세션에서 무슨 일이 있었는지를 봐야 해서다.
+         * 시뮬레이션 결과는 세션 기록의 일부가 아니라 (금액, 상품 조건, 지수 스냅샷) 의 순수
+         * 함수라(P2), 남의 세션에 대해 돌려도 그 세션에 관해 알게 되는 것이 없다. 감독에
+         * 필요한 것은 {@code report:read} 가 이미 준다.
+         *
+         * <p>넓히려면 이 테스트를 고쳐야 하고 그 PR 이 기록에 남는다. 그게 요지다.
+         */
+        @Test
+        @DisplayName("❗MGR 은 지점 내 세션을 읽되 시뮬레이터는 못 돌린다")
+        void theBranchManagerReadsButDoesNotRun() {
+            assertThat(policy.permits(mgr("BR-1"), "session:read", OWN))
+                    .as("읽기는 열려 있다 — 여기가 닫히면 이 대비가 아무것도 안 잰다")
+                    .isTrue();
+            assertThat(policy.permits(mgr("BR-1"), "session:simulate", OWN))
+                    .as("고객 앞 화면을 띄우는 것은 면담 진행이다 (session:interview 와 같은 결)")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("❗COMPL 도 같다 — 전체를 읽되 진행하지는 않는다")
+        void complianceReadsButDoesNotRun() {
+            Actor compl = new Actor("compl-01", Role.COMPL, null);
+
+            assertThat(policy.permits(compl, "session:read", OWN)).isTrue();
+            assertThat(policy.permits(compl, "session:simulate", OWN)).isFalse();
+        }
+
+        /**
+         * ❗<b>이 이슈의 요지가 이 한 줄이다.</b> {@code #76} · 기획 7-2 가 요구하는 것은
+         * <i>"누가 무엇을 봤는지 남는다"</i> 이고, S-04 는 데모 경로에 직접 있는 화면이다.
+         * 비audited 인 {@code session:interview} 를 재사용했다면 이 요건이 안 채워진다.
+         */
+        @Test
+        @DisplayName("❗감사 대상이다 — S-04 를 띄운 사실이 불변 기록에 남는다")
+        void showingTheScreenIsAudited() {
+            assertThat(file.audited())
+                    .as("여기서 빠지면 AuditInterceptor 가 이 호출을 조용히 넘긴다 — "
+                            + "로그 0건이 '아무도 안 봤다' 로 읽힌다")
+                    .contains("session:simulate");
+        }
+    }
 }

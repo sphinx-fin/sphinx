@@ -61,6 +61,23 @@ jobs:
             TARGET=alpha
           fi
           echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+          # ── 환경마다 다른 것 둘: 공개 도메인 · 화면 개방 여부 ──────────────
+          #
+          # ❗**개방(`DEMO_OPEN=1`)은 alpha 에만 준다.** 개방 모드는 nginx 가 데모 계정으로
+          # 대신 로그인하는 것이라 감사 로그의 "누가" 가 그 계정으로 굳는다
+          # (web/docker-entrypoint.d/15-demo-mode.sh). prod 에 그 상태가 새어 들어가면
+          # `#41` 1항이 되살아난 것과 같은 그림이 되므로, **환경으로 갈라 둔다.**
+          #
+          # prod 는 도메인도 아직 없다. 비면 nginx 가 443 을 안 세우고 :80 만 뜬다.
+          if [ "$TARGET" = alpha ]; then
+            echo "public_host=sphinx2026.duckdns.org" >> "$GITHUB_OUTPUT"
+            echo "demo_open=1"                        >> "$GITHUB_OUTPUT"
+          else
+            echo "public_host=" >> "$GITHUB_OUTPUT"
+            echo "demo_open="   >> "$GITHUB_OUTPUT"
+          fi
+
           echo "### $TARGET ← \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/checkout@v4
@@ -123,7 +140,7 @@ jobs:
                 "aws s3 cp s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/${{ steps.art.outputs.key }} - | tar xz -C \"$NEW\"",
                 "rm -rf /opt/sphinx && mv \"$NEW\" /opt/sphinx && chmod 755 /opt/sphinx",
                 "cd /opt/sphinx",
-                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -60 /var/log/sphinx-deploy.log; exit 1; }",
+                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -60 /var/log/sphinx-deploy.log; exit 1; }",
                 "tail -40 /var/log/sphinx-deploy.log"
               ]}' \
             --query Command.CommandId --output text)
@@ -158,21 +175,46 @@ jobs:
           set -eu
           IP=$(aws ec2 describe-instances --instance-ids '${{ steps.ec2.outputs.id }}' \
                  --query 'Reservations[].Instances[].PublicIpAddress' --output text)
-          echo "화면: http://$IP/"
-          # ❗**401 이 정상이다.** nginx 가 사이트 전체에 auth_basic 을 걸어서(#162) 인증
-          # 없는 GET / 는 401 로 답한다. 200 이 나오면 auth_basic 이 빠진 것이라 이 한 줄이
-          # #41 1항의 회귀도 같이 잡는다.
-          #
+          HOST='${{ steps.t.outputs.public_host }}'
+          OPEN='${{ steps.t.outputs.demo_open }}'
+
+          # ❗**무엇이 정상인지는 환경이 선언한 모드가 정한다.** 예전에는 `401` 하나만
+          # 정상이었는데, alpha 를 개방 모드로 돌리기로 하면서(결정 10.57) 같은 200 이
+          # 환경에 따라 정상이기도 하고 회귀이기도 하게 됐다. 그래서 **기대값을 위에서 받아
+          # 온다** — prod 는 여전히 `401` 이 아니면 실패하므로 `#41` 1항 회귀 검사가 산다.
+          if [ -n "$OPEN" ]; then EXPECT=200; WHAT="개방 모드(로그인 없음)"; else EXPECT=401; WHAT="잠금 모드(auth_basic)"; fi
+
           # `-f` 를 쓰지 않는다 — 401 에 비영점으로 죽어서 **정상 동작을 배포 실패로 읽게**
           # 된다. #170 이 고친 결함이 정확히 이 모양이라, 여기서 다시 만들면 안 된다.
           # `|| echo 000` 을 쓰지 않는다 — curl 은 연결 실패에도 `-w` 로 이미 `000` 을
           # 찍으므로 뒤에 붙는 문자열이 **덧붙어서** `000000` 이 되고, 아래 case 가
           # `*)` 로 떨어져 "예상 밖 응답" 이라는 틀린 이유를 댄다. `|| true` 로 set -e
           # 만 막고 코드는 curl 이 찍은 것을 그대로 쓴다.
-          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "http://$IP/" || true)
+          probe() { curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$1" || true; }
+
+          CODE80=$(probe "http://$IP/")
+
+          # ── 인증서가 아직 없을 수 있다 — 그때도 배포는 성공해야 한다 ────────
+          #
+          # 첫 발급은 :80 이 떠 있어야 가능하다(HTTP-01). 여기서 https 를 요구하면
+          # **인증서를 받으려면 배포가 성공해야 하는데 배포가 https 를 요구하는** 고리가
+          # 된다. 그래서 도메인이 있어도 https 는 "되면 확인하고 아니면 안내" 다.
+          if [ -n "$HOST" ] && [ "$CODE80" = 301 ]; then
+            echo "화면: https://$HOST/  ($WHAT · :80 은 https 로 튕긴다)"
+            CODE=$(probe "https://$HOST/")
+            URL="https://$HOST/"
+          else
+            echo "화면: http://$IP/  ($WHAT)"
+            [ -z "$HOST" ] || echo "  ⚠ 인증서가 아직 없다 — :80 이 $CODE80 로 답했다(301 이면 TLS 켜짐)."
+            [ -z "$HOST" ] || echo "    발급: docs/deployment.md §9. 발급 뒤 web 을 재기동하면 443 이 선다."
+            CODE=$CODE80
+            URL="http://$IP/"
+          fi
+
           case "$CODE" in
-            401) echo "  80  열림 · 인증 걸림 ✓" ;;
-            200) echo "  ❗200 이다 — auth_basic 이 빠졌다 (#41 1항 회귀)"; exit 1 ;;
+            "$EXPECT") echo "  화면 $CODE ✓ — $WHAT 그대로다" ;;
+            401) echo "  ❗401 이다 — 개방 모드로 떴어야 하는데 잠겨 있다 (15-demo-mode.sh 로그를 본다)"; exit 1 ;;
+            200) echo "  ❗200 이다 — 잠겨 있어야 하는데 열려 있다 (#41 1항 회귀)"; exit 1 ;;
             000) echo "  ❗응답이 없다 — 컨테이너나 보안그룹을 본다"; exit 1 ;;
             *)   echo "  ❗예상 밖 응답 $CODE"; exit 1 ;;
           esac
@@ -187,7 +229,7 @@ jobs:
             fi
             echo "  $P 막힘 ✓"
           done
-          echo "http://$IP/" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
 
 concurrency:
   # 같은 환경에 두 배포가 겹치면 compose 가 서로를 밟는다. 앞의 것을 취소하지는 않는다 —

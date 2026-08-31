@@ -207,6 +207,9 @@ class AccessControlWiringTest {
         //
         // aggregate:indicator:read 는 뺐다 — GET /dashboard/leading-indicators 가 붙었다
         // (이슈 #178). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
+        //
+        // session:simulate 도 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214 · #222).
+        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
                 "admin:role:assign",
@@ -230,9 +233,8 @@ class AccessControlWiringTest {
         assertThat(unannotated)
                 .as("action 미부착 엔드포인트가 바뀌었다. 정책이 생겼으면 붙이고, "
                         + "새로 만든 엔드포인트면 action부터 정하라")
-                .hasSize(5);
+                .hasSize(4);
         assertThat(String.join(" | ", unannotated))
-                .contains("/products")        // 상품 목록·업로드·추출·조회 4종
-                .contains("simulate");        // 손실 시뮬레이터
+                .contains("/products");       // 상품 목록·업로드·추출·조회 4종
     }
 }

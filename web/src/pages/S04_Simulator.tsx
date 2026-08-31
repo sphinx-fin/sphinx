@@ -15,7 +15,6 @@
  * ③ **계산은 서버에서만** (P2)
  *    슬라이더가 움직여도 화면은 금액을 직접 계산하지 않는다. 클라이언트에서 한 번 더
  *    계산하면 결정론 계산이 두 벌이 되고, 어느 쪽이 리포트에 남은 값인지 알 수 없게 된다.
- *    대신 디바운스로 재계산 호출을 줄인다.
  *
  * ④ **E-SIM-01 — 조건 불완전이면 비활성**
  *    추출 실패 항목이 하나라도 있으면 상품 조건 파라미터가 불완전하므로 시뮬레이터를
@@ -30,6 +29,20 @@
  *    "예상이 아니라 과거에 있었던 일"이라고 말하려면 **어느 구간인지**가 보여야 한다.
  *    `pathMeta`(계약일·상환일·최저 종목·낙인 여부)와 `timeseriesVersion`(지수 스냅샷)을
  *    표시한다 — 심사자에게는 "이 수치가 어디서 나왔는가"의 실물 근거가 된다.
+ *
+ * ⑦ **부르는 것은 드래그가 아니라 확정 시점** (이슈 #223)
+ *    `/simulate` 는 `session:simulate` 로 **감사 대상**이다(`#214` · `#222`). 드래그마다
+ *    부르면 세션 하나에 감사 로그가 수십 건 쌓여, *"누가 무엇을 봤는지 남는다"* 를 보여주려던
+ *    로그가 오히려 그 신호를 덮는다. 줄일 자리는 로그 쪽이 아니라 **호출 쪽**이다 —
+ *    감사 로그는 append-only 라 접어서 적으면 `audit:verify` 가 지키려는 것이 깨진다.
+ *
+ *    그래서 값이 **확정될 때**(네이티브 `change` — 손을 놓을 때·방향키 한 칸·보조기기가
+ *    값을 바꿀 때) 부르고, 그 신호를 하나도 못 받는 경우를 위해 `IDLE_MS` 안전망을 둔다.
+ *
+ *    **화면에 보이는 금액과 카드의 금액을 따로 들고 있는 이유**가 이것이다 — 아직 안 부른
+ *    동안 슬라이더는 새 금액인데 카드는 옛 금액이라, 한 짝으로 묶어 두지 않으면
+ *    *"8,000만 원 → 3,200만 원"* 같은 **어긋난 쌍**이 그려진다. 그 상태를 화면이 문장으로
+ *    말하지 않으면 고객은 옛 금액의 결과를 새 금액의 결과로 읽는다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -49,16 +62,49 @@ const MIN_AMOUNT = 1_000_000;
 const MAX_AMOUNT = 200_000_000;
 const STEP = 1_000_000;
 const DEFAULT_AMOUNT = 50_000_000;   // 기획서 7-2 데모 기준값
-/** 재계산 디바운스. 비기능 요구 "시뮬레이터 재계산 ≤200ms" 안에 들도록 짧게 잡는다. */
-const DEBOUNCE_MS = 150;
+/**
+ * 확정 신호가 **연달아** 올 때 묶는 간격.
+ *
+ * ❗이게 없으면 **키보드 경로가 마우스보다 나빠진다.** `type="range"` 는 방향키 한 번마다
+ * `change` 를 내므로(실측: →키 10번 = `change` 10 = 호출 10) 확정 신호를 그대로 호출로
+ * 바꾸면 키를 누르고 있는 동안 계속 나간다. 옛 디바운스는 그걸 묶어 줬으니, 안 묶으면
+ * 이슈 #223 을 고치면서 접근성 경로에 같은 문제를 새로 만드는 셈이다.
+ *
+ * 드래그를 묶는 값이 아니라 **확정을 묶는 값**이라 짧아도 된다 — 손을 놓은 뒤 이만큼만
+ * 늦는다. 옛 `DEBOUNCE_MS` 와 같은 150ms 인 것은 우연이 아니라, "사람이 연속 조작을
+ * 멈췄다" 를 재는 같은 종류의 값이기 때문이다.
+ */
+const COMMIT_MS = 150;
+
+/**
+ * ❗**확정 신호를 하나도 못 받았을 때만 도는 안전망이다.** 평소 경로가 아니다 —
+ * 보통은 `change`(아래 주석) 나 `pointerup` 이 먼저 온다.
+ *
+ * 그래도 필요하다: 이게 없으면 신호를 놓친 순간 화면이 **영구히 어긋난 채로 멈춘다**
+ * (슬라이더는 새 금액, 카드는 옛 금액). 고객 화면에서 그 상태는 되돌릴 방법이 없다.
+ *
+ * **길게 잡는 이유**가 이 값의 전부다. 700ms 로 뒀을 때를 재 봤더니, 드래그 도중 그보다
+ * 길게 멈추는 것만으로 매번 호출이 나갔다 — 멈춤 20회 = 호출 20건이라 이슈 #223 이
+ * 말하는 상태와 다르지 않다. 안전망은 "사람이 손을 놓는 것을 잊었다" 를 재는 것이지
+ * "잠깐 멈췄다" 를 재는 것이 아니므로, 그 둘이 안 겹치는 자리까지 민다.
+ */
+const IDLE_MS = 2500;
 
 export default function S04Simulator() {
   const { sid = "" } = useParams();
   const navigate = useNavigate();
   const { elderly, toggle } = useElderlyMode();
 
+  /** 슬라이더가 지금 가리키는 금액. **로컬 표시값이다** — 이것만으로는 서버를 안 부른다. */
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
-  const [sim, setSim] = useState<SimulateResponse | null>(null);
+  /** 서버에 물어보기로 **확정한** 금액. 이 값이 바뀔 때만 `/simulate` 가 나간다. */
+  const [requested, setRequested] = useState(DEFAULT_AMOUNT);
+  /**
+   * 응답과 **그 응답이 어느 금액의 것인지**를 한 짝으로 든다. 따로 두면 카드의 "얼마가"
+   * 와 "얼마가 된다" 가 서로 다른 금액을 가리키는 순간이 생기는데, 그건 화면이 조용히
+   * 틀린 쌍을 그리는 것이라 느린 것보다 나쁘다(설계 판단 ⑦).
+   */
+  const [sim, setSim] = useState<{ res: SimulateResponse; amount: number } | null>(null);
   const [pending, setPending] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);   // E-SIM-01
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +134,7 @@ export default function S04Simulator() {
     return () => { alive = false; };
   }, [sid]);
 
-  /* ── 재계산 (디바운스) ───────────────────────────────────────────────────── */
+  /* ── 재계산 — 확정된 금액에 대해서만 (설계 판단 ⑦) ────────────────────────── */
   const recalc = useCallback(
     async (won: number, signal: AbortSignal) => {
       setPending(true);
@@ -98,7 +144,7 @@ export default function S04Simulator() {
         const body: SimulateRequest = { amount: won };
         const res = await post<SimulateResponse>(`/sessions/${sid}/simulate`, body);
         if (signal.aborted) return;
-        setSim(res);
+        setSim({ res, amount: won });
         setError(null);
       } catch (e) {
         if (!signal.aborted) setError(describe(e));
@@ -109,18 +155,62 @@ export default function S04Simulator() {
     [sid],
   );
 
+  /* 확정된 금액에 대해서만 부른다. `amount` 가 아니라 `requested` 를 보는 것이 이 화면이
+     드래그마다 감사 로그를 남기지 않는 이유 전부다(이슈 #223). */
   useEffect(() => {
     if (blocked) return;                       // 조건 불완전이면 계산 자체를 하지 않는다
     const ctrl = new AbortController();
-    const t = setTimeout(() => void recalc(amount, ctrl.signal), DEBOUNCE_MS);
-    return () => { clearTimeout(t); ctrl.abort(); };
-  }, [amount, blocked, recalc]);
+    void recalc(requested, ctrl.signal);
+    return () => ctrl.abort();
+  }, [requested, blocked, recalc]);
+
+  /**
+   * 확정 — 다만 **바로 부르지 않고 COMMIT_MS 만큼 묶는다.** 방향키를 누르고 있으면 확정
+   * 신호가 한 칸마다 오는데, 그대로 부르면 칸 수만큼 호출이 나간다(주석 참조).
+   * 마지막 확정만 남으므로 신호가 겹쳐 와도 호출은 한 번이다.
+   */
+  const commitTimer = useRef<number | null>(null);
+  const commit = useCallback((won: number) => {
+    if (commitTimer.current !== null) window.clearTimeout(commitTimer.current);
+    commitTimer.current = window.setTimeout(() => setRequested(won), COMMIT_MS);
+  }, []);
+  useEffect(() => () => {
+    if (commitTimer.current !== null) window.clearTimeout(commitTimer.current);
+  }, []);
+
+  /* ❗**주 신호는 네이티브 `change` 다.** `type="range"` 의 `change` 는 값이 *확정*될 때만
+     뜬다 — 마우스·터치는 놓을 때, 키보드는 한 칸 움직일 때, 보조기기가 값을 바꿀 때.
+     React 의 `onChange` 로는 못 받는다: React 는 그 이름을 `input` 이벤트에 붙여 두었고
+     그건 드래그 내내 뜨는 쪽이다. 그래서 ref 로 직접 건다.
+
+     `pointerup`·`pointercancel` 을 JSX 에 같이 둔 것은 겹쳐서라기보다, 드래그가 취소로
+     끝나는 경로에서 `change` 가 보장되지 않기 때문이다. 셋 다 같은 `commit` 이라 겹쳐도
+     호출은 안 는다. */
+  const sliderRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const el = sliderRef.current;
+    if (!el) return;
+    const onCommit = () => commit(Number(el.value));
+    el.addEventListener("change", onCommit);
+    return () => el.removeEventListener("change", onCommit);
+  }, [commit]);
+
+  /* 확정 신호를 못 받는 경우의 폴백(IDLE_MS 주석). 값이 계속 움직이는 동안에는 타이머가
+     매번 새로 걸리므로, 실제로 도는 것은 "멈춘 뒤 IDLE_MS" 한 번뿐이다. */
+  useEffect(() => {
+    if (amount === requested) return;
+    const t = setTimeout(() => setRequested(amount), IDLE_MS);
+    return () => clearTimeout(t);
+  }, [amount, requested]);
 
   /* ── 열람 완료 관측 ──────────────────────────────────────────────────────── */
   const ordered = useMemo(
-    () => (sim ? orderScenarios(sim.scenarios) : null),
+    () => (sim ? orderScenarios(sim.res.scenarios) : null),
     [sim],
   );
+
+  /** 슬라이더는 움직였는데 아직 그 금액으로 안 물어본 상태. 화면이 이걸 **말해야** 한다. */
+  const stale = !!sim && sim.amount !== amount;
 
   useEffect(() => {
     if (!ordered || ordered.length === 0) return;
@@ -178,6 +268,12 @@ export default function S04Simulator() {
             step={STEP}
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}
+            /* 확정 시점(설계 판단 ⑦). `onChange` 는 드래그 중에도 계속 뜨므로 여기서
+               서버를 부르지 않는다. 주 신호는 위 `useEffect` 가 거는 네이티브 `change` 고,
+               아래 둘은 드래그가 취소로 끝나는 경로를 받는다. */
+            ref={sliderRef}
+            onPointerUp={() => commit(amount)}
+            onPointerCancel={() => commit(amount)}
             aria-valuetext={formatKrw(amount)}
           />
           <div className="sm__ticks">
@@ -195,11 +291,13 @@ export default function S04Simulator() {
           </p>
         )}
 
-        {!ordered ? (
+        {/* `sim` 을 같이 보는 것은 타입 좁히기 때문만이 아니다 — 아래가 카드의 금액을
+            `sim.amount` 에서 읽으므로 응답과 금액이 **함께** 있어야 그릴 수 있다. */}
+        {!sim || !ordered ? (
           <p className="sm__state">계산 중…</p>
         ) : (
           <>
-            <div className="sm__grid">
+            <div className={`sm__grid${pending || stale ? " sm__grid--stale" : ""}`} aria-busy={pending || stale}>
               {ordered.map((s) => {
                 const loss = s.pnl < 0;
                 const id = cardId(s);
@@ -213,7 +311,9 @@ export default function S04Simulator() {
                     <h2 className="sm__card-name">{s.name}</h2>
                     <p className="sm__card-path">{describePath(s) ?? ""}</p>
                     <p className="sm__flow">
-                      <span className="sm__flow-from">{formatKrw(amount)}</span>
+                      {/* ❗`amount` 가 아니라 **이 응답이 계산된 금액**이다. 슬라이더를 따라가게
+                          두면 아직 안 부른 동안 좌우가 다른 금액의 쌍이 된다(설계 판단 ⑦). */}
+                      <span className="sm__flow-from">{formatKrw(sim.amount)}</span>
                       <span className="sm__flow-arrow" aria-hidden="true">→</span>
                       <span className="sr-only">이(가) 다음 금액이 됩니다:</span>
                       <span className="sm__flow-to">{formatKrw(s.payout)}</span>
@@ -227,7 +327,17 @@ export default function S04Simulator() {
             </div>
 
             <div className="sm__foot">
-              {pending && <p className="sm__pending" role="status">금액에 맞춰 다시 계산하는 중…</p>}
+              {/* 세 상태를 가른다. **`stale` 을 말 없이 두면 안 된다** — 슬라이더와 카드가
+                  다른 금액을 가리키는 동안 화면이 아무 말도 안 하면, 고객은 옛 금액의
+                  결과를 새 금액의 결과로 읽는다. */}
+              {pending ? (
+                <p className="sm__pending" role="status">금액에 맞춰 다시 계산하는 중…</p>
+              ) : stale ? (
+                <p className="sm__pending" role="status">
+                  아래는 <b>{formatKrw(sim.amount)}</b> 기준입니다 — 손을 떼시면{" "}
+                  {formatKrw(amount)}으로 다시 계산합니다.
+                </p>
+              ) : null}
 
               <p className="sm__alert sm__alert--info">
                 세 가지 모두 실제로 있었던 지수 구간을 대입한 결과입니다. 어느 쪽이 될지는
@@ -235,9 +345,9 @@ export default function S04Simulator() {
               </p>
 
               {/* P2 재현성 — 어느 상품 조건·어느 지수 스냅샷에서 나온 수치인지 (설계 판단 ⑥) */}
-              {sim?.productName && sim?.timeseriesVersion && (
+              {sim?.res.productName && sim?.res.timeseriesVersion && (
                 <p className="sm__pending">
-                  {sim.productName} · 지수 스냅샷 {sim.timeseriesVersion}
+                  {sim.res.productName} · 지수 스냅샷 {sim.res.timeseriesVersion}
                 </p>
               )}
 

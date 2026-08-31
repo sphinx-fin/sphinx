@@ -25,7 +25,17 @@ AWS_REGION="${AWS_REGION:-ap-northeast-2}"
 SSM_PREFIX="${SSM_PREFIX:-/sphinx/prod}"
 
 CHECK_ONLY=0
-[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+CERT_ONLY=0
+case "${1:-}" in
+  --check) CHECK_ONLY=1 ;;
+  # ── ❗왜 인증서 발급이 여기 있나 ─────────────────────────────────────────
+  #
+  # `docker compose run --rm certbot …` 을 손으로 치면 **안 된다.** compose 는 명령이
+  # 무엇이든 파일 전체를 먼저 해석하고, 이 파일의 비밀들은 `${VAR:?}` 라 값이 없으면
+  # 거기서 죽는다. 값을 가진 것은 이 스크립트뿐이므로(SSM 에서 받는다) 발급도 여기서 한다.
+  # `#173` 이후 자격증명 확인을 여기서 하기로 한 것과 같은 이유다.
+  --cert)  CERT_ONLY=1 ;;
+esac
 
 # 아래 `cd` 는 --check 를 지난 뒤에 온다. 명부는 --check 에서도 읽으므로 여기서 절대경로를 잡는다.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -139,6 +149,42 @@ fi
 
 cd "$(dirname "$0")/.."
 
+# ── --cert : Let's Encrypt 첫 발급 (한 번) ──────────────────────────────────
+#
+# ❗**배포 때마다 자동으로 하지 않는다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
+# 1시간 5회)을 매긴다. 배포마다 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를 태워서
+# 정작 필요한 순간에 못 받는다.** 갱신은 그 위험이 없어서(이미 받은 인증서가 있고 만료
+# 30일 전에만 움직인다) certbot 컨테이너가 12시간마다 알아서 돌린다.
+if [ "$CERT_ONLY" = 1 ]; then
+  : "${SPHINX_PUBLIC_HOST:?--cert 에는 도메인이 필요하다: SPHINX_PUBLIC_HOST=… $0 --cert}"
+
+  # web 이 :80 으로 챌린지를 내보내야 발급이 된다. 안 떠 있으면 먼저 띄운다 —
+  # `--cert` 를 배포 직후가 아니라 나중에 부르는 경우가 있다.
+  docker compose up -d web
+
+  echo "인증서 발급 — $SPHINX_PUBLIC_HOST"
+  # ❗`--entrypoint certbot` 이 있어야 한다. **`docker compose run` 은 `command` 만 덮고
+  # `entrypoint` 는 안 덮는다** — 이 서비스의 entrypoint 는 갱신 루프를 돌리려고
+  # `/bin/sh` 로 잡혀 있어서, 빼면 컨테이너가 받는 argv 가
+  # `/bin/sh certonly --webroot …` 가 되고 sh 가 `certonly` 를 스크립트 파일 이름으로
+  # 읽는다(`certonly: No such file or directory` · exit 127). certbot 이 아예 안 불리는데
+  # 실패 모양은 "certbot 이 뭔가 실패했다" 로 읽혀 rate limit 을 의심하며 재시도하게 된다
+  # (PR #221 리뷰, 정세현 실측). 갱신 루프(`command` 쪽)는 `sh -c '… certbot renew …'` 라 멀쩡하다.
+  #
+  # LETSENCRYPT_EMAIL 이 비면 등록 없이 받는다. 만료 알림을 못 받는다는 뜻이라
+  # 대회가 끝나고도 쓸 도메인이면 채우는 편이 낫다.
+  docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot \
+    -d "$SPHINX_PUBLIC_HOST" --agree-tos -n \
+    ${LETSENCRYPT_EMAIL:+--email "$LETSENCRYPT_EMAIL"} \
+    ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
+
+  # 20-tls.sh 는 **기동 때** 인증서 유무를 본다. 재기동해야 443 이 선다.
+  echo "web 재기동 — 443 을 세운다"
+  docker compose up -d --force-recreate web
+  docker compose logs --tail 20 web | grep -E "TLS|모드" || true
+  exit 0
+fi
+
 # data/ 가 있어야 한다. 읽기 전용 볼륨의 원본이고, 없으면 docker 가 빈 디렉토리를 만들어
 # 마운트해서 **오해 라이브러리 없이 컨테이너가 뜬다** — ai-service 는 로딩 시점에 죽으니
 # 드러나지만, 원인이 "git clone 이 덜 됐다"라는 것은 로그만 봐서는 안 보인다.
@@ -157,6 +203,12 @@ done
 echo "합성 세션 생성 (F-DSH-003)"
 python3 scripts/gen_synth_sessions.py
 
+# ❗**만든 다음에 켠다.** `SyntheticSessionLoader` 는 켜졌는데 파일이 없으면 예외를 던져
+# server 가 기동을 못 한다 — 그래서 compose 기본값은 `false` 이고, 파일을 방금 만든
+# 여기서만 켠다(`SPHINX_API_USERS` 와 같은 모양: 근거를 가진 쪽이 값을 넘긴다).
+# 안 켜면 산출물이 있어도 서버가 안 읽어 대시보드가 전부 "가려짐" 으로 뜬다(이슈 #179).
+export SPHINX_DEMO_SYNTHETIC_SESSIONS=true
+
 echo "compose 기동"
 docker compose up -d --build
 
@@ -172,7 +224,16 @@ echo "확인:"
 # -u 로 자격증명을 넣는 쪽은 안 쓴다. 셸 히스토리와 ps 에 남아 `#162` 가 값을 파일·환경변수
 # 로만 다루기로 한 것과 어긋난다. 그리고 상태코드를 그냥 찍는 편이 **더 많이 잡는다** —
 # 401 이 나오는 것 자체가 성공 신호라, 200 이 나오면 auth_basic 이 빠진 것이다.
-echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
+#
+# ❗**기대값이 모드마다 다르다.** 개방 모드(alpha)는 `auth_basic` 이 꺼져 있어 **200 이
+# 정상**이고, 잠금은 401 이 정상이다. 한쪽 문구만 박아 두면 붙여 넣은 사람이 정상을
+# 이상으로 읽는다 — `#170` 과 같은 모양이라, `deploy.yml` 의 노출 확인이 `EXPECT` 를
+# 환경에서 받는 것과 같은 이유로 여기서도 모드를 보고 찍는다.
+if [ "${SPHINX_DEMO_OPEN:-0}" = "1" ]; then
+  echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 개방 모드라 200 이 정상이다(401 이면 잠긴 것)"
+else
+  echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
+fi
 echo "  docker compose logs -f server          # 기동 로그"
 echo
 
@@ -195,13 +256,20 @@ echo
 # 백슬래시를 **먼저** 치환한다. 순서를 바꾸면 방금 이스케이프한 백슬래시를 다시 이스케이프한다.
 auth_user=${SPHINX_API_USER//\\/\\\\};     auth_user=${auth_user//\"/\\\"}
 auth_pass=${SPHINX_API_PASSWORD//\\/\\\\}; auth_pass=${auth_pass//\"/\\\"}
+#
+# ❗**개방 모드에서는 이 검사가 아무것도 재지 않는다** — `auth_basic` 이 꺼져 있어 자격증명이
+# 무엇이든 200 이다. 그래도 죽은 검사는 아니다: 개방 모드는 nginx 와 Spring 이 **같은**
+# `SPHINX_API_PASSWORD` 를 쓰므로 둘이 갈릴 수가 없고, `prod` 는 잠금이라 거기서 산다.
+# (다음 사람이 "왜 항상 통과하지" 를 파지 않도록 적어 둔다 — PR #221 리뷰, 정세현.)
 auth_code=$(printf 'user = "%s:%s"\n' "$auth_user" "$auth_pass" |
             curl -sS -K - -o /dev/null -w '%{http_code}' http://localhost/ || true)
+auth_note=""
+[ "${SPHINX_DEMO_OPEN:-0}" = "1" ] && auth_note=" (개방 모드라 auth_basic 이 꺼져 있다 — 이 검사는 늘 200 이다)"
 case "$auth_code" in
-  200)      echo "자격증명 확인: 200 — 통과" ;;
+  200)      echo "자격증명 확인: 200 — 통과${auth_note}" ;;
   401)      echo "자격증명 확인: 401 — SSM 값과 nginx htpasswd 가 다르다. 둘 다 SSM 에서 나오는지 본다" ;;
   ''|000)   echo "자격증명 확인: 요청 자체가 안 갔다 — nginx 가 떴는지 본다 (docker compose ps)" ;;
   *)        echo "자격증명 확인: $auth_code — 예상 밖이다. server 로그를 본다" ;;
 esac
 echo
-echo "❗보안그룹 인바운드는 80 만 연다. 8000·8100 을 열면 #41 의 1·3항(permitAll · ai-service 무인증)이 되살아난다."
+echo "❗보안그룹 인바운드는 80·443 만 연다(443 은 infra/network.tf). 8000·8100 을 열면 #41 의 1·3항(permitAll · ai-service 무인증)이 되살아난다."
