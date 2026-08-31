@@ -212,9 +212,12 @@ export SPHINX_DEMO_SYNTHETIC_SESSIONS=true
 # ── 디스크 — 박스 위에서 빌드하므로 여기가 차면 배포가 아니라 **런타임이** 먼저 상한다 ──
 #
 # 루트 30GB(infra/locals.tf)인데 배포마다 `--build` 가 돌아 이미지와 빌드 캐시가 쌓인다.
-# 차면 healthcheck 의 `docker exec` 이 실패해서 **코드가 그대로인데 컨테이너가 unhealthy**
-# 가 되고, 그 상태는 아래 `--build` 로도 안 낫는다(이슈 #240 ②③). 매 배포에 남겨서
-# 다음 사람이 추이를 볼 수 있게 한다 — CloudWatch 에이전트가 없어 이게 유일한 기록이다.
+#
+# ❗**#240 의 원인은 디스크가 아니었다** — 확인 시점에 19% 였다(빌드 캐시 2.15GB · 회수
+# 가능한 이미지 1.18GB). 원인은 아래 `--force-recreate` 주석의 마운트 끊김이다. 그래도
+# 남기는 이유는 정리가 **아무 데도 없었기 때문**이다. 배포마다 캐시가 쌓이기만 하는데
+# CloudWatch 에이전트가 없어 추이를 볼 수단이 없었고, 그러면 차는 날이 와도 그날의
+# 증상(healthcheck 의 `docker exec` 실패)이 #240 과 구별되지 않는다.
 echo "디스크:"
 df -h / | tail -1
 docker system df 2>/dev/null | sed 's/^/  /' || true
@@ -227,23 +230,15 @@ if [ -n "${avail_pct:-}" ] && [ "$avail_pct" -ge 90 ]; then
   echo "::warning::루트 사용률 ${avail_pct}% — 90% 를 넘었다. 아래 정리로도 안 내려가면 #240 을 본다." >&2
 fi
 
-# ── ❗이전 배포가 남긴 비정상 컨테이너를 걷어낸다 (이슈 #240 ③) ──────────────
+# ── 비정상 컨테이너가 있으면 **지우기 전에 로그를 남긴다** (이슈 #240) ────────
 #
-# compose 는 **이미지·설정이 안 바뀐 컨테이너를 재생성하지 않는다.** 그래서 한 번
-# unhealthy 가 되면 그 서비스를 안 건드리는 배포는 전부 `Running` 으로 보고 healthy 가
-# 되기를 기다리다 `dependency failed to start` 로 죽는다 — **자력으로 복구되는 경로가
-# 없다.** 실제로 8/30 12:40 이후 배포 13회가 ai-service 하나 때문에 연속 실패했고,
-# 그 사이 ai-service 커밋은 0건이었다.
+# 아래 `--force-recreate` 가 어차피 전부 새로 만들지만, 그러면 **왜 상했는지가 같이
+# 사라진다.** 상한 컨테이너의 마지막 로그가 다음 사람이 가진 유일한 단서라 여기서 찍는다.
 #
-# `--force-recreate` 로 매번 전부 새로 만들지 않는 이유는 그 반대쪽이 더 비싸서다 —
-# 멀쩡한 서비스까지 내렸다 올리면 배포마다 불필요한 다운타임이 생긴다. 상한 것만 건다.
-#
-# 볼륨은 안 지운다(`docker rm` 은 named volume 을 건드리지 않는다) — certbot 인증서가
-# 거기 있고, 지우면 rate limit 때문에 정작 필요할 때 재발급을 못 받는다.
 # ❗**이 compose 프로젝트 것만 본다.** `docker ps --filter health=unhealthy` 로 전역을 훑으면
-# 박스에 우리 것 아닌 컨테이너가 있을 때 그것까지 지운다. `compose ps -aq` 로 대상을 먼저
-# 좁히고 상태는 `docker inspect` 로 읽는다 — `compose ps --format` 의 템플릿 지원은 버전을
-# 타는데 `inspect --format` 은 안 탄다.
+# 박스에 우리 것 아닌 컨테이너까지 딸려 나온다. `compose ps -aq` 로 대상을 먼저 좁히고
+# 상태는 `docker inspect` 로 읽는다 — `compose ps --format` 의 템플릿 지원은 버전을 타는데
+# `inspect --format` 은 안 탄다.
 stuck=""
 for cid in $(docker compose ps -aq 2>/dev/null); do
   info=$(docker inspect --format \
@@ -256,15 +251,11 @@ for cid in $(docker compose ps -aq 2>/dev/null); do
   fi
 done
 if [ -n "$stuck" ]; then
-  echo "비정상 컨테이너를 걷어낸다 — compose 가 새로 만든다 (#240 ③):"
-  printf '  %s\n' $stuck
-  # 지우기 전에 로그를 남긴다. 여기서 안 남기면 재생성과 함께 **원인이 사라진다.**
+  echo "::warning::비정상 컨테이너가 있다 — 아래 로그를 남기고 재생성한다 (#240): $stuck"
   for c in $stuck; do
     echo "── $c 마지막 로그 40줄 ──"
     docker logs --tail 40 "$c" 2>&1 | sed 's/^/    /' || true
   done
-  # shellcheck disable=SC2086
-  docker rm -f $stuck >/dev/null
 fi
 
 echo "compose 기동"
@@ -272,8 +263,33 @@ echo "compose 기동"
 # `unhealthy` 한 줄뿐이라 매번 SSM 으로 들어가야 한다(이슈 #240 ④).
 # ❗`if ! docker compose …; then rc=$?` 로 쓰면 안 된다 — `!` 가 뒤집은 뒤라 `$?` 가 **0** 이고
 # 그대로 `exit 0` 이 되어 **실패가 성공으로 보고된다.** 상태를 먼저 받는다.
+#
+# ── ❗`--force-recreate` 가 이 이슈의 본체다 (이슈 #240) ──────────────────────
+#
+# 배포는 `rm -rf /opt/sphinx && mv $NEW /opt/sphinx` 로 **트리를 통째로 갈아끼운다**
+# (deploy.yml). 그 순간 돌고 있던 컨테이너의 bind mount 는 **지워진 inode 를 계속 가리킨다** —
+# `./data:/data:ro` 가 컨테이너 안에서 **빈 디렉토리**가 된다. 실측:
+#
+#   호스트: rm -rf tree && mv new tree   → tree/data/file.txt 있음
+#   컨테이너 안 /data                     → []   (빈 디렉토리)
+#
+# compose 는 이미지·설정이 안 바뀐 컨테이너를 재생성하지 않으므로, **그 서비스를 안
+# 건드리는 배포는 마운트가 끊긴 컨테이너를 그대로 둔다.** 그리고 이 상태는 조용하다:
+#
+#   1. 앱은 계속 돈다 — `misconception.library()` 가 `@lru_cache` 라 메모리에 남아 있다
+#   2. `/healthz` 만 죽는다 — `library_version()` 은 캐시가 없어 매번 디스크를 다시 읽는다
+#   3. healthcheck 가 뒤집히는 데 ~50초(interval 10s × retries 5)가 걸려서
+#      **배포는 이미 "성공"으로 끝난 뒤에** 컨테이너가 unhealthy 가 된다
+#   4. 다음 배포가 그걸 보고 `dependency failed to start` 로 죽는다. 이미지가 안 바뀌는 한
+#      영원히 — 8/31 배포 13회가 이것이었다. 8/28 #228 이 ai-service 를 고쳐 이미지가
+#      바뀌자 그때서야 재생성되며 저절로 나았다
+#
+# 그래서 **트리를 갈아끼운 배포는 컨테이너를 다시 만들어야 한다.** 처음에는 다운타임을
+# 아끼려고 상한 것만 골라 지웠는데, 그 판단은 틀렸다 — 방금 끊긴 컨테이너는 아직
+# `healthy` 로 보이므로(3번) 고르는 방식으로는 **정작 이번에 끊긴 것을 못 잡는다.**
+# 재생성 비용은 alpha 에서 수십 초고, 대가는 마운트가 끊긴 채 초록으로 도는 것이다.
 rc=0
-docker compose up -d --build || rc=$?
+docker compose up -d --build --force-recreate || rc=$?
 if [ "$rc" -ne 0 ]; then
   echo "::error::compose 기동 실패 — 아래 상태·로그를 본다 (이슈 #240)" >&2
   echo "── docker compose ps ──"
