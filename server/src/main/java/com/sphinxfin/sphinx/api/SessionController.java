@@ -314,9 +314,15 @@ public class SessionController {
      * <p>금액은 화면 슬라이더가 정한다. 서버 기본값을 두지 않는 이유는 계약이 적어 뒀다 —
      * 기본값이 있으면 프론트 버그가 조용히 그럴듯한 숫자로 덮인다.
      */
+    @PreAuthorize("@accessGuard.can('session:simulate', #sid)")
     @PostMapping("/{sid}/simulate")
     public ApiResponse<SimulationScenarios.SimulationView> simulate(
             @PathVariable String sid, @Valid @RequestBody SimulateRequest body) {
+        // 없는 세션이면 404. 시뮬레이션 자체는 (금액, 조건, 지수 스냅샷)의 순수 함수라
+        // 세션을 안 읽어도 답이 나오지만(P2), 그러면 없는 세션에 200 이 나가고
+        // AuditInterceptor 가 **그 세션에 대한 감사 항목을 만든다** — 세션 기록과 대응하지
+        // 않는 로그가 체인에 남는다(#214 · #222). 다른 세션 하위 경로와 같은 규약이다.
+        sessionService.get(sid);
         return ApiResponse.ok(simulationScenarios.view(body.amount()));
     }
 

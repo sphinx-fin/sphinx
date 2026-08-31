@@ -208,15 +208,12 @@ class AccessControlWiringTest {
         // aggregate:indicator:read 는 뺐다 — GET /dashboard/leading-indicators 가 붙었다
         // (이슈 #178). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         //
-        // session:simulate 도 product:manage 와 같은 자리다 — 엔드포인트는 **이미 있다**
-        // (POST /sessions/{sid}/simulate). 정책이 없어서 어노테이션이 못 붙어 있던 것이고,
-        // 그 정책이 방금 생겼다(이슈 #214). 부착은 강희진 몫이라 이 PR 이 하지 않는다.
-        // **부착되면 이 줄을 지운다** — 그때 아래 unannotatedEndpointsAreEnumerated 의
-        // hasSize(5) 도 4 가 되고 "simulate" 줄이 빠진다. 두 곳이 같이 움직인다.
+        // session:simulate 도 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214 · #222).
+        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
                 "admin:role:assign",
-                "product:manage", "session:simulate");
+                "product:manage");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
                         + "'접근이 없었다'로 읽힌다. 기능이 아직 없으면 예외 목록에 넣고 이유를 적어라")
@@ -236,9 +233,8 @@ class AccessControlWiringTest {
         assertThat(unannotated)
                 .as("action 미부착 엔드포인트가 바뀌었다. 정책이 생겼으면 붙이고, "
                         + "새로 만든 엔드포인트면 action부터 정하라")
-                .hasSize(5);
+                .hasSize(4);
         assertThat(String.join(" | ", unannotated))
-                .contains("/products")        // 상품 목록·업로드·추출·조회 4종
-                .contains("simulate");        // 손실 시뮬레이터
+                .contains("/products");       // 상품 목록·업로드·추출·조회 4종
     }
 }
