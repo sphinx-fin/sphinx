@@ -55,7 +55,7 @@ if [ "${SPHINX_DEMO_OPEN:-0}" = "1" ]; then
     seller="${SPHINX_DEMO_ACTOR:-seller-01}"
     compl="${SPHINX_DEMO_ACTOR_AGGREGATE:-compl-01}"
     mgr="${SPHINX_DEMO_ACTOR_APPROVER:-mgr-01}"
-    admin="${SPHINX_DEMO_ACTOR_ADMIN:-admin-01}"
+    admin="${SPHINX_DEMO_ACTOR_MANAGE:-admin-01}"
 
     # base64 는 76자마다 줄바꿈을 넣는다. 헤더 값에 개행이 들어가면 설정 파싱이 죽거나
     # 헤더가 잘리므로 지운다(busybox base64 는 `-w 0` 을 모른다).
