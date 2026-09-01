@@ -55,6 +55,25 @@ class LlmClient:
             )
         return self._client
 
+    def _extra_body(self, caller: dict[str, Any] | None) -> dict[str, Any]:
+        """설정의 사고 예산을 얹는다. **호출자가 준 값이 이긴다.**
+
+        `reasoning_effort` 를 안 박으면 gpt-5-mini 가 호출당 사고토큰 1,024개를 태운다
+        (실측 20.3초). `minimal` 이면 0개 · 2.4초이고 등급은 같았다. 사고토큰은 출력
+        요금이라 이 한 줄이 요금을 두 배 가른다.
+
+        여기서 얹는 이유는 **한 곳이기 때문**이다. 라우트마다 넣으면 새 라우트가 생길 때
+        조용히 빠지고, 그 누락은 요금과 지연으로만 드러난다 — 테스트로는 안 보인다.
+
+        빈 문자열이면 아무것도 안 보낸다. 이 파라미터를 모르는 프로바이더로 옮길 때
+        **코드가 아니라 설정으로** 끄기 위한 문이다(`LLM_REASONING_EFFORT=`).
+        """
+        merged: dict[str, Any] = dict(caller or {})
+        effort = self._cfg.llm_reasoning_effort
+        if effort and "reasoning_effort" not in merged:
+            merged["reasoning_effort"] = effort
+        return merged
+
     # ── 공개 API ──────────────────────────────────────────────────────────────
     def send(
         self,
@@ -93,10 +112,10 @@ class LlmClient:
         }
         if response_format:
             kwargs["response_format"] = response_format
-        if extra_body:
-            # Gemini 고유 옵션(thinking_level, safety settings)은 호환 레이어에서
-            # extra_body로만 전달된다. 정확한 중첩 형태는 키 확보 후 실측 확인 필요.
-            kwargs["extra_body"] = extra_body
+        body = self._extra_body(extra_body)
+        if body:
+            # 프로바이더 고유 옵션은 호환 레이어에서 extra_body 로만 전달된다.
+            kwargs["extra_body"] = body
 
         try:
             resp = self._openai().chat.completions.create(**kwargs)
