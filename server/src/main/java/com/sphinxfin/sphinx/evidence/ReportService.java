@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.TreeMap;
 
@@ -182,16 +183,25 @@ public class ReportService {
      * 문서는 우리가 교부한 것이 아니다 — 조용히 다른 지면을 내주면 종이와 기록이 갈리고,
      * 그 사실은 분쟁 시점까지 드러나지 않는다. 재현이 안 되는 쪽이 낫다.
      *
-     * @throws IllegalStateException 아직 발행하지 않았거나, 재현한 내용이 발행 기록과 다르다
+     * <p>❗<b>실패 둘을 다른 타입으로 낸다.</b> 성격이 정반대라 같은 타입이면 엔드포인트가
+     * 둘을 가를 수 없다 — 자세한 근거는 {@link ReportNotReproducibleException}.
+     *
+     * <pre>
+     *   미발행     NoSuchElementException          정상 상태 → 404 (GET /report 와 같은 규약)
+     *   재현 실패  ReportNotReproducibleException  무결성 실패 → 500. 404 로 접히면 안 된다
+     * </pre>
+     *
+     * @throws java.util.NoSuchElementException 아직 발행하지 않았다 — 오류가 아니라 상태다
+     * @throws ReportNotReproducibleException  재현한 내용이 발행 기록과 다르다
      */
     public byte[] pdf(String sessionId) {
-        Issued issued = latestIssued(sessionId).orElseThrow(() -> new IllegalStateException(
+        Issued issued = latestIssued(sessionId).orElseThrow(() -> new NoSuchElementException(
                 "발행된 리포트가 없다: " + sessionId + " — POST /sessions/{sid}/report 가 먼저다"));
 
         Map<String, Object> asIssued = render(sessionId, issued.seq());
         String hash = contentHash(asIssued);
         if (!hash.equals(issued.report().contentHash())) {
-            throw new IllegalStateException(
+            throw new ReportNotReproducibleException(
                     "발행 시점 내용을 재현하지 못했다: " + sessionId
                             + " 기록=" + issued.report().contentHash() + " 재현=" + hash
                             + " — 체인이 상했거나 조립 규칙이 바뀌었다");
