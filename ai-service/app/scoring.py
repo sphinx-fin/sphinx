@@ -26,6 +26,31 @@ from . import misconception, rubrics, textsim
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
 
+class MeasurementInvalid(LlmError):
+    """모델이 낸 **측정값이 우리 검증을 통과하지 못했다** (이슈 #280).
+
+    `LlmError` 를 상속해서 라우트 동작은 그대로 둔다(502). 갈라 두는 이유는 둘이다.
+
+    **① 재시도 가능성이 다르다.** 호출 실패·설정 누락은 다시 물어도 같고, 잘림은 같은
+    입력이면 또 잘린다. 그런데 이건 **모델이 이번에 인용을 잘못한 것**이라 다시 물으면
+    통과할 수 있다 — `#229` 가 그 실물이다(`els-0010` 이 1회차 P4 위반, 2회차 U2 통과).
+
+    **② `MEASUREMENT_INVALID` 로 갈라 보낼 자리다.** 계약에 그 코드가 이미 있는데
+    지금은 `AI_SERVICE_UNAVAILABLE` 과 한 통로로 나간다 — Spring 이 *"AI 가 죽었다"* 와
+    *"측정을 못 믿는다"* 를 구분할 수 없다. 그 배선은 `#280` ③이고 이 PR 에 없다.
+    """
+
+
+#: P4·인용 검증 실패에 몇 번까지 다시 물을까 (이슈 #280 ①).
+#:
+#: `reexplain` 에는 `MAX_ATTEMPTS = 3` 이 있는데 **채점에는 재시도가 아예 없었다.** 같은
+#: 성격의 실패인데 한쪽만 복구 경로가 있었다. 2 회면 실패 확률이 `p` 에서 `p²` 가 된다.
+#:
+#: ❗**이것이 `#280` 을 닫지 않는다.** `p²` 도 0 이 아니고, 무엇보다 게이트가 분모를
+#: 모르는 문제(`#280` ②)는 이것과 무관하다 — 12항목만 채점되고 초록이 나오는 경로는
+#: 재시도 횟수와 상관없이 열려 있다.
+MAX_SCORING_ATTEMPTS = 2
+
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
 PROMPT_VERSION = "F-SCR-001_v2"
 
@@ -133,22 +158,43 @@ def score(
     """고객 발화 → Judgment(측정값)."""
     rubric = rubrics.get(item_id)
     matched = misconception.match(answer_text, product_type)
+    client_ = llm or default_client()
+    prompt = build_prompt(rubric, risk_item, question, answer_text)
 
-    judgment = (llm or default_client()).complete_json(
-        prompt=build_prompt(rubric, risk_item, question, answer_text),
-        model_cls=Judgment,
-        schema_name="Judgment",
-        system=load_system_prompt(),
+    last: MeasurementInvalid | None = None
+    for attempt in range(1, MAX_SCORING_ATTEMPTS + 1):
+        judgment = client_.complete_json(
+            prompt=prompt,
+            model_cls=Judgment,
+            schema_name="Judgment",
+            system=load_system_prompt(),
+        )
+        judgment = _pin_prompt_version(judgment)
+        judgment = _pin_item_id(judgment, item_id)
+        judgment = _drop_llm_misconception_type(judgment)
+        try:
+            verify_quote_is_verbatim(judgment, answer_text)
+            verify_rubric_clause_is_published(judgment, rubric)
+        except MeasurementInvalid as exc:
+            # 재판정 사실을 로그에 남긴다. 조용히 다시 물으면 폴백률·오탐률을 볼 때
+            # 한 항목이 몇 번 불렸는지 알 수 없고, 쿼터 소모도 설명이 안 된다.
+            log.warning(
+                "채점 재판정 %d/%d: item_id=%s — %s",
+                attempt, MAX_SCORING_ATTEMPTS, item_id, exc,
+            )
+            last = exc
+            continue
+        judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
+        judgment = apply_misconception_floor(judgment, matched, rubric)
+        return _pin_escalation(judgment, matched, rubric)
+
+    # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
+    # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
+    # 항목이 세션에서 사라지는 문제는 **게이트가 분모를 알게 하는 쪽**으로 풀어야 한다
+    # (`#280` ②, 강희진) — 여기서 등급을 지어내는 것으로는 안 된다.
+    raise MeasurementInvalid(
+        f"{MAX_SCORING_ATTEMPTS}회 재판정 후에도 측정이 무효다: item_id={item_id} — {last}"
     )
-
-    judgment = _pin_prompt_version(judgment)
-    judgment = _pin_item_id(judgment, item_id)
-    judgment = _drop_llm_misconception_type(judgment)
-    verify_quote_is_verbatim(judgment, answer_text)
-    verify_rubric_clause_is_published(judgment, rubric)
-    judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
-    judgment = apply_misconception_floor(judgment, matched, rubric)
-    return _pin_escalation(judgment, matched, rubric)
 
 
 def _pin_escalation(
@@ -334,7 +380,7 @@ def verify_quote_is_verbatim(judgment: Judgment, answer_text: str) -> None:
     quote = _canonical(judgment.evidence.utterance_quote)
     if quote and quote in _canonical(answer_text):
         return
-    raise LlmError(
+    raise MeasurementInvalid(
         f"근거 인용이 발화에 없음 (P4 위반): item_id={judgment.item_id} "
         f"quote={judgment.evidence.utterance_quote!r}"
     )
@@ -360,7 +406,7 @@ def verify_rubric_clause_is_published(judgment: Judgment, rubric: rubrics.Rubric
     if not _CLAUSE_JOINERS.sub("", residual):
         return
 
-    raise LlmError(
+    raise MeasurementInvalid(
         f"루브릭 밖의 조항을 인용했다 (P4 위반): item_id={judgment.item_id} "
         f"clause={judgment.evidence.rubric_clause!r}"
     )
