@@ -6,6 +6,7 @@ API 키 없이 돈다.
 """
 from __future__ import annotations
 
+import json
 import unicodedata
 from typing import Any
 
@@ -375,3 +376,92 @@ def test_session_devset_has_a_consistent_control():
     clean = [case for _, spec in _session_specs() for case in spec["cases"]
              if case["expected_status"] == "evaluated" and not case["expected_mismatch"]]
     assert clean, "모순 없음이 정답인 케이스가 없다"
+
+
+# ── LLM 원문 검증 경로 (이슈 #253) ────────────────────────────────────────────
+class RawLlm(LlmClient):
+    """`send()` 만 갈아끼운다 — **실제 `complete_json()` 검증을 태우기 위해서다.**
+
+    기존 `FakeLlm` 은 `complete_json()` 자체를 대체해 이미 만들어진 객체를 돌려준다. 그래서
+    *"LLM 원문이 검증을 통과하는가"* 를 한 번도 묻지 않았고, `#253` 결함이 안 보였다 —
+    헬퍼(`_llm_result`)가 `_finalize()` 와 같은 계산으로 `confidence` 를 맞춰 줬기 때문이다.
+    **픽스처가 결함을 대신 고쳐 주고 있었다.**
+    """
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        self.calls: list[dict[str, Any]] = []
+
+    def send(self, **kwargs: Any) -> str:  # type: ignore[override]
+        self.calls.append(kwargs)
+        return self.raw
+
+
+#: LLM 이 실제로 내는 모양 — `confidence` 가 최고 모순 확신도와 다르다.
+#: `gpt-5-mini` 실측에서 0.86 vs 0.9 로 6/6 재현됐고, `gemini-3.5-flash-lite` 가 우연히
+#: 맞춰 주던 것뿐이다(프롬프트는 그 일치를 요구하지 않는다 — 요구할 이유도 없다).
+_INCONSISTENT_RAW = json.dumps({
+    "contradictions": [{
+        "axis": "principal_preservation",
+        "direction": "survey_overstates_tolerance",
+        "survey_ref": {"question_id": "SUIT-PRINCIPAL-LOSS",
+                       "recorded_answer": "손실이 나더라도 감수할 수 있다"},
+        "utterance_quote": "원금은 절대 손해 보면 안 됩니다",
+        "reason": "설문 기재와 반대되는 진술", "confidence": 0.9,
+    }],
+    # 초안이 안 받는 필드들 — 모델은 이걸 계속 낸다. `extra="forbid"` 라 남아 있으면 터진다
+    "session_id": "from-llm", "status": "evaluated", "mismatch": True,
+    "confidence": 0.86, "reason": "LLM 사유",
+}, ensure_ascii=False)
+
+
+def test_llm_confidence_mismatch_does_not_kill_the_request():
+    """★ LLM 이 `confidence` 를 최고값과 다르게 내도 판정이 나가야 한다 (이슈 #253).
+
+    세션 단위 불변식 셋(`mismatch↔contradictions`·`insufficient_input`·`confidence==최고값`)은
+    **`_finalize()` 가 우리 손으로 계산하는 값**이다. 모델이 맞출 이유가 없는데, 계약 타입으로
+    직접 받으면 그 불변식이 **원문 검증에서 터져** `LlmError` → 502 가 됐다. 게이트 R-02 가
+    모순 판정 없이 지나간다 — 기획 7-2 데모 ④(적색 3건 중 모순)가 안 뜬다.
+
+    `_drop_llm_misconception_type`·`_pin_item_id`·`_pin_axis` 는 후처리에 도달하는데
+    이것만 못 했다. 초안 층(`MismatchDraft`)이 그 순서를 바로잡는다.
+    """
+    llm = RawLlm(_INCONSISTENT_RAW)
+    result = mismatch.detect("s-1", SURVEY, UTTERANCES, survey_schema_version="v1", llm=llm)
+
+    assert result.status == "evaluated"
+    assert result.mismatch is True
+    assert result.confidence == 0.9, "우리가 재계산한 최고값이어야 한다"
+    assert llm.calls[0]["response_format"]["json_schema"]["name"] == "MismatchDraft", (
+        "계약 타입으로 받으면 원문 검증에서 다시 터진다"
+    )
+
+
+def test_draft_drops_the_session_level_fields_the_model_still_sends():
+    """초안이 모델의 잉여 필드를 흘려보낸다 — `Strict(extra='forbid')` 와 부딪히지 않는다.
+
+    프롬프트는 여전히 세션 단위 필드를 내라고 하지 않지만 모델은 낸다(위 원문이 실측이다).
+    초안이 `extra='forbid'` 인데 그것들을 받지 않으면, 이번엔 **잉여 필드로 터진다** —
+    고친 자리에서 같은 실패가 다른 이유로 반복된다.
+    """
+    from app.schemas import MismatchDraft
+
+    draft = MismatchDraft.model_validate(json.loads(_INCONSISTENT_RAW))
+    assert len(draft.contradictions) == 1
+    assert draft.contradictions[0].confidence == 0.9
+
+
+def test_contract_type_still_enforces_the_invariants():
+    """출력 계약은 그대로다 — 초안을 만든 것이 불변식을 없앤 것이 아니다.
+
+    `_finalize()` 가 만드는 객체는 여전히 이 검증을 통과해야 한다. 여기가 풀리면
+    *"근거 없는 mismatch"* 나 *"판정 못 했는데 적합"* 이 계약을 통과한다(P4).
+    """
+    with pytest.raises(ValueError, match="최고 모순 확신도"):
+        SuitabilityMismatch(
+            session_id="s", status="evaluated", mismatch=True, confidence=0.86,
+            contradictions=[_contradiction(confidence=0.9)], reason="사유",
+        )
+    with pytest.raises(ValueError, match="P4 위반"):
+        SuitabilityMismatch(session_id="s", status="evaluated", mismatch=True,
+                            confidence=0.0, contradictions=[], reason="사유")
