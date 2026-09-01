@@ -147,7 +147,37 @@ def score(
     verify_quote_is_verbatim(judgment, answer_text)
     verify_rubric_clause_is_published(judgment, rubric)
     judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
-    return apply_misconception_floor(judgment, matched, rubric)
+    judgment = apply_misconception_floor(judgment, matched, rubric)
+    return _pin_escalation(judgment, matched, rubric)
+
+
+def _pin_escalation(
+    judgment: Judgment, matched: MisconceptionResponse, rubric: rubrics.Rubric
+) -> Judgment:
+    """상신 신호를 싣는다 — **모델에게 묻지 않는다** (이슈 #160, 결정 10.47).
+
+    `escalation_signal()` 이 라이브러리의 `escalate: compliance` 에서 계산한 값을 그대로
+    옮긴다. `_pin_item_id`·`_pin_prompt_version` 과 같은 층이다.
+
+    ## 왜 `apply_misconception_floor` 뒤인가
+
+    순서가 중요하지 않아 보이지만 하나 있다 — **floor 가 등급을 바꿔도 신호는 안 바뀐다.**
+    두 값이 같은 입력(`matched`)에서 나오는데 **거르는 기준이 다르다.**
+
+        등급 상향   rubric.related_misconceptions 로 거른다  (이 항목의 오해만)
+        상신 신호   거르지 않는다                            (판매자 행위는 항목 무관)
+
+    `#160` 의 결함이 정확히 그 필터가 신호까지 삼킨 것이었다. 뒤에 두면 floor 를 고치는
+    사람이 신호를 같이 건드리지 않는다.
+
+    ## 판매자에게 안 나간다
+
+    계약 `description` 이 *"판매자 응답(JudgmentView)에 넣지 않는다"* 를 적었고, 서버가
+    `JudgmentView.of()` 허용목록(`JudgmentViewFieldsTest`)과 어휘 대조
+    (`UnfairSignalNotExposedTest`)로 두 겹 잠갔다. 어떤 발화가 탐지되는지 알면 문면만 바꿔
+    같은 영업을 한다(기획 7-4 역이용 방지).
+    """
+    return judgment.model_copy(update={"escalate": escalation_signal(matched, rubric)})
 
 
 # ── 프롬프트 ───────────────────────────────────────────────────────────────────
@@ -347,6 +377,20 @@ def apply_misconception_floor(
 
     단, **루브릭이 관련 유형으로 선언한 오해만** 이 항목의 판정을 바꾼다.
     다른 항목의 오해가 이 항목 등급을 끌어내리면 안 된다.
+
+    ## `reason` 에 유형ID 를 적지 않는다 (이슈 #160 ②)
+
+    상향 사실을 기록에 남기는 것은 맞다 — 조용히 등급만 바뀌면 감사 시점에 왜 U4 였는지
+    설명할 수 없다. 문제는 **어디에 적느냐**였다.
+
+    `reason` 은 `JudgmentView` 가 판매자 화면에 그대로 싣는 5개 필드 중 하나다. 유형ID 를
+    거기 넣으면 `escalate: compliance` 유형이 걸렸을 때 **`#147`·`#159`·`#145` 가 막아 둔
+    비노출 조치를 문자열로 우회한다** — 판매자가 `M08-TYING` 을 읽는다. 기획서 7-4 가
+    불공정영업 신호를 판매자에게 보이지 않기로 한 그 지점이다.
+
+    유형ID 는 이미 구조화된 필드(`misconception_type`)에 있고 **그 필드는 화면 경계에서
+    걸러진다.** 그러니 문면에는 상향이 있었다는 사실과 그 강도·근거 등급만 남긴다 —
+    감사에 필요한 것은 다 남고, 화면으로 새는 것은 없다.
     """
     relevant = [m for m in matched.matches if m.type_id in rubric.related_misconceptions]
     if not relevant:
@@ -357,7 +401,7 @@ def apply_misconception_floor(
     if judgment.grade is not Grade.U4:
         update["grade"] = Grade.U4
         update["reason"] = (
-            f"{judgment.reason} (오해 라이브러리 {top.type_id} 매칭 "
+            f"{judgment.reason} (오해 라이브러리 매칭 "
             f"[{top.stage} {top.score}, 근거 {_source_tier(top.type_id)}] → U4 상향)"
         )
     return judgment.model_copy(update=update)
