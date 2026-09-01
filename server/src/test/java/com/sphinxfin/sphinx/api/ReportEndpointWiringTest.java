@@ -10,8 +10,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -131,17 +134,60 @@ class ReportEndpointWiringTest {
     }
 
     @Test
-    @DisplayName("previewUrl·downloadUrl 은 키가 있고 값이 null 이다 — 생략과 다르다")
-    void pdfUrlsAreNullNotAbsent() throws Exception {
+    @DisplayName("❗previewUrl·downloadUrl 이 이 서버의 실제 경로다 — 키 존재만 재면 오타도 초록이다")
+    void pdfUrlsPointAtThisServer() throws Exception {
         String sid = createSession();
 
-        // 계약이 nullable 로 둔 이유는 값을 채우면 "이 URL 로 가면 문서가 있다" 를 계약이
-        // 보장하는데 404 가 나기 때문이다. 반대로 키를 빼면 화면이 "없음" 과 "필드가 생기기
-        // 전 응답" 을 구별할 수 없다. 그래서 **키는 있고 값이 null** 이어야 한다.
-        mvc.perform(post("/sessions/" + sid + "/report"))
-                .andExpect(jsonPath("$.data.previewUrl").doesNotExist())
-                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.hasKey("previewUrl")))
-                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.hasKey("downloadUrl")));
+        // 예전에는 **키는 있고 값이 null** 을 쟀다. 계약이 nullable 로 둔 이유가 값을 채우면
+        // "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 나서였다(#233). PDF 가 붙어서
+        // (PR #244) 그 보장이 참이 됐으므로 단정도 그쪽으로 옮긴다.
+        //
+        // 키 존재나 문자열 모양만 재면 **오타 난 경로도 통과**한다 — 그게 원래 막으려던
+        // 상태다. 그래서 값을 받아 그대로 GET 해 본다.
+        String issued = mvc.perform(post("/sessions/" + sid + "/report"))
+                .andExpect(jsonPath("$.data.previewUrl").isNotEmpty())
+                .andExpect(jsonPath("$.data.downloadUrl").isNotEmpty())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        mvc.perform(get((String) JsonPath.read(issued, "$.data.previewUrl")))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.startsWith("inline")));
+
+        mvc.perform(get((String) JsonPath.read(issued, "$.data.downloadUrl")))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition",
+                        org.hamcrest.Matchers.startsWith("attachment")));
+    }
+
+    @Test
+    @DisplayName("❗미리보기와 내려받기가 같은 바이트다 — 본 문서와 받은 문서가 다르면 안 된다")
+    void previewAndDownloadAreTheSameDocument() throws Exception {
+        String sid = createSession();
+        mvc.perform(post("/sessions/" + sid + "/report"));
+
+        byte[] preview = mvc.perform(get("/sessions/" + sid + "/report/preview"))
+                .andReturn().getResponse().getContentAsByteArray();
+        byte[] download = mvc.perform(get("/sessions/" + sid + "/report/download"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(download)
+                .as("두 경로를 가르는 것은 Content-Disposition 하나여야 한다")
+                .isEqualTo(preview);
+        assertThat(new String(preview, 0, 5, StandardCharsets.US_ASCII)).isEqualTo("%PDF-");
+    }
+
+    @Test
+    @DisplayName("❗발행 안 한 세션의 PDF 는 404 다 — GET /report 와 같은 코드다")
+    void pdfBeforeIssueIsNotFound() throws Exception {
+        String sid = createSession();
+
+        // 세션은 있는데 발행이 없다. GET /report 가 이 경우와 "세션이 없다" 를 한 코드로
+        // 내는 이유(범위 밖 세션의 존재 여부를 안 알려준다)가 여기도 그대로 적용된다.
+        mvc.perform(get("/sessions/" + sid + "/report/preview"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/sessions/" + sid + "/report/download"))
+                .andExpect(status().isNotFound());
     }
 
     @Test
