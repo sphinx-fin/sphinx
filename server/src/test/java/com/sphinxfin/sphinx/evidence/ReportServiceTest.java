@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -468,8 +469,11 @@ class ReportServiceTest {
         void nothingToRenderBeforeIssuing() {
             seedSession();
 
+            // NoSuchElementException 인 것이 요지다 — GlobalExceptionHandler 가 404 로 내보내는
+            // 유일한 타입이고, SessionController.report() 가 "아직 발행된 리포트가 없다" 에
+            // 쓰는 것과 같다. 미발행은 오류가 아니라 상태라 두 경로가 같은 코드를 내야 한다.
             assertThatThrownBy(() -> reports.pdf(SID))
-                    .isInstanceOf(IllegalStateException.class)
+                    .isInstanceOf(NoSuchElementException.class)
                     .hasMessageContaining("발행된 리포트가 없다");
         }
 
@@ -525,8 +529,33 @@ class ReportServiceTest {
 
             assertThatThrownBy(() -> reports.pdf(SID))
                     .as("그려 주면 고객이 받은 종이와 불변 기록이 갈리고, 그 사실은 분쟁 시점까지 안 드러난다")
-                    .isInstanceOf(IllegalStateException.class)
+                    .isInstanceOf(ReportNotReproducibleException.class)
                     .hasMessageContaining("재현하지 못했다");
+        }
+
+        @Test
+        @DisplayName("❗재현 실패는 **미발행과 다른 타입**이다 — 404 로 접히면 손상이 사라진다")
+        void aMismatchIsNeverMistakenForNotIssuedYet() {
+            seedSession();
+
+            Map<String, Object> tampered = new java.util.LinkedHashMap<>();
+            tampered.put("type", "report");
+            tampered.put("sessionId", SID);
+            tampered.put("at", T0.plusSeconds(100));
+            tampered.put("contentHash", "0".repeat(64));
+            store.append(StoredEvidenceRecorder.streamOf(SID), tampered);
+            em.flush();
+            em.clear();
+
+            // ❗이 단정이 이 클래스에서 제일 중요하다. GlobalExceptionHandler 는
+            // NoSuchElementException 만 404 로 내보내는데, 재현 실패가 그 타입이 되는 순간
+            // **체인 손상이 "아직 발행 안 했습니다" 로 화면에 뜬다.** 그러면 종이와 불변
+            // 기록이 갈렸다는 사실이 어디에도 안 남고, 다음 행동은 "발행하기" 가 된다.
+            //
+            // 둘을 같은 타입으로 되돌리는 변경은 여기서 걸린다 — 실제로 원래 둘 다
+            // IllegalStateException 이었고, 그 상태로는 엔드포인트를 안전하게 붙일 수 없었다.
+            assertThatThrownBy(() -> reports.pdf(SID))
+                    .isNotInstanceOf(NoSuchElementException.class);
         }
 
         @Test
