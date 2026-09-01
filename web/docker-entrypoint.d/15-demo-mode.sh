@@ -23,8 +23,15 @@
 # 밖 화면이 403 이 되므로, **경로에 맞는 데모 계정**을 넣는다.
 #
 #   /api/dashboard/…                        COMPL  집계는 COMPL(org)·MGR(branch) 뿐이다
+#   /api/signals/…                          COMPL  불공정영업 신호는 COMPL 뿐이다 (이슈 #263)
 #   /api/sessions/{sid}/override/approve    MGR    요청자 ≠ 승인자 (ADR-002)
+#   /api/products/documents · …/extract     ADMIN  등록·추출은 판매 라인에서 뗀다 (결정 10.36)
 #   그 밖의 /api/…                          SELLER 세션 생성·면담·판정·리포트·상품 조회
+#
+# ❗**이 목록은 손으로 맞추지 않는다.** `DemoModeAccountMapTest` 가 rbac_policy.yaml 과
+# 대조한다 — 실리는 계정의 역할이 그 경로 action 의 그랜트에 없으면 빨개진다. 그 대조가
+# 없던 동안 `/api/signals`(#252)와 `/api/products/*`(#249)가 지도에 안 올라 alpha 에서만
+# 403 이었다. 서버 테스트는 셋 다 초록이었다 — 이 층이 대조 밖이었다.
 #
 # mgr-01 과 seller-01 이 **같은 지점(BR-001)** 이라 `scope: branch` 가 실제로 성립한다 —
 # 다른 지점이면 승인이 403 이다(`demo_accounts.yaml` 주석 참조).
@@ -48,6 +55,7 @@ if [ "${SPHINX_DEMO_OPEN:-0}" = "1" ]; then
     seller="${SPHINX_DEMO_ACTOR:-seller-01}"
     compl="${SPHINX_DEMO_ACTOR_AGGREGATE:-compl-01}"
     mgr="${SPHINX_DEMO_ACTOR_APPROVER:-mgr-01}"
+    admin="${SPHINX_DEMO_ACTOR_ADMIN:-admin-01}"
 
     # base64 는 76자마다 줄바꿈을 넣는다. 헤더 값에 개행이 들어가면 설정 파싱이 죽거나
     # 헤더가 잘리므로 지운다(busybox base64 는 `-w 0` 을 모른다).
@@ -69,6 +77,8 @@ map \$uri \$sphinx_api_auth {
     default                                 "Basic $(b64 "$seller")";
     ~^/api/dashboard/                       "Basic $(b64 "$compl")";
     ~^/api/sessions/[^/]+/override/approve  "Basic $(b64 "$mgr")";
+    ~^/api/signals/                         "Basic $(b64 "$compl")";
+    ~^/api/products/(documents|[^/]+/extract)$  "Basic $(b64 "$admin")";
 }
 EOF
     chmod 640 "$MODE_CONF"

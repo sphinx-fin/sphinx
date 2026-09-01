@@ -88,4 +88,11 @@ tasks.named('test') {
     inputs.file('../web/src/lib/survey.ts')
             .withPropertyName('surveySet')
             .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // 개방 모드 계정 지도도 같은 이유다. DemoModeAccountMapTest 가 이 파일을 읽어
+    // rbac_policy.yaml 과 대조하는데, 안 걸면 **지도만 고친 PR 에서 UP-TO-DATE 로 안 돈다**
+    // — 정작 갈리는 그 PR 에서 검사가 빠진다(이슈 #263).
+    inputs.file('../web/docker-entrypoint.d/15-demo-mode.sh')
+            .withPropertyName('demoModeAccountMap')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
 }
