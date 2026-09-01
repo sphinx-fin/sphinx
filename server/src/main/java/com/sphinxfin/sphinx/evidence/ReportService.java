@@ -52,7 +52,10 @@ public class ReportService {
 
     private final ImmutableStore store;
 
-    public ReportService(ImmutableStore store) {
+    private final ReportPdf pdf;
+
+    public ReportService(ImmutableStore store, ReportPdf pdf) {
+        this.pdf = pdf;
         this.store = store;
     }
 
@@ -66,11 +69,28 @@ public class ReportService {
      * 남는다(5.12). 게이트 신호의 변천과 오버라이드 승인도 각각 시간순으로 담는다.
      */
     public Map<String, Object> render(String sessionId) {
+        return render(sessionId, Long.MAX_VALUE);
+    }
+
+    /**
+     * <b>발행 시점까지만</b> 재생해서 조립한다.
+     *
+     * <p>❗발행 뒤에도 판정은 더 쌓인다(재검증·오버라이드). 그래서 지금 전체를 재생하면
+     * <b>교부된 문서와 다른 지면</b>이 나온다 — 해시도 안 맞는다. 스트림이 append-only 라
+     * 발행 시점 내용은 그 seq 까지의 앞부분으로 <b>정확히 재현된다</b>(ADR-003).
+     *
+     * <p>ADR-004 가 발행 기록을 안 지우는 이유가 이것과 한 쌍이다 — 기록이 남아 있고 재현이
+     * 되어야 <i>"교부 시점에 무엇이 적혀 있었는가"</i>에 답할 수 있다.
+     */
+    Map<String, Object> render(String sessionId, long uptoSeq) {
         Map<String, List<Map<String, Object>>> byItem = new TreeMap<>();
         List<Map<String, Object>> gateHistory = new ArrayList<>();
         List<Map<String, Object>> overrides = new ArrayList<>();
 
         for (HashChain.ChainEntry entry : store.replay(StoredEvidenceRecorder.streamOf(sessionId))) {
+            if (entry.seq() > uptoSeq) {
+                break;   // 발행 뒤에 쌓인 것은 그 문서에 없었다
+            }
             Map<String, Object> payload = asMap(entry.payload());
             switch (String.valueOf(payload.get("type"))) {
                 case "judgment" -> {
@@ -136,16 +156,47 @@ public class ReportService {
 
     /** 마지막 발행 기록. 없으면 비어 있다 — 아직 리포트를 낸 적이 없는 세션이다. */
     public Optional<Report> latest(String sessionId) {
-        Report found = null;
+        return latestIssued(sessionId).map(Issued::report);
+    }
+
+    /** 발행 기록 + 그 항목의 seq. seq 는 발행 시점 재현에 쓰므로 밖으로 내지 않는다. */
+    private record Issued(Report report, long seq) {}
+
+    private Optional<Issued> latestIssued(String sessionId) {
+        Issued found = null;
         for (HashChain.ChainEntry entry : store.replay(StoredEvidenceRecorder.streamOf(sessionId))) {
             Map<String, Object> payload = asMap(entry.payload());
             if (REPORT_TYPE.equals(payload.get("type"))) {
-                found = new Report(reportId(sessionId, entry.seq()), sessionId,
+                found = new Issued(new Report(reportId(sessionId, entry.seq()), sessionId,
                         Instant.parse(String.valueOf(payload.get("at"))),
-                        String.valueOf(payload.get("contentHash")));
+                        String.valueOf(payload.get("contentHash"))), entry.seq());
             }
         }
         return Optional.ofNullable(found);
+    }
+
+    /**
+     * 발행된 리포트의 PDF. <b>발행 시점 지면을 다시 그린다</b>(F-GTE-004 2번).
+     *
+     * <p>❗<b>재현한 내용의 해시가 발행 기록의 해시와 같은지 먼저 확인한다.</b> 다르면 그
+     * 문서는 우리가 교부한 것이 아니다 — 조용히 다른 지면을 내주면 종이와 기록이 갈리고,
+     * 그 사실은 분쟁 시점까지 드러나지 않는다. 재현이 안 되는 쪽이 낫다.
+     *
+     * @throws IllegalStateException 아직 발행하지 않았거나, 재현한 내용이 발행 기록과 다르다
+     */
+    public byte[] pdf(String sessionId) {
+        Issued issued = latestIssued(sessionId).orElseThrow(() -> new IllegalStateException(
+                "발행된 리포트가 없다: " + sessionId + " — POST /sessions/{sid}/report 가 먼저다"));
+
+        Map<String, Object> asIssued = render(sessionId, issued.seq());
+        String hash = contentHash(asIssued);
+        if (!hash.equals(issued.report().contentHash())) {
+            throw new IllegalStateException(
+                    "발행 시점 내용을 재현하지 못했다: " + sessionId
+                            + " 기록=" + issued.report().contentHash() + " 재현=" + hash
+                            + " — 체인이 상했거나 조립 규칙이 바뀌었다");
+        }
+        return pdf.render(asIssued, hash, issued.report().generatedAt());
     }
 
     /** 발행 기록의 위치에서 유도한다 — 난수를 쓰면 같은 발행이 재현되지 않는다. */
