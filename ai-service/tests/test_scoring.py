@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app import rubrics, scoring
@@ -449,3 +451,41 @@ def test_prompt_version_matches_the_prompt_file_actually_used():
     """상수와 파일이 어긋나면 레코드가 없는 프롬프트를 가리킨다."""
     assert scoring.PROMPT_PATH.name == f"{scoring.PROMPT_VERSION}.md"
     assert scoring.PROMPT_PATH.exists()
+
+
+# ── 유형ID 가 판매자 화면으로 새지 않는다 (이슈 #160 ②) ───────────────────────
+#: 유형ID 문면. 라이브러리가 `M01`~`M10` 을 쓰므로 두 자리 숫자로 잡는다.
+TYPE_ID_PATTERN = re.compile(r"M\d\d-[A-Z]")
+
+
+def test_reason_never_carries_a_misconception_type_id():
+    """★ 상향 사실은 남기되 **유형ID 는 `reason` 에 넣지 않는다.**
+
+    `reason` 은 `JudgmentView` 가 판매자에게 그대로 싣는 5개 필드 중 하나다. 유형ID 를 거기
+    넣으면 `escalate: compliance` 유형이 걸렸을 때 `#147`·`#159`·`#145` 가 막아 둔 비노출
+    조치를 **문자열로 우회한다** — 판매자가 `M08-TYING` 을 읽는다(기획서 7-4).
+
+    이 경계는 **여기서** 잠가야 한다. 서버 쪽 단정문은 `@MockBean AiServiceClient` 가
+    `reason` 을 손으로 만들어 주므로 ai-service 후처리를 통과한 문자열이 그 경계에 온 적이
+    없다(이슈 #160 이 지적한 그대로다).
+    """
+    judgment, _ = _score(make_judgment(grade=Grade.U1))
+
+    assert judgment.grade is Grade.U4, "결정론 상향이 안 일어나면 이 테스트가 아무것도 안 잰다"
+    assert judgment.misconception_type is not None, "유형은 구조화 필드에 실려야 한다"
+    assert "상향" in judgment.reason, "상향 사실은 남아야 한다 (감사)"
+    assert not TYPE_ID_PATTERN.search(judgment.reason), (
+        f"reason 에 유형ID 가 있다 — 판매자 화면으로 샌다: {judgment.reason!r}"
+    )
+
+
+def test_reason_still_records_the_strength_and_source_tier():
+    """유형ID 를 뺀 것이 근거를 없앤 것은 아니다 — 강도와 근거 등급은 남는다.
+
+    감사 시점에 필요한 것은 *"어느 유형이었나"* 가 아니라 *"왜 상향됐나"* 이고, 유형 자체는
+    `misconception_type` 에 구조화돼 있다(그 필드는 화면 경계에서 걸러진다).
+    """
+    judgment, _ = _score(make_judgment(grade=Grade.U1))
+    assert "오해 라이브러리 매칭" in judgment.reason
+    assert "pattern" in judgment.reason or "ngram" in judgment.reason
+    assert "근거" in judgment.reason

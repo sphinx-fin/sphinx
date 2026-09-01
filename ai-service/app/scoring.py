@@ -335,6 +335,20 @@ def apply_misconception_floor(
 
     단, **루브릭이 관련 유형으로 선언한 오해만** 이 항목의 판정을 바꾼다.
     다른 항목의 오해가 이 항목 등급을 끌어내리면 안 된다.
+
+    ## `reason` 에 유형ID 를 적지 않는다 (이슈 #160 ②)
+
+    상향 사실을 기록에 남기는 것은 맞다 — 조용히 등급만 바뀌면 감사 시점에 왜 U4 였는지
+    설명할 수 없다. 문제는 **어디에 적느냐**였다.
+
+    `reason` 은 `JudgmentView` 가 판매자 화면에 그대로 싣는 5개 필드 중 하나다. 유형ID 를
+    거기 넣으면 `escalate: compliance` 유형이 걸렸을 때 **`#147`·`#159`·`#145` 가 막아 둔
+    비노출 조치를 문자열로 우회한다** — 판매자가 `M08-TYING` 을 읽는다. 기획서 7-4 가
+    불공정영업 신호를 판매자에게 보이지 않기로 한 그 지점이다.
+
+    유형ID 는 이미 구조화된 필드(`misconception_type`)에 있고 **그 필드는 화면 경계에서
+    걸러진다.** 그러니 문면에는 상향이 있었다는 사실과 그 강도·근거 등급만 남긴다 —
+    감사에 필요한 것은 다 남고, 화면으로 새는 것은 없다.
     """
     relevant = [m for m in matched.matches if m.type_id in rubric.related_misconceptions]
     if not relevant:
@@ -345,7 +359,7 @@ def apply_misconception_floor(
     if judgment.grade is not Grade.U4:
         update["grade"] = Grade.U4
         update["reason"] = (
-            f"{judgment.reason} (오해 라이브러리 {top.type_id} 매칭 "
+            f"{judgment.reason} (오해 라이브러리 매칭 "
             f"[{top.stage} {top.score}, 근거 {_source_tier(top.type_id)}] → U4 상향)"
         )
     return judgment.model_copy(update=update)
