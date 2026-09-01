@@ -258,3 +258,159 @@
 .s08__floattip--below { transform: translate(-50%, 8px); }
 .s08__floattip b { display: block; font-weight: 700; }
 .s08__tip-val { display: block; margin-top: var(--space-1); color: var(--limestone-88); }
+
+/* ══ 선행지표 뷰 (F-DSH-002) ══════════════════════════════════════════════ */
+
+/* ── 뷰 전환 ──────────────────────────────────────────────────────────────
+   분절 컨트롤. 눌린 쪽만 면을 갖는다 — 둘 다 칠하면 어느 쪽이 지금인지가 색의
+   차이로만 남고, 그건 tokens.css 규칙 3(색만으로 구분하지 않는다)에 걸린다.
+   눌린 상태는 면 + 굵기 두 가지로 말한다. */
+.s08__views {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+.s08__view {
+  font: inherit;
+  font-size: calc(14px * var(--scale));
+  font-weight: 600;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.s08__view:hover:not([aria-pressed="true"]) { color: var(--text); }
+.s08__view[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: var(--shadow-1);
+}
+
+/* 축 선택 옆 안내. 필터가 사라진 자리라 "왜 없는지"를 적어 둔다. */
+.s08__axis-note {
+  align-self: end;
+  max-width: 44ch;
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.s08__axis-note b { color: var(--text); }
+
+/* ── 이상치 ───────────────────────────────────────────────────────────────
+   ❗채도 있는 색을 쓰지 않는다. 이상치는 **판정이 아니다** — 녹·황·적은 게이트
+   신호등 전용이고(tokens.css 규칙 1), 여기에 빨강을 쓰면 화면에 판정이 두 종류
+   있는 것처럼 보인다. 위계는 굵기와 왼쪽 획으로 낸다. */
+.s08__outliers {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+}
+.s08__out-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.s08__out-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: calc(14px * var(--scale));
+}
+.s08__out-key { font-weight: 700; }
+.s08__out-reason { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.s08__panel-note {
+  margin-top: var(--space-4);
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+.s08__panel-note b { color: var(--text); }
+
+/* ── 추이 표 ──────────────────────────────────────────────────────────────
+   행 하나가 계열 하나다(작은 그래프 여러 개). 계열마다 색을 주는 대신 행을 갈랐고,
+   그래서 잉크는 히트맵과 같은 한 가지다 — 판정 3색과 경쟁하지 않는다. */
+.s08__trend {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+}
+.s08__trend-table td { min-width: 3.5rem; }
+.s08__trend-table tbody th { min-width: 9rem; }
+
+/* 최근 주 — 이상치 판단의 기준이 되는 칸이다. 머리글에서만 세운다: 칸에 면이나 획을
+   더하면 그게 막대·빗금과 경쟁해서 정작 값이 안 읽힌다. */
+.s08__trend-table thead th.s08__col-latest { color: var(--text); font-weight: 700; }
+
+.s08__tcell {
+  position: relative;
+  cursor: default;
+  padding: var(--space-2) var(--space-2) !important;
+}
+
+/* 막대는 바닥에서 자란다. **기준선을 실제로 그린다** — 0 이 어디인지가 보여야 여덟 칸이
+   서로 견줘지고, 값이 없는 칸도 "바닥은 여기" 위에서 읽힌다.
+   높이 눈금은 0~100% 고정이다. 관측 최대값에 맞춰 늘리면 축이 화면마다 달라져서
+   같은 막대 높이가 다른 값을 뜻하게 된다 — 대시보드에서 제일 나쁜 종류의 거짓말이다. */
+.s08__tbar-track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: calc(46px * var(--scale));
+  border-bottom: 1px solid var(--border);
+}
+/* 막대는 칸 폭의 절반을 넘게 쓴다. 처음엔 14px 이었는데 90px 짜리 칸에서 점처럼 보여
+   추이가 아니라 흩어진 얼룩으로 읽혔다 — 마크가 얇은 것과 안 보이는 것은 다르다. */
+.s08__tbar {
+  display: block;
+  width: min(60%, calc(26px * var(--scale)));
+  min-height: 2px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: color-mix(in srgb, var(--kohl-70) 75%, var(--surface));
+}
+
+/* 값이 없는 주 — 막대 대신 바닥에 낮은 빗금 조각만 둔다.
+   ❗**데이터보다 크게 그리지 않는다.** 처음엔 칸 전체를 빗금으로 채웠는데, 그러면 값이
+   없는 주가 화면에서 제일 큰 요소가 되어 **추이보다 구멍이 먼저 읽혔다.** 빗금을 남기는
+   이유는 "빈칸이 아니라 값이 없는 것" 을 말하기 위해서지 강조하기 위해서가 아니다.
+   가려짐(표본 부족)과 판정 없음은 툴팁·스크린리더 문장이 가른다. */
+.s08__tslot {
+  display: block;
+  width: min(60%, calc(26px * var(--scale)));
+  height: calc(7px * var(--scale));
+  background: repeating-linear-gradient(
+    45deg, var(--border), var(--border) 2px, var(--surface) 2px, var(--surface) 4px);
+  border-radius: var(--radius-sm);
+}
+
+.s08__tval {
+  display: block;
+  margin-top: var(--space-1);
+  font-weight: 700;
+  font-size: calc(13px * var(--scale));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 이상치 표식 — 색이 아니라 말이다(위 주석). */
+.s08__out-flag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: calc(11px * var(--scale));
+  font-weight: 700;
+  color: var(--text-muted);
+  vertical-align: middle;
+}

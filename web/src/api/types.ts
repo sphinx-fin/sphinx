@@ -419,3 +419,59 @@ export interface HeatmapResponse {
   scope: "branch" | "org";
   cells: HeatmapCell[];
 }
+
+/**
+ * F-DSH-002 선행지표 뷰 (`GET /dashboard/leading-indicators`).
+ *
+ * **집계 축(`groupBy`)과 데이터 범위(`scope`)는 다른 개념이다** — 계약이 이름을 갈라 둔
+ * 것도 그래서다. 축은 요청이 고르고(지점·판매자·항목), 범위는 요청자 역할이 정한다
+ * (MGR=branch · COMPL=org). 화면은 둘을 같이 보여야 무엇을 보고 있는지가 드러난다.
+ */
+export type IndicatorAxis = "branch" | "seller" | "item";
+
+/**
+ * 한 구간(주)의 값.
+ *
+ * ❗**값이 없는 주도 자리를 남긴다**(`n=0` · `masked=true`). 서버가 빈 주를 빼지 않는
+ * 이유를 화면도 지켜야 한다 — 빼면 추이의 끊김이 안 보이고, 8주가 계열마다 다른 길이가
+ * 된다. 그래서 화면은 빈 칸을 **높이 0 인 막대로 그리지 않는다**: 0% 와 "그 주에 판정이
+ * 없었다" 는 다른 사실이다.
+ */
+export interface IndicatorPoint {
+  /** ISO 주(예: `2026-W32`). 목록의 **끝이 최신**이다. */
+  period: string;
+  /** 오해율 0~1. `masked` 면 null. */
+  misrate: number | null;
+  n: number;
+  /** 히트맵과 같은 규칙(n<30). */
+  masked: boolean;
+}
+
+export interface IndicatorSeries {
+  groupBy: IndicatorAxis;
+  /** 지점·항목 식별자, 또는 **판매자 비식별 대체키**(로그인 ID 가 아니다). */
+  key: string;
+  points: IndicatorPoint[];
+}
+
+/**
+ * 이상치 1건. 서버가 *직전 구간 평균 대비 상승폭*으로 판단한다 — 화면이 다시 계산하지
+ * 않는다(P1 과 같은 결: 판단은 서버, 화면은 표시).
+ */
+export interface IndicatorOutlier {
+  groupBy: IndicatorAxis;
+  key: string;
+  /** 사람이 읽는 사유(예: `직전 4구간 평균 대비 +18.0%p`). 화면은 이 문장을 그대로 낸다. */
+  reason: string;
+  /** 기계 판독용 변화량. 없을 수 있다. */
+  delta?: number | null;
+}
+
+export interface LeadingIndicatorResponse {
+  /** 히트맵과 동일 — 두 뷰 모두 워터마크를 상시 노출한다(F-DSH-003 연출 금지). */
+  synthetic: boolean;
+  /** 데이터 범위. 히트맵의 같은 이름 필드와 같은 뜻이고, 집계 축은 `groupBy` 다. */
+  scope: "branch" | "org";
+  series: IndicatorSeries[];
+  outliers: IndicatorOutlier[];
+}
