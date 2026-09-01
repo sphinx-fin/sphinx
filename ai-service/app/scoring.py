@@ -78,7 +78,19 @@ ECHO_THRESHOLD = 0.6
 #: 바꿨을 때 하드코딩 값(8)이 깨진 것이 그 필요의 실측이다.
 @lru_cache(maxsize=1)
 def min_echo_bigrams() -> int:
-    """가장 짧은 루브릭 조항보다 하나 작은 값. 하한의 유일한 제약이 상방이라 그렇다."""
+    """가장 짧은 루브릭 조항보다 하나 작은 값. 하한의 유일한 제약이 상방이라 그렇다.
+
+    ## ❗유도는 조항만 보는데 `echo_score` 는 조건 원문도 대조한다 (이슈 #128 ③)
+
+    `echo_score` 의 대조 대상은 `[condition.value_text, *required_elements]` 인데 여기서는
+    `required_elements` 만 훑는다. **조건 원문이 조항보다 짧아지면 그 원문을 그대로 옮긴
+    복창을 놓친다.**
+
+    지금은 안 뒤집힌다 — 조항 최단 6bg < 조건 원문 최단 11bg 라 조항 쪽이 항상 구속한다
+    (계약 정답 26건 실측). 그건 **현재 데이터의 사실이지 유도식의 보장이 아니고**, 계약
+    샘플이 바뀌면 조용히 깨진다. 런타임 데이터라 import 시점에 알 수 없어서
+    `test_the_floor_sits_below_every_condition_text` 가 그 전제를 대신 지킨다.
+    """
     shortest = min(
         len(textsim.bigrams(textsim.normalize(clause)))
         for rubric in rubrics.all_rubrics().values()
