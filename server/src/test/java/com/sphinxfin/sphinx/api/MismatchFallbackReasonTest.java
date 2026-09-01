@@ -79,7 +79,7 @@ class MismatchFallbackReasonTest {
     void stub() {
         RECORDED.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED"));
+                .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED", false));
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),

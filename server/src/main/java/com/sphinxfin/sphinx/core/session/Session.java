@@ -146,6 +146,22 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, String> askedQuestionsByItem = new HashMap<>();
 
+    /**
+     * 그 질문이 <b>ai-service 템플릿 폴백</b>이었던 항목 (F-INT-002 · 이슈 #234).
+     *
+     * <p>❗<b>위 맵과 나란한 구조인데 갈리지 않는다</b> — 쓰는 곳이
+     * {@link #recordAskedQuestion} 하나뿐이고 거기서 둘을 같이 쓴다. 나란한 자료구조가
+     * 위험한 것은 <b>따로 쓰는 경로가 생길 때</b>이고, 그래서 세터를 늘리지 않는다.
+     *
+     * <p>맵의 값을 {@code @Embeddable} 로 바꾸지 않은 이유는 기존 수집 테이블의 모양을
+     * 안 건드리려는 것이다 — 값 타입이 바뀌면 읽는 쪽이 전부 따라 움직인다.
+     */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "session_template_fallback", joinColumns = @JoinColumn(name = "session_id"))
+    @Column(name = "item_id")
+    @Builder.Default
+    private java.util.Set<String> templateFallbackItems = new java.util.HashSet<>();
+
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
     @Column(columnDefinition = "TEXT")
@@ -238,8 +254,20 @@ public class Session extends BaseEntity {
     }
 
     /** 고객에게 보여준 질문을 항목별로 기록(재질문 시 덮어씀 — 마지막에 보여준 것이 답의 맥락이다). */
-    public void recordAskedQuestion(String itemId, String question) {
+    public void recordAskedQuestion(String itemId, String question, boolean templateFallback) {
         askedQuestionsByItem.put(itemId, question);
+        if (templateFallback) {
+            templateFallbackItems.add(itemId);
+        } else {
+            // 재질문으로 정상 문면이 오면 흔적을 지운다 — 남겨 두면 이 항목의 판정이
+            // 영원히 폴백으로 집계된다. 기록에 남는 것은 append-only 지만 세션은 최신 상태다.
+            templateFallbackItems.remove(itemId);
+        }
+    }
+
+    /** 그 항목의 질문이 ai-service 템플릿 폴백이었나 (이슈 #234). */
+    public boolean askedQuestionWasTemplateFallback(String itemId) {
+        return templateFallbackItems.contains(itemId);
     }
 
     /** 그 항목에 실제로 보여준 질문. 없으면 null — 화면을 거치지 않고 답변이 들어온 경우다. */

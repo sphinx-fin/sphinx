@@ -73,7 +73,7 @@ class SessionControllerTest {
                 .thenReturn(new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
         // 질문 생성(F-INT-002) 기본 스텁 — nextQuestion 이 이제 ai-service 문면을 쓴다.
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition"));
+                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition", false));
         // 재설명(F-INT-004) 기본 스텁 — re-explain 콘텐츠가 이제 ai-service 에서 온다.
         when(aiServiceClient.reExplain(any(RiskItem.class), any(Judgment.class),
                 nullable(String.class), nullable(String.class)))
@@ -408,7 +408,7 @@ class SessionControllerTest {
     void nextQuestionUsesAiServiceQuestion() throws Exception {
         // 목 문면("… 본인 말씀으로 설명해 주시겠어요?")이 아니라 ai-service 응답이 실려야 한다.
         when(aiServiceClient.question(any(RiskItem.class), anyList(), eq("ELS")))
-                .thenReturn(new AiServiceClient.Question("낙인 아래로 떨어지면 어떻게 되나요?", "condition"));
+                .thenReturn(new AiServiceClient.Question("낙인 아래로 떨어지면 어떻게 되나요?", "condition", false));
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))

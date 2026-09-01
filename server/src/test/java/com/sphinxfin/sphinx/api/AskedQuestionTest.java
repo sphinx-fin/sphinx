@@ -2,6 +2,7 @@ package com.sphinxfin.sphinx.api;
 
 import com.jayway.jsonpath.JsonPath;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -85,7 +86,7 @@ class AskedQuestionTest {
         RECORDED.clear();
         SOURCES.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED"));
+                .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED", false));
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
@@ -179,6 +180,55 @@ class AskedQuestionTest {
     }
 
     @Test
+    @DisplayName("❗템플릿 폴백 질문은 TEMPLATE_FALLBACK 으로 남는다 — 고객은 봤지만 모델이 안 만들었다")
+    void templateFallbackQuestionIsRecordedApart() throws Exception {
+        // ai-service 가 정답 노출 검사를 통과 못 해 템플릿 고정 문장으로 내려간 회차다
+        // (F-INT-002). 화면에는 정상적으로 나가므로 고객 경험은 DISPLAYED 와 같고,
+        // 갈리는 것은 **무엇을 측정했는가** 다 — 폴백 질문으로 받은 답이 성능 수치에
+        // 섞이면 F-INT-002 가 사실상 안 돈 회차를 정상으로 센다(이슈 #234).
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+                .thenAnswer(inv -> new AiServiceClient.Question(
+                        "이 항목에 대해 이해하신 대로 말씀해 주시겠어요?", "OPEN_ENDED", true));
+
+        String sid = createSession();
+        mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\",\"text\":\"낙인 하회하면 손실 납니다\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(SOURCES)
+                .as("서버가 fallbackUsed 를 받아서 버리면 여기가 DISPLAYED 로 남는다 — "
+                        + "그러면 폴백률을 기록에서 셀 방법이 없다")
+                .containsExactly(EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK);
+        assertThat(RECORDED)
+                .as("문면 자체는 화면에 나간 그것이어야 한다 — 출처만 다르지 맥락은 같다")
+                .containsExactly("이 항목에 대해 이해하신 대로 말씀해 주시겠어요?");
+    }
+
+    @Test
+    @DisplayName("❗폴백 뒤 정상 질문을 받으면 표식이 사라진다 — 항목이 영원히 폴백으로 집계되면 안 된다")
+    void aLaterNormalQuestionClearsTheMark() throws Exception {
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+                .thenAnswer(inv -> new AiServiceClient.Question("고정 문장", "OPEN_ENDED", true));
+        String sid = createSession();
+        mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
+
+        // 재질문에서 모델이 정상 문면을 냈다. 채점 맥락은 이쪽이므로 표식도 이쪽을 따라야 한다.
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+                .thenAnswer(inv -> new AiServiceClient.Question(
+                        "낙인이 무엇인지 설명해 주시겠어요?", "OPEN_ENDED", false));
+        mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
+
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\",\"text\":\"낙인 하회하면 손실 납니다\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(SOURCES)
+                .as("표식을 지우지 않으면 한 번 폴백난 항목이 계속 폴백으로 집계된다")
+                .containsExactly(EvidenceRecorder.QuestionSource.DISPLAYED);
+    }
+
+    @Test
     @DisplayName("질문을 다시 받으면 마지막에 보여준 것이 채점 맥락이 된다")
     void reaskedQuestionOverwrites() throws Exception {
         String sid = createSession();
@@ -186,7 +236,7 @@ class AskedQuestionTest {
 
         String second = "다시 여쭙겠습니다 — 원금이 줄어드는 조건을 말씀해 주시겠어요?";
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenAnswer(inv -> new AiServiceClient.Question(second, "OPEN_ENDED"));
+                .thenAnswer(inv -> new AiServiceClient.Question(second, "OPEN_ENDED", false));
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
 
         mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
