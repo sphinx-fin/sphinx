@@ -75,7 +75,21 @@ public interface EvidenceRecorder {
          * 지워지고 감사·집계는 기록만 보기 때문</b>이다 — {@code SERVER_FALLBACK} 을 로그가
          * 아니라 불변 기록에 남긴 것과 같은 판단이다(#136 3항).
          */
-        TEMPLATE_FALLBACK
+        TEMPLATE_FALLBACK,
+        /**
+         * 재검증 질문이다 — <b>서버가 만들었고 화면에 나갔다</b> (F-INT-002 되말하기 2바퀴째).
+         *
+         * <p>❗나머지 셋 중 어느 것도 아니다. {@link #DISPLAYED} 는 {@code /questions/next} 로
+         * 나간 <b>ai-service 질문</b>이고, {@link #SERVER_FALLBACK} 은 <i>"고객이 본 적 없다"</i>
+         * 이며, {@link #TEMPLATE_FALLBACK} 은 <b>폴백</b>이다. 재검증 문면은 서버가 만들지만
+         * 폴백이 아니라 <b>설계된 경로</b>이고 고객이 실제로 그것을 보고 답한다.
+         *
+         * <p>이 값이 없던 동안 재검증 답변이 <b>원 질문 문면으로</b> 채점되고 기록됐다
+         * (이슈 #274). 필드가 비는 것보다 나쁘다 — 기록이 A 를 가리키니 감사 시점에 아무도
+         * 의심하지 않는다. 되말하기 루프가 F-GTE 의 논지인데 <b>그 두 번째 바퀴의 기록만</b>
+         * 틀렸다.
+         */
+        REVERIFY
     }
 
     /**

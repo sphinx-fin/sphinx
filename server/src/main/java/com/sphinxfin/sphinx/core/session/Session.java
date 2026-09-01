@@ -9,6 +9,7 @@ import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.Signal;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import jakarta.persistence.CollectionTable;
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.ElementCollection;
@@ -147,20 +148,23 @@ public class Session extends BaseEntity {
     private Map<String, String> askedQuestionsByItem = new HashMap<>();
 
     /**
-     * 그 질문이 <b>ai-service 템플릿 폴백</b>이었던 항목 (F-INT-002 · 이슈 #234).
+     * 그 항목에 마지막으로 보여준 질문의 <b>출처</b> (이슈 #234 · #274).
      *
-     * <p>❗<b>위 맵과 나란한 구조인데 갈리지 않는다</b> — 쓰는 곳이
-     * {@link #recordAskedQuestion} 하나뿐이고 거기서 둘을 같이 쓴다. 나란한 자료구조가
-     * 위험한 것은 <b>따로 쓰는 경로가 생길 때</b>이고, 그래서 세터를 늘리지 않는다.
+     * <p>❗<b>불리언이 아니라 출처를 그대로 담는다.</b> 처음엔 "템플릿 폴백인가" 한 비트였는데
+     * (#265) 재검증 질문이 들어오면서 세 번째 상태가 생겼다 — 불리언으로는 못 담는다.
+     * 값을 그대로 두면 상태가 늘어도 이 자료구조가 안 바뀐다.
      *
-     * <p>맵의 값을 {@code @Embeddable} 로 바꾸지 않은 이유는 기존 수집 테이블의 모양을
-     * 안 건드리려는 것이다 — 값 타입이 바뀌면 읽는 쪽이 전부 따라 움직인다.
+     * <p>출처를 <b>질문을 만든 자리에서</b> 정해 넘긴다. 예전에는 컨트롤러가 저장된 값을 보고
+     * 되유도했는데, 그러면 유도 규칙과 실제 경로가 갈릴 수 있다 — 실제로 재검증 경로가
+     * {@code DISPLAYED} 로 유도되고 있었다.
      */
     @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "session_template_fallback", joinColumns = @JoinColumn(name = "session_id"))
-    @Column(name = "item_id")
+    @CollectionTable(name = "session_asked_source", joinColumns = @JoinColumn(name = "session_id"))
+    @MapKeyColumn(name = "item_id")
+    @Column(name = "source")
+    @Enumerated(EnumType.STRING)
     @Builder.Default
-    private java.util.Set<String> templateFallbackItems = new java.util.HashSet<>();
+    private Map<String, EvidenceRecorder.QuestionSource> askedQuestionSourceByItem = new HashMap<>();
 
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
@@ -254,20 +258,21 @@ public class Session extends BaseEntity {
     }
 
     /** 고객에게 보여준 질문을 항목별로 기록(재질문 시 덮어씀 — 마지막에 보여준 것이 답의 맥락이다). */
-    public void recordAskedQuestion(String itemId, String question, boolean templateFallback) {
+    /**
+     * 그 항목에 보여준 질문과 <b>그 문면의 출처</b>를 같이 남긴다.
+     *
+     * <p>둘을 한 메서드로 묶어 두는 이유는 <b>따로 쓰는 경로를 안 만들려는 것</b>이다 —
+     * 문면은 새것인데 출처가 옛것으로 남으면 아예 안 남기는 것보다 나쁘다.
+     */
+    public void recordAskedQuestion(String itemId, String question,
+                                    EvidenceRecorder.QuestionSource source) {
         askedQuestionsByItem.put(itemId, question);
-        if (templateFallback) {
-            templateFallbackItems.add(itemId);
-        } else {
-            // 재질문으로 정상 문면이 오면 흔적을 지운다 — 남겨 두면 이 항목의 판정이
-            // 영원히 폴백으로 집계된다. 기록에 남는 것은 append-only 지만 세션은 최신 상태다.
-            templateFallbackItems.remove(itemId);
-        }
+        askedQuestionSourceByItem.put(itemId, source);
     }
 
-    /** 그 항목의 질문이 ai-service 템플릿 폴백이었나 (이슈 #234). */
-    public boolean askedQuestionWasTemplateFallback(String itemId) {
-        return templateFallbackItems.contains(itemId);
+    /** 그 항목에 마지막으로 보여준 질문의 출처. 보여준 적이 없으면 {@code null}. */
+    public EvidenceRecorder.QuestionSource askedQuestionSource(String itemId) {
+        return askedQuestionSourceByItem.get(itemId);
     }
 
     /** 그 항목에 실제로 보여준 질문. 없으면 null — 화면을 거치지 않고 답변이 들어온 경우다. */

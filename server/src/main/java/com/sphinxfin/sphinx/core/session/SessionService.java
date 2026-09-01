@@ -229,9 +229,9 @@ public class SessionService {
      */
     @Transactional
     public Session recordAskedQuestion(String sessionId, String itemId, String question,
-                                       boolean templateFallback) {
+                                       EvidenceRecorder.QuestionSource source) {
         Session session = get(sessionId);
-        session.recordAskedQuestion(itemId, question, templateFallback);
+        session.recordAskedQuestion(itemId, question, source);
         return repository.save(session);
     }
 
@@ -263,8 +263,14 @@ public class SessionService {
                 .content();
         session.fire(SessionFsm.Event.REQUEST_REEXPLAIN);
         repository.save(session);
-        return new ReExplanation(itemId, content,
-                session.vulnerable(), reverifyQuestion(itemId, session.vulnerable()));
+        String reverify = reverifyQuestion(itemId, session.vulnerable());
+        // ❗**보여줄 문면을 여기서 기록한다** (이슈 #274). 화면은 계약대로 이 문장을 띄우고
+        // 고객은 그것에 답하는데, 안 남기면 /answers 가 **원 질문 문면**으로 채점하고
+        // 기록한다 — 필드가 비는 것보다 나쁘다. 기록이 다른 질문을 가리키니 감사 시점에
+        // 아무도 의심하지 않는다.
+        session.recordAskedQuestion(itemId, reverify, EvidenceRecorder.QuestionSource.REVERIFY);
+        repository.save(session);
+        return new ReExplanation(itemId, content, session.vulnerable(), reverify);
     }
 
     /**
