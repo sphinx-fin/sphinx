@@ -94,7 +94,7 @@ class OwnershipEnforcementTest {
     }
 
     @Test
-    @DisplayName("❗귀속은 언제나 판매자다 — CUST 는 이름이 안 맞아 막히고, 맞으면 통과한다")
+    @DisplayName("❗귀속은 언제나 판매자다 — CUST 는 이름이 맞아도 막힌다 (#166 B안)")
     void ownershipComesFromTheSellerNotTheRole() throws Exception {
         // 결정 7.24·7.25 가 세운 사실을 **배선 층에서** 고정한다. AccessPolicyTest 는
         // AS_WIRED 라는 상수로 그 모양을 손으로 적는데, AccessGuard.targetOf 가 바뀌면
@@ -107,29 +107,32 @@ class OwnershipEnforcementTest {
 
         String answer = "{\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\",\"text\":\"낙인 하회하면 손실 납니다\"}";
 
-        // session:answer 는 { roles: [CUST, SELLER], scope: own_session } 이다.
-        // 역할은 있는데 이름이 sellerId 와 달라 막힌다.
+        // session:answer 는 { roles: [SELLER], scope: own_session } 이다 (#166 B안).
+        // CUST 는 그랜트가 없어서 막힌다 — 이름을 볼 것도 없다.
         mvc.perform(post("/sessions/" + sid + "/answers").with(cust("cust-01"))
                         .contentType(MediaType.APPLICATION_JSON).content(answer))
                 .andExpect(status().isForbidden());
 
-        // ❗같은 CUST 역할이라도 이름이 sellerId 와 같으면 **판매자와 똑같이** 통과한다.
-        //   막는 것이 역할이 아니라 ownerId 대조라는 것이 여기서 드러난다.
+        // ❗**B 안이 바꾼 것이 여기다** (#166). 이전에는 같은 CUST 역할이라도 이름이 sellerId 와
+        //   같으면 **판매자와 똑같이 통과했다** — 막는 것이 역할이 아니라 ownerId 대조였기
+        //   때문이다(결정 7.24). 그래서 이 action 에서 역할은 구속이 아니었다.
         //
-        //   isNotEqualTo(403) 으로 두지 않는다 — 그건 401 에도 만족된다. currentActor() 가
-        //   던지는 경로가 열리면(#105 가 401·403 을 가른 자리다) 이 단정은 초록인데 귀속에
-        //   대해 아무것도 증명하지 않는다. 정당한 판매자와 같은 코드인지를 보면 그 구멍이
-        //   닫히고, 하류 결과에도 안 묶인다 — 오늘은 둘 다 502(ai-service 없음)이고
-        //   나중에 목이 붙으면 둘 다 200 이 된다 (#174 리뷰).
+        //   지금은 그랜트 검사에서 끝나므로 이름이 무엇이든 CUST 는 막힌다. 두 값을 나란히
+        //   두는 형태는 유지한다 — 판매자 경로가 함께 죽는 변경(예: 그랜트를 통째로 비움)을
+        //   잡으려면 "CUST 가 막힌다" 만으로는 부족하고, **정당한 판매자는 통과한다** 를 같은
+        //   자리에서 봐야 한다. 하류 결과에는 안 묶인다 — 오늘 판매자 쪽은 502(ai-service
+        //   없음)이고 나중에 목이 붙으면 200 이 된다 (#174 리뷰).
         int asSeller = answerAs(sid, seller("seller-01"), answer);
         int asCustNamedLikeSeller = answerAs(sid, cust("seller-01"), answer);
 
         assertThat(asCustNamedLikeSeller)
-                .as("역할이 CUST 여도 이름이 sellerId 와 같으면 판매자와 똑같이 통과한다 — "
-                        + "귀속이 역할이 아니라 이름 대조라는 뜻이다(결정 7.24). 여기가 "
-                        + "갈리면 귀속 모델이 바뀐 것이므로 rbac_policy.yaml 의 CUST 도달 "
-                        + "불가 주석과 7.24·7.25 를 같이 고쳐야 한다")
-                .isEqualTo(asSeller);
+                .as("이름이 sellerId 와 같아도 CUST 는 막힌다 — 역할이 구속이라는 뜻이다. "
+                        + "여기가 다시 asSeller 와 같아지면 누가 CUST 그랜트를 되돌린 것이고, "
+                        + "#166 의 B 결정과 rbac_policy.yaml 의 근거 둘을 같이 봐야 한다")
+                .isEqualTo(403);
+        assertThat(asSeller)
+                .as("정당한 판매자까지 막혔으면 그랜트를 통째로 비운 것이다")
+                .isNotEqualTo(403);
     }
 
     /** 답변을 한 번 넣고 상태코드만 돌려준다. 하류 결과가 아니라 인가 결과를 보려는 것이다. */
