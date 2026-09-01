@@ -385,6 +385,48 @@ class SuitabilityMismatch(Strict):
         return self
 
 
+class MismatchDraft(Strict):
+    """F-DET-002 LLM 초안 (계약 아님 — 내부 타입). `ExtractionDraft`·`QuestionDraft` 와 같은 층.
+
+    ## 왜 초안 층이 필요한가 (이슈 #253)
+
+    `SuitabilityMismatch` 의 세션 단위 불변식 셋(`mismatch↔contradictions` ·
+    `insufficient_input` · `confidence==최고값`)이 **LLM 원문 검증에서 터졌다.**
+    `complete_json()` 이 `model_validate()` 로 응답을 검증하는데, 그 불변식은
+    `_finalize()` 가 **우리 손으로 계산하는 값**이라 LLM 이 맞출 이유가 없다.
+
+        LLM 원문   confidence=0.86, 최고 모순 0.9
+        → ValidationError → LlmError → 라우트 502 → 게이트 R-02 가 판정 없이 지나간다
+
+    `_finalize()` 에 같은 입력을 주면 `confidence=0.9` 로 고친다. **값은 우리가 만드는데
+    검증이 먼저 걸려 그 기회를 못 얻었다** — `_drop_llm_misconception_type` ·`_pin_item_id`
+    ·`_pin_axis` 와 같은 계열이고, 그 셋은 후처리에 도달하는데 이것만 못 했다.
+
+    `gemini-3.5-flash-lite` 가 두 값을 일관되게 맞춰 줘서 안 드러났을 뿐이다 — 프롬프트가
+    그 일치를 요구하지 않으므로 보장이 아니다. 다른 모델에서 6/6 재현됐다.
+
+    ## 무엇을 버리고 무엇을 남기나
+
+    버리는 것은 **세션 단위 집계 불변식 셋뿐**이다. `Contradiction` 자체의 검증(`axis` enum
+    ·`direction` enum ·`min_length` ·0~1 범위)은 그대로 산다 — 그건 LLM 이 실제로 지켜야
+    하는 것이고, 어기면 그 모순은 근거로 쓸 수 없다(P4).
+
+    `session_id`·`status`·`mismatch`·`reason`·`confidence` 를 안 받는 이유도 같다. 전부
+    `_finalize()` 가 만든다. 받아 두고 버리면 *"모델이 낸 값이 어딘가 쓰인다"* 는 오해가 남는다.
+    """
+
+    contradictions: list[Contradiction] = Field(default_factory=list)
+
+    #: **잉여 필드를 흘려보낸다.** `Strict` 의 `extra="forbid"` 를 여기서만 푼다 —
+    #: 프롬프트가 세션 단위 필드를 요구하지 않아도 모델은 낸다(실측). 안 받으면 이번엔
+    #: **잉여 필드로 터져서**, 고친 자리에서 같은 실패가 다른 이유로 반복된다.
+    #: `ParsedDocument` 가 계약 밖의 `_expected_risk_items` 를 같은 이유로 흘려보낸다.
+    #:
+    #: 버리는 것이 안전한 이유: 그 필드들은 전부 `_finalize()` 가 계산하는 값이라
+    #: **모델 값이 쓰일 자리가 없다.** 받아서 무시하는 것과 안 받는 것의 결과가 같다.
+    model_config = ConfigDict(extra="ignore")
+
+
 class MismatchRequest(Strict):
     """POST /internal/mismatch — 7번째 엔드포인트로 확정(강희진 결정 ⓐ).
 

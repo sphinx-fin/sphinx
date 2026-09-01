@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, get_args
 
 from .llm_client import LlmClient, LlmError, client as default_client
-from .schemas import Contradiction, SuitabilityMismatch
+from .schemas import Contradiction, MismatchDraft, SuitabilityMismatch
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-DET-002_v1.md"
 PROMPT_VERSION = "F-DET-002_v1"
@@ -119,15 +119,22 @@ def detect(
             survey_schema_version=survey_schema_version,
         )
 
-    judged = (llm or default_client()).complete_json(
+    # **초안으로 받는다** (이슈 #253). `SuitabilityMismatch` 로 직접 받으면 세션 단위 불변식
+    # (`mismatch↔contradictions`·`insufficient_input`·`confidence==최고값`)이 LLM 원문
+    # 검증에서 터진다 — 그 셋은 아래 `_finalize()` 가 우리 손으로 계산하는 값이라 모델이
+    # 맞출 이유가 없는데, 못 맞추면 502 가 되어 게이트 R-02 가 판정 없이 지나갔다.
+    #
+    # `Contradiction` 검증은 초안에도 그대로 산다 — `axis`·`direction` enum 과 인용
+    # `min_length` 는 모델이 실제로 지켜야 하는 것이고, 어기면 근거로 쓸 수 없다(P4).
+    draft = (llm or default_client()).complete_json(
         prompt=build_prompt(survey, utterances),
-        model_cls=SuitabilityMismatch,
-        schema_name="SuitabilityMismatch",
+        model_cls=MismatchDraft,
+        schema_name="MismatchDraft",
         system=load_system_prompt(),
     )
 
     kept = [
-        _pin_axis(c) for c in judged.contradictions
+        _pin_axis(c) for c in draft.contradictions
         if _is_traceable(c, survey, texts)
     ]
     return _finalize(session_id, kept, survey_schema_version)

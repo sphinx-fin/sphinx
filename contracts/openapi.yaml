@@ -494,6 +494,31 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /signals/unfair:
+    get:
+      summary: 불공정영업 신호 큐 (F-GTE-003 · 이슈 #63)
+      description: >
+        판정에 불공정영업 신호가 있으면 `UnfairSalesSignalEvent` 가 나고, 그것이
+        append-only 스트림(`signal:unfair`)에 쌓인다. 이 경로가 그 큐를 읽는다.
+        **상태를 바꾸지 않는다** — 큐가 append-only 라 "처리함" 으로 항목을 지우지 않는다.
+        처리 상태가 필요해지면 지우는 것이 아니라 새 항목을 쌓는 방식이어야 한다.
+        권한: `signal:unfair:read` — **COMPL 전용이다.** SELLER·MGR·ADMIN 이 부재이고,
+        그건 권한을 안 준 것이 아니라 **줄 대상이 없는 것**이다(ADR-001 과 같은 결).
+        판매자가 무엇이 탐지되는지 알면 문면만 바꿔 같은 영업을 한다(기획 7-4 역이용 방지).
+      responses:
+        '200':
+          description: 쌓인 순서 그대로의 신호 목록
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UnfairSignalsApiResponse'}
+        '403':
+          description: >
+            COMPL 이 아니다. **화면이 "차단됨" 을 그려야 하므로 계약에 선언한다** —
+            데모에서 역할 차단을 시연하는 근거가 이 응답이다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
 components:
   schemas:
     # 공통 응답 봉투 — 모든 응답은 success + (data | error) 형태.
@@ -522,6 +547,36 @@ components:
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
         timestamp: {type: string, format: date-time}
+    UnfairSignal:
+      type: object
+      description: >
+        불공정영업 신호 한 건. 저장 형태가 곧 이 모양이라 읽기와 쓰기가 갈리지 않는다.
+      required: [sessionId, itemId, misconceptionType, utteranceQuote, at]
+      properties:
+        sessionId:  {type: string}
+        itemId:     {type: string}
+        misconceptionType:
+          type: string
+          description: "오해 라이브러리에서 escalate: compliance 인 유형 (예 M08-TYING)"
+        utteranceQuote:
+          type: string
+          description: >
+            고객이 실제로 한 말. **이 값이 이 큐의 실질이다** — 유형ID 만으로는 COMPL 이
+            판단할 근거가 없다. 채점 경로에서 `PiiGateway.mask()` 를 거친 발화라 구성상
+            마스킹 상태다(P3).
+        at: {type: string, format: date-time}
+    UnfairSignalsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:
+          type: object
+          required: [total, signals]
+          properties:
+            total:   {type: integer}
+            signals: {type: array, items: {$ref: '#/components/schemas/UnfairSignal'}}
+        error:   {type: object, nullable: true}
     ErrorApiResponse:
       type: object
       required: [success, error]

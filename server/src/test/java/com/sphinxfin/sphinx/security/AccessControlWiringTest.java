@@ -208,8 +208,15 @@ class AccessControlWiringTest {
         //
         // session:simulate 도 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214 · #222).
         // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
+        //
+        // signal:unfair:read 를 뺐다 — GET /signals/unfair 에 붙었다(이슈 #63).
+        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
+        //
+        // ❗남은 셋은 성격이 같다 — **엔드포인트가 아직 없다.** audit 둘은 COMPL 조회 화면이,
+        // admin:role:assign 은 역할별 계정 설계(결정 10.5)가 서야 붙는다. 기능이 생기면
+        // 여기서 빼는 것이 순서다.
         List<String> notYetImplemented = List.of(
-                "audit:read", "audit:verify", "signal:unfair:read",
+                "audit:read", "audit:verify",
                 "admin:role:assign");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "

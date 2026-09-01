@@ -121,6 +121,25 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
      * 정한다. {@link CanonicalJson} 은 이제 {@code Judgment} 를 직접 순회할 수도 있다
      * (CanonicalJsonTest 의 {@code judgmentIsSerializableOnceConfidenceIsFixed} 가 확인한다).
      * 그래도 펴는 쪽을 남긴다: <b>무엇을 담는지가 이 파일에 보여야</b> 한다.
+     *
+     * <h2>❗{@code escalate} 는 반드시 담는다 — 상신의 유일한 근거가 된다</h2>
+     *
+     * <p>{@code escalate} 가 들어오면 <b>그 값이 컴플라이언스 상신을 결정한다.</b>
+     * {@code UnfairSalesTypes} 가 <i>"계약이 열리면 사라진다"</i> 고 예고해 둔 자리를 그 값이
+     * 대신한다. 그런데 지금까지 담기던 {@code misconceptionType} 은 <b>바로 그 경우에
+     * null</b> 이다 — 루브릭 17종 중 {@code M08-TYING} 을 {@code related_misconceptions} 에
+     * 건 것이 하나도 없어서 {@code apply_misconception_floor} 가 유형을 안 싣는다(이슈 #160).
+     *
+     * <p>그래서 이 필드를 빼면 <b>상신된 세션의 기록에 상신 사유가 아무것도 없다</b> —
+     * 담긴 유형은 null 이고 신호는 어디에도 없다. P4 가 막으려는 <i>"근거 없는 판정"</i> 이
+     * 감사 기록 쪽에서 생기는 모양이고, 이 결함은 <b>분쟁으로 기록을 열어 보는 날까지
+     * 드러나지 않는다.</b>
+     *
+     * <p>{@code #246} 이 필드를 더할 때 여기가 안 따라온 이유는 이 파일을 건드릴 일이 없었기
+     * 때문이다. 위 문단이 <i>"무엇을 담는지가 이 파일에 보여야 한다"</i> 고 적어 두었지만
+     * 그건 규약일 뿐 강제가 아니었다 — {@code JudgmentIsFullyRecordedTest} 가 이제 그것을
+     * 강제한다. {@code Judgment} 에 필드가 늘면 그 테스트가 실패하고, 담을지 뺄지를
+     * <b>여기서 정하게</b> 된다.
      */
     private static Map<String, Object> judgmentPayload(Judgment judgment) {
         Map<String, Object> item = new LinkedHashMap<>();
@@ -131,6 +150,7 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         item.put("reason", judgment.reason());
         item.put("misconceptionType", judgment.misconceptionType());   // nullable — 생략하지 않는다
         item.put("promptVersion", judgment.promptVersion());           // nullable — 위와 같은 이유
+        item.put("escalate", judgment.escalate());                     // 상신 판단의 근거 — 아래 참조
         return item;
     }
 }
