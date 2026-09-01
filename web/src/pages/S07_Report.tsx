@@ -36,6 +36,15 @@
  *    직원이 한다. 그래서 조회는 되는데 발행만 403 인 상태가 정상적으로 존재한다 —
  *    그때 화면이 그냥 실패로 보이면 승인자가 원인을 모른다. 403 을 따로 문구로 낸다.
  *
+ * ⑦ **`previewUrl`·`downloadUrl` 에는 API 접두어를 화면이 붙인다** (이슈 #254)
+ *    이 둘은 **API 기준 경로**(`/sessions/…`)라 그대로 `href` 에 넣으면 안 된다.
+ *    `<a href>` 는 `client.ts` 를 안 타므로 `BASE` 가 안 붙고, 브라우저는 web 오리진을
+ *    친다 — 거기서 `/sessions/…` 는 `app.conf` 의 `try_files … /index.html` 로 떨어져
+ *    **404 가 아니라 200 index.html** 이 온다. 미리보기는 하얀 새 탭, 내려받기는 PDF 대신
+ *    HTML 파일이고 **오류는 하나도 안 난다.** ③이 *"없는 것은 없다고 쓴다"* 로 막은 것과
+ *    같은 종류의 조용한 실패인데, 이쪽은 값이 **있어서** 나는 것이다.
+ *    서버가 접두어를 지어 넣지 않는 이유는 `client.ts` 의 `BASE` javadoc 에 적어 뒀다.
+ *
  * ── 지금 서버는 목이다 ───────────────────────────────────────────────────────
  *
  * `SessionController.reportPayload()` 가 `TODO(정세현)` 목이고 이슈 #54 가 배선을 들고 있다.
@@ -45,7 +54,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ApiRequestError, get, post } from "../api/client";
+import { ApiRequestError, BASE, get, post } from "../api/client";
 import type { ReportResponse } from "../api/types";
 import "./S07_Report.css";
 
@@ -198,14 +207,22 @@ export default function S07Report() {
           <section className="s07__pdf">
             <h2>문서</h2>
             {state.report.previewUrl || state.report.downloadUrl ? (
+              /* 접두어는 화면이 붙인다(설계 판단 ⑦) — `<a href>` 는 client.ts 를 안 탄다. */
               <div className="s07__pdf-links">
                 {state.report.previewUrl && (
-                  <a className="s07__btn" href={state.report.previewUrl} target="_blank" rel="noreferrer">
+                  <a
+                    className="s07__btn"
+                    href={`${BASE}${state.report.previewUrl}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     미리보기
                   </a>
                 )}
                 {state.report.downloadUrl && (
-                  <a className="s07__btn" href={state.report.downloadUrl}>내려받기</a>
+                  <a className="s07__btn" href={`${BASE}${state.report.downloadUrl}`}>
+                    내려받기
+                  </a>
                 )}
               </div>
             ) : (
