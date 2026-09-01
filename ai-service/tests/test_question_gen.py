@@ -6,6 +6,7 @@ API 키 없이 돈다.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -367,3 +368,92 @@ def test_non_numeric_short_fragments_use_substring():
     숫자 여부로 가른다. 문면과 동작을 맞추는 것이다(정세현 지적).
     """
     assert qg.leaked_fragments("원금 손실이 나면 어떻게 되나요?", ("손실",))
+
+
+# ── 폴백 관측 (이슈 #234 1항) ─────────────────────────────────────────────────
+def test_fallback_logs_why_not_just_that_it_happened(caplog):
+    """★ 폴백 사유가 남아야 한다 — "폴백이 났다" 만으로는 고칠 수 없다.
+
+    `fallback_used` 는 응답에 실리지만 **서버가 받아서 버린다**
+    (`AiServiceClient.Question` 이 안 들고 간다). 여기 로그가 없으면 화면·기록·로그 어디에도
+    안 남고, `#199` 가 관측한 폴백률 26% 를 다시 볼 방법이 없다.
+
+    세 갈래가 완전히 다른 일이라 **이유가 본체다** — 프롬프트를 고칠지(누출), 규칙을
+    고칠지(유형), 쿼터를 볼지(LLM 오류)가 갈린다.
+    """
+    leaky = _draft(f"원금이 {numerics.numbers(RISK_ITEM.condition.value_text)[0]}% 아래로 가면요?")
+    with caplog.at_level(logging.INFO, logger="app.question_gen"):
+        resp, _ = _gen(leaky)
+
+    assert resp.fallback_used is True
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert "F-INT-002 폴백" in line, caplog.text
+    assert RISK_ITEM.item_id in line
+    assert "leaked(" in line, f"어느 조각이 샜는지가 사유의 본체다: {line}"
+
+
+def test_fallback_reason_distinguishes_the_llm_error_path(caplog):
+    """★ LLM 이 안 돈 것과 프롬프트가 샌 것이 로그에서 갈려야 한다.
+
+    뭉쳐 놓으면 쿼터 문제(10.41)를 프롬프트 결함으로 읽고 프롬프트를 고치러 간다.
+    누출 갈래는 위 테스트가 본다.
+    """
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="app.question_gen"):
+        resp, _ = _gen(fail=True)
+    assert resp.fallback_used is True
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert "llm_error(LlmError)" in line, line
+    assert "leaked(" not in line, "LLM 이 안 돌았는데 누출로 읽히면 프롬프트를 고치러 간다"
+
+
+def test_successful_generation_logs_nothing(caplog):
+    """정상 생성에 로그를 남기면 폴백 신호가 묻힌다 — 세션마다 항목 수만큼 찍힌다."""
+    with caplog.at_level(logging.INFO, logger="app.question_gen"):
+        resp, _ = _gen(_draft("어떤 상황에서 돈을 잃는지 말씀해 주시겠어요?"))
+    assert resp.fallback_used is False
+    assert not [r for r in caplog.records if "폴백" in r.message], caplog.text
+
+
+def test_fallback_log_stays_at_info(caplog):
+    """★ 레벨을 `INFO` 로 고정한다 (PR #238 리뷰, 정세현).
+
+    `info` 인 근거는 **폴백이 설계된 정상 경로**라는 것이다(`#121` 이 로그 레벨 설정을 넣으며
+    세운 기준 — 관측 로그와 진짜 경고를 같은 레벨에 섞지 않는다). 그 판단은 맞는데 **붙들어
+    두는 것이 없었다.**
+
+    실측으로 확인했다.
+
+        변조  log.info( → log.warning(     369 passed   ← 안 잡힌다
+
+    올리기 쉬운 자리다 — *"폴백이 26% 나 나는데 info 냐"* 는 다음 사람의 반응이 자연스럽다.
+    올라가면 `#121` 이 세운 것이 조용히 풀리고, 그때 이 테스트가 근거를 되돌려 준다.
+    """
+    leaky = _draft(f"원금이 {numerics.numbers(RISK_ITEM.condition.value_text)[0]}% 아래로 가면요?")
+    with caplog.at_level(logging.DEBUG, logger="app.question_gen"):
+        _gen(leaky)
+
+    fallback = [r for r in caplog.records if "F-INT-002 폴백" in r.getMessage()]
+    assert len(fallback) == 1, f"폴백 로그가 {len(fallback)}건 — 한 번만 남아야 한다"
+    assert fallback[0].levelname == "INFO", (
+        f"레벨이 {fallback[0].levelname} 다 — 폴백은 설계된 정상 경로이고, 경고로 올리면 "
+        "진짜 경고와 같은 레벨에 섞인다(#121)"
+    )
+
+
+def test_repeated_reasons_are_collapsed(caplog):
+    """같은 사유 반복은 `×N` 으로 접는다 — 시도 횟수는 이미 `시도=` 에 있다.
+
+    접는 쪽이 정보를 더 준다: *"세 번 다 같은 원인"*(프롬프트가 일관되게 샌다)과
+    *"매번 다른 원인"*(모델이 흔들린다)이 한눈에 갈린다. 할 일이 다르다.
+    """
+    assert qg._collapse(["leaked(45)"] * 3) == "leaked(45) ×3"
+    assert qg._collapse(["leaked(45)", "type_not_allowed(amount)"]) == \
+        "leaked(45) | type_not_allowed(amount)"
+    assert qg._collapse([]) == ""
+
+    leaky = _draft(f"원금이 {numerics.numbers(RISK_ITEM.condition.value_text)[0]}% 아래로 가면요?")
+    with caplog.at_level(logging.INFO, logger="app.question_gen"):
+        _gen(leaky)
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert "시도=3" in line and "×3" in line, line

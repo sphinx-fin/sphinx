@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.api.dto.JudgmentView;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
@@ -190,13 +191,25 @@ class SessionServiceTest {
         Session s = service.create(cmd(null));
         Judgment returned = service.recordJudgment(s.id(), tying("A"));
 
-        // 응답은 ai-service 가 준 판정 그대로다. 발행 여부를 알려주는 필드가 없어야 한다.
+        // 서비스가 돌려주는 것은 ai-service 가 준 판정 그대로다 — 발행 사실을 얹지 않는다.
+        // 발행됐다는 것을 여기서 알려주면 판매자가 어느 답변이 걸렸는지 알게 된다.
         assertThat(returned).isEqualTo(tying("A"));
-        assertThat(Judgment.class.getRecordComponents())
-                .as("판정에 신호 관련 필드가 생기면 판매자 화면까지 흘러간다 (기획 7-4)")
-                .noneMatch(c -> c.getName().toLowerCase().contains("unfair")
-                        || c.getName().toLowerCase().contains("escalate")
-                        || c.getName().toLowerCase().contains("signal"));
+
+        // ❗**도메인이 아니라 뷰에서 막는다.** 예전에는 이 자리에서 Judgment 레코드에
+        // unfair·escalate·signal 이름의 필드가 아예 없는 것을 단정했다. 그 근거는
+        // *"판정에 필드가 생기면 판매자 화면까지 흘러간다"* 였는데, `#147` 이후로 참이
+        // 아니다 — 두 경로(단건 submitAnswer · 목록 judgments) 모두 JudgmentView 로 내려가고
+        // 그 레코드가 담을 필드를 명시적으로 고른다.
+        //
+        // 그리고 그 단정은 **계약이 escalate 를 실을 수 없게 만들었다**(이슈 #160). 신호를
+        // 서버가 들고 있으면서 판매자에게만 안 보내는 것이 목적인데, 도메인에 두지 못하게
+        // 하면 들고 있을 자리가 없다.
+        //
+        // 잠금은 JudgmentViewFieldsTest 로 옮겼고 거기서 더 강해졌다 — 이름 세 개를 막는
+        // 금지 목록이 아니라 **허용 목록**이라, 앞으로 붙는 어떤 필드든 판단을 강제한다.
+        assertThat(JudgmentView.of(returned))
+                .as("판매자에게 나가는 것은 뷰다 — 필드 잠금은 JudgmentViewFieldsTest")
+                .isEqualTo(JudgmentView.of(tying("A")));
     }
 
     @Test
