@@ -140,7 +140,7 @@ jobs:
                 "aws s3 cp s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/${{ steps.art.outputs.key }} - | tar xz -C \"$NEW\"",
                 "rm -rf /opt/sphinx && mv \"$NEW\" /opt/sphinx && chmod 755 /opt/sphinx",
                 "cd /opt/sphinx",
-                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -60 /var/log/sphinx-deploy.log; exit 1; }",
+                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -200 /var/log/sphinx-deploy.log; exit 1; }",
                 "tail -40 /var/log/sphinx-deploy.log"
               ]}' \
             --query Command.CommandId --output text)
@@ -164,10 +164,15 @@ jobs:
             sleep 10
           done
           # 출력은 2500자에서 잘린다. 전체 로그는 박스의 /var/log/sphinx-deploy.log 에 있다.
+          #
+          # ❗**잘림은 앞에서부터 남는다** — 그래서 실패 진단은 `deploy_ec2.sh` 가 죽기 직전에
+          # `docker compose ps` · 비정상 컨테이너 로그 · 디스크를 **자기가 찍고**, 위 원격
+          # 명령의 `tail -200` 이 그 블록을 통째로 실어 보낸다(이슈 #240 ④). 여기서 줄 수만
+          # 늘리면 안 되는 이유가 이것이다 — 늘려도 잘리는 쪽이 뒤라 정작 원인이 날아간다.
           aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
-            --query 'StandardOutputContent' --output text | tail -40
+            --query 'StandardOutputContent' --output text | tail -200
           aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
-            --query 'StandardErrorContent' --output text | tail -40
+            --query 'StandardErrorContent' --output text | tail -60
           [ "$FAIL" = 0 ] || { echo "전체 로그: aws ssm start-session --target $ID → cat /var/log/sphinx-deploy.log"; exit 1; }
 
       - name: 노출 확인 (8000·8100 은 막혀야 정상)
