@@ -15,10 +15,13 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
+import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -161,6 +164,57 @@ class StoredEvidenceRecorderTest {
 
             assertThat(child(payloads().get(0), "judgment").keySet())
                     .contains("misconceptionType");
+        }
+
+        @Test
+        @DisplayName("❗escalate 가 들어간다 — 안 담으면 상신된 세션에 상신 사유가 없다")
+        void storesEscalate() {
+            // escalate 가 상신을 결정하게 되면(#160 · #242), 그때 misconceptionType 은
+            // **바로 그 경우에 null** 이다 — 루브릭 17종 중 M08-TYING 을
+            // related_misconceptions 에 건 것이 0건이라 유형이 안 실린다.
+            // 그래서 이 필드를 빼면 담긴 유형은 null, 신호는 부재 — 기록에 근거가 없다.
+            Judgment escalating = new Judgment("A", Grade.U4, new BigDecimal("0.91"),
+                    new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요", "꺾기 조항"),
+                    "꺾기 정황", null, "F-SCR-001_v2", true);
+
+            recorder.appendJudgment(SID, escalating, 0, "질문 문면",
+                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+
+            Map<String, Object> item = child(payloads().get(0), "judgment");
+            assertThat(item.get("escalate"))
+                    .as("상신 판단의 근거가 불변 기록에 남아야 한다 — 분쟁 시점에 답할 것이 이것뿐이다")
+                    .isEqualTo(true);
+            assertThat(item.get("misconceptionType"))
+                    .as("이 경우 유형은 null 이다 — escalate 가 유일한 근거라는 것이 요지다")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("❗Judgment 의 모든 필드가 기록된다 — 필드가 늘면 여기서 정하게 된다")
+        void everyJudgmentFieldIsRecorded() {
+            // judgmentPayload 의 javadoc 이 *"무엇을 담는지가 이 파일에 보여야 한다"* 고
+            // 적어 두었지만 그건 규약일 뿐 강제가 아니었다. 실제로 #246 이 Judgment 에
+            // escalate 를 더할 때 적재 쪽은 안 따라왔다 — 그 파일을 건드릴 일이 없었기
+            // 때문이고, git 도 텍스트 충돌을 안 낸다.
+            //
+            // 이 단정이 그 규약을 강제한다. Judgment 에 필드가 늘면 여기서 실패하고,
+            // 담을지 뺄지를 **적재 파일에서** 정하게 된다. 일부러 빼는 필드가 생기면
+            // 아래 집합에 이유와 함께 적는다 — 지금은 없다.
+            Set<String> deliberatelyOmitted = Set.of();
+
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면",
+                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            Set<String> recorded = child(payloads().get(0), "judgment").keySet();
+
+            List<String> components = Arrays.stream(Judgment.class.getRecordComponents())
+                    .map(RecordComponent::getName)
+                    .filter(name -> !deliberatelyOmitted.contains(name))
+                    .toList();
+
+            assertThat(recorded)
+                    .as("Judgment 에 필드가 늘었는데 적재가 안 따라왔다 — "
+                            + "담을 것인지 뺄 것인지를 StoredEvidenceRecorder.judgmentPayload 에서 정한다")
+                    .containsAll(components);
         }
 
         @Test
