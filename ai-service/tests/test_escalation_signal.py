@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from app import misconception, rubrics, scoring
+from app.schemas import Evidence, Grade, Judgment
 
 CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "judgment.schema.json"
 
@@ -142,26 +143,44 @@ def test_escalation_is_data_driven_not_hardcoded(monkeypatch):
     )
 
 
-# ── 계약 대기 트립와이어 ──────────────────────────────────────────────────────
-def test_contract_field_is_still_pending():
-    """❗계약이 열리는 순간 **깨지라고 있는 테스트다.**
+# ── 계약 ↔ 미러 대조 (트립와이어를 전환했다) ──────────────────────────────────
+def test_contract_and_mirror_agree_on_escalate():
+    """★ 계약에 있는 `escalate` 가 미러에도 있다 — 트립와이어가 할 일을 하고 전환됐다.
 
-    `escalate` 가 `contracts/judgment.schema.json` 에 들어오면 여기서 실패하고,
-    그때 해야 할 일이 실패 메시지에 적혀 있다. 승인을 놓쳐서 값만 만들어 놓고 안 싣는
-    상태가 조용히 이어지는 것을 막는다 — `#160` 이 정확히 그 모양의 결함이었다.
+    `#242` 로 계약이 열렸고, 그때 이 자리에 있던 트립와이어가 실패하며 배선 4단계를
+    출력했다. **의도대로 작동했다** — 그게 없었으면 계약만 들어가고 아무도 모른 채
+    지나갔다가, 나중에 값을 싣는 날 원인이 두 PR 전으로 거슬러 올라가는 502 를 만났을 것이다.
+
+    이제는 반대 방향을 지킨다: 계약과 미러가 **같이** 있거나 **같이** 없어야 한다.
+    한쪽만 바뀌면 조용히 갈린다 — 계약에만 있으면 값이 영영 안 실리고(원래 결함),
+    미러에만 있으면 서버가 모르는 필드를 보내 `/internal/score` 가 전부 502 다.
     """
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
-    if "escalate" in contract.get("properties", {}):
-        pytest.fail(
-            "계약에 escalate 가 열렸다. 이제 배선한다:\n"
-            "  1. app/schemas.py Judgment 에 `escalate: bool = False` 미러 추가\n"
-            "  2. scoring.score() 마지막에 "
-            "`model_copy(update={'escalate': escalation_signal(matched, rubric)})`\n"
-            "  3. 이 테스트를 '계약에 있고 미러에도 있다' 대조로 바꾼다\n"
-            "  4. ②(reason 누출)를 feat/F-GTE-003-tying-signal 에서 가져와 한 PR 로 올린다"
-        )
-
-    from app.schemas import Judgment
-    assert "escalate" not in Judgment.model_fields, (
-        "계약에 없는데 미러에 필드가 생겼다 — 미러는 계약을 앞서가면 안 된다"
+    in_contract = "escalate" in contract.get("properties", {})
+    in_mirror = "escalate" in Judgment.model_fields
+    assert in_contract and in_mirror, (
+        f"계약={in_contract} 미러={in_mirror} — 한쪽만 있으면 조용히 갈린다"
     )
+    assert contract["properties"]["escalate"]["type"] == "boolean"
+    assert Judgment.model_fields["escalate"].default is False, (
+        "기본값이 False 가 아니면 신호가 없는 판정이 신호로 읽힌다"
+    )
+
+
+def test_mirror_emits_false_by_default_so_the_server_must_accept_it():
+    """❗미러를 만드는 것이 **곧 싣는 것**이다 (`#242` 리뷰, 강희진).
+
+    `routes.py` 의 `@router.post("/score", response_model=Judgment)` 때문에 FastAPI 가
+    `response_model` 로 직렬화한다 — 값을 안 채워도 **기본값 `false` 가 응답에 나간다.**
+    *"필드만 만들고 아직 안 싣는다"* 는 상태가 존재하지 않는다.
+
+    그래서 서버가 먼저 받을 수 있어야 했고(`#246`), 그게 이 PR 보다 앞선 이유다.
+    `AiServiceClient` 의 매퍼는 `FAIL_ON_UNKNOWN_PROPERTIES` 가 켜져 있어서, 순서가
+    뒤바뀌면 첫 채점에서 인터뷰가 죽는다 — `#165` 와 방향만 반대인 같은 결함이다.
+    """
+    j = Judgment(item_id="X", grade=Grade.U3, confidence=0.5,
+                 evidence=Evidence(utterance_quote="모르겠어요", rubric_clause="투자원금의 손실이 발생할 수 있음"),
+                 reason="사유")
+    payload = json.loads(j.model_dump_json())
+    assert "escalate" in payload, "직렬화에서 빠지면 서버 계약과 갈린다"
+    assert payload["escalate"] is False

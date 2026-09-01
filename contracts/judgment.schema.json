@@ -54,6 +54,10 @@
       ],
       "description": "F-DET-001 매칭 시 유형ID (예: M08-TYING)"
     },
+    "escalate": {
+      "type": "boolean",
+      "description": "이 판정이 컴플라이언스로 올라갈 신호인가. 오해 라이브러리의 escalate: compliance 에서 온다(M08-TYING 등). optional — 이 필드가 생기기 전 레코드는 없다. ❗판매자 응답(JudgmentView)에 넣지 않는다: 어떤 발화가 탐지되는지 알면 문면만 바꿔 같은 영업을 한다(기획 7-4 역이용 방지). 이 값이 오면 서버가 UnfairSalesTypes 하드코딩 없이 발행을 판단한다 — 그 클래스 docstring 이 \"계약이 열리면 사라진다\" 고 예고해 뒀다(이슈 #160 · 결정 10.47)."
+    },
     "prompt_version": {
       "type": "string",
       "description": "이 판정을 낸 채점 프롬프트 버전(ai-service scoring.PROMPT_VERSION, 예 F-SCR-001_v2). optional — 이 필드가 생기기 전 레코드는 없다. ❗confidence 의 정의가 프롬프트 버전마다 다르다: v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). evidence 는 append-only 라 두 정의가 같은 컬럼에 섞이면 감사 시점에 어느 쪽으로 해석할지 판단할 근거가 없어진다 — 그래서 값과 함께 남긴다(결정 10.38 · 이슈 #136)."
