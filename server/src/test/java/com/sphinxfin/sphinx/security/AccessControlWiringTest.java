@@ -210,8 +210,10 @@ class AccessControlWiringTest {
         //
         // session:simulate 도 뺐다 — POST /sessions/{sid}/simulate 에 붙었다(이슈 #214 · #222).
         // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
+        // signal:unfair:read 를 뺐다 — GET /signals/unfair 에 붙었다(이슈 #63).
+        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
-                "audit:read", "audit:verify", "signal:unfair:read",
+                "audit:read", "audit:verify",
                 "admin:role:assign",
                 "product:manage");
         assertThat(unreachable)
