@@ -18,7 +18,22 @@
  */
 import type { ApiError, ApiResponse, ErrorCode } from "./types";
 
-const BASE = "/api";
+/**
+ * 배포의 API 접두어. **`fetch` 만 붙이는 게 아니라 `<a href>` 도 붙여야 해서 export 한다.**
+ *
+ * 아래 `request` 를 타는 요청은 여기서 알아서 붙지만, 서버가 **경로를 값으로** 내려주는
+ * 것들(`report.previewUrl`·`downloadUrl`)은 화면이 `href` 에 그대로 넣으므로 이 파일을
+ * 안 탄다. 그때 브라우저가 치는 곳은 web 오리진이고, `app.conf` 에서 `/sessions/…` 는
+ * `location /api/` 에 안 걸려 `try_files $uri $uri/ /index.html` 로 떨어진다 —
+ * **404 가 아니라 200 index.html** 이다. 미리보기는 하얀 탭이 뜨고 내려받기는 PDF 대신
+ * HTML 파일을 받는데 **오류가 하나도 안 난다**(이슈 #254).
+ *
+ * 서버가 응답에 접두어를 지어 넣는 길도 있었지만 그러면 이 상수와 **두 벌**이 되고,
+ * 갈리는 날 링크만 조용히 깨진다. 접두어는 *프론트 배포의 사실*이지 서버 경로가 아니므로
+ * 붙이는 자리도 여기다 — 계약도 같은 말을 적고 있다(`#247`: *"이 값은 API 기준 경로다.
+ * 브라우저에서 쓸 때는 배포의 API 접두어를 붙인다"*).
+ */
+export const BASE = "/api";
 
 /** 서버가 내려준 실패 봉투 또는 HTTP 오류. 화면은 `code` 로 분기한다. */
 export class ApiRequestError extends Error {
