@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +46,7 @@ import java.util.TreeMap;
  * 해시가 달라져서 "이 문서가 그 문서인가"를 대조할 수 없다. 발행 시각은 체인 항목의
  * {@code at}이 갖는다.
  */
+@Slf4j
 @Service
 public class ReportService {
 
@@ -201,6 +203,16 @@ public class ReportService {
         Map<String, Object> asIssued = render(sessionId, issued.seq());
         String hash = contentHash(asIssued);
         if (!hash.equals(issued.report().contentHash())) {
+            // ❗던지는 자리에서 남긴다 (#248 리뷰). 안 남기면 GlobalExceptionHandler 의
+            // 마지막 갈래가 "처리되지 않은 예외" 로 적는데, 이건 설계가 예상하고 전용 타입까지
+            // 만들어 둔 실패다. 그리고 이 시스템에서 제일 무거운 실패이기도 하다 — 종이와
+            // 불변 기록이 갈렸다는 뜻이라 감사·분쟁에 직접 걸린다. NPE 와 같은 줄로 뭉치면
+            // 모니터링이 메시지로 묶는 순간 구별이 사라진다.
+            //
+            // 두 해시를 다 남기는 것이 요지다. 어느 쪽이 움직였는지 — 체인이 상한 것인지
+            // 조립 규칙이 바뀐 것인지 — 는 값을 나란히 놓고 봐야 갈린다.
+            log.error("리포트 재현 실패 session={} 발행해시={} 재현해시={}",
+                    sessionId, issued.report().contentHash(), hash);
             throw new ReportNotReproducibleException(
                     "발행 시점 내용을 재현하지 못했다: " + sessionId
                             + " 기록=" + issued.report().contentHash() + " 재현=" + hash
