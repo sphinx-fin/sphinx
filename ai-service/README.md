@@ -72,19 +72,27 @@ F-DET-002는 **7번째 엔드포인트**다(강희진 결정). 모순 판정은 
 
 ## LLM
 
-OpenAI 호환 엔드포인트로 붙는다(기본값: Gemini). `.env` 3개 변수만 갈아끼우면 다른 모델·
-온프레미스로 이동한다 — 호출부는 프로바이더를 모른다.
+OpenAI 엔드포인트로 붙는다. `.env` 3개 변수만 갈아끼우면 다른 모델·온프레미스로
+이동한다 — 호출부는 프로바이더를 모른다. Gemini 로 되돌리는 것도 base_url 한 줄이다
+(OpenAI 호환 엔드포인트를 제공한다).
 
-**모델 정책: 모든 LLM 호출은 flash-lite 계열을 쓴다.** 기능별로 모델을 나누지 않는다.
-`gemini-2.5-flash-lite`는 신규 키에 제공되지 않으므로(404) API가 안내하는
-`gemini-3.5-flash-lite`가 기본값이다. 정책에서 벗어난 모델을 넣으면 경고가 남는다 —
+**모델 정책: 모든 LLM 호출을 한 모델로 한다.** 기능별로 모델을 나누지 않는다.
+기본값은 `gpt-5-mini` 다. 정책에서 벗어난 모델을 넣으면 경고가 남는다 —
 성능 수치의 출처를 추적할 수 있어야 한다.
 
 ```
-LLM_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_API_BASE=https://api.openai.com/v1
 LLM_API_KEY=...
-LLM_MODEL=gemini-3.5-flash-lite   # 생략 가능 — 코드 기본값과 같다
+LLM_MODEL=gpt-5-mini              # 생략 가능 — 코드 기본값과 같다
+LLM_REASONING_EFFORT=minimal      # 생략 가능. 빈 값으로 두면 아예 안 보낸다
 ```
+
+`LLM_REASONING_EFFORT` 를 비우지 않는 이유: 기본값이면 gpt-5-mini 가 호출당 사고토큰
+1,024개를 태운다(20.3초). `minimal` 이면 0개 · 2.4초이고 **등급은 같았다.**
+
+이전 기본값은 `gemini-3.5-flash-lite` 였다. 옮긴 이유는 `app/config.py` 의 모델 정책
+주석에 적혀 있다 — 요약하면 무료 티어가 **분당 15회**에서 막혀 데모 중에 폴백 질문이
+나가고, 두 모델의 판정 등급이 dev set 24건에서 완전히 같았다.
 
 ### .env 위치
 

@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ai-service"))
 
 from app import scoring  # noqa: E402
-from app.config import settings  # noqa: E402
+from app.config import MODEL_POLICY_SUBSTRING, settings  # noqa: E402
 from app.schemas import RiskItem  # noqa: E402
 
 CORPUS = REPO / "eval" / "corpus"
@@ -61,7 +61,7 @@ def main() -> int:
     if not cfg.llm_api_key:
         print("eval: LLM_API_KEY 가 없다 — ai-service/.env 를 본다", file=sys.stderr)
         return 1
-    if "flash-lite" not in cfg.llm_model:
+    if MODEL_POLICY_SUBSTRING not in cfg.llm_model:
         print(f"eval: 모델 정책 위반 — {cfg.llm_model}. 이 실행의 결과는 성능 수치로 못 쓴다", file=sys.stderr)
         return 1
 

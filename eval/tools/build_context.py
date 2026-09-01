@@ -31,7 +31,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ai-service"))
 
 from app import extraction, question_gen  # noqa: E402
-from app.config import settings  # noqa: E402
+from app.config import MODEL_POLICY_SUBSTRING, settings  # noqa: E402
 
 PARSED_DOC = REPO / "contracts" / "samples" / "parsed_els_sample.json"
 OUT = REPO / "eval" / "data" / "context" / "els.json"
@@ -44,10 +44,10 @@ def main() -> int:
     if not cfg.llm_api_key:
         print("eval: LLM_API_KEY 가 없다 — ai-service/.env 를 본다", file=sys.stderr)
         return 1
-    if "flash-lite" not in cfg.llm_model:
+    if MODEL_POLICY_SUBSTRING not in cfg.llm_model:
         # config.py 도 경고하지만 여기서 멈춘다. 문맥은 한 번 만들어 오래 쓰는 파일이라,
         # 정책 밖 모델로 만든 것이 섞이면 나중에 출처를 못 가린다.
-        print(f"eval: 모델 정책 위반 — {cfg.llm_model}. 팀 결정은 flash-lite 계열이다", file=sys.stderr)
+        print(f"eval: 모델 정책 위반 — {cfg.llm_model}. 팀 결정은 {MODEL_POLICY_SUBSTRING} 다", file=sys.stderr)
         return 1
 
     doc = json.loads(PARSED_DOC.read_text(encoding="utf-8"))
