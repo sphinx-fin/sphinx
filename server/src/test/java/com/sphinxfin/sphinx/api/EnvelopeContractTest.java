@@ -58,7 +58,7 @@ class EnvelopeContractTest {
     @BeforeEach
     void stubQuestion() {
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition"));
+                .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition", false));
     }
 
     /** 봉투 3요소: success=true · data 존재 · error 없음(null). */

@@ -228,9 +228,10 @@ public class SessionService {
      * 않으면 채점 시점에 재현할 수 없다.
      */
     @Transactional
-    public Session recordAskedQuestion(String sessionId, String itemId, String question) {
+    public Session recordAskedQuestion(String sessionId, String itemId, String question,
+                                       boolean templateFallback) {
         Session session = get(sessionId);
-        session.recordAskedQuestion(itemId, question);
+        session.recordAskedQuestion(itemId, question, templateFallback);
         return repository.save(session);
     }
 

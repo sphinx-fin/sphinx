@@ -196,7 +196,7 @@ public class AiServiceClient {
         if (response == null) {
             throw new AiServiceException("ai-service /internal/question 응답이 비었다");
         }
-        return new Question(response.question(), response.questionType());
+        return new Question(response.question(), response.questionType(), response.fallbackUsed());
     }
 
     /**
@@ -253,7 +253,15 @@ public class AiServiceClient {
     public record Scored(Judgment judgment, String maskedAnswer) {}
 
     /** F-INT-002 질문 생성 결과. question_type ∈ {situation, amount, condition}. */
-    public record Question(String question, String questionType) {}
+    /**
+     * 생성된 질문. {@code fallbackUsed} 는 ai-service 가 정답 노출 검사를 통과 못 해
+     * <b>템플릿 고정 문장</b>으로 내려갔다는 뜻이다(F-INT-002 · 이슈 #234).
+     *
+     * <p>예전에는 이 값을 여기서 버렸다 — {@code QuestionResponse} 가 받아 두고 이 레코드가
+     * 안 옮겼다. 그래서 <b>서버가 받아서 의도적으로 버리는</b> 상태였고, 폴백률을 화면에도
+     * 로그에도 기록에도 볼 방법이 없었다.
+     */
+    public record Question(String question, String questionType, boolean fallbackUsed) {}
 
     /** F-INT-004 재설명 결과. citedSpans는 P6 원문 인용 스팬(없으면 빈 리스트). */
     public record ReExplanation(String content, List<RiskItem.SourceSpan> citedSpans) {}

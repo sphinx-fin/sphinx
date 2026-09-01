@@ -142,7 +142,7 @@ class UnfairSignalNotExposedTest {
     void stub() {
         RECORDED_TYPES.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED"));
+                .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED", false));
         // ❗꺾기(M08-TYING)로 채점된다 — 이 요청이 COMPL 이벤트를 실제로 발행하는 경로다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
