@@ -21,14 +21,32 @@
  *    명세 10절 접근성이 고령자 모드를 "입력 시간 제한 없음"으로 규정한다. E-INT-03 도
  *    강제 종료가 아니라 "안내 후 건너뛰기 **확인**"이므로, 타이머를 끄는 쪽이 두 조항을
  *    모두 만족한다. 일반 모드에서도 자동으로 넘기지 않고 확인을 받는다.
+ *
+ * ④ **재설명·재검증은 이 화면의 다른 모드다** (F-INT-004 · 명세 8절 S-03 "재설명 화면")
+ *    판매자가 S-05 에서 시작하면(`session:interview` 는 SELLER 다) 문면과 재질문이
+ *    `lib/reexplain` 을 거쳐 여기로 온다. 그때 화면은 **질문을 서버에 새로 묻지 않는다** —
+ *    `POST /questions/next` 는 *아직 안 물은 다음 항목*을 주므로, 재검증 중에 부르면
+ *    엉뚱한 항목을 묻고 그 답이 재검증으로 기록된다. 에러 없이 틀리는 종류다.
+ *
+ *    재검증에서는 **진행 막대를 그리지 않는다.** 서버가 주는 `index`/`total` 은 "몇 번째
+ *    항목인가" 지 "재검증 몇 번째인가" 가 아니라, 그대로 그리면 진행률이 뒤로 가거나
+ *    제자리인 것처럼 보인다. 대신 지금이 재검증이라는 사실만 적는다.
+ *
+ *    ⚠️ **남은 구멍 — 인계를 못 받은 탭에서는 이 화면이 재검증인 줄 모른다.** 문면을 다시
+ *    읽는 GET 이 계약에 없어서(`ReExplanation` 주석) 다른 기기·다른 탭으로 넘어가면
+ *    일반 흐름으로 떨어지고, 세션은 `RE_EXPLAIN` 인데 화면은 *다음 항목*을 묻는다 —
+ *    그 답이 엉뚱한 항목의 재검증으로 기록된다. 화면 쪽에서 막으려면 세션 상태를 읽어야
+ *    하는데 `session:read` 는 CUST 에게 없다(#166). 계약에 재설명 조회가 생기면 그때
+ *    닫힌다. 한 태블릿에서 넘기는 데모 경로에서는 인계가 항상 있다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { Judgment, NextQuestion, RiskItem } from "../api/types";
+import type { Judgment, NextQuestion, ReExplanation, RiskItem } from "../api/types";
 import { useElderlyMode } from "../hooks/useElderlyMode";
 import { useInputMeta } from "../hooks/useInputMeta";
 import { detectPii } from "../lib/pii";
+import { clearReExplanation, readReExplanation } from "../lib/reexplain";
 import "./S03_Interview.css";
 
 /** E-INT-02: 공백 제외 5자 미만이면 1회 재요청. */
@@ -36,17 +54,20 @@ const MIN_CHARS = 5;
 /** E-INT-03: 무응답 안내까지의 시간(고령자 모드에서는 비활성). */
 const IDLE_PROMPT_MS = 60_000;
 
-type Phase = "loading" | "asking" | "submitting" | "answered" | "failed";
+/** `reexplain` = 재설명 문면을 읽는 중. 읽고 나서 `asking`(재질문)으로 간다(설계 판단 ④). */
+type Phase = "loading" | "reexplain" | "asking" | "submitting" | "answered" | "failed";
 
 export default function S03Interview() {
   const { sid = "" } = useParams();
   const navigate = useNavigate();
-  const { elderly, toggle } = useElderlyMode();
+  const { elderly, toggle, enable } = useElderlyMode();
   const meta = useInputMeta();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [items, setItems] = useState<RiskItem[]>([]);
   const [question, setQuestion] = useState<NextQuestion | null>(null);
+  /** 진행 중인 재설명. null 이면 일반 인터뷰 흐름이다(설계 판단 ④). */
+  const [reExplain, setReExplain] = useState<ReExplanation | null>(null);
   const [text, setText] = useState("");
   const [shortWarned, setShortWarned] = useState(false);
   const [idlePrompt, setIdlePrompt] = useState(false);
@@ -69,11 +90,19 @@ export default function S03Interview() {
     return phase === "answered" ? question.index : question.index - 1;
   })();
 
+  /* ── 지금 묻고 있는 것 ───────────────────────────────────────────────────
+     재검증이면 출처가 재설명 응답이고, 아니면 `/questions/next` 다. **문면을 고르는 곳을
+     한 군데로 둔다** — 렌더에서 매번 삼항으로 가르면 한 자리를 빠뜨렸을 때 화면에 보인
+     질문과 제출한 itemId 가 갈린다.                                                   */
+  const reverifying = reExplain !== null;
+  const askedItemId = reverifying ? reExplain.itemId : question?.itemId ?? null;
+  const askedText = reverifying ? reExplain.reverifyQuestion : question?.question ?? null;
+
   /* 항목명 표시용. 추출 실패 항목(E-EXT-03)은 서버가 애초에 묻지 않지만, 숨기지는 않는다 —
      실패 항목의 가시화는 S-01 의 책임이다. */
   const currentItem = useMemo(
-    () => items.find((i) => i.itemId === question?.itemId) ?? null,
-    [items, question],
+    () => items.find((i) => i.itemId === askedItemId) ?? null,
+    [items, askedItemId],
   );
 
   const charCount = text.replace(/\s/g, "").length;
@@ -101,9 +130,20 @@ export default function S03Interview() {
     let alive = true;
     (async () => {
       try {
+        // 재설명 인계가 있으면 **질문을 새로 묻지 않는다**(설계 판단 ④). 항목 목록은
+        // 두 흐름 모두 항목명을 그리는 데 쓰므로 먼저 받는다.
+        const handoff = readReExplanation(sid);
         const res = await get<{ items: RiskItem[] }>(`/sessions/${sid}/risk-items`);
         if (!alive) return;
         setItems(res.items ?? []);
+        if (handoff) {
+          setReExplain(handoff);
+          // `vulnerable` 은 렌더링 힌트다 — 모드만 켜고 이유를 화면에 적지 않는다
+          // (계약 주석 · 기획서 7-4: 취약 분류를 본인에게 보이지 않는다).
+          if (handoff.vulnerable) enable();
+          setPhase("reexplain");
+          return;
+        }
         await loadQuestion();
       } catch (e) {
         if (!alive) return;
@@ -130,9 +170,21 @@ export default function S03Interview() {
     if (phase === "asking") textareaRef.current?.focus();
   }, [phase, question]);
 
+  /* ── 재설명을 읽고 나서 재질문으로 ────────────────────────────────────────
+     여기서 `meta.reset()` 을 부른다 — 입력 메타의 기준점은 "질문이 화면에 뜬 순간"이고,
+     재검증에서 그건 문면을 읽고 이 버튼을 누른 때다. 마운트 시점으로 잡으면 문면을
+     읽은 시간이 통째로 '첫 키 입력 지연'에 들어가 코칭 정황 신호가 오염된다.          */
+  function beginReverify() {
+    setText("");
+    setShortWarned(false);
+    setIdlePrompt(false);
+    meta.reset();
+    setPhase("asking");
+  }
+
   /* ── 제출 ───────────────────────────────────────────────────────────────── */
   async function submit() {
-    if (!question?.itemId) return;   // done=true 면 itemId 가 null 이다
+    if (!askedItemId) return;   // done=true 면 itemId 가 null 이다
 
     // E-INT-02: 극단적 단답은 1회만 되묻는다. 두 번째는 그대로 받는다 —
     // 계속 막으면 "모르겠다"는 응답 자체가 기록되지 못하고 세션이 멎는다(U3 도 판정이다).
@@ -146,11 +198,16 @@ export default function S03Interview() {
     setError(null);
     try {
       // 판정은 받지만 화면에 등급을 그리지 않는다(설계 판단 ①). 서버 세션에 기록된다.
+      // 재검증도 같은 엔드포인트다 — 세션이 `RE_EXPLAIN` 이면 서버가 이 답변을 재검증으로
+      // 세고 상태를 옮긴다(`recordJudgment`). 화면이 "재검증 제출" 을 따로 말하지 않는 이유다.
       await post<Judgment>(`/sessions/${sid}/answers`, {
-        itemId: question.itemId,
+        itemId: askedItemId,
         text,
         inputMeta: meta.snapshot(text, elderly),
       });
+      // 인계는 여기서 지운다 — 성공한 뒤라야 한다(`lib/reexplain` 주석). 화면 상태는
+      // 남겨 둔다: 다음 화면이 "재검증이 기록됐다"를 말해야 하고, 그건 이 값으로만 안다.
+      if (reverifying) clearReExplanation(sid);
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -160,14 +217,15 @@ export default function S03Interview() {
 
   /** E-INT-03 건너뛰기 — 서버가 U3(미이해)로 처리하도록 빈 응답을 명시적으로 보낸다. */
   async function skip() {
-    if (!question?.itemId) return;
+    if (!askedItemId) return;
     setPhase("submitting");
     try {
       await post<Judgment>(`/sessions/${sid}/answers`, {
-        itemId: question.itemId,
+        itemId: askedItemId,
         text: "(응답하지 않음)",
         inputMeta: meta.snapshot("", elderly),
       });
+      if (reverifying) clearReExplanation(sid);
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -177,6 +235,9 @@ export default function S03Interview() {
 
   async function nextQuestion() {
     setPhase("loading");
+    // 재검증이 끝났으니 일반 흐름으로 돌아간다. 저장소는 제출 때 이미 비웠다 —
+    // 여기서 지우는 것은 화면 상태뿐이다.
+    setReExplain(null);
     try {
       await loadQuestion();
     } catch (e) {
@@ -209,21 +270,27 @@ export default function S03Interview() {
     <main className="iv">
       <div className="iv__shell">
         <div className="iv__top">
-          <div className="iv__progress">
-            <span className="iv__progress-label">
-              검증 항목 <b>{total}</b>개 중 <b>{answeredCount}</b>개 응답 완료
-            </span>
-            <div
-              className="iv__bar"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={total}
-              aria-valuenow={answeredCount}
-              aria-label="인터뷰 진행률"
-            >
-              <div className="iv__bar-fill" style={{ width: `${pct}%` }} />
+          {/* 재검증에서는 진행 막대를 그리지 않는다(설계 판단 ④) — 서버의 index/total 은
+              "몇 번째 항목인가" 라 재검증 중에 그리면 진행률이 제자리이거나 뒤로 간다. */}
+          {reverifying ? (
+            <p className="iv__reverify">다시 한 번 확인하는 항목입니다.</p>
+          ) : (
+            <div className="iv__progress">
+              <span className="iv__progress-label">
+                검증 항목 <b>{total}</b>개 중 <b>{answeredCount}</b>개 응답 완료
+              </span>
+              <div
+                className="iv__bar"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={total}
+                aria-valuenow={answeredCount}
+                aria-label="인터뷰 진행률"
+              >
+                <div className="iv__bar-fill" style={{ width: `${pct}%` }} />
+              </div>
             </div>
-          </div>
+          )}
 
           <button
             type="button"
@@ -244,13 +311,35 @@ export default function S03Interview() {
           </span>
         </p>
 
-        {phase === "answered" ? (
+        {phase === "reexplain" && reExplain ? (
+          /* ── 재설명 문면 (F-INT-004) ────────────────────────────────────────
+             ❗**등급도 "왜 다시 설명하는지"도 적지 않는다.** 고객에게 판정을 보이지
+             않는 것이 설계 판단 ①이고, 재설명 자리에서 "미이해로 판정되어" 를 적으면
+             그 원칙이 여기서만 깨진다. 화면은 다시 설명한다는 사실만 말한다.
+             문면은 서버가 만든 그대로 낸다 — 요약하거나 자르지 않는다.               */
+          <section className="iv__card" aria-live="polite">
+            {currentItem && <span className="iv__item-name">{currentItem.name}</span>}
+            <h1 className="iv__question">다시 한 번 설명드릴게요.</h1>
+            <p className="iv__reexplain-body">{reExplain.content}</p>
+            <div className="iv__actions">
+              <button
+                type="button"
+                className="iv__btn iv__btn--primary"
+                onClick={beginReverify}
+              >
+                읽었습니다, 답변하기
+              </button>
+            </div>
+          </section>
+        ) : phase === "answered" ? (
           <section className="iv__card" aria-live="polite">
             <h1 className="iv__question">답변이 기록되었습니다.</h1>
             <p className="iv__alert iv__alert--info">
-              {question?.done
-                ? "모든 항목에 응답하셨습니다. 담당자가 결과를 확인합니다."
-                : "다음 항목으로 넘어가시겠어요?"}
+              {reverifying
+                ? "다시 답해 주셔서 감사합니다. 담당자가 결과를 확인합니다."
+                : question?.done
+                  ? "모든 항목에 응답하셨습니다. 담당자가 결과를 확인합니다."
+                  : "다음 항목으로 넘어가시겠어요?"}
             </p>
             <div className="iv__actions">
               <button
@@ -275,7 +364,9 @@ export default function S03Interview() {
             {currentItem && (
               <span className="iv__item-name">{currentItem.name}</span>
             )}
-            <h1 className="iv__question">{question?.question}</h1>
+            {/* 재검증이면 재설명 응답의 변형 질문이다 — 직전 질문을 다시 띄우지 않는다
+                (계약 `ReExplanation.reverifyQuestion`). 고르는 자리는 `askedText` 한 곳. */}
+            <h1 className="iv__question">{askedText}</h1>
 
             <div className="iv__field">
               <label htmlFor="answer" className="sr-only">
