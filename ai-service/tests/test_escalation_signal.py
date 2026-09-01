@@ -32,8 +32,10 @@ from pathlib import Path
 import pytest
 
 from app import misconception, rubrics, scoring
-from app.schemas import Evidence, Grade, Judgment
+from app.schemas import (Condition, Evidence, Grade, Judgment, RiskItem,
+                         SourceSpan)
 
+CONTRACT_SAMPLES = Path(__file__).resolve().parents[2] / "contracts" / "samples"
 CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "judgment.schema.json"
 
 #: 라이브러리 M08-TYING 의 근거 인용문(`source.quote`) 그대로다.
@@ -48,6 +50,16 @@ ITEM_ID = "ELS-PRINCIPAL-LOSS-WARNING"
 
 def _matched(utterance: str):
     return misconception.match(utterance, "ELS")
+
+
+def _risk_item() -> RiskItem:
+    """계약 샘플에서 만든다 — 조항 문면을 복사해 두면 낡는다(dev set 과 같은 이유)."""
+    raw = json.loads((CONTRACT_SAMPLES / "parsed_els_sample.json").read_text(encoding="utf-8"))
+    e = next(x for x in raw["_expected_risk_items"] if x["item_id"] == ITEM_ID)
+    return RiskItem(item_id=ITEM_ID, product_id="p", name="원금손실 가능성 고지",
+                    importance="required", status="extracted",
+                    condition=Condition(value_text=e["value_text"],
+                                        source_span=SourceSpan(**e["source_span"])))
 
 
 # ── #160 회귀 ────────────────────────────────────────────────────────────────
@@ -184,3 +196,61 @@ def test_mirror_emits_false_by_default_so_the_server_must_accept_it():
     payload = json.loads(j.model_dump_json())
     assert "escalate" in payload, "직렬화에서 빠지면 서버 계약과 갈린다"
     assert payload["escalate"] is False
+
+
+
+def _score_with_stub(answer: str):
+    """`scoring.score()` 를 실제로 태운다 — LLM 만 목으로 바꾼다.
+
+    후처리 전체(`_pin_escalation` 포함)를 지나야 배선을 검증한 것이 된다. 판정 객체를
+    손으로 만들면 그 배선을 건너뛴다.
+    """
+    from unittest.mock import patch
+    r = rubrics.get(ITEM_ID)
+    stub = Judgment(item_id=ITEM_ID, grade=Grade.U3, confidence=0.9,
+                    evidence=Evidence(utterance_quote=answer,
+                                      rubric_clause=r.required_elements[0]),
+                    reason="원금손실 언급 없음")
+    with patch("app.llm_client.LlmClient.complete_json", return_value=stub):
+        return scoring.score(ITEM_ID, "질문?", answer, _risk_item())
+
+
+# ── 배선 (이슈 #160 2단계) ────────────────────────────────────────────────────
+def test_score_carries_the_signal_for_the_demo_utterance(monkeypatch):
+    """★ 기획 [기능2] 데모 발화가 `escalate=True` 로 나간다 — `#160` 이 노린 것.
+
+    이게 서 있어야 서버 `publishIfUnfairSales` 가 COMPL 발행을 판단한다. 그전에는
+    `misconception_type` 이 null 이라 첫 줄에서 반환됐고, **탐지는 만점인데 발행이
+    한 번도 안 일어났다**(오준서가 3모듈 왕복으로 재현).
+    """
+    j = _score_with_stub(TYING_UTTERANCE)
+    assert j.escalate is True, "꺾기 발화인데 신호가 안 선다"
+
+
+def test_signal_does_not_depend_on_the_graded_item(monkeypatch):
+    """❗신호는 **어느 항목을 채점 중이었는지와 무관**하다.
+
+    `ELS-PRINCIPAL-LOSS-WARNING` 을 채점하다 꺾기를 들어도 꺾기다. 등급은 그 항목의
+    이해도를 재고, 신호는 판매자 행위를 잰다 — 묻는 것이 다르다.
+
+    이 단정이 `escalation_signal` 의 `del rubric` 과 한 쌍이다. 누가 "일관성" 을 이유로
+    루브릭 필터를 달면 `#160` 결함이 그대로 돌아온다.
+    """
+    assert _score_with_stub(TYING_UTTERANCE).escalate is True
+
+
+def test_normal_utterance_raises_no_signal():
+    """신호가 아무 발화에나 서면 COMPL 큐가 의미를 잃는다."""
+    assert _score_with_stub("기초자산이 많이 떨어지면 원금이 깎일 수 있습니다").escalate is False
+
+
+def test_reason_carries_no_type_id_even_when_the_signal_is_up():
+    """★ 2단계와 4단계가 **한 PR 이어야 하는 이유** (이슈 #160 이 못박았다).
+
+    ①(신호를 싣는다)만 들어가면 상향 경로가 열리면서 `reason` 문면에 유형ID 가 찍히고,
+    그 `reason` 은 `JudgmentView` 가 판매자에게 싣는 5필드 중 하나다 — `#147`·`#159`·`#145`
+    의 비노출 조치를 문자열로 우회한다(기획 7-4).
+    """
+    import re
+    j = _score_with_stub(TYING_UTTERANCE)
+    assert not re.search(r"M\d\d-[A-Z]", j.reason), f"유형ID 가 문면에 있다: {j.reason!r}"

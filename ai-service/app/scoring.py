@@ -135,7 +135,37 @@ def score(
     verify_quote_is_verbatim(judgment, answer_text)
     verify_rubric_clause_is_published(judgment, rubric)
     judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
-    return apply_misconception_floor(judgment, matched, rubric)
+    judgment = apply_misconception_floor(judgment, matched, rubric)
+    return _pin_escalation(judgment, matched, rubric)
+
+
+def _pin_escalation(
+    judgment: Judgment, matched: MisconceptionResponse, rubric: rubrics.Rubric
+) -> Judgment:
+    """상신 신호를 싣는다 — **모델에게 묻지 않는다** (이슈 #160, 결정 10.47).
+
+    `escalation_signal()` 이 라이브러리의 `escalate: compliance` 에서 계산한 값을 그대로
+    옮긴다. `_pin_item_id`·`_pin_prompt_version` 과 같은 층이다.
+
+    ## 왜 `apply_misconception_floor` 뒤인가
+
+    순서가 중요하지 않아 보이지만 하나 있다 — **floor 가 등급을 바꿔도 신호는 안 바뀐다.**
+    두 값이 같은 입력(`matched`)에서 나오는데 **거르는 기준이 다르다.**
+
+        등급 상향   rubric.related_misconceptions 로 거른다  (이 항목의 오해만)
+        상신 신호   거르지 않는다                            (판매자 행위는 항목 무관)
+
+    `#160` 의 결함이 정확히 그 필터가 신호까지 삼킨 것이었다. 뒤에 두면 floor 를 고치는
+    사람이 신호를 같이 건드리지 않는다.
+
+    ## 판매자에게 안 나간다
+
+    계약 `description` 이 *"판매자 응답(JudgmentView)에 넣지 않는다"* 를 적었고, 서버가
+    `JudgmentView.of()` 허용목록(`JudgmentViewFieldsTest`)과 어휘 대조
+    (`UnfairSignalNotExposedTest`)로 두 겹 잠갔다. 어떤 발화가 탐지되는지 알면 문면만 바꿔
+    같은 영업을 한다(기획 7-4 역이용 방지).
+    """
+    return judgment.model_copy(update={"escalate": escalation_signal(matched, rubric)})
 
 
 # ── 프롬프트 ───────────────────────────────────────────────────────────────────
