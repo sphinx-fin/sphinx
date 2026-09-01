@@ -24,6 +24,12 @@ import com.sphinxfin.sphinx.domain.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import java.nio.charset.StandardCharsets;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -391,9 +397,83 @@ public class SessionController {
     }
 
     /**
-     * 계약({@code ReportResponse}) 응답. <b>URL 둘은 PDF 생성 전까지 null 이 계약이다</b> —
-     * 채우면 계약이 "이 URL 로 가면 문서가 있다"를 보장하는데 404 가 나고, 스키마 검증은
-     * 통과하며 화면은 링크를 그린다. 눌러야 드러나는 종류의 결함이다.
+     * 발행된 리포트를 PDF 로 본다 (F-GTE-004 2번 · 이슈 #233).
+     *
+     * <p><b>인라인이다</b> — 브라우저가 뷰어로 연다. 내려받기는 {@link #downloadReportPdf}
+     * 이고, <b>바이트는 같다.</b> 두 엔드포인트를 가르는 것은 {@code Content-Disposition}
+     * 하나뿐이라, 미리 본 문서와 받은 문서가 다를 수 없다.
+     *
+     * <p>❗<b>공통 봉투({@code ApiResponse})에 담지 않는다.</b> PDF 는 바이트고 봉투는 JSON
+     * 이다. base64 로 접어 넣으면 브라우저가 뷰어로 못 열고 화면이 다시 풀어야 한다 —
+     * 계약이 {@code previewUrl} 을 <i>"브라우저 미리보기(PDF 인라인)"</i> 로 적은 것과
+     * 어긋난다. <b>오류 경로는 봉투 그대로다</b>(403·404 는 {@code GlobalExceptionHandler}
+     * 가 낸다) — 규약이 깨지는 것은 성공 응답의 본문뿐이고, 그것이 이 경계의 목적이다.
+     *
+     * <p>권한은 {@code report:read} 다. <b>발행({@code report:issue})과 가르는 이유가
+     * 그대로 적용된다</b> — 이건 조회이고 상태를 안 바꾼다. 감사 로그에서도 "열어봤다" 로
+     * 남아야 하지 "교부했다" 로 남으면 안 된다(#94 리뷰).
+     */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @GetMapping("/{sid}/report/preview")
+    public ResponseEntity<byte[]> previewReportPdf(@PathVariable String sid) {
+        return pdfResponse(sid, false);
+    }
+
+    /** 발행된 리포트를 내려받는다. {@link #previewReportPdf} 와 <b>같은 바이트</b>다. */
+    @PreAuthorize("@accessGuard.can('report:read', #sid)")
+    @GetMapping("/{sid}/report/download")
+    public ResponseEntity<byte[]> downloadReportPdf(@PathVariable String sid) {
+        return pdfResponse(sid, true);
+    }
+
+    /**
+     * 두 경로의 공통 본체. 발행 안 된 세션은 {@code ReportService.pdf} 가
+     * {@link NoSuchElementException} 을 던져 <b>GET /report 와 같은 404</b> 가 된다 —
+     * 그쪽 javadoc 이 적은 "세션이 없다 · 아직 발행 안 했다" 를 한 코드로 내는 이유가
+     * 여기도 그대로다(범위 밖 세션의 존재 여부를 알려주지 않는다).
+     *
+     * <p>파일명에 {@code reportId} 를 쓴다. 세션 ID 를 쓰면 <b>같은 세션의 서로 다른 발행이
+     * 같은 이름</b>이 되어, 받은 사람의 폴더에서 두 교부본이 덮어써진다.
+     */
+    private ResponseEntity<byte[]> pdfResponse(String sid, boolean asAttachment) {
+        sessionService.get(sid);   // 없는 세션이면 404
+        ReportService.Report report = reportService.latest(sid).orElseThrow(
+                () -> new NoSuchElementException("아직 발행된 리포트가 없다: " + sid));
+        byte[] bytes = reportService.pdf(sid);
+
+        ContentDisposition disposition = (asAttachment
+                ? ContentDisposition.attachment()
+                : ContentDisposition.inline())
+                .filename("sphinx-report-" + report.reportId() + ".pdf", StandardCharsets.UTF_8)
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                // 판정 근거와 고객 발화가 실린 문서다. 중간 캐시에 남기지 않는다
+                // (web/app.conf 가 사이트 전체에 거는 것과 같은 이유, 결정 10.57).
+                .cacheControl(CacheControl.noStore())
+                .body(bytes);
+    }
+
+    /**
+     * 계약({@code ReportResponse}) 응답.
+     *
+     * <p>❗<b>URL 둘이 이제 값을 갖는다</b>(이슈 #233 · PR #244). 예전에는 null 이 계약이었다 —
+     * 채우면 계약이 <i>"이 URL 로 가면 문서가 있다"</i> 를 보장하는데 404 가 났기 때문이다.
+     * 지금은 그 보장이 참이다: 발행된 리포트가 있어야 이 payload 자체가 만들어지고, 두 URL 은
+     * 그 리포트의 PDF 를 가리킨다.
+     *
+     * <p>❗<b>API 기준 경로다 — 사이트 기준이 아니다.</b> 이 문자열을 그대로
+     * {@code <a href>} 에 넣으면 브라우저는 <b>web 오리진</b>을 치고, 거기서 {@code /sessions/…}
+     * 는 API 가 아니다. nginx 의 {@code location /} 이 {@code index.html} 로 떨어뜨려
+     * <b>404 가 아니라 200 text/html</b> 이 나온다 — 미리보기는 빈 탭, 내려받기는 PDF 대신
+     * HTML 파일이다. 소비자가 그 배포의 API 접두어({@code /api})를 붙여야 한다.
+     *
+     * <p>그럼에도 서버가 접두어를 안 붙이는 이유는 그것이 <b>프론트 배포의 값</b>이기
+     * 때문이다({@code web/src/api/client.ts} 의 {@code BASE}). 서버가 지어내기 시작하면 같은
+     * 값이 두 곳에 살고, 갈리는 날 링크만 조용히 깨진다. 절대 URL 은 더 나쁘다 — 배포 호스트
+     * 까지 서버가 알아야 한다.
      *
      * <p>{@code generatedAt} 은 발행 기록의 시각이지 지금 시각이 아니다. 같은 내용을 다시
      * 발행하면 기존 것을 돌려주므로(멱등), 그때 이 값이 <b>안 바뀌는 것</b>이 맞다.
@@ -404,8 +484,8 @@ public class SessionController {
         out.put("sessionId", report.sessionId());
         out.put("generatedAt", report.generatedAt().toString());
         out.put("contentHash", report.contentHash());
-        out.put("previewUrl", null);
-        out.put("downloadUrl", null);
+        out.put("previewUrl", "/sessions/" + report.sessionId() + "/report/preview");
+        out.put("downloadUrl", "/sessions/" + report.sessionId() + "/report/download");
         return out;
     }
 }

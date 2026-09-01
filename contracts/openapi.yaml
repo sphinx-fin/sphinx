@@ -415,6 +415,64 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /sessions/{id}/report/preview:
+    get:
+      summary: 발행된 리포트 PDF — 브라우저 인라인 (F-GTE-004)
+      description: >
+        **응답이 공통 봉투가 아니다.** 본문이 PDF 바이트다 — base64 로 봉투에 접어 넣으면
+        브라우저가 뷰어로 못 열고 화면이 다시 풀어야 한다. `ReportResponse.previewUrl` 이
+        가리키는 곳이 여기다.
+        **오류 응답은 봉투 그대로다**(403·404). 규약이 갈리는 것은 성공 본문뿐이다.
+        `download` 와 **바이트가 같다** — 가르는 것은 `Content-Disposition` 하나다.
+        권한: `report:read`.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: "PDF 본문. `Content-Disposition: inline`"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '403':
+          description: 범위 밖 접근
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: >
+            세션이 없거나 **아직 발행된 리포트가 없다.** GET `/report` 와 같은 이유로 둘을
+            한 코드로 낸다 — 범위 밖 세션의 존재 여부를 알려주지 않는다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/report/download:
+    get:
+      summary: 발행된 리포트 PDF — 내려받기 (F-GTE-004)
+      description: >
+        `preview` 와 **같은 바이트**이고 `Content-Disposition` 만 `attachment` 다.
+        파일명은 `sphinx-report-<reportId>.pdf` — 세션 ID 를 쓰면 같은 세션의 서로 다른
+        발행이 같은 이름이 되어 받은 사람의 폴더에서 덮어써진다.
+        응답 봉투 규약은 `preview` 와 같다. 권한: `report:read`.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: "PDF 본문. `Content-Disposition: attachment`"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '403':
+          description: 범위 밖 접근
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: 세션이 없거나 아직 발행된 리포트가 없다
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions/{id}/report/summary:
     get:
       summary: 고객 교부용 요약 (F-GTE-004)
@@ -932,13 +990,26 @@ components:
           type: string
           nullable: true
           description: >
-            브라우저 미리보기(PDF 인라인). **PDF 생성이 붙기 전까지 null 이다.** 값을 채우면
-            계약이 "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 난다 — 스키마 검증은
-            통과하고 화면은 링크를 그리며, 눌러야 드러난다.
+            브라우저 미리보기(PDF 인라인) — `GET /sessions/{id}/report/preview`.
+            **PDF 가 붙어서 이제 값이 있다**(이슈 #233 · PR #244). 예전에는 null 이 계약이었다:
+            생성이 없는데 채우면 계약이 "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 나고,
+            스키마 검증은 통과하며 화면은 링크를 그려서 눌러야 드러났다. 지금은 그 보장이
+            참이다 — 발행된 리포트가 있어야 이 응답 자체가 만들어진다.
+            ❗**이 값은 API 기준 경로다 — 사이트 기준이 아니다.** 브라우저에서 쓸 때는
+            그 배포의 API 접두어를 앞에 붙인다(이 배포에서는 `/api`). 서버가 접두어를 지어내지
+            않는 이유는 그것이 **프론트 배포의 값**이기 때문이다 — 서버가 알기 시작하면
+            `client.ts` 의 `BASE` 와 두 벌이 되고, 갈리는 날 링크만 조용히 깨진다.
+            ❗**안 붙이면 404 가 아니라 200 이다.** nginx 의 `location /` 이 `index.html` 로
+            떨어뜨리므로 미리보기는 빈 탭, 내려받기는 PDF 대신 HTML 파일을 받는다 —
+            눌러야 드러나고, 눌러도 원인이 안 보인다(PR #247 리뷰 실측).
+            nullable 은 유지한다 — 키가 없는 것과 값이 null 인 것은 다르고, 화면이 옛 응답을
+            만날 수 있다.
         downloadUrl:
           type: string
           nullable: true
-          description: "PDF 다운로드. previewUrl 과 같은 이유로 PDF 생성 전까지 null."
+          description: >
+            PDF 내려받기 — `GET /sessions/{id}/report/download`. previewUrl 과 **같은 바이트**를
+            가리키고 `Content-Disposition` 만 다르다.
     ReportApiResponse:
       type: object
       required: [success, data]

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,9 +17,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * /report 응답이 계약을 만족하는지, 그리고 발행과 조회가 갈려 있는지 본다. 소유: 강희진
@@ -65,16 +67,31 @@ class ReportContractTest {
     }
 
     @Test
-    @DisplayName("previewUrl·downloadUrl 은 PDF 전까지 null — 없는 경로를 계약이 보장하면 안 된다")
-    void urlsAreNullUntilPdfExists() throws Exception {
+    @DisplayName("❗previewUrl·downloadUrl 이 실제로 문서를 낸다 — 계약이 보장하는 것이 그것이다")
+    void theUrlsActuallyResolveToTheDocument() throws Exception {
+        // 예전에는 이 자리가 **null 이어야 한다**였다. PDF 생성이 없어서 URL 을 채우면
+        // 계약이 "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 났기 때문이다(#233).
+        //
+        // PDF 가 붙었으니(PR #244) 단정이 뒤집히는 게 아니라 **한 걸음 더 간다** — 값이
+        // 있는지가 아니라 **그 값이 가리키는 곳에 문서가 있는지**를 잰다. 값만 재면
+        // 오타 난 경로도 초록이고, 그건 원래 막으려던 상태 그대로다.
         String sid = createSession();
         JsonNode data = new ObjectMapper().readTree(
                 mvc.perform(post("/sessions/" + sid + "/report"))
                         .andReturn().getResponse().getContentAsString()).path("data");
 
-        assertThat(data.get("previewUrl").isNull())
-                .as("PDF 생성이 없는데 URL 을 채우면 404 나는 경로를 계약이 보장하게 된다").isTrue();
-        assertThat(data.get("downloadUrl").isNull()).isTrue();
+        for (String key : new String[]{"previewUrl", "downloadUrl"}) {
+            String url = data.get(key).asText(null);
+            assertThat(url).as("%s 가 비었다", key).isNotBlank();
+
+            byte[] body = mvc.perform(get(url))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PDF))
+                    .andReturn().getResponse().getContentAsByteArray();
+
+            assertThat(new String(body, 0, 5, StandardCharsets.US_ASCII))
+                    .as("%s 가 PDF 가 아닌 것을 낸다", key).isEqualTo("%PDF-");
+        }
     }
 
     @Test

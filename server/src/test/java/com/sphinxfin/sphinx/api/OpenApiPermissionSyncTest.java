@@ -83,6 +83,47 @@ class OpenApiPermissionSyncTest {
                 .isEmpty();
     }
 
+    @Test
+    @DisplayName("❗어노테이션이 붙은 엔드포인트는 계약에도 있다 — 반대 방향도 잰다")
+    void everyAnnotatedEndpointIsDeclared() {
+        // 위 단정은 **계약 → 실물** 한 방향뿐이었다. 그래서 @PreAuthorize 를 달고 엔드포인트를
+        // 새로 만들면서 openapi 에 안 적어도 조용히 통과했다 — 실제로 /report/preview·download
+        // 를 붙이고 나서야 알았다(PR #244 부착).
+        //
+        // 이 방향이 덜 위험해 보이지만(없는 버튼이 생기는 쪽은 반대다) CLAUDE.md 가 *"엔드포인트를
+        // 새로 만들면 최소한 목록에는 올린다 — 문서가 전부라고 믿는 사람이 생기지 않게"* 라고
+        // 못박은 자리다. 프론트는 이 문서만 읽는다.
+        Map<String, String> declared = declaredInSpec2();
+        List<String> missing = annotatedActions().keySet().stream()
+                .filter(key -> !declared.containsKey(key))
+                .sorted()
+                .toList();
+
+        assertThat(missing)
+                .as("어노테이션은 있는데 openapi 에 없다. 명세를 못 쓰겠으면 요약만이라도 "
+                        + "올린다 — 계약이 단일 진실이라고 스스로 선언하고 있어서 더 그렇다")
+                .isEmpty();
+    }
+
+    /** 권한 문면이 없어도 <b>경로·메서드가 계약에 있기만</b> 하면 담는다. */
+    private static Map<String, String> declaredInSpec2() {
+        try {
+            List<String> lines = Files.readAllLines(SPEC);
+            Map<String, String> out = new LinkedHashMap<>();
+            String path = null;
+            for (String line : lines) {
+                if (line.matches("^  /\\S+:\\s*$")) {
+                    path = line.trim().replaceFirst(":$", "");
+                } else if (path != null && line.matches("^    (get|post|put|delete|patch):\\s*$")) {
+                    out.put(line.trim().replaceFirst(":$", "").toUpperCase() + " " + path, path);
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            throw new IllegalStateException("openapi.yaml 을 못 읽었다", e);
+        }
+    }
+
     /** {@code "METHOD /path" → action}. 설명에 권한 문면이 있는 것만. */
     private static Map<String, String> declaredInSpec() throws Exception {
         List<String> lines = Files.readAllLines(SPEC);
