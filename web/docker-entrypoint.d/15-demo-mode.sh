@@ -73,18 +73,46 @@ map \$host \$sphinx_auth_realm { default off; }
 # 은 mgr-01 을 달고 임의 세션 경로로 간다(파일이 말하는 규칙과 도는 규칙이 갈린다).
 # 앞쪽은 화면이 조용히 깨지고 뒤쪽은 선언과 어긋난다(PR #221 리뷰, 정세현 실측).
 # 쿼리스트링은 계정 선택과 무관하므로 \$uri 로 잃는 것이 없다.
+# ❗**한 줄이 곧 정책 주장이다 — \`rbac_policy.yaml\` 을 옮겨 적고 있다.** 규칙마다 어느
+# action 을 여는지와 그 action 의 roles 를 같이 적는다 — 정책이 바뀌면 여기가 조용히
+# 거짓이 된다. 기준은 둘이고 **둘 다** 봐야 한다(이슈 #263 · 정세현).
+#
+#   ① 그 경로가 default 밖으로 나와 있는가   — SELLER 가 roles 에 없으면 default 로는 403
+#   ② 실리는 계정의 역할이 그 action 의 roles 에 있는가
+#
+# ②를 빼면 "경로는 지도에 있는데 계정이 틀려서" 같은 403 이 난다 — 지금 dashboard 가
+# compl-01 인 것은 \`aggregate:*\` 에 COMPL 이 있어서지 \`/dashboard/\` 라서가 아니다.
+#
+# 둘 다 \`DemoModeAccountMapTest\`(#269) 가 대조하지만 **\`@PreAuthorize\` 가 붙은
+# 엔드포인트만** 본다. 그래서 사람 몫이 둘 남는다 — 엔드포인트가 아직 없는
+# action(\`report:summary:read\` · \`audit:read\` · \`audit:verify\`)은 붙는 날 여기 없으면
+# 그날 403 이고, 규칙을 **넓히는** 실수는 초록인 채로 지나간다(\`~^/api/products/\` 로 넓히면
+# risk-items 에 admin-01 이 실리는데 \`product:read\` 에 ADMIN 이 있어 대조를 통과한다).
 map \$uri \$sphinx_api_auth {
+    # SELLER 가 roles 에 있는 action 은 전부 여기로 통과한다(session:* · product:read · report:*)
     default                                 "Basic $(b64 "$seller")";
+
+    # aggregate:heatmap:read · aggregate:indicator:read — [COMPL org, MGR branch]
     ~^/api/dashboard/                       "Basic $(b64 "$compl")";
+
+    # override:approve — [MGR branch]. 요청자 ≠ 승인자(ADR-002)
     ~^/api/sessions/[^/]+/override/approve  "Basic $(b64 "$mgr")";
+
+    # signal:unfair:read — [COMPL org] 뿐이다. 판매자 화면 비노출이 요건이라 SELLER 가 없다
+    # (기획 7-4). default 로 두면 기획 [기능2] 의 보이는 절반이 403 이다(이슈 #263).
     ~^/api/signals/                         "Basic $(b64 "$compl")";
+
+    # product:manage — [ADMIN org]. 등록·추출을 판매 라인에서 뗀 것이라(결정 10.36) SELLER 가
+    # 없다. S-01(/upload) 이 이 둘을 부른다. 조회(product:read)는 SELLER 도 있어 default 로
+    # 둔다 — 판매자가 읽은 것을 admin 이 읽은 것으로 감사에 남기지 않는다.
     ~^/api/products/(documents|[^/]+/extract)$  "Basic $(b64 "$admin")";
 }
 EOF
     chmod 640 "$MODE_CONF"
 
     echo "⚠ 개방 모드 — 로그인 없이 열린다. nginx 가 대신 로그인하므로 감사 로그의 '누가' 는"
-    echo "  아래 계정으로 굳는다: 기본 ${seller} · 집계 ${compl} · 오버라이드 승인 ${mgr}"
+    echo "  아래 계정으로 굳는다: 기본 ${seller} · 집계/신호 ${compl} · 오버라이드 승인 ${mgr}"
+    echo "  · 상품 등록/추출 ${admin}"
     echo "  잠그려면 SPHINX_DEMO_OPEN 을 비우고 다시 띄운다."
 else
     cat > "$MODE_CONF" <<'EOF'
