@@ -118,6 +118,11 @@ class Judgment(Strict):
     misconception_type: str | None = Field(
         default=None, description="F-DET-001 매칭 시 유형ID (예: M08-TYING)"
     )
+    escalate: bool = Field(
+        default=False,
+        description="이 판정이 컴플라이언스로 올라갈 신호인가 (M08-TYING 등 "
+                    "escalate: compliance). ❗판매자 응답에 넣지 않는다 — 기획 7-4 역이용 방지",
+    )
     prompt_version: str | None = Field(
         default=None,
         description="이 판정을 낸 채점 프롬프트 버전. **모델이 채우지 않는다** — "
