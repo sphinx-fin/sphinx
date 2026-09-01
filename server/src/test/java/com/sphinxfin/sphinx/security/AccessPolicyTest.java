@@ -379,7 +379,7 @@ class AccessPolicyTest {
     }
 
     @Nested
-    @DisplayName("❗CUST 그랜트는 지금 도달 불가다 (이슈 #166)")
+    @DisplayName("❗CUST — session:answer 는 역할로 막고, 남은 그랜트는 도달 불가다 (이슈 #166)")
     class CustIsUnreachable {
 
         /**
@@ -395,42 +395,56 @@ class AccessPolicyTest {
         private static final Actor CUST = new Actor("cust-01", Role.CUST, null);
 
         @Test
-        @DisplayName("정책 파일에는 그랜트가 있다 — 없어서 막히는 것이 아니다")
-        void theGrantExists() {
+        @DisplayName("❗session:answer 에는 CUST 그랜트가 없다 — B안이 들어간 자리다")
+        void theGrantIsGone() {
             assertThat(new RbacPolicyFile().grants("session:answer"))
-                    .as("이 단정이 깨지면 누가 그랜트를 지운 것이다 — 그건 #166 의 B 안이고, "
-                            + "이 Nested 전체를 다시 봐야 한다")
-                    .anyMatch(g -> g.roles().contains(Role.CUST));
+                    .as("이 단정이 깨지면 누가 CUST 를 되돌린 것이다 — #166 은 B 로 결정됐고, "
+                            + "되돌리려면 그 결정과 rbac_policy.yaml 의 근거 두 개를 먼저 봐야 한다")
+                    .noneMatch(g -> g.roles().contains(Role.CUST));
         }
 
         @Test
-        @DisplayName("❗그런데 배선이 만드는 Target 으로는 통과할 수 없다 — S-03 이 그것이다")
-        void custCannotAnswerOwnSession() {
+        @DisplayName("❗이제 **역할이** 막는다 — 사유도 참이다")
+        void theRoleIsWhatBlocksNow() {
             AccessPolicy.Decision decision = policy.decide(CUST, "session:answer", AS_WIRED);
 
             assertThat(decision.allowed()).isFalse();
             assertThat(decision.reason())
-                    .as("역할이 없어서가 아니라 이름이 안 맞아서다 — 대조 값이 sellerId 뿐이다")
-                    .contains("자기 세션이 아니다");
+                    .as("B 이전에는 '자기 세션이 아니다' 였는데 그건 거짓이었다 — 자기 세션이 "
+                            + "아니어서가 아니라 대조할 고객 식별자가 세션에 없어서다. "
+                            + "그랜트를 걷으니 AccessPolicy 를 안 고치고 사유가 참이 됐다")
+                    .contains("그랜트가 없다")
+                    .doesNotContain("자기 세션이 아니다");
         }
 
         @Test
-        @DisplayName("고객 교부용 요약도 같다")
-        void custCannotReadOwnSummary() {
-            assertThat(policy.permits(CUST, "report:summary:read", AS_WIRED)).isFalse();
-        }
-
-        @Test
-        @DisplayName("❗막는 것은 역할이 아니라 이름 대조다 — CUST 라도 이름이 맞으면 통과한다")
-        void theRoleIsNotWhatBlocks() {
-            // 이 단정이 #166 의 요지다. 역할은 그랜트 유무만 정하고 그 뒤로는 이름 비교뿐이라,
-            // actorId 가 우연히 sellerId 와 같으면 CUST 가 판매자 세션을 연다.
+        @DisplayName("❗이름이 sellerId 와 같아도 못 한다 — B 이전에는 통과했다")
+        void aCustNamedLikeTheSellerIsBlockedToo() {
+            // ❗이것이 B 를 고른 근거다(#166 ❶). 이전에는 역할이 그랜트 유무만 정하고 그 뒤로는
+            // 이름 비교뿐이라, actorId 가 sellerId 와 같으면 **CUST 가 판매자와 똑같이 통과했다.**
+            // 즉 이 action 에서 역할은 구속이 아니었다. 지금은 그랜트 검사에서 끝난다.
             Actor custNamedLikeTheSeller = new Actor("seller-01", Role.CUST, null);
 
             assertThat(policy.permits(custNamedLikeTheSeller, "session:answer", AS_WIRED))
-                    .as("역할로 막고 있었다면 이것도 거부여야 한다. 통과한다는 것이 "
-                            + "'CUST 는 원래 못 한다' 가 아니라 '대조할 값이 없다' 라는 증거다")
-                    .isTrue();
+                    .as("여기가 다시 true 가 되면 역할이 또 무의미해진 것이다")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("❗도달 불가라는 사실은 report:summary:read 에 살아 있다 — 그랜트가 남았다")
+        void theUnreachableGrantSurvivesOnTheSummary() {
+            // B 는 session:answer 만 걷었다. 고객 교부용 요약은 기획 산출물이라 F-GTE-004
+            // 판단으로 뗐고(#166 조건 ②), 그래서 **CUST 그랜트가 있는데 도달 못 하는** 상태는
+            // 그쪽에 그대로 남는다. #166 이 세운 사실을 붙들 자리가 여기다.
+            assertThat(new RbacPolicyFile().grants("report:summary:read"))
+                    .as("이 그랜트까지 걷으면 CUST 도달 불가를 보여줄 자리가 없어진다")
+                    .anyMatch(g -> g.roles().contains(Role.CUST));
+
+            AccessPolicy.Decision decision = policy.decide(CUST, "report:summary:read", AS_WIRED);
+            assertThat(decision.allowed()).isFalse();
+            assertThat(decision.reason())
+                    .as("그랜트는 있으므로 범위 판정까지 내려간다 — 거기서 이름이 안 맞아 막힌다")
+                    .contains("자기 세션이 아니다");
         }
 
         @Test
