@@ -295,10 +295,21 @@ def test_v1_prompt_is_kept_for_audit():
 
 
 def test_short_answers_are_not_treated_as_parroting():
-    """분모가 작으면 우연 일치가 점수를 지배한다 (PR #114 리뷰, 정세현).
+    """짧은 발화는 복창 판정을 아예 건너뛴다 — **이유는 우연 일치가 아니다.**
 
-    `"손실"` 은 바이그램이 1개라 그 하나가 조항에 있으면 containment 가 1.000 이다.
-    복창이 아닌데 상한이 걸린다.
+    처음 근거는 *"분모가 작으면 우연 일치가 점수를 지배한다"* 였는데 **실측이 그것을
+    부정했다**(`scoring.min_echo_bigrams` 주석). `"손실"` 의 containment 1.000 은 우연이
+    아니라 **조항 문면 그대로**이기 때문이다.
+
+        '손실'      1bg  containment=1.000   조항 부분열 — 우연이 아니다
+        '원금 손실'  3bg  containment=0.667   어휘만 겹친다(순서 다름)
+
+    실제 이유는 **그 길이에서는 상한을 씌워도 판정이 안 바뀐다**는 것이다. 복창 판정이
+    잡으려는 것은 *"요소는 다 말했는데 자기 말인지 모르겠다"* 이고 그건 U1 일 때만 생기는데,
+    조항 하나를 담을 길이보다 짧으면 요소 미충족이라 U2 이하가 되어 게이트 R-04 가 이미
+    YELLOW 로 잡는다. 그래서 계산을 건너뛰는 것이 맞다.
+
+    이 docstring 이 철회된 근거를 들고 있으면 다음 사람이 그걸 읽고 판단한다 (이슈 #128 ②).
     """
     rubric, item = _rubric_and_item()
     for short in ("손실", "원금", "원금 손실"):
@@ -320,8 +331,54 @@ def test_short_answers_would_have_scored_high_without_the_floor():
     assert textsim.containment("원금 손실", clause) >= scoring.ECHO_THRESHOLD
 
 
+def test_the_floor_tracks_the_rubric_not_a_constant(monkeypatch):
+    """★ **하한이 실제로 루브릭을 따라간다** — 상수로 되돌리는 회귀를 잡는다 (이슈 #128 ①).
+
+    아래 `..._derived_from_the_shortest_clause` 가 `★` 를 달고 이 성질을 지킨다고 적었는데,
+    실측하니 **상수로 되돌려도 안 잡혔다.**
+
+        유도식 -1 → +1        2 failed   (잡힌다)
+        유도를 `return 5` 로   35 passed  ❗아무것도 안 잡는다
+
+    부등식(`하한 < 조항최단`)만 보므로, 우연히 모든 최단값보다 작은 상수면 통과한다.
+    **지키겠다고 적은 것을 안 지키고 있었다.**
+
+    그래서 루브릭을 갈아끼워 하한이 **따라 움직이는지**를 본다. 상수면 안 움직인다.
+    """
+    from dataclasses import replace
+
+    from app import rubrics as r
+    from app import textsim
+
+    baseline = scoring.min_echo_bigrams()
+
+    # 조항이 더 긴 루브릭만 남긴다 — 최단이 올라가면 하한도 올라가야 한다
+    longest = max(
+        (clause for rubric in r.all_rubrics().values() for clause in rubric.required_elements),
+        key=lambda c: len(textsim.bigrams(textsim.normalize(c))),
+    )
+    only_long = {"X": replace(next(iter(r.all_rubrics().values())),
+                              item_id="X", required_elements=(longest,))}
+    monkeypatch.setattr(r, "all_rubrics", lambda: only_long)
+    scoring.min_echo_bigrams.cache_clear()
+    try:
+        moved = scoring.min_echo_bigrams()
+    finally:
+        monkeypatch.undo()
+        scoring.min_echo_bigrams.cache_clear()
+
+    expected = len(textsim.bigrams(textsim.normalize(longest))) - 1
+    assert moved == expected, f"루브릭을 갈았는데 하한이 {moved} 다 (기대 {expected})"
+    assert moved != baseline, (
+        "루브릭이 바뀌었는데 하한이 그대로다 — 유도가 아니라 상수로 되돌아갔다"
+    )
+
+
 def test_the_floor_is_derived_from_the_shortest_clause():
-    """★ 하한은 상수가 아니라 루브릭에서 나온다.
+    """하한이 조항 최단보다 작다 — 유도식의 **정의**를 본다.
+
+    이 단정만으로는 상수 회귀를 못 잡는다(위 `..._tracks_the_rubric_not_a_constant` 참고).
+    그래도 남기는 이유는 유도식이 잘못된 방향으로 바뀌는 것(`-1` → `+1`)을 잡기 때문이다.
 
     처음 상수 8 로 박았다가 `#112`(required 루브릭 10종)가 조항 최단을 13bg → 6bg 로 바꾸면서
     깨졌다. 하한의 유일한 실제 제약은 **가장 짧은 조항을 그대로 옮긴 복창을 놓치지 않는 것**
