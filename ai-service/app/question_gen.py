@@ -28,6 +28,7 @@
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from . import numerics, rubrics, templates
@@ -36,6 +37,8 @@ from .schemas import QuestionDraft, QuestionResponse, RiskItem
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-INT-002_v1.md"
 PROMPT_VERSION = "F-INT-002_v1"
+
+log = logging.getLogger(__name__)
 
 QUESTION_TYPES = ("situation", "amount", "condition")
 MAX_ATTEMPTS = 3
@@ -62,6 +65,7 @@ def generate(
     allowed = [t for t in QUESTION_TYPES if t not in set(asked_types or ())] or list(QUESTION_TYPES)
 
     client_ = llm or default_client()
+    attempts: list[str] = []           # 폴백으로 내려갈 때만 쓴다 — 왜 내려갔는지 (이슈 #234)
     for _ in range(MAX_ATTEMPTS):
         try:
             draft = client_.complete_json(
@@ -70,18 +74,74 @@ def generate(
                 schema_name="QuestionDraft",
                 system=load_system_prompt(),
             )
-        except LlmError:
+        except LlmError as exc:
+            attempts.append(f"llm_error({type(exc).__name__})")
             break                      # 폴백으로 내려간다 — 인터뷰를 멈추지 않는다
         if draft.question_type not in allowed:
+            attempts.append(f"type_not_allowed({draft.question_type})")
             continue                   # 화이트리스트·중복 위반
-        if leaked_fragments(draft.question, forbidden):
+        leaked = leaked_fragments(draft.question, forbidden)
+        if leaked:
+            attempts.append(f"leaked({'·'.join(leaked)})")
             continue
         return QuestionResponse(
             item_id=risk_item.item_id, question=draft.question,
             question_type=draft.question_type, fallback_used=False,
         )
 
+    _log_fallback(risk_item.item_id, attempts, allowed)
     return _fallback(risk_item, template_item)
+
+
+def _log_fallback(item_id: str, attempts: list[str], allowed: list[str]) -> None:
+    """폴백으로 내려간 사실과 **이유**를 남긴다 (이슈 #234 1항).
+
+    ## 왜 필요한가
+
+    폴백은 LLM 이 만든 질문이 아니라 템플릿의 고정 문장이다. 인터뷰를 멈추지 않으려는
+    설계이고 그건 맞지만, **비율이 높으면 F-INT-002 가 사실상 안 도는 것**이다.
+
+    `#199` 작업 중 실제 생성에서 23건 중 6건(26%)이 폴백이었는데, 원인을 보려다 쿼터가
+    소진돼 멈췄다. **그 뒤로 이 값을 다시 볼 방법이 없었다** — `fallback_used` 는 응답에
+    실리지만 서버가 받아서 버리고(`AiServiceClient.Question` 이 안 들고 간다) 여기에도
+    로그가 없었다. 화면·기록·로그 어디에도 안 남는다.
+
+    ## 무엇을 남기나 — 이유가 본체다
+
+    "폴백이 났다" 만으로는 고칠 수 없다. 세 갈래가 완전히 다른 일이기 때문이다.
+
+        leaked(...)          프롬프트가 정답을 흘린다 → 프롬프트 수정
+        type_not_allowed(…)  화이트리스트 밖 유형을 낸다 → 프롬프트 규칙
+        llm_error(...)       모델이 안 돌았다 → 쿼터·네트워크. 우리 문제가 아니다
+
+    누출 조각을 그대로 싣는 이유는 그것이 **어느 어휘가 새는지**를 바로 말해 주기 때문이다.
+    조각의 출처는 루브릭과 조건 원문이고 **루브릭은 공개 의무 대상**이므로(기획서 5절)
+    로그에 남겨도 새로 드러나는 것이 없다. 고객 발화는 이 경로에 아예 없다(P3).
+
+    `warning` 이 아니라 `info` 다. 폴백은 설계된 정상 경로이고, 경고로 올리면 진짜 경고와
+    같은 레벨에 섞인다(`#121` 이 로그 레벨 설정을 넣으며 세운 기준과 같다).
+    """
+    log.info(
+        "F-INT-002 폴백: item_id=%s 시도=%d 허용유형=%s 사유=%s",
+        item_id, len(attempts), ",".join(allowed), _collapse(attempts) or "(없음)",
+    )
+
+
+def _collapse(reasons: list[str]) -> str:
+    """같은 사유가 이어지면 `×N` 으로 접는다.
+
+    세 번 다 같은 조각이 새면 `leaked(45) | leaked(45) | leaked(45)` 가 되는데, 시도 횟수는
+    이미 `시도=` 에 있으므로 같은 말을 두 번 하는 셈이다. **접어도 정보가 안 준다** —
+    오히려 *"세 번 다 같은 원인"* 과 *"매번 다른 원인"* 이 한눈에 갈린다. 앞의 것은 프롬프트가
+    일관되게 새는 것이고 뒤의 것은 모델이 흔들리는 것이라 할 일이 다르다.
+    """
+    out: list[str] = []
+    for reason in reasons:
+        if out and out[-1][0] == reason:
+            out[-1][1] += 1
+        else:
+            out.append([reason, 1])
+    return " | ".join(r if n == 1 else f"{r} ×{n}" for r, n in out)
 
 
 # ── 정답 노출 검사 ────────────────────────────────────────────────────────────
