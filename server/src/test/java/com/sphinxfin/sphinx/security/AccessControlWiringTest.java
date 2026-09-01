@@ -200,10 +200,8 @@ class AccessControlWiringTest {
                 .toList();
         // 아직 엔드포인트가 없는 기능(F-GTE-003 신호 큐, 감사 조회, 계정 관리)은 제외한다.
         //
-        // product:manage 는 성격이 다르다 — 엔드포인트는 **이미 있다**(POST /products/documents ·
-        // POST /products/{id}/extract). 정책이 없어서 어노테이션이 못 붙어 있던 것이고,
-        // 그 정책이 방금 생겼다(이슈 #69, 결정 10.36). 부착은 강희진 몫이라 이 PR 이 하지
-        // 않는다. **부착되면 이 줄을 지운다** — 목록이 줄어드는 것이 진척이다.
+        // product:manage 도 뺐다 — POST /products/documents · POST /products/{id}/extract 에
+        // 붙었다(이슈 #69 · 결정 10.36). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         //
         // aggregate:indicator:read 는 뺐다 — GET /dashboard/leading-indicators 가 붙었다
         // (이슈 #178). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
@@ -212,8 +210,7 @@ class AccessControlWiringTest {
         // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         List<String> notYetImplemented = List.of(
                 "audit:read", "audit:verify", "signal:unfair:read",
-                "admin:role:assign",
-                "product:manage");
+                "admin:role:assign");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
                         + "'접근이 없었다'로 읽힌다. 기능이 아직 없으면 예외 목록에 넣고 이유를 적어라")
@@ -221,20 +218,29 @@ class AccessControlWiringTest {
     }
 
     @Test
-    @DisplayName("action이 안 붙은 엔드포인트가 명시적으로 열거돼 있다 — 잊고 빠뜨린 것과 구별한다")
-    void unannotatedEndpointsAreEnumerated() {
+    @DisplayName("❗어노테이션이 안 붙은 엔드포인트가 하나도 없다 — 목록이 비었다")
+    void everyEndpointCarriesAnAction() {
         List<String> unannotated = endpointActions().entrySet().stream()
                 .filter(e -> e.getValue() == null)
                 .map(Map.Entry::getKey)
                 .sorted()
                 .toList();
-        // rbac_policy.yaml에 대응 action이 아직 없는 것들이다(정책 소유자 확정 대기).
-        // 정책이 생기면 여기서 빼고 컨트롤러에 붙인다 — 목록이 줄어드는 것이 진척이다.
+
+        // 이 단정은 원래 **"몇 개가 남았는지"** 를 셌다(마지막 값은 4 — /products 네 경로).
+        // 정책이 생길 때마다 붙이고 숫자를 줄여 왔고(이슈 #178 · #214 · #69), 이제 0 이다.
+        //
+        // ❗**숫자를 0 으로 두지 않고 "비어 있다" 로 바꾼다.** 남은 개수를 세는 단정은
+        // *"아직 덜 됐다"* 를 전제하고, 그 전제가 끝난 지금은 **새 엔드포인트가 어노테이션
+        // 없이 들어오는 것**이 유일한 실패 사유다. 그때 나와야 하는 말은 "4개여야 하는데
+        // 5개다" 가 아니라 **"이 경로에 action 이 없다"** 다.
+        //
+        // 미인증으로 열린 경로가 하나도 없다는 뜻이 아니다 — 그건 SecurityConfig 와
+        // enforce 스위치가 정한다. 여기서 재는 것은 **모든 경로가 어떤 action 에 속한다**는
+        // 것이고, 그래야 AuditInterceptor 가 무엇을 남길지 판단할 근거가 생긴다(#76).
         assertThat(unannotated)
-                .as("action 미부착 엔드포인트가 바뀌었다. 정책이 생겼으면 붙이고, "
-                        + "새로 만든 엔드포인트면 action부터 정하라")
-                .hasSize(4);
-        assertThat(String.join(" | ", unannotated))
-                .contains("/products");       // 상품 목록·업로드·추출·조회 4종
+                .as("@PreAuthorize 가 없는 엔드포인트가 생겼다. action 부터 정하고 "
+                        + "rbac_policy.yaml 에 넣은 뒤 붙인다 — 정책이 아직 없으면 "
+                        + "그 사실을 여기 예외로 적고 이유를 남긴다")
+                .isEmpty();
     }
 }
