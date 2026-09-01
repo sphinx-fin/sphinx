@@ -151,10 +151,24 @@ class SessionServiceTest {
     // ── F-GTE-003 불공정영업 신호 (이슈 #63) ──────────────────────────
 
     /** 꺾기 판정 — misconceptionType 이 M08-TYING 이다. */
+    /**
+     * 꺾기로 채점된 판정 — <b>ai-service 가 실제로 보내는 모양</b>이다.
+     *
+     * <p>❗{@code misconceptionType} 이 {@code null} 인 것이 요지다. 예전 픽스처는 여기에
+     * {@code "M08-TYING"} 을 넣었는데 <b>실물에서는 그 값이 안 온다</b> — 등급 상향은 루브릭의
+     * {@code related_misconceptions} 로 거르고, 17개 루브릭 어디에도 M08 이 안 걸려 있다.
+     * 그래서 유형이 실릴 경로가 없다(이슈 #160).
+     *
+     * <p>그 픽스처가 <b>일어나지 않는 상태를 모델링</b>하고 있었고, 그래서 발행 게이트가
+     * 유형ID 를 보는 동안에도 이 테스트는 초록이었다. 탐지는 만점인데 COMPL 발행이 0회인
+     * 상태를 테스트가 못 잡은 이유다.
+     *
+     * <p>신호는 {@code escalate} 로 온다 — ai-service 가 루브릭 필터 <b>밖에서</b> 계산한다.
+     */
     private static Judgment tying(String itemId) {
         return new Judgment(itemId, Grade.U4, new BigDecimal("0.9"),
                 new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요", "구속행위 금지"),
-                "꺾기 정황", "M08-TYING");
+                "꺾기 정황", null, null, true);
     }
 
     @Test
@@ -167,19 +181,30 @@ class SessionServiceTest {
         UnfairSalesSignalEvent e = (UnfairSalesSignalEvent) published.stream()
                 .filter(x -> x instanceof UnfairSalesSignalEvent).findFirst().orElseThrow();
         assertThat(e.sessionId()).isEqualTo(s.id());
-        assertThat(e.misconceptionType()).isEqualTo("M08-TYING");
         assertThat(e.utteranceQuote())
                 .as("컴플라이언스가 판단하려면 고객이 실제로 한 말이 필요하다")
                 .isEqualTo("대출받으려면 이것도 들어야 한다고 해서요");
+
+        // ❗**유형ID 는 비어 있다 — 그리고 그게 실물이다.** 루브릭 필터가 M08 을 안 실으므로
+        // (이슈 #160) 사건이 들고 가는 근거는 발화 인용이다. 예전 단정은 여기서 "M08-TYING"
+        // 을 기대했는데, 그건 픽스처가 만든 값이지 ai-service 가 보내는 값이 아니었다.
+        //
+        // 필드를 지우지는 않는다. 승급 유형이 어느 루브릭의 related_misconceptions 에 걸리는
+        // 날에는 값이 실리고, 그때 COMPL 이 유형까지 보는 것이 낫다.
+        assertThat(e.misconceptionType())
+                .as("유형이 실리는 경로가 없다 — 근거는 인용이다")
+                .isNull();
     }
 
     @Test
     @DisplayName("다른 오해는 사건이 안 나간다 — 모든 U4 가 불공정영업은 아니다")
     void otherMisconceptionsDoNotSignal() {
         Session s = service.create(cmd(null));
+        // M01 은 루브릭에 걸려 있어 유형이 실린다 — 그런데 escalate 는 false 다.
+        // **유형이 있는 것과 상신 대상인 것은 다르다**는 것을 이 줄이 고정한다.
         Judgment other = new Judgment("A", Grade.U4, new BigDecimal("0.9"),
                 new Judgment.Evidence("원금은 지켜지죠", "원금손실 조건"),
-                "원금 보장 오해", "M01-PRINCIPAL-GUARANTEE");
+                "원금 보장 오해", "M01-PRINCIPAL-GUARANTEE", null, false);
         service.recordJudgment(s.id(), other);
 
         assertThat(published).filteredOn(e -> e instanceof UnfairSalesSignalEvent).isEmpty();

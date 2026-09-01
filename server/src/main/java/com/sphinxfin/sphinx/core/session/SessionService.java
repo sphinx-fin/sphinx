@@ -159,9 +159,31 @@ public class SessionService {
      * <p>❗<b>발행 여부를 판정 응답에 싣지 않는다.</b> 판매자가 그 필드를 보면 무엇이
      * 탐지되는지 알게 되고, 그러면 같은 영업을 문면만 바꿔서 한다(기획 7-4 역이용 방지).
      * 그래서 이 메서드는 값을 돌려주지 않는다 — 호출자가 실수로 응답에 실을 수 없다.
+     *
+     * <h2>❗{@code misconceptionType} 이 아니라 {@code escalate} 로 가른다 (이슈 #160)</h2>
+     *
+     * <p>예전에는 {@code UnfairSalesTypes.isSignal(judgment.misconceptionType())} 이었다.
+     * 그 클래스가 자기 javadoc 에 <i>"이 클래스는 계약이 열리면 사라진다"</i> 고 적어 둔
+     * 그 계약이 열렸다({@code judgment.schema.json} 의 {@code escalate} · PR #242).
+     *
+     * <p>유형ID 로 가르는 동안 <b>발행이 한 번도 일어나지 않았다.</b> 등급 상향은 루브릭의
+     * {@code related_misconceptions} 로 거르는 것이 맞는데(다른 항목의 오해가 이 항목 등급을
+     * 끌어내리면 안 된다) 그 필터가 <b>신호까지 같이 삼켰다</b> — 17개 루브릭 어디에도
+     * {@code M08-TYING} 이 안 걸려 있어서 유형이 실릴 경로가 없었다. 탐지는 pattern 1.0
+     * 만점인데 COMPL 발행은 0회였고, <b>아무도 안 걸리는 것이 탐지가 도는 것처럼 보였다.</b>
+     *
+     * <p>{@code escalate} 는 ai-service 가 <b>루브릭 필터 밖에서</b> 계산한다(PR #205 ·
+     * {@code escalation_signal}). 등급과 신호는 묻는 것이 다르기 때문이다 — 등급은
+     * <i>"이 고객이 이 항목을 이해했는가"</i>, 꺾기는 <i>"판매자가 무엇을 했는가"</i> 다.
+     * 후자는 어느 위험항목을 채점 중이었는지와 무관하게 성립한다.
+     *
+     * <p>❗<b>서버에 유형 목록을 두지 않는다.</b> 근거는 오해 라이브러리의
+     * {@code escalate: compliance} 하나이고, ai-service 가 그것을 읽어 이미 판단해 준다.
+     * 서버가 목록을 다시 갖는 순간 유형이 승급될 때 두 곳을 고쳐야 하고, 한쪽만 고치면
+     * <b>탐지는 되는데 발행이 안 되는</b> 지금 이 상태로 돌아온다.
      */
     private void publishIfUnfairSales(String sessionId, Judgment judgment) {
-        if (!UnfairSalesTypes.isSignal(judgment.misconceptionType())) {
+        if (!judgment.escalate()) {
             return;
         }
         events.publishEvent(new UnfairSalesSignalEvent(
