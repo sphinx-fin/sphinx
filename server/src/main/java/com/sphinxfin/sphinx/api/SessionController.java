@@ -143,7 +143,11 @@ public class SessionController {
         String question = generated.question();
         // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
         // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
-        sessionService.recordAskedQuestion(sid, next.itemId(), question, generated.fallbackUsed());
+        // 출처를 **여기서** 정한다 — 질문을 만든 자리가 그것을 아는 유일한 곳이다.
+        sessionService.recordAskedQuestion(sid, next.itemId(), question,
+                generated.fallbackUsed()
+                        ? EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK
+                        : EvidenceRecorder.QuestionSource.DISPLAYED);
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
                 question,
@@ -241,12 +245,10 @@ public class SessionController {
     private AskedQuestion askedQuestionFor(Session session, RiskItem item) {
         String asked = session.askedQuestion(item.itemId());
         if (asked != null) {
-            // 고객이 본 것은 맞다. 그 문면을 **모델이 만들었는지**가 갈린다 — ai-service 가
-            // 정답 노출 검사를 통과 못 해 템플릿으로 내려간 회차는 F-INT-002 가 사실상 안
-            // 돈 것이라, 성능 수치가 정상 회차와 섞이면 안 된다(이슈 #234).
-            return new AskedQuestion(asked, session.askedQuestionWasTemplateFallback(item.itemId())
-                    ? EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK
-                    : EvidenceRecorder.QuestionSource.DISPLAYED);
+            // ❗**출처를 여기서 유도하지 않는다** (이슈 #274). 저장된 값을 그대로 쓴다 —
+            // 질문을 만든 자리가 자기 출처를 아는 유일한 곳이고, 여기서 되유도하면 규칙과
+            // 실제 경로가 갈린다. 실제로 갈렸다: 재검증 질문이 DISPLAYED 로 유도되고 있었다.
+            return new AskedQuestion(asked, session.askedQuestionSource(item.itemId()));
         }
         log.warn("표시 질문이 없어 목 문면으로 채점한다 — /questions/next 를 거치지 않았다 "
                 + "(session={} item={}). 기록에는 SERVER_FALLBACK 으로 남는다.",

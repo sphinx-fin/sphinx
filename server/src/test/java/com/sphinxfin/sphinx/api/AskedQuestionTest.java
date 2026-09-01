@@ -180,6 +180,54 @@ class AskedQuestionTest {
     }
 
     @Test
+    @DisplayName("❗재검증 답변은 재검증 질문으로 채점·기록된다 — 원 질문으로 재면 안 된다")
+    void theReverifyAnswerIsScoredAgainstTheReverifyQuestion() throws Exception {
+        // 되말하기 두 번째 바퀴다. 화면은 계약대로 재검증 문면을 띄우고 고객은 그것에 답하는데,
+        // 그 문면이 기록되지 않으면 /answers 가 **원 질문**으로 채점하고 기록한다(이슈 #274).
+        // 필드가 비는 것보다 나쁘다 — 기록이 다른 질문을 가리키니 아무도 의심하지 않는다.
+        String sid = createSession();
+        mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
+
+        // 1바퀴: U2 로 떨어뜨려 재설명 대상으로 만든다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U2, new BigDecimal("0.9"),
+                                new Judgment.Evidence("일부만 말함", "원금손실 조건 인지"),
+                                "부분 이해", null),
+                        inv.getArgument(2)));
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\",\"text\":\"손실이 날 수도 있다고 들었어요\"}"))
+                .andExpect(status().isOk());
+
+        when(aiServiceClient.reExplain(any(RiskItem.class), any(Judgment.class),
+                nullable(String.class), nullable(String.class)))
+                .thenReturn(new AiServiceClient.ReExplanation("쉬운 말 재설명", java.util.List.of()));
+
+        String re = mvc.perform(post("/sessions/{sid}/re-explain", sid)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        String shown = JsonPath.read(re, "$.data.reverifyQuestion");
+        assertThat(shown).as("화면에 띄울 문면이 응답에 있어야 한다").isNotBlank();
+
+        RECORDED.clear();
+        SOURCES.clear();
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + ITEM + "\",\"text\":\"낙인 아래로 떨어지면 손실이 납니다\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(RECORDED)
+                .as("고객이 본 것은 재검증 문면인데 기록이 원 질문을 가리키면, "
+                        + "리포트가 '왜 황색이었다가 통과했는가' 에 틀린 근거로 답한다(5.12)")
+                .containsExactly(shown);
+        assertThat(RECORDED).doesNotContain(Q_AI);
+        assertThat(SOURCES)
+                .as("서버가 만든 문면이 화면에 나갔다 — DISPLAYED 도 폴백도 아니다")
+                .containsExactly(EvidenceRecorder.QuestionSource.REVERIFY);
+    }
+
+    @Test
     @DisplayName("❗템플릿 폴백 질문은 TEMPLATE_FALLBACK 으로 남는다 — 고객은 봤지만 모델이 안 만들었다")
     void templateFallbackQuestionIsRecordedApart() throws Exception {
         // ai-service 가 정답 노출 검사를 통과 못 해 템플릿 고정 문장으로 내려간 회차다
