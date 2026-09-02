@@ -115,6 +115,50 @@ class ReportServiceTest {
         }
 
         @Test
+        @DisplayName("❗리포트가 판정을 만든 입력도 낸다 — 기록에만 있으면 스트림을 열어야 한다 (이슈 #280 ②)")
+        void gateHistoryCarriesTheJudgementInputs() {
+            seedSession();
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 2, 3),
+                    T0.plusSeconds(120));
+            em.flush();
+            em.clear();
+
+            Map<String, Object> last = list(reports.render(SID), "gateHistory").get(2);
+            assertThat(last.get("signal")).isEqualTo("RED");
+            assertThat(last.get("unmeasured"))
+                    .as("교부 문서가 'R-00 이 물었다' 까지만 말하면 몇 항목을 못 쟀는지 "
+                        + "감사에서 스트림을 직접 열어야 한다 — 이슈 #280 이 든 나머지 절반이다")
+                    .isEqualTo(2);
+            assertThat(last.get("rulesVersion")).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("❗이 필드 전 기록은 키를 null 로 남긴다 — 0(전부 쟀다) 과 갈라 둔다")
+        void olderEntriesKeepTheKeyAsNull() {
+            seedSession();
+
+            // 이 필드가 생기기 전에 적힌 게이트 항목이다. 실물에서 이 모양이 나온다 —
+            // append-only 라 옛 항목은 고쳐지지 않고, 리허설 전 세션의 기록이 그대로 남는다.
+            Map<String, Object> older = new java.util.LinkedHashMap<>();
+            older.put("type", "gate");
+            older.put("sessionId", SID);
+            older.put("at", T0.plusSeconds(120));
+            older.put("signal", "RED");
+            older.put("ruleTrace", List.of("R-00"));
+            store.append(StoredEvidenceRecorder.streamOf(SID), older);
+            em.flush();
+            em.clear();
+
+            Map<String, Object> last = list(reports.render(SID), "gateHistory").get(2);
+            // ❗세 값이 갈려야 한다: 0 은 "전부 쟀다", null 은 "이 필드 전 기록", 키 없음은
+            // "리포트가 안 낸다". 여기서 null 을 걸러내면 뒤의 둘이 같아지고, 그러면
+            // 옛 세션의 리포트가 **못 쟀는지 안 적었는지를 말하지 않는 채로** 교부된다.
+            assertThat(last).containsKeys("unmeasured", "rulesVersion");
+            assertThat(last.get("unmeasured")).isNull();
+            assertThat(last.get("rulesVersion")).isNull();
+        }
+
+        @Test
         @DisplayName("색은 담지 않는다 (ADR-004 §5) — grade 원값과 근거만")
         void doesNotStoreColor() {
             seedSession();
