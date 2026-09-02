@@ -58,6 +58,40 @@ def _llm_unavailable(exc: LlmError) -> HTTPException:
     return HTTPException(status_code=code, detail=str(exc))
 
 
+#: `/internal/*` 가 기계가 읽을 코드를 실어 보내는 유일한 경우. **문자열 detail 과 공존한다.**
+#:
+#: 나머지 실패는 `detail` 이 사람이 읽는 문자열이고 그대로 둔다 — 내부 오류 응답의 형식은
+#: 아직 계약에 없다(결정 10.40, `ExtractResponse` 가 `openapi.yaml` 에 없는 것과 같은 구멍).
+#: 전부 구조화하는 것은 그 결정이 난 뒤에 한 번에 하는 것이 맞다. 지금 한 자리만 구조화하는
+#: 이유는 **다른 방법이 없어서**다: 이 실패와 상류 장애가 둘 다 502 라 상태 코드로는 못 가른다.
+MEASUREMENT_INVALID_CODE = "MEASUREMENT_INVALID"
+
+
+def _measurement_invalid(exc: scoring.MeasurementInvalid) -> HTTPException:
+    """측정값이 우리 검증을 통과 못 한 경우 (`#280` ③).
+
+    ## 왜 상태 코드로 못 가르나
+
+    Spring 계약에서 `MEASUREMENT_INVALID` 와 `AI_SERVICE_UNAVAILABLE` 이 **둘 다 502** 다
+    (`contracts/openapi.yaml` `ApiError.code`). 502 를 바꾸면 그건 다른 뜻이 된다 —
+    이 실패는 진짜로 상류(우리) 문제이고 요청은 정상이었다. 그래서 본문에 코드를 싣는다.
+
+    ## 왜 갈라야 하나
+
+    지금은 `AiServiceClient` 가 상태 코드만 보고 `AiServiceException` 을 던져서, 화면과
+    로그가 *"AI 가 죽었다"* 로 말한다. 실물은 *"모델이 인용을 지어냈고 다시 물어도 그랬다"*
+    이고 **고칠 곳이 반대편**이다. 상류에 무엇을 고치라고 말하려면 둘이 달라야 한다 —
+    `GlobalExceptionHandler` 가 두 코드를 가른 이유와 같은 문장이다.
+
+    Spring 쪽 수신 배선은 강희진 영역이라 이 PR 에 없다. 여기서 내보내는 것까지가 내 몫이고,
+    받기 전까지는 지금과 똑같이 502 로 취급된다 — **깨지는 것 없이 먼저 나갈 수 있다.**
+    """
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail={"code": MEASUREMENT_INVALID_CODE, "message": str(exc)},
+    )
+
+
 # ── F-EXT-001 (정세현) ─────────────────────────────────────────────────────────
 @router.post("/parse")
 def parse(body: ParseRequest) -> dict:
@@ -122,6 +156,10 @@ def score(body: ScoreRequest) -> Judgment:
         raise HTTPException(status_code=422, detail=f"루브릭 없음: {body.item_id}") from exc
     except NotImplementedError:
         raise _not_implemented("F-SCR-001 채점")
+    except scoring.MeasurementInvalid as exc:
+        # ❗`LlmError` 보다 **먼저** 잡는다 — 부분집합이라 순서가 바뀌면 아래로 삼켜진다.
+        # `test_measurement_invalid_is_not_swallowed_by_the_generic_handler` 가 잠근다.
+        raise _measurement_invalid(exc) from exc
     except LlmError as exc:
         raise _llm_unavailable(exc)
 

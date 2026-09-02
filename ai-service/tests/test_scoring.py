@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import pytest
@@ -12,7 +13,7 @@ import pytest
 from app import rubrics, scoring
 from app.llm_client import LlmError
 from app.schemas import Condition, Grade, RiskItem, SourceSpan
-from tests.helpers import FakeLlm, make_judgment
+from tests.helpers import FakeLlm, SequenceLlm, make_judgment
 
 RISK_ITEM = RiskItem(
     item_id="ELS-PRINCIPAL-LOSS-WARNING",
@@ -546,3 +547,118 @@ def test_reason_still_records_the_strength_and_source_tier():
     assert "오해 라이브러리 매칭" in judgment.reason
     assert "pattern" in judgment.reason or "ngram" in judgment.reason
     assert "근거" in judgment.reason
+
+
+# ── 재판정 1회 (이슈 #280 ①) ──────────────────────────────────────────────────
+#
+# `#229` 실측: 같은 문서·같은 코드로 `els-0010` 이 1회차 P4 위반, 2회차 U2 통과.
+# 채점에는 재시도가 **아예 없어서** 그 502 가 그대로 나갔다 — `reexplain` 에는
+# `MAX_ATTEMPTS = 3` 이 있는데 같은 성격의 실패인데 한쪽만 복구 경로가 있었다.
+def test_invalid_measurement_is_retried_once_and_recovers():
+    """1회차 P4 위반 → 2회차 정상. 재시도가 없으면 502 다."""
+    bad = make_judgment(rubric_clause="루브릭에 없는 조항이다")
+    good = make_judgment(grade=Grade.U2)
+    llm = SequenceLlm(bad, good)
+
+    out = scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
+
+    assert len(llm.calls) == 2, "다시 묻지 않았다"
+    # 등급은 단정하지 않는다 — 이 발화는 M01 에 걸려 오해 상향(U4)을 타는 것이 정상이다.
+    # 여기서 재는 것은 **502 대신 판정이 나왔다**는 것 하나다.
+    assert out.evidence.rubric_clause in (
+        tuple(rubrics.get(RISK_ITEM.item_id).required_elements)
+        + tuple(rubrics.get(RISK_ITEM.item_id).misconception_conditions)
+    ), "2회차의 유효한 인용이 실려야 한다"
+
+
+def test_retry_is_bounded_and_still_raises(caplog):
+    """계속 무효면 끝내 던진다 — 무한 재시도로 쿼터를 태우지 않는다."""
+    bad = make_judgment(rubric_clause="루브릭에 없는 조항이다")
+    llm = SequenceLlm(bad)
+
+    with caplog.at_level(logging.WARNING, logger="app.scoring"):
+        with pytest.raises(scoring.MeasurementInvalid) as exc:
+            scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
+
+    assert len(llm.calls) == scoring.MAX_SCORING_ATTEMPTS
+    assert f"{scoring.MAX_SCORING_ATTEMPTS}회 재판정" in str(exc.value)
+    assert any("채점 재판정" in r.getMessage() for r in caplog.records), (
+        "조용히 다시 물으면 한 항목이 몇 번 불렸는지 알 수 없다 — 쿼터·폴백률 설명이 안 된다"
+    )
+
+
+def test_no_fallback_grade_is_invented():
+    """★ U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · P4).
+
+    근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
+    항목이 세션에서 사라지는 문제는 **게이트가 분모를 알게 하는 쪽**으로 풀어야 한다
+    (`#280` ②) — 여기서 등급을 지어내는 것으로는 안 된다.
+    """
+    llm = SequenceLlm(make_judgment(rubric_clause="루브릭에 없는 조항이다"))
+    with pytest.raises(scoring.MeasurementInvalid):
+        scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
+
+
+def test_measurement_invalid_is_distinguishable_from_llm_outage():
+    """`MEASUREMENT_INVALID` 로 갈라 보낼 수 있어야 한다 (`#280` ③ 준비).
+
+    지금은 둘 다 502 로 나가서 Spring 이 *"AI 가 죽었다"* 와 *"측정을 못 믿는다"* 를
+    구분할 수 없다. 예외 계층만 먼저 갈라 둔다 — 라우트 배선은 계약 확인 후다.
+    """
+    assert issubclass(scoring.MeasurementInvalid, LlmError)
+    assert scoring.MeasurementInvalid is not LlmError
+
+
+def test_retry_varies_the_seed():
+    """★ 재시도가 **다른 seed** 로 나간다 (`#281` 트립와이어의 후신).
+
+    ## 이 테스트의 전신
+
+    원래는 *"`#281` 이 머지되는 순간 깨지라고"* 있던 트립와이어였다. `seed` 가 고정되면
+    같은 프롬프트 재시도가 같은 답을 받아 **이 재판정이 무력해진다** — 두 PR 이 각자 맞는데
+    합치면 기능이 없어지는 자리였고, 실제로 `#281` 머지 직후 이 파일에서 실패했다.
+    그때 해야 할 3단계를 실패 메시지에 적어 뒀고 그대로 따랐다.
+
+    지금은 **그 배선이 살아 있는지**를 잠근다. `seed` 를 안 넘기는 쪽으로 되돌리면
+    두 호출의 seed 가 같아져서 여기서 걸린다.
+
+    첫 시도가 설정값 그대로인 것도 같이 고정한다 — 단발 호출의 동작이 `#281` 과 같아야
+    하고, 재시도만 어긋나야 한다.
+    """
+    from app import config
+
+    bad = make_judgment(rubric_clause="루브릭에 없는 조항이다")
+    good = make_judgment()
+    llm = SequenceLlm(bad, good)
+
+    scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
+
+    seeds = [c.get("seed") for c in llm.calls]
+    assert len(seeds) == 2, f"재판정이 두 번 불려야 한다: {seeds}"
+    assert seeds[0] != seeds[1], (
+        f"두 시도가 같은 seed 로 나갔다 — 같은 답이 와서 재판정이 무력하다: {seeds}"
+    )
+    assert seeds[0] == config.settings().llm_seed, (
+        "첫 시도는 설정값 그대로여야 한다 — 단발 호출의 동작이 #281 과 달라지면 안 된다"
+    )
+
+
+def test_seed_stays_off_when_it_is_off():
+    """`LLM_SEED=` 로 끈 경우에는 어긋나게 만들 것이 없다.
+
+    프로바이더가 매번 다르게 답하므로 재판정은 그것만으로 유효하다. 여기서 억지로 숫자를
+    만들어 넣으면 **끈 것을 코드가 되살리는** 것이 된다 — `_reasoning_effort` 가 빈 문자열을
+    기본값으로 되살렸던 것과 같은 결이고, 그건 실제로 한 번 그랬다.
+    """
+    import dataclasses
+    from unittest.mock import patch
+
+    from app import config
+
+    assert scoring._attempt_seed(1) is not None, "기본 설정에서는 seed 가 있다"
+
+    # settings() 는 lru_cache 라 캐시를 지우면 다른 테스트에 번진다. 값만 바꿔 끼운다.
+    off = dataclasses.replace(config.settings(), llm_seed=None)
+    with patch.object(scoring, "settings", lambda: off):
+        assert scoring._attempt_seed(1) is None
+        assert scoring._attempt_seed(2) is None
