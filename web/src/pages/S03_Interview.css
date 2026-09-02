@@ -203,3 +203,27 @@
   padding: var(--space-8) var(--space-4);
   color: var(--text-muted);
 }
+
+/* ── 재검증 (F-INT-004 · 설계 판단 ④) ────────────────────────────────────────
+   진행 막대 자리를 대신 채운다. 같은 줄에 서므로 높이를 맞춰 두면 모드가 바뀔 때
+   상단이 튀지 않는다. */
+.iv__reverify {
+  flex: 1 1 16rem;
+  display: flex;
+  align-items: center;
+  min-height: calc(38px * var(--scale));
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.429 * var(--leading-scale));
+  letter-spacing: 0.0145em;
+  color: var(--text-muted);
+}
+
+/* 재설명 문면. 고객이 **읽는** 글이라 질문보다 크지 않되 본문보다는 크다 —
+   창구에서 소리 내어 읽어 주는 경우까지 감안한 크기다. 고령자 모드에서 함께 커진다. */
+.iv__reexplain-body {
+  font-size: calc(19px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  letter-spacing: -0.008em;
+  color: var(--text);
+  white-space: pre-wrap;   /* 서버 문면의 줄바꿈을 그대로 살린다 */
+}
