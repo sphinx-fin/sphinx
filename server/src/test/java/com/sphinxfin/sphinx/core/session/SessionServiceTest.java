@@ -37,6 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.gate.GateEngine;
 import com.sphinxfin.sphinx.core.persistence.BaseEntity;
 import com.sphinxfin.sphinx.core.persistence.JpaAuditingConfig;
@@ -476,6 +477,42 @@ class SessionServiceTest {
     /** 문자열에서 만든다 — new BigDecimal(double) 은 0.9 를 0.9000000000000000222… 로 만든다. */
     private static BigDecimal conf(String v) {
         return new BigDecimal(v);
+    }
+
+    @Test
+    @DisplayName("❗물어봤는데 판정이 없으면 RED — 차집합이 실제로 도는 경로다 (이슈 #280 ②)")
+    void anAskedButUnjudgedItemBlocksTheVerdict() {
+        // ❗GateEngineTest 는 미측정 수를 **손으로 넣는다**(engine.judge(…, 1)). 그래서 룰은
+        // 잠기는데 **그 룰에 들어가는 숫자는 아무도 안 지나간다** — unmeasuredItemCount() 가
+        // return 0 이어도 전건 초록이었다(#291 리뷰, 윤지석 실측).
+        //
+        // 여기서는 askedQuestionsByItem 과 judgments 를 실제로 갈라 놓고 judge() 를 부른다.
+        Session s = service.create(cmd(null));
+        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordJudgment(s.id(), j("A", Grade.U1));   // B 는 채점이 실패했다고 본다
+
+        GateResult r = service.judge(s.id());
+
+        assertThat(r.signal())
+                .as("A 가 U1 이라 R-06 이 GREEN 을 냈다 — 물어본 B 를 못 쟀는데도. "
+                        + "이 경로를 안 지나가면 계산이 0 을 돌려줘도 아무도 모른다")
+                .isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).contains("R-00");
+    }
+
+    @Test
+    @DisplayName("❗미리보기도 같은 답을 낸다 — 미리보기가 더 낙관적이면 재설명 루프를 건너뛴다")
+    void thePreviewAgreesWithTheVerdict() {
+        Session s = service.create(cmd(null));
+        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+
+        assertThat(service.previewGate(s.id()).signal())
+                .as("previewGate 가 미측정 수를 안 넘기면 여기가 GREEN 이고, 판매자는 그걸 보고 "
+                        + "재설명을 건너뛴다 — /judge 는 RED 를 낸다")
+                .isEqualTo(Signal.RED);
     }
 
     private static Judgment j(String itemId, Grade grade) {

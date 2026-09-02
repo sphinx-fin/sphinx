@@ -328,7 +328,7 @@ public class SessionService {
 
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount());
+                session.failedReverifyCount(), session.unmeasuredItemCount());
         Instant judgedAt = Instant.now();
         session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.JUDGE)) {
@@ -361,9 +361,12 @@ public class SessionService {
             return new GatePreview(recorded.signal(), recorded.ruleTrace(), true,
                     session.judgedAt(), session.suitabilityStatus());
         }
+        // ❗미측정 수도 같이 넘긴다. 안 넘기면 미리보기가 **판정보다 낙관적**이 되고,
+        // 그건 아래 주석이 이미 경고한 모양이다 — 판매자가 GREEN 미리보기를 보고 재설명
+        // 루프를 건너뛰는데 /judge 는 R-00 으로 RED 를 낸다.
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount());
+                session.failedReverifyCount(), session.unmeasuredItemCount());
         // 미리보기는 모순 판정을 부르지 않는다 — GET 이 상태를 바꾸면 안 되고 LLM 호출 비용도
         // 든다. 대신 아직 평가 전이라는 사실을 실어 보낸다. 안 실으면 signal=GREEN 만 오는데,
         // /judge 는 모순을 평가하므로 같은 세션이 YELLOW·RED 로 갈릴 수 있다 — 미리보기가
