@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from app import config
+from app import config, llm_client
 from app.llm_client import LlmClient
 
 
@@ -78,13 +78,41 @@ class _Recorder(LlmClient):
             def create(self, **kwargs: Any) -> Any:
                 recorder.kwargs = kwargs
                 message = type("M", (), {"content": '{"ok": true}'})()
-                choice = type("C", (), {"message": message})()
-                return type("R", (), {"choices": [choice]})()
+                # `finish_reason` 을 실물처럼 담는다 — 프로바이더는 항상 보낸다.
+                # 더미가 빠뜨리면 잘림 검사(#280)가 테스트에서만 안 도는 상태가 된다.
+                choice = type("C", (), {"message": message, "finish_reason": "stop"})()
+                return type("R", (), {"choices": [choice], "usage": None})()
 
         class _Chat:
             completions = _Completions()
 
         return type("Client", (), {"chat": _Chat()})()
+
+
+def _stub_client(monkeypatch, *, content: str, finish_reason: str,
+                 completion_tokens: int | None = None,
+                 reasoning_tokens: int | None = None, **env: str):
+    """응답 모양을 그대로 흉내내는 클라이언트. 잘림 검사(#280)용."""
+    cfg = _settings(monkeypatch, LLM_API_KEY="test-key", **env)
+    client = llm_client.LlmClient(cfg)
+
+    detail = (type("D", (), {"reasoning_tokens": reasoning_tokens})()
+              if reasoning_tokens is not None else None)
+    usage = (type("U", (), {"completion_tokens": completion_tokens,
+                            "completion_tokens_details": detail})()
+             if completion_tokens is not None else None)
+
+    class _Completions:
+        def create(self, **kwargs):
+            message = type("M", (), {"content": content})()
+            choice = type("C", (), {"message": message, "finish_reason": finish_reason})()
+            return type("R", (), {"choices": [choice], "usage": usage})()
+
+    class _Chat:
+        completions = _Completions()
+
+    monkeypatch.setattr(client, "_openai", lambda: type("Client", (), {"chat": _Chat()})())
+    return client
 
 
 def _send(monkeypatch, caller_body: dict | None = None, **env: str) -> dict:
@@ -116,3 +144,67 @@ def test_empty_setting_sends_nothing(monkeypatch) -> None:
     """이 파라미터를 모르는 프로바이더로 옮길 때 **코드가 아니라 설정으로** 끈다."""
     kwargs = _send(monkeypatch, **{config.REASONING_EFFORT_ENV: ""})
     assert "extra_body" not in kwargs, kwargs.get("extra_body")
+
+
+# ── 재현성: seed 고정과 잘림 구분 (이슈 #280) ─────────────────────────────────
+#
+# 같은 문서·같은 모델·같은 코드로 두 번 돌렸을 때 결과가 달랐다 — 추출 11/13 ↔ 13/13,
+# P4 가드가 한 번은 터지고 한 번은 통과(#229 실측). 아무것도 고정하지 않고 있었다.
+#
+# ❗`temperature` 로는 못 잡는다. 정책 모델이 거부한다(실측):
+#     temperature=0 → 400 "does not support 0 with this model. Only the default (1)..."
+# 그래서 `seed` 로만 잡는다.
+def test_seed_default_is_pinned(monkeypatch):
+    kwargs = _send(monkeypatch)
+    assert kwargs["seed"] == config.DEFAULT_SEED, "seed 를 안 보내면 실행마다 결과가 달라진다"
+
+
+def test_seed_can_be_overridden(monkeypatch):
+    kwargs = _send(monkeypatch, LLM_SEED="7")
+    assert kwargs["seed"] == 7
+
+
+def test_empty_seed_turns_it_off(monkeypatch):
+    """❗빈 값과 미설정을 가른다 — 튜닝에서 표본을 여러 개 보려면 *끄는* 방법이 필요하다.
+
+    `os.getenv(...) or DEFAULT` 로 쓰면 빈 값이 기본값으로 되살아나 끌 수 없다.
+    `#198` 의 `_truthy` 가 `=0` 을 True 로 만들지 않게 한 것과 같은 결이다.
+    """
+    kwargs = _send(monkeypatch, LLM_SEED="")
+    assert "seed" not in kwargs
+
+
+def test_unparsable_seed_falls_back_and_warns(monkeypatch, caplog):
+    """숫자가 아니면 조용히 끄지 않는다 — 끄면 재현성이 사라진 것을 아무도 모른다."""
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        kwargs = _send(monkeypatch, LLM_SEED="abc")
+    assert kwargs["seed"] == config.DEFAULT_SEED
+    assert any("LLM_SEED" in r.getMessage() for r in caplog.records), (
+        "경고 없이 기본값으로 돌아가면 안 된다"
+    )
+
+
+def test_truncated_response_is_its_own_error(monkeypatch):
+    """`finish_reason == "length"` 는 빈 응답이 아니라 **잘림**이다.
+
+    추론 모델은 상한을 추론 토큰으로 먼저 소진하므로 `content` 가 빈 채로 length 가 온다.
+    예전에는 그것이 `"LLM 빈 응답"` 으로 나왔고, 그러면 *"모델이 이상한 답을 했다"* 로
+    읽힌다 — 실물은 *"우리가 상한을 너무 낮게 줬다"* 이고 고칠 곳이 반대편이다.
+
+    그리고 잘림은 **재시도가 의미 없다** — 같은 입력이면 또 잘린다.
+    """
+    client = _stub_client(monkeypatch, content="", finish_reason="length",
+                          completion_tokens=300, reasoning_tokens=300)
+    with pytest.raises(llm_client.LlmTruncated) as exc:
+        client.send(prompt="안녕하세요")
+    assert "잘렸다" in str(exc.value)
+    assert "추론=300" in str(exc.value), "무엇이 상한을 먹었는지 문면에 남아야 한다"
+
+
+def test_empty_response_that_is_not_truncation_stays_distinct(monkeypatch):
+    """잘림이 아닌 빈 응답은 그대로 LlmError — 두 원인을 뭉치지 않는다."""
+    client = _stub_client(monkeypatch, content="", finish_reason="stop")
+    with pytest.raises(llm_client.LlmError) as exc:
+        client.send(prompt="안녕하세요")
+    assert not isinstance(exc.value, llm_client.LlmTruncated)
+    assert "finish_reason='stop'" in str(exc.value)

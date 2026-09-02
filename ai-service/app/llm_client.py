@@ -35,6 +35,19 @@ class LlmNotConfigured(LlmError):
     """LLM_API_KEY 미설정 — 목 개발 중에는 정상 상태다."""
 
 
+class LlmTruncated(LlmError):
+    """응답이 토큰 상한에서 잘렸다 (`finish_reason == "length"`). 이슈 #280.
+
+    **진짜 실패와 갈라야 하는 이유가 있다.** 잘림은 입력이 컸다는 뜻이라 같은 입력이면
+    또 잘린다 — 재시도가 의미 없고, 프롬프트나 상한을 고쳐야 한다. 반면 스키마 불일치나
+    호출 실패는 재시도로 넘어갈 수 있다.
+
+    그리고 예전에는 이것이 `"LLM 빈 응답"` 으로 나왔다. 추론 모델은 상한을 **추론 토큰으로
+    먼저 소진**하므로 `content` 가 빈 문자열이 되고, 그러면 *"모델이 이상한 답을 했다"* 로
+    읽힌다. 실물은 *"우리가 상한을 너무 낮게 줬다"* 다 — 고칠 곳이 반대편이다.
+    """
+
+
 class LlmClient:
     def __init__(self, cfg: Settings | None = None) -> None:
         self._cfg = cfg or settings()
@@ -110,6 +123,12 @@ class LlmClient:
             "model": model or self._cfg.llm_model,
             "messages": messages,
         }
+        # 편차 축소 (이슈 #280). `temperature` 는 정책 모델이 거부하므로 seed 만 보낸다.
+        # ❗**이것으로 재현성이 확보되지 않는다** — 같은 seed 로 complete_json 3회가
+        # 3가지였다(실측). 실행 간 재현성은 결정 10.10 의 재판정 경로 몫이다.
+        # None 이면 안 보낸다 — 튜닝에서 표본을 여러 개 보려고 끄는 경우가 있다.
+        if self._cfg.llm_seed is not None:
+            kwargs["seed"] = self._cfg.llm_seed
         if response_format:
             kwargs["response_format"] = response_format
         body = self._extra_body(extra_body)
@@ -124,9 +143,21 @@ class LlmClient:
         except Exception as exc:  # SDK 예외 계층에 의존하지 않는다
             raise LlmError(f"LLM 호출 실패: {exc}") from exc
 
-        content = (resp.choices[0].message.content or "").strip()
+        choice = resp.choices[0]
+        content = (choice.message.content or "").strip()
+
+        # ❗잘림을 먼저 본다 — 내용이 비어 있는 이유가 여기일 수 있다 (이슈 #280).
+        # 추론 모델은 상한을 추론 토큰으로 먼저 쓰므로 content 가 빈 채로 length 가 온다.
+        if choice.finish_reason == "length":
+            raise LlmTruncated(
+                f"응답이 토큰 상한에서 잘렸다: model={kwargs['model']} "
+                f"{_usage_note(resp)} — 프롬프트를 줄이거나 상한을 올려야 한다"
+            )
         if not content:
-            raise LlmError("LLM 빈 응답")
+            raise LlmError(
+                f"LLM 빈 응답: model={kwargs['model']} "
+                f"finish_reason={choice.finish_reason!r} {_usage_note(resp)}"
+            )
         return content
 
     def complete_json(
@@ -174,3 +205,21 @@ def client() -> LlmClient:
     if _default is None:
         _default = LlmClient()
     return _default
+
+
+def _usage_note(resp: Any) -> str:
+    """토큰 사용량을 진단 문면에 남긴다 (이슈 #280).
+
+    잘림을 만났을 때 **무엇이 상한을 먹었는지** 알아야 고칠 곳이 정해진다. 추론 토큰이
+    대부분이면 프롬프트가 아니라 `reasoning_effort` 나 상한을 봐야 한다. 없으면 조용히
+    비운다 — 프로바이더마다 usage 모양이 달라서 여기서 죽으면 진단이 진단을 막는다.
+    """
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        return "(usage 없음)"
+    parts = [f"완성={getattr(usage, 'completion_tokens', '?')}"]
+    detail = getattr(usage, "completion_tokens_details", None)
+    reasoning = getattr(detail, "reasoning_tokens", None) if detail else None
+    if reasoning is not None:
+        parts.append(f"추론={reasoning}")
+    return "(" + " ".join(parts) + ")"
