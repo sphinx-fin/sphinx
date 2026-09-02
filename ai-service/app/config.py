@@ -74,6 +74,39 @@ MODEL_POLICY_SUBSTRING = "gpt-5-mini"
 #: 를 갈아도 이 값을 지울 필요가 없다. 그래도 비울 수 있게 열어 둔 것은, 이걸 모르는
 #: 프로바이더가 나오면 **코드가 아니라 설정으로** 끄기 위해서다.
 REASONING_EFFORT_ENV = "LLM_REASONING_EFFORT"
+
+# ── 재현성 (이슈 #280) ────────────────────────────────────────────────────────
+#
+# 같은 문서·같은 모델·같은 코드로 두 번 돌렸을 때 결과가 달랐다 — 추출 11/13 ↔ 13/13,
+# 그리고 P4 가드가 한 번은 터지고 한 번은 통과했다(#229 실측). **아무것도 고정하지 않고
+# 프로바이더 기본값으로 돌고 있었다.**
+#
+# ❗`temperature` 로는 못 고친다. 정책 모델(`gpt-5-mini`)이 추론 모델이라 거부한다:
+#
+#     temperature=0 → 400 "does not support 0 with this model.
+#                          Only the default (1) value is supported."
+#
+# `seed` 는 받는다. **그런데 재현성을 주지는 않는다 — 실측으로 확인했다.**
+#
+#     complete_json 경로 (추출·채점이 쓰는 것)   같은 seed 3회 → 3가지   ❌
+#     send 평문 경로                              같은 seed 4회 → 2가지   ❌ (3/4 동일)
+#
+# 프로바이더 문서가 `seed` 를 *best-effort* 로 규정한 그대로다. 처음 2회 프로브가 동일해서
+# 되는 줄 알았는데 표본을 늘리자 갈렸다 — **적은 표본으로 "결정론"을 주장하면 안 된다.**
+#
+# 그래서 이 값을 고정하는 것은 **편차를 줄이는 조치이지 `#280` 의 해결이 아니다.**
+# 실행 간 재현성은 이 모델에서 파라미터로 얻을 수 없고, **결정 10.10 의 재판정 경로가
+# 유일한 답**이다. 그쪽이 선택이 아니게 됐다는 것이 이 실측의 결론이다.
+#
+# 그래도 고정해 두는 이유: 공짜고, 편차가 줄고, 프로바이더를 갈면(`temperature` 를 받는
+# 쪽으로) 그때 실제로 듣는다. 무엇보다 **안 보내는 것이 의도인지 누락인지** 코드에 남는다.
+#
+# 값을 환경변수로 여는 이유: 프롬프트 튜닝에서 **일부러 여러 표본을 보고 싶은 경우**가
+# 있다. `LLM_SEED=` (빈 값) 로 두면 seed 를 안 보낸다.
+SEED_ENV = "LLM_SEED"
+
+#: 기본 seed. 임의의 고정값이면 되고, 무엇이든 **고정**인 것이 요점이다.
+DEFAULT_SEED = 20260903
 DEFAULT_REASONING_EFFORT = "minimal"
 
 #: 로그 레벨. **기본이 INFO 다** — 우리 코드의 관측 기록이 전부 `log.info` 이고, 파이썬
@@ -215,6 +248,7 @@ class Settings:
     llm_api_key: str
     llm_model: str
     llm_reasoning_effort: str
+    llm_seed: int | None
     llm_timeout_sec: float
     env_files: tuple[str, ...]
     log_level: str
@@ -230,6 +264,26 @@ class Settings:
     def llm_configured(self) -> bool:
         """키가 없으면 LLM 호출 경로만 막고 서비스는 기동한다(목 개발용)."""
         return bool(self.llm_api_key)
+
+
+def _seed() -> int | None:
+    """`LLM_SEED` 를 읽는다. 미설정이면 기본값, **빈 문자열이면 None**(안 보낸다).
+
+    빈 값과 미설정을 가르는 이유: 튜닝에서 표본을 여러 개 보려면 seed 를 *끄는* 방법이
+    있어야 한다. `os.getenv(...) or DEFAULT` 로 쓰면 빈 값이 기본값으로 되살아나서 끌 수
+    없다 — `#198` 의 `_truthy` 가 `=0` 을 True 로 만들지 않게 한 것과 같은 결이다.
+    """
+    raw = os.getenv(SEED_ENV)
+    if raw is None:
+        return DEFAULT_SEED
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        log.warning("%s 를 정수로 못 읽었다: %r — 기본값 %d 을 쓴다", SEED_ENV, raw, DEFAULT_SEED)
+        return DEFAULT_SEED
 
 
 def _reasoning_effort() -> str:
@@ -258,6 +312,7 @@ def settings() -> Settings:
         llm_api_key=os.getenv("LLM_API_KEY", ""),
         llm_model=model,
         llm_reasoning_effort=_reasoning_effort(),
+        llm_seed=_seed(),
         llm_timeout_sec=float(os.getenv("LLM_TIMEOUT_SEC", "60")),
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),
 
