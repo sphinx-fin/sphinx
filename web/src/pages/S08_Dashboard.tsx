@@ -1,6 +1,6 @@
 /**
- * S-08 오해 지도 대시보드 — F-DSH-001 의 UI 몫. 소유: 오준서.
- * 집계 파이프라인은 정세현(`AggregateService`, 아직 TODO). 화면은 집계하지 않는다.
+ * S-08 오해 지도 대시보드 — F-DSH-001 · **F-DSH-002** 의 UI 몫. 소유: 오준서.
+ * 집계 파이프라인은 정세현(`AggregateService`). 화면은 집계하지 않는다.
  *
  * ── 이 화면은 세 가지를 "보이게" 하려고 있다 ────────────────────────────────
  *
@@ -37,10 +37,35 @@
  *
  * `scope`(branch·org)를 헤더에 박는다. 무엇을 보고 있는지가 안 보이면 MGR 이 자기 지점
  * 수치를 전사 수치로 착각한다 — 집계 축(`groupBy`)과 다른 개념이라 특히 헷갈린다.
+ *
+ * ── ⑤ 선행지표 뷰 (F-DSH-002) ──────────────────────────────────────────────
+ *
+ * 히트맵은 **한 시점의 단면**이라 *"지난주보다 나빠졌는가"* 를 못 말한다. 그 질문에
+ * 답하는 것이 이 뷰이고, 명세 8절이 S-08 의 요소로 "선행지표 뷰" 를 따로 적어 둔 이유다.
+ * 같은 화면 안의 **다른 뷰**로 둔다 — 지점·판매자·항목이 다른 라우트로 흩어지면 필터와
+ * 범위 표식을 두 벌로 유지해야 하고, 그러면 한쪽만 갱신되는 사고가 난다.
+ *
+ * **선은 안 쓰고 막대를 쓴다.** 계약이 값 없는 주도 자리를 남기라고 했고(`n=0`·`masked`),
+ * 선으로 이으면 **없는 주를 지나가며 값을 지어낸다** — 가려진 구간을 통과하는 추세선은
+ * 이 제품이 제일 하면 안 되는 종류의 그림이다. 막대는 그 자리를 비워 둘 수 있다.
+ *
+ * **계열마다 색을 주지 않는다.** 지점이 늘면 색이 늘고, 그러면 판정 3색과 경쟁한다
+ * (tokens.css 규칙 1). 대신 계열을 **행으로 갈라** 한 축(시간)만 그리고, 값의 크기는
+ * 히트맵과 같은 한 가지 잉크의 높이로 말한다. 행 이름이 곧 범례라 범례 상자도 없다.
+ *
+ * **표로 그린다.** 행=계열 · 열=주 인 표 안에 막대를 넣으면, 화면을 못 보는 사람에게도
+ * 같은 데이터가 그대로 읽힌다(별도 "표 보기" 를 만들 필요가 없다).
+ *
+ * **이상치는 서버가 판단한 것만 표시한다.** 화면이 임계값을 다시 계산하면 두 벌이 되고,
+ * 어긋나는 날 화면이 서버가 하지 않은 판단을 말한다(P1 과 같은 결). 그래서 `reason`
+ * 문장을 그대로 낸다. 색으로 소리치지도 않는다 — 이상치는 **판정이 아니다.**
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
-import type { HeatmapCell, HeatmapResponse, ProductSummary } from "../api/types";
+import type {
+  HeatmapCell, HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse,
+  ProductSummary,
+} from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
 
@@ -61,8 +86,22 @@ const SCOPE_LABEL: Record<HeatmapResponse["scope"], string> = {
   org: "전사",
 };
 
+/** 집계 축 라벨. **범위(scope)와 다른 개념**이라 화면에서도 말을 갈라 쓴다. */
+const AXIS_LABEL: Record<IndicatorAxis, string> = {
+  branch: "지점",
+  seller: "판매자",
+  item: "이해항목",
+};
+
+/** 화면에 보이는 두 뷰. 라우트를 가르지 않는 이유는 파일 상단 ⑤에 적었다. */
+type View = "heatmap" | "indicator";
+
 export default function S08Dashboard() {
+  const [view, setView] = useState<View>("heatmap");
   const [data, setData] = useState<HeatmapResponse | null>(null);
+  const [indicator, setIndicator] = useState<LeadingIndicatorResponse | null>(null);
+  /** 집계 축. 계약 기본값과 같은 `branch` 로 연다 — 화면이 서버와 다른 기본을 갖지 않는다. */
+  const [axis, setAxis] = useState<IndicatorAxis>("branch");
   const [product, setProduct] = useState("");
   const [ageBand, setAgeBand] = useState("");
   const [channel, setChannel] = useState("");
@@ -104,29 +143,39 @@ export default function S08Dashboard() {
     return () => window.removeEventListener("scroll", hideTip, true);
   }, [tip, hideTip]);
 
+  /* 두 뷰가 한 함수를 쓴다. 403 처리·워터마크·범위 표식이 둘 다 같아서, 갈라 두면
+     한쪽만 고치는 사고가 난다(파일 상단 ⑤). 뷰가 바뀌면 다시 받는다 — 대시보드에서
+     낡은 수치를 보여 주는 것이 한 번의 요청보다 비싸다. */
   const load = useCallback(async () => {
     setLoading(true);
-    const qs = new URLSearchParams();
-    if (product) qs.set("product", product);
-    if (ageBand) qs.set("ageBand", ageBand);
-    if (channel) qs.set("channel", channel);
-    const q = qs.toString();
     try {
-      const res = await get<HeatmapResponse>(`/dashboard/heatmap${q ? `?${q}` : ""}`);
-      setData(res);
+      if (view === "heatmap") {
+        const qs = new URLSearchParams();
+        if (product) qs.set("product", product);
+        if (ageBand) qs.set("ageBand", ageBand);
+        if (channel) qs.set("channel", channel);
+        const q = qs.toString();
+        setData(await get<HeatmapResponse>(`/dashboard/heatmap${q ? `?${q}` : ""}`));
+      } else {
+        // `periods` 는 보내지 않는다 — 계약이 기본 8주를 갖고 있고, 화면이 같은 숫자를
+        // 다시 들면 두 벌이 된다. 바꿀 일이 생기면 계약이 먼저 바뀐다.
+        setIndicator(await get<LeadingIndicatorResponse>(
+          `/dashboard/leading-indicators?groupBy=${axis}`));
+      }
       setBlocked(false);
       setError(null);
     } catch (e) {
       if (e instanceof ApiRequestError && e.status === 403) {
         setBlocked(true);
         setData(null);
+        setIndicator(null);
       } else {
         setError(describe(e));
       }
     } finally {
       setLoading(false);
     }
-  }, [product, ageBand, channel]);
+  }, [view, axis, product, ageBand, channel]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -193,6 +242,32 @@ export default function S08Dashboard() {
     };
   }, [data]);
 
+  /* ── 선행지표 축 ────────────────────────────────────────────────────────
+   * 계열 순서를 서버 순서(키 사전순)로 두지 않는다 — 8주 × N행 표에서 **먼저 봐야 하는
+   * 행이 어디 있는지** 가 순서로만 드러난다. 이상치를 위로, 그다음 최신 값이 큰 순.
+   * 값이 없는(가려진) 계열은 맨 아래다. 이건 표시 순서일 뿐 판단이 아니다 — 이상치 여부는
+   * 서버가 정한 것을 그대로 쓴다(파일 상단 ⑤).                                        */
+  const { rows, periods, outlierKeys } = useMemo(() => {
+    const series = indicator?.series ?? [];
+    // 계약상 모든 계열이 같은 창(최근 N주)을 갖지만, 그 가정에 기대 열을 그리면 어긋나는
+    // 날 조용히 밀린다. 가장 긴 계열의 구간을 열로 삼는다.
+    const longest = series.reduce<IndicatorPoint[]>(
+      (best, s) => (s.points.length > best.length ? s.points : best), []);
+    const keys = new Set((indicator?.outliers ?? []).map((o) => o.key));
+    const latest = (points: IndicatorPoint[]) => points[points.length - 1]?.misrate ?? null;
+    const sorted = [...series].sort((a, b) => {
+      const byOutlier = Number(keys.has(b.key)) - Number(keys.has(a.key));
+      if (byOutlier !== 0) return byOutlier;
+      return (latest(b.points) ?? -1) - (latest(a.points) ?? -1);
+    });
+    return { rows: sorted, periods: longest.map((p) => p.period), outlierKeys: keys };
+  }, [indicator]);
+
+  /* 범위·합성 표식은 두 뷰가 같이 쓴다 — 뜻이 같은 필드이고, 표식을 뷰마다 따로 그리면
+     한쪽에서 워터마크가 빠지는 사고가 난다(그게 F-DSH-003 이 막으려는 것이다). */
+  const shown: { scope: HeatmapResponse["scope"]; synthetic: boolean } | null =
+    view === "heatmap" ? data : indicator;
+
   if (loading) {
     return <main className="s08"><p className="s08__loading">집계를 불러오는 중입니다…</p></main>;
   }
@@ -205,8 +280,8 @@ export default function S08Dashboard() {
         <section className="s08__blocked">
           <h2>이 역할에는 집계가 열리지 않습니다</h2>
           <p>
-            오해 지도는 준법감시(COMPL)와 관리자(MGR)만 볼 수 있습니다. 판매 조직은
-            집계에 접근할 수 없습니다.
+            오해 지도와 선행지표는 준법감시(COMPL)와 관리자(MGR)만 볼 수 있습니다.
+            판매 조직은 집계에 접근할 수 없습니다.
           </p>
           <p className="s08__blocked-why">
             개인의 이해도 데이터가 영업 관리 지표로 되돌아가면 이 제품은 고객을 보호하는
@@ -228,11 +303,11 @@ export default function S08Dashboard() {
           <p className="s08__tags">
             <Tag
               show={showTip} hide={hideTip} id="tip-scope"
-              text={data ? SCOPE_LABEL[data.scope] : "—"}
+              text={shown ? SCOPE_LABEL[shown.scope] : "—"}
               tip={"이 수치가 어느 범위의 세션을 센 것인지입니다. 요청자 역할이 정합니다 — " +
                    "관리자(MGR)는 자기 지점, 준법감시(COMPL)는 전사입니다."}
             />
-            {data?.synthetic && (
+            {shown?.synthetic && (
               <Tag
                 show={showTip} hide={hideTip} id="tip-synth" strong
                 text="합성 데이터"
@@ -247,6 +322,26 @@ export default function S08Dashboard() {
 
       {error && <p className="s08__error" role="alert">{error}</p>}
 
+      {/* ── 뷰 전환 ────────────────────────────────────────────────────────
+          히트맵은 단면, 선행지표는 추이다. 두 질문이 다르므로 화면을 겹쳐 그리지 않고
+          자리를 바꾼다 — 한 화면에 표 두 개를 세우면 어느 수치를 읽고 있는지 흐려진다.
+          `aria-pressed` 로 낸다: 누르는 동작이 상태를 바꾸는 버튼 두 개다. */}
+      <div className="s08__views" role="group" aria-label="뷰 선택">
+        <button
+          type="button" className="s08__view" aria-pressed={view === "heatmap"}
+          onClick={() => setView("heatmap")}
+        >
+          오해 지도
+        </button>
+        <button
+          type="button" className="s08__view" aria-pressed={view === "indicator"}
+          onClick={() => setView("indicator")}
+        >
+          선행지표
+        </button>
+      </div>
+
+      {view === "heatmap" && (<>
       {/* 자유 입력이 아니라 선택이다. "60대" 와 "60세" 를 손으로 치면 후자는 아무 셀도
           안 걸리는데 화면은 그냥 빈 표를 보여준다 — 오타와 "해당 없음" 이 구분되지 않는다.
           허용값은 세션이 실제로 보내는 값과 **같은 곳**(lib/sessionAttrs)에서 온다. */}
@@ -443,6 +538,115 @@ export default function S08Dashboard() {
           </div>
         </section>
       )}
+      </>)}
+
+      {/* ── 선행지표 뷰 (F-DSH-002) ───────────────────────────────────────── */}
+      {view === "indicator" && (<>
+        <section className="s08__filters">
+          <label>
+            <span>집계 축</span>
+            <select
+              className="s08__select"
+              value={axis}
+              onChange={(e) => setAxis(e.target.value as IndicatorAxis)}
+            >
+              {(Object.keys(AXIS_LABEL) as IndicatorAxis[]).map((a) => (
+                <option key={a} value={a}>{AXIS_LABEL[a]}</option>
+              ))}
+            </select>
+          </label>
+          {/* 축과 범위를 화면이 먼저 갈라 말한다 — 계약이 이름을 가른 이유가 이것이고,
+              둘을 같은 것으로 읽으면 MGR 이 지점 추이를 전사 추이로 본다. */}
+          <p className="s08__axis-note">
+            상품·연령대·채널 필터는 오해 지도에만 걸립니다. 여기서 고르는 것은
+            <b> 집계 축</b>이고, 보이는 <b>범위</b>는 역할이 정합니다.
+          </p>
+        </section>
+
+        {/* 이상치 — 서버가 판단한 것만. 화면은 임계값을 다시 계산하지 않는다. */}
+        {(indicator?.outliers.length ?? 0) > 0 && (
+          <section className="s08__outliers" aria-label="이상치">
+            <h2 className="s08__panel-title">
+              이상치 <span className="s08__count">{indicator?.outliers.length}건</span>
+            </h2>
+            <ul className="s08__out-list">
+              {indicator?.outliers.map((o) => (
+                <li key={`${o.groupBy} ${o.key}`} className="s08__out-row">
+                  <span className="s08__out-key">{o.key}</span>
+                  {/* 사유 문장은 서버 것을 그대로 낸다 — 화면이 고쳐 쓰면 근거가 갈린다. */}
+                  <span className="s08__out-reason">{o.reason}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="s08__panel-note">
+              직전 구간 평균과 견준 값입니다. <b>가려진 구간으로는 이상치를 말하지 않습니다</b> —
+              표본이 모자란 주는 판단에서 빠집니다.
+            </p>
+          </section>
+        )}
+
+        {rows.length === 0 ? (
+          <p className="s08__empty">집계된 계열이 없습니다.</p>
+        ) : (
+          <section className="s08__trend" aria-label={`${AXIS_LABEL[axis]}별 주간 오해율 추이`}>
+            <h2 className="s08__panel-title">{AXIS_LABEL[axis]}별 주간 추이</h2>
+            <div className="s08__table-wrap">
+              <table className="s08__table s08__trend-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{AXIS_LABEL[axis]} \ 주</th>
+                    {periods.map((p, i) => (
+                      <th
+                        key={p}
+                        scope="col"
+                        className={i === periods.length - 1 ? "s08__col-latest" : undefined}
+                      >
+                        {/* 화면에는 주 번호만, 스크린리더에는 연도까지. 열이 8개라
+                            연도를 여덟 번 반복하면 그게 표를 가린다. */}
+                        <span aria-hidden="true">{shortWeek(p)}</span>
+                        <span className="sr-only">{p}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((s) => {
+                    const total = s.points.reduce((a, p) => a + p.n, 0);
+                    return (
+                      <tr key={s.key}>
+                        <th scope="row">
+                          {s.key}
+                          {/* 이상치 표식은 색이 아니라 **말**이다 — 신호등 3색은 판정
+                              전용이고(tokens.css 규칙 1) 이건 판정이 아니다. */}
+                          {outlierKeys.has(s.key) && (
+                            <span className="s08__out-flag">이상치</span>
+                          )}
+                          <span className="s08__row-id">표본 {total.toLocaleString()}건</span>
+                        </th>
+                        {s.points.map((pt, i) => (
+                          <TrendCell
+                            key={pt.period}
+                            point={pt}
+                            seriesKey={s.key}
+                            latest={i === s.points.length - 1}
+                            show={showTip}
+                            hide={hideTip}
+                          />
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="s08__panel-note">
+              막대 높이가 그 주의 오해율입니다. <b>값이 없는 주는 막대를 그리지 않습니다</b> —
+              판정이 없었던 주와 표본이 모자라 가린 주는 0% 와 다릅니다. 숫자는 가장 최근
+              주에만 적습니다.
+            </p>
+          </section>
+        )}
+      </>)}
 
       {/* 화면 좌표에 뜨는 단 하나의 툴팁. `position: fixed` 라 카드의 스태킹 컨텍스트도,
           표의 overflow 도 통과한다. 트리거가 여럿이어도 실체는 하나다. */}
@@ -521,6 +725,64 @@ function Kpi({ label, value, sub, tip, tipId, show, hide }: {
       <p className="s08__kpi-sub">{sub}</p>
     </article>
   );
+}
+
+/**
+ * 추이 표의 한 칸 = 한 주 (F-DSH-002).
+ *
+ * ❗**값이 없으면 막대를 그리지 않는다.** 0% 와 *"그 주에 판정이 없었다"*, *"표본이 모자라
+ * 가렸다"* 는 서로 다른 사실인데 높이 0 인 막대는 셋을 같아 보이게 한다 — 히트맵이
+ * 빈칸과 "가려짐" 을 가르는 것과 같은 규칙이다(설계 판단 ②).
+ *
+ * 값이 있을 때는 최소 높이를 조금 준다. 1% 가 선 하나로도 안 보이면 **"값이 있다" 자체가
+ * 화면에서 사라진다** — 정확한 수치는 hover·포커스와 스크린리더 문장이 준다.
+ */
+function TrendCell({ point, seriesKey, latest, show, hide }: {
+  point: IndicatorPoint; seriesKey: string; latest: boolean;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+}) {
+  const pct = point.misrate == null ? null : Math.round(point.misrate * 100);
+  const label = pct == null
+    ? (point.n === 0
+        ? "그 주에는 판정이 없습니다"
+        : `표본 ${point.n}건 — 30건 미만이라 값을 가렸습니다`)
+    : `오해율 ${pct}% · 표본 ${point.n}건`;
+  const tip = (
+    <>
+      <b>{seriesKey}</b>{point.period}
+      <span className="s08__tip-val">{label}</span>
+    </>
+  );
+
+  return (
+    <td
+      className={`s08__tcell${pct == null ? " s08__tcell--none" : ""}`
+        + (latest ? " s08__col-latest" : "")}
+      tabIndex={0}
+      onMouseEnter={(e) => show(e.currentTarget, tip)}
+      onMouseLeave={hide}
+      onFocus={(e) => show(e.currentTarget, tip)}
+      onBlur={hide}
+    >
+      {/* 있든 없든 같은 트랙에 앉힌다 — 기준선(0%)이 한 줄로 이어져야 여덟 칸이
+          서로 견줘진다. 값이 없는 주는 그 자리에 낮은 빗금 조각만 남는다. */}
+      <span className="s08__tbar-track" aria-hidden="true">
+        {pct == null
+          ? <span className="s08__tslot" />
+          : <span className="s08__tbar" style={{ height: `${Math.max(pct, 2)}%` }} />}
+      </span>
+      {/* 숫자는 최근 주에만 적는다 — 여덟 칸 모두에 적으면 표가 숫자 벽이 되고
+          추이(모양)를 읽으라는 이 표의 목적이 사라진다. */}
+      {latest && pct != null && <span className="s08__tval">{pct}%</span>}
+      <span className="sr-only">{point.period} {label}</span>
+    </td>
+  );
+}
+
+/** `2026-W32` → `W32`. 열이 여덟 개라 연도를 여덟 번 반복하면 그게 표를 가린다. */
+function shortWeek(period: string): string {
+  const i = period.indexOf("-W");
+  return i >= 0 ? period.slice(i + 1) : period;
 }
 
 function describe(e: unknown): string {
