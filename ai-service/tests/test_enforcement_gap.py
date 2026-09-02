@@ -52,7 +52,7 @@ from app.main import _log_enforcement_gap
 #: 이유를 이미 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고 변액에서 *"예금자보호 되는
 #: 줄"* 은 **부분적으로 참**이라 결정론 상향이 **오판**이었다.
 #:
-#: 그래서 그 항목은 `rubrics._INTENTIONALLY_UNLINKED` 로 갔다. **빈 집합이 정상 상태다** —
+#: 그래서 그 항목은 `rubrics._UNLINKED_UNTIL` 로 갔다. **빈 집합이 정상 상태다** —
 #: 여기 뭐가 생기면 그건 진짜 사각이고, 의도라면 근거와 함께 그쪽 목록에 넣어야 한다.
 _NO_ENFORCEMENT_PATH: set[str] = set()
 
@@ -99,14 +99,14 @@ def test_the_gap_reports_the_conditions_not_just_the_item() -> None:
     )
 
 
-def test_the_intentional_exception_is_not_reported_as_a_gap() -> None:
+def test_the_pending_exception_is_not_reported_as_a_gap() -> None:
     """★ `#298` 리뷰가 잡은 것 — 의도된 정정을 사각으로 세지 않는다.
 
     이 기능이 내는 경고는 지금 이것뿐이었다. **오탐 하나가 기동 로그에 상시로 서면 다음에
     진짜 사각이 생겨도 같은 줄로 보인다.** 그리고 확인받는 쪽이 M02 를 도로 링크할 수 있다 —
     `#57` 이 오판이라고 판정한 상향이 돌아온다.
     """
-    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in rubrics.intentionally_unlinked()
+    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in rubrics.unlinked_until()
     assert "VAR-PARTIAL-DEPOSIT-INSURANCE" not in rubrics.enforcement_gaps()
 
     rubric = rubrics.get("VAR-PARTIAL-DEPOSIT-INSURANCE")
@@ -114,7 +114,7 @@ def test_the_intentional_exception_is_not_reported_as_a_gap() -> None:
     assert not rubric.related_misconceptions, "링크가 생겼으면 예외 목록에서 빼야 한다"
 
 
-def test_intentional_exceptions_cite_their_reason() -> None:
+def test_pending_exceptions_cite_their_reason() -> None:
     """★ 예외 목록을 **손으로 채울 수 없게** 한다.
 
     각 항목의 루브릭 파일에 그 근거 PR 번호가 실제로 적혀 있는지 대조한다. 없는데 적으면
@@ -125,7 +125,8 @@ def test_intentional_exceptions_cite_their_reason() -> None:
     from pathlib import Path
 
     root = Path(rubrics.__file__).resolve().parent / "rubrics"
-    for item_id, why in rubrics.intentionally_unlinked().items():
+    for item_id, (why, until) in rubrics.unlinked_until().items():
+        assert until.strip(), f"{item_id}: 빼는 조건이 비어 있다 — 그러면 지우는 사건이 안 온다"
         path = root / f"{item_id}.yaml"
         assert path.exists(), f"{item_id}: 루브릭 파일이 없는데 예외 목록에 있다"
         head = path.read_text(encoding="utf-8")
@@ -162,7 +163,7 @@ def test_the_declared_conditions_outnumber_the_library() -> None:
     )
 
 
-def test_startup_records_the_intentional_exception_as_info(caplog) -> None:
+def test_startup_records_the_pending_exception_as_info(caplog) -> None:
     """의도된 예외는 `INFO` 로 남긴다 — 안 남기면 사각이 0 인 이유를 알 수 없다.
 
     `#121` 이 넣은 로그 레벨 설정 덕에 `INFO` 도 배포에서 보인다.
@@ -175,7 +176,10 @@ def test_startup_records_the_intentional_exception_as_info(caplog) -> None:
     )
     text = caplog.text
     assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in text
-    assert "의도" in text, "왜 세지 않는지 문면에 없으면 다음 사람이 누락으로 읽는다"
+    assert "아직" in text, "왜 세지 않는지 문면에 없으면 다음 사람이 누락으로 읽는다"
+    assert "빼는 조건" in text, (
+        "빼는 조건이 로그에 없으면 '영구히 이렇다' 로 읽힌다 — 지우는 사건이 안 온다"
+    )
     assert "#284" in text, "출처가 없으면 이 로그가 왜 있는지 다음 사람이 모른다"
 
 
@@ -200,6 +204,86 @@ def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
     text = caplog.text
     assert "SYNTH-NO-LINK" in text
     assert "전액 보호된다" in text, "조건 문면이 없으면 사람이 다시 찾아야 한다"
-    assert "_INTENTIONALLY_UNLINKED" in text, (
+    assert "_UNLINKED_UNTIL" in text, (
         "의도라면 어디에 넣어야 하는지 문면이 알려줘야 한다"
+    )
+
+
+# ── `#298` 리뷰(정세현) C·B — 잡히지 않던 둘 ─────────────────────────────────
+def test_startup_actually_calls_it_through_lifespan(caplog) -> None:
+    """★ **C — 기동 경로를 실제로 태운다.**
+
+    앞서 이 파일의 기동 테스트가 `_log_enforcement_gap()` 를 **직접 불렀다.** 그러면
+    재는 것은 *"이 함수가 부르면 로그를 낸다"* 이고, ★ 로 적어 둔 주장(*"기동 로그에
+    남는다"*)은 검증되지 않는다 — `lifespan` 에서 호출을 지워도 전건 초록이었다.
+
+    **이 PR 의 주제가 그것이라 특히 걸린다** — *"선언했는데 강제 안 되는 것이 조용하다"* 를
+    드러내려고 만든 기능이 조용히 빠질 수 있는 상태였다.
+
+    `#252` 의 `UnfairSignalLogTest` 가 리스너를 직접 안 부르고 **실제 발행**을 쓴 이유가
+    같다(결정 5.31) — *"직접 부르면 구독이 걸려 있는지를 안 재게 되는데, 이 기능이 없던
+    이유가 정확히 그것이었다."*
+
+    ❗`TestClient(app)` 를 **컨텍스트로** 써야 `lifespan` 이 돈다. 모듈 수준으로 두면
+    안 돈다(`test_measurement_invalid_route.py` 가 그 형태다).
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with caplog.at_level(logging.INFO, logger="app.main"), TestClient(app):
+        pass
+
+    text = caplog.text
+    assert "F-DET-001 강제 범위" in text, (
+        "lifespan 이 _log_enforcement_gap() 를 부르지 않는다 — 배포 기동 로그에 아무것도 "
+        "안 남는데 직접 호출 테스트는 초록이다"
+    )
+    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in text
+
+
+def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
+    """★ **B — 조건이 0개면 사각이 아니다.**
+
+    `enforcement_gaps()` 의 `misconception_conditions and` 가드가 지키는 구별이다.
+
+        선언했는데 강제 못 한다   ← 경고할 것
+        선언한 것 자체가 없다     ← 경고하면 오탐
+
+    지금 조건 0개 루브릭이 없어서 **가드를 빼도 전건 초록이었다.** 조건 없는 루브릭이
+    들어오는 날 오탐 경고가 나고, 그건 이 PR 이 없애려던 그 상태다 — 오탐이 상시로 서면
+    진짜 사각도 같은 줄로 보인다.
+    """
+    from app.rubrics import Rubric
+
+    bare = Rubric(
+        item_id="SYNTH-NO-CONDITIONS", product_type="ELS", name="합성", status="draft",
+        required_elements=("가",), misconception_conditions=(), related_misconceptions=(),
+    )
+    monkeypatch.setattr(rubrics, "_all", lambda: {"SYNTH-NO-CONDITIONS": bare})
+
+    assert rubrics.enforcement_gaps() == {}, (
+        "조건이 없는 루브릭을 사각으로 세면 오탐이다 — 강제할 것이 애초에 없다"
+    )
+
+
+def test_unlinked_until_has_not_expired() -> None:
+    """★ 만료 조건을 기계가 본다 (`#298` 리뷰 2번).
+
+    `_UNLINKED_UNTIL` 이 *"의도적으로 링크 없음"* 이면 **영구히 그렇다고 읽히고 지우는
+    사건이 안 온다.** 결정 10.67(OIDC 이름 표기)에서 정리한 그 모양이다.
+
+    `VAR-PARTIAL-DEPOSIT-INSURANCE` 의 조건은 *"변액을 덮는 예금자보호 유형이 생길 때"*
+    다(결정 10.24). 그 유형이 라이브러리에 들어오는 순간 **여기서 실패하고**, 그때 항목을
+    빼면 경고가 정상적으로 서기 시작한다.
+    """
+    covering = [
+        m.type_id for m in misconception.library()
+        if "DEPOSIT" in m.type_id
+        and ("VARIABLE_INSURANCE" in m.products or "ALL" in m.products)
+    ]
+    assert not covering, (
+        f"{covering} 가 변액을 덮는다 — 결정 10.24 의 조건이 충족됐다. "
+        "rubrics._UNLINKED_UNTIL 에서 VAR-PARTIAL-DEPOSIT-INSURANCE 를 빼고, "
+        "그 루브릭에 related_misconceptions 를 걸고, 이 테스트를 지운다"
     )

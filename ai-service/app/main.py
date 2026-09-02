@@ -224,16 +224,17 @@ def _log_enforcement_gap() -> None:
     )
     # 의도된 정정은 세지 않는다 — 오탐 하나가 상시로 서면 진짜 사각도 같은 줄로 보인다
     # (`#298` 리뷰). 무엇이 예외인지는 남긴다 — 안 남기면 이 숫자가 왜 0 인지 알 수 없다.
-    for item_id, why in rubrics.intentionally_unlinked().items():
+    for item_id, (why, until) in rubrics.unlinked_until().items():
         log.info(
-            "F-DET-001 강제 통로 없음(의도): item_id=%s — %s 의 판단이다 (이슈 #298)",
-            item_id, why,
+            "F-DET-001 강제 통로 없음(아직): item_id=%s — %s 의 판단이다. 빼는 조건: %s "
+            "(이슈 #298)",
+            item_id, why, until,
         )
     for item_id, conditions in rubrics.enforcement_gaps().items():
         log.warning(
             "F-DET-001 강제 통로 없음: item_id=%s 조건=%d개 — related_misconceptions 가 "
-            "비어 있고 의도된 예외에도 없다. 모델이 놓치면 U4 상향이 아예 일어나지 않는다. "
-            "의도라면 rubrics._INTENTIONALLY_UNLINKED 에 근거와 함께 넣는다 (%s)",
+            "비어 있고 '아직' 목록에도 없다. 모델이 놓치면 U4 상향이 아예 일어나지 않는다. "
+            "의도라면 rubrics._UNLINKED_UNTIL 에 근거와 함께 넣는다 (%s)",
             item_id, len(conditions), " / ".join(conditions),
         )
 
