@@ -36,10 +36,10 @@
 | | 코드가 강제하는 것 | 강제 지점 |
 |---|---|---|
 | **P4** | 근거 없는 판정은 무효 — 발화 인용 + 루브릭 조항이 비면 안 된다 | `domain/Judgment` 컴팩트 생성자 · `EvidenceRequiredException` → 502 · ai-service `scoring.verify_quote_is_verbatim`·`verify_rubric_clause_is_published` |
-| **P5** | 미탐(놓침)을 과탐보다 비싸게 다룬다 — 못 잰 것은 통과가 아니다 | `gate_rules.yaml` R-01 · `POST /judge` 판정 0건 가드([ADR-004](adr/004-evidence-append-contract.md) §6) · `eval/metrics.py` 의 `miss_rate` 를 QWK 에 접지 않는 것 · ❗**R-00**(미측정이면 RED)은 **아직 main 에 없다 — PR #291 이 들어오면 여기에 더한다** |
+| **P5** | 미탐(놓침)을 과탐보다 비싸게 다룬다 — 못 잰 것은 통과가 아니다 | `gate_rules.yaml` **R-00**(미측정이면 RED)·R-01 · `POST /judge` 판정 0건 가드([ADR-004](adr/004-evidence-append-contract.md) §6) · `eval/metrics.py` 의 `miss_rate` 를 QWK 에 접지 않는 것 |
 | **P6** | 수치는 원문 인용만 — 지어낸 값이 들어갈 자리가 없다 | `contracts/risk_item.schema.json` `condition.value_text`(*"원문 인용만 허용 (P6)"*) · `pages[page].text[start:end] == value_text` 항등식 · ai-service `reexplain` 의 환각 수치 검사 · `extraction` 의 좁히기 거부 |
 
-❗**아직 없는 강제 지점은 없다고 적는다.** P5 의 `R-00` 이 그것이다 — 이 파일이 *"근거처럼 생겼는데 없는 것"* 을 만들지 않으려고 조항 전사를 거절했으므로, 강제 지점에서도 같은 규칙을 지킨다. `grep -c "R-00" gate_rules.yaml` 이 2를 세는데 **둘 다 `ADR-005` 안의 부분일치**라 개수만 보면 있다고 읽힌다(리뷰에서 실제로 한 번 걸렸다). PR #291 이 머지되면 이 칸의 단서를 지운다.
+❗**아직 없는 강제 지점은 없다고 적는다.** 이 파일이 *"근거처럼 생겼는데 없는 것"* 을 만들지 않으려고 조항 전사를 거절했으므로(이슈 #290), 강제 지점에서도 같은 규칙을 지킨다 — P5 의 `R-00` 이 한 번 그랬고 `#291` 이 머지돼서 단서를 지웠다. 개수만 세면 안 된다: `grep -c "R-00" gate_rules.yaml` 은 그 룰이 **없을 때도 2를 셌다**(둘 다 `ADR-005` 안의 부분일치). 룰의 존재는 `grep "^\s*- id: R-00"` 로 본다.
 
 **원본이 들어오면 이 표를 지우고 조항 문면으로 갈아 넣는다.** 그때 `CLAUDE.md` 의
 「핵심 불변식」도 P4 까지에서 P6 까지로 같이 늘려야 한다(지금 P5·P6 이 거기에도 없다).
