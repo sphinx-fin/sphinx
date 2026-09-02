@@ -144,15 +144,23 @@ class StoredEvidenceRecorderTest {
         }
 
         @Test
-        @DisplayName("❗미측정 0 을 생략하지 않는다 — 없음과 미기재를 가른다")
-        void zeroUnmeasuredIsRecordedNotOmitted() {
-            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of("R-06"), 0, 3), T0);
+        @DisplayName("❗입력이 0 이어도 생략하지 않는다 — 없음과 미기재를 가른다. 두 필드 다")
+        void zeroInputsAreRecordedNotOmitted() {
+            // ❗두 필드를 한 단정으로 같이 본다. `unmeasured` 만 걸었던 판이 있었고,
+            // `if (rulesVersion != 0) put(...)` 변이가 그때 전건 통과했다 — 다른 테스트는
+            // 전부 rulesVersion 을 3 으로 넣어서 0 인 경로를 아무도 안 지나갔다(PR #299 리뷰).
+            // 문면이 두 필드를 같은 규약으로 말하는데 그물이 한쪽만 있으면 규약이 아니다.
+            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of("R-06"), 0, 0), T0);
 
             assertThat(payloads().get(0))
                     .as("키가 없으면 '전부 쟀다' 와 '이 필드가 생기기 전 기록' 이 같아 보인다 — "
                         + "misconceptionType·promptVersion·escalate 와 같은 규약이다(이슈 #136)")
-                    .containsKey("unmeasured");
+                    .containsKeys("unmeasured", "rulesVersion");
             assertThat(payloads().get(0).get("unmeasured")).isEqualTo(0);
+            // rulesVersion 0 은 뜻이 따로 있어서 생략이 더 나쁘다 — "버전 0 인 룰셋" 이 아니라
+            // **파일을 안 지나온 룰**(GateEngine.UNVERSIONED)이다. 생략되면 기록에서
+            // "파일을 안 지나온 룰로 판정했다" 와 "이 필드 전 기록" 이 같아진다.
+            assertThat(payloads().get(0).get("rulesVersion")).isEqualTo(0);
         }
 
         @Test
