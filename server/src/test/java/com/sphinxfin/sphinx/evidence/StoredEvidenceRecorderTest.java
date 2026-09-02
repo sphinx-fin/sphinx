@@ -77,7 +77,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("판정 → 게이트 → 오버라이드 순서가 기록에 남는다")
         void keepsCrossKindOrder() {
             recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04", "R-05")), T0.plusSeconds(1));
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04", "R-05"), 0, 3), T0.plusSeconds(1));
             recorder.appendOverride(SID, "고객이 충분히 이해했다고 판단하여 진행합니다", "mgr-01", T0.plusSeconds(2));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
@@ -89,7 +89,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("기록 한 건이 스스로 어느 세션·언제인지 말한다")
         void entriesAreSelfDescribing() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01")), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
 
             Map<String, Object> payload = payloads().get(0);
             assertThat(payload.get("sessionId")).isEqualTo(SID);
@@ -101,8 +101,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("세션이 다르면 사슬도 다르다")
         void streamsAreSeparatedBySession() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01")), T0);
-            recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of()), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0);
 
             assertThat(payloads()).hasSize(1);
             assertThat(store.verify(StoredEvidenceRecorder.streamOf("S-2")).ok()).isTrue();
@@ -131,9 +131,9 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("게이트 판정도 매 호출 남는다 — 최종 신호가 아니라 신호의 변천")
         void gateSignalsAccumulate() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01")), T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(60));
-            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(120));
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(60));
+            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(120));
 
             assertThat(payloads()).extracting(p -> p.get("signal"))
                     .containsExactly("RED", "YELLOW", "GREEN");
@@ -337,7 +337,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("게이트와 다른 사슬 항목이다 — 재검증마다 도는 게이트와 발생 시점이 다르다")
         void mismatchIsItsOwnKind() {
             recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-02")), T0.plusSeconds(1));
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-02"), 0, 3), T0.plusSeconds(1));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
                     .as("게이트에 얹으면 재검증마다 같은 모순 근거가 중복으로 쌓인다")

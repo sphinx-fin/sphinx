@@ -35,16 +35,25 @@ public class GateEngine {
     /** 파일에 매칭되는 룰이 없을 때의 fail-closed 판정에 남기는 트레이스 ID. */
     static final String DEFAULT_TRACE = "R-DEFAULT";
 
+    /** 룰을 직접 주입할 때 쓰는 버전 값 — 파일에서 온 게 아니라 "모른다" 는 뜻이다. */
+    static final int UNVERSIONED = 0;
+
     private final List<Rule> rules;
+    private final int rulesVersion;
 
     /** 프로덕션 경로: classpath의 gate_rules.yaml을 로드한다. */
     public GateEngine() {
-        this(loadRules("/gate_rules.yaml"));
+        this(load("/gate_rules.yaml"));
     }
 
-    /** 테스트/DI용: 컴파일된 룰을 직접 주입한다. */
+    /** 테스트/DI용: 컴파일된 룰을 직접 주입한다. 파일을 안 지나왔으므로 버전은 없다. */
     GateEngine(List<Rule> rules) {
-        this.rules = List.copyOf(rules);
+        this(new Ruleset(UNVERSIONED, rules));
+    }
+
+    GateEngine(Ruleset ruleset) {
+        this.rules = List.copyOf(ruleset.rules());
+        this.rulesVersion = ruleset.version();
     }
 
     /**
@@ -127,14 +136,24 @@ public class GateEngine {
             }
         }
         if (winning == null) {
-            return new GateResult(Signal.RED, List.of(DEFAULT_TRACE));   // fail-closed
+            // fail-closed. 여기서도 입력을 싣는다 — 룰이 하나도 안 맞은 판정일수록
+            // "무엇을 보고 그랬나" 가 남아야 한다.
+            return new GateResult(Signal.RED, List.of(DEFAULT_TRACE), unmeasured, rulesVersion);
         }
-        return new GateResult(winning, List.copyOf(trace));
+        return new GateResult(winning, List.copyOf(trace), unmeasured, rulesVersion);
     }
 
     // ── 룰 로딩·컴파일 ────────────────────────────────────────────────
 
+    /** 파일에서 온 룰셋 — 룰과 그 룰을 정한 버전이 같이 다닌다. */
+    record Ruleset(int version, List<Rule> rules) {}
+
+    /** 버전이 필요 없는 호출부용. */
     static List<Rule> loadRules(String classpathResource) {
+        return load(classpathResource).rules();
+    }
+
+    static Ruleset load(String classpathResource) {
         ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
         try (InputStream in = GateEngine.class.getResourceAsStream(classpathResource)) {
             if (in == null) {
@@ -148,7 +167,7 @@ public class GateEngine {
             for (RawRule raw : file.rules) {
                 compiled.add(new Rule(raw.id, raw.ifExpr, compile(raw.ifExpr), Signal.valueOf(raw.then)));
             }
-            return compiled;
+            return new Ruleset(file.version, compiled);
         } catch (IOException e) {
             throw new UncheckedIOException("게이트 룰 로드 실패: " + classpathResource, e);
         }

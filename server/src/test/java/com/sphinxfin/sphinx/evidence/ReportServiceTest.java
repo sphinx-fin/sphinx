@@ -62,10 +62,10 @@ class ReportServiceTest {
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
         recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
+        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
         recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
         recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
-        recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
+        recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));
         em.flush();
         em.clear();
     }
@@ -169,10 +169,10 @@ class ReportServiceTest {
 
             // 같은 내용을 다른 세션에 쌓으면 체인 위치는 다르지만 내용은 같다.
             recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04")), T0.plusSeconds(1));
+            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
             recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
             recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
-            recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of()), T0.plusSeconds(91));
+            recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));
             em.flush();
             em.clear();
 

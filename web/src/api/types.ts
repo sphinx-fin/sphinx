@@ -171,6 +171,19 @@ export interface Judgment {
 export interface GateResult {
   signal: Signal;
   ruleTrace: string[];
+  /**
+   * 판정 시점의 **미측정 항목 수** — 질문은 보냈는데 판정이 안 돌아온 항목.
+   * 1 이상이면 `R-00` 이 RED 를 낸다.
+   *
+   * ❗**판정 뒤에 그 항목이 마저 채점돼도 이 값은 안 바뀐다.** 재계산값이 아니라
+   * 그때의 기록값이다 — 화면에서 지금 채점 상태와 대조해 "안 맞는다" 고 읽지 않는다.
+   */
+  unmeasured: number;
+  /**
+   * 판정에 쓴 `gate_rules.yaml` 의 버전. 임계값이 바뀐 뒤의 판정과 그 전의 판정을
+   * 감사 시점에 가르는 값이다. 화면에 꼭 그릴 필요는 없다.
+   */
+  rulesVersion: number;
 }
 
 /**
@@ -213,8 +226,10 @@ export type SuitabilityStatus = "NOT_EVALUATED" | "NO_MISMATCH" | "MISMATCH" | "
 /**
  * 게이트 **미리보기** (`GET /sessions/{id}/gate-preview`).
  *
- * **`GateResult` 와 다른 타입이다.** `/judge` 는 `signal`·`ruleTrace` 둘뿐이고, 이쪽은
- * 미리보기를 안전하게 만드는 두 필드를 더 싣는다. 미리보기를 `GateResult` 로 받으면
+ * **`GateResult` 와 다른 타입이다.** 둘 다 `signal`·`ruleTrace` 로 시작하지만 나머지가
+ * 겹치지 않는다 — 확정 판정은 `unmeasured`·`rulesVersion`(감사용 기록값)을 싣고, 이쪽은
+ * 미리보기를 안전하게 만드는 `recorded`·`suitabilityStatus` 를 싣는다.
+ * 미리보기를 `GateResult` 로 받으면
  * 남는 필드를 TS 가 잡아주지 않아 **타입은 통과하는데 화면만 조용히 덜 그린다** —
  * `RiskItem` 의 snake_case 사고(decision-log 10.18)와 같은 종류다.
  */

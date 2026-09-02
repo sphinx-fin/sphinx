@@ -200,6 +200,15 @@ public class Session extends BaseEntity {
     @Convert(converter = StringListConverter.class)
     @Column(columnDefinition = "TEXT")
     private List<String> gateRuleTrace;
+
+    // 판정 시점의 미측정 항목 수와 룰셋 버전. 신호·트레이스만 남기면 "R-00 이 물었다"까지만
+    // 알고 몇 개를 못 쟀는지도 어느 룰셋으로 쟀는지도 모르는 기록이 된다 — 판정 뒤에는
+    // 재계산해도 그때의 값이 안 나오므로(항목이 더 채점될 수 있다) 여기 같이 남긴다.
+    @Builder.Default
+    private int gateUnmeasured = 0;
+    @Builder.Default
+    private int gateRulesVersion = 0;
+
     private Instant judgedAt;              // 판정 시각
 
     // F-GTE-002 적색 오버라이드 — 적색 판정 세션을 관리자 승인으로 진행한 사실·사유·승인자.
@@ -370,6 +379,8 @@ public class Session extends BaseEntity {
     public void recordGate(GateResult result, Instant judgedAt) {
         this.gateSignal = result.signal();
         this.gateRuleTrace = List.copyOf(result.ruleTrace());
+        this.gateUnmeasured = result.unmeasured();
+        this.gateRulesVersion = result.rulesVersion();
         this.judgedAt = judgedAt;
     }
 

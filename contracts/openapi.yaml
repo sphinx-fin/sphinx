@@ -1152,10 +1152,22 @@ components:
 
     GateResult:
       type: object
-      required: [signal, ruleTrace]
+      required: [signal, ruleTrace, unmeasured, rulesVersion]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
-        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01). 그 신호를 낸 사유 전부 — 하나가 아닐 수 있다"}
+        unmeasured:
+          type: integer
+          minimum: 0
+          description: >-
+            판정 시점의 미측정 항목 수 — 질문을 보냈는데 판정이 안 돌아온 항목.
+            1 이상이면 R-00 이 RED 를 낸다. 판정 뒤에 그 항목이 마저 채점돼도
+            이 값은 안 바뀐다(재계산값이 아니라 그때의 기록값).
+        rulesVersion:
+          type: integer
+          description: >-
+            판정에 쓴 gate_rules.yaml 의 version. 임계값이 바뀐 뒤의 판정과
+            그 전의 판정을 감사 시점에 가르는 값이다.
     GateApiResponse:
       type: object
       required: [success, data]

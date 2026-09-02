@@ -237,4 +237,50 @@ class GateEngineTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> GateEngine.compile("nonsense >> 3"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("❗판정이 어느 룰셋으로 잰 건지 싣는다 — gate_rules.yaml 의 version 첫 소비처 (#294)")
+    void theVerdictCarriesTheRulesetVersion() throws Exception {
+        // version: 은 그전까지 파싱만 되고 버려졌다(읽는 곳 0건). "바꿔도 안 깨지는 설정값"
+        // 이라 언젠가 낡는데, 낡은 것을 알아챌 방법이 없었다. 여기서 처음 소비된다.
+        int declared = declaredVersion();
+
+        assertThat(engine.judge(List.of(judgment(Grade.U1)), false, false, 0, 0).rulesVersion())
+                .as("파일이 선언한 version 과 판정이 싣는 값이 달라지면, 감사 기록이 "
+                        + "실제로 안 쓴 룰셋을 가리킨다")
+                .isEqualTo(declared);
+    }
+
+    @Test
+    @DisplayName("❗룰을 직접 주입한 엔진은 버전을 0 으로 남긴다 — 파일을 안 지나왔다는 사실이 보여야 한다")
+    void anInjectedRulesetHasNoVersion() {
+        GateEngine injected = new GateEngine(GateEngine.loadRules("/gate_rules.yaml"));
+
+        assertThat(injected.judge(List.of(judgment(Grade.U1)), false, false, 0, 0).rulesVersion())
+                .as("주입된 룰에 파일 버전을 붙이면 기록이 거짓말을 한다 — 그 룰은 파일과 다를 수 있다")
+                .isEqualTo(GateEngine.UNVERSIONED);
+    }
+
+    @Test
+    @DisplayName("❗미측정 수가 판정에 실린다 — 신호만 재면 그 숫자를 만드는 계산이 안 잠긴다 (#294 ①)")
+    void theVerdictCarriesTheUnmeasuredCount() {
+        assertThat(engine.judge(List.of(judgment(Grade.U1)), false, false, 0, 2).unmeasured())
+                .isEqualTo(2);
+        assertThat(engine.judge(List.of(), false, false, 0, 2).unmeasured())
+                .as("fail-closed 경로에서도 실린다 — 룰이 하나도 안 맞은 판정일수록 "
+                        + "무엇을 보고 그랬는지가 남아야 한다")
+                .isEqualTo(2);
+    }
+
+    /** gate_rules.yaml 이 선언한 version. 상수로 박으면 이 테스트가 대조를 그만둔다. */
+    private static int declaredVersion() throws Exception {
+        String yaml = new String(GateEngineTest.class.getResourceAsStream("/gate_rules.yaml")
+                .readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?m)^version:\\s*(\\d+)\\s*$").matcher(yaml);
+        if (!m.find()) {
+            throw new IllegalStateException("gate_rules.yaml 에 version: 이 없다");
+        }
+        return Integer.parseInt(m.group(1));
+    }
 }
