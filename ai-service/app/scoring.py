@@ -23,6 +23,7 @@ import unicodedata
 from pathlib import Path
 
 from . import misconception, rubrics, textsim
+from .config import settings
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
 
@@ -49,6 +50,21 @@ class MeasurementInvalid(LlmError):
 #: ❗**이것이 `#280` 을 닫지 않는다.** `p²` 도 0 이 아니고, 무엇보다 게이트가 분모를
 #: 모르는 문제(`#280` ②)는 이것과 무관하다 — 12항목만 채점되고 초록이 나오는 경로는
 #: 재시도 횟수와 상관없이 열려 있다.
+#: P4 검증(인용 원문 대조 · 조항 공개 대조)이 실패했을 때 다시 묻는 횟수.
+#:
+#: ## ❗재시도마다 seed 를 바꾼다 — 안 바꾸면 이 값이 의미가 없다
+#:
+#: `#281` 이 `seed` 를 기본 고정했다. 고정 seed 로 **같은 프롬프트**를 다시 물으면 같은 답이
+#: 올 수 있고, 그러면 재판정이 같은 실패를 두 번 겪는 것으로 끝난다. 두 조치가 각자 맞는데
+#: 합치면 기능이 없어지는 자리였다(`#160`·`#207` 에서 겪은 것과 같은 모양).
+#:
+#: 그래서 `_attempt_seed()` 가 시도마다 다른 값을 준다. 첫 시도는 설정값 그대로여서
+#: 단발 호출의 동작은 `#281` 과 같고, 재시도만 어긋난다.
+#:
+#: seed 를 끈 경우(`LLM_SEED=`)는 프로바이더가 매번 다르게 답하므로 손댈 것이 없다.
+#:
+#: **재현성이 확보되는 것은 아니다** — 실측에서 같은 seed 로 3회가 3가지였다. seed 는
+#: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
 MAX_SCORING_ATTEMPTS = 2
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
@@ -147,6 +163,19 @@ _WS = re.compile(r"\s+")
 _CLAUSE_JOINERS = re.compile(r"[및,·/\-~()\[\]]|그리고|또는|와|과")
 
 
+def _attempt_seed(attempt: int) -> int | None:
+    """시도마다 다른 seed. 첫 시도는 설정값 그대로다.
+
+    설정에서 읽는 이유: 스텁 클라이언트는 `super().__init__()` 을 부르지 않아 `_cfg` 가
+    없다(`tests/helpers.py`). 클라이언트에게 물으면 테스트 전부가 `AttributeError` 다.
+
+    seed 가 꺼져 있으면(`None`) 그대로 `None` 을 준다 — 프로바이더가 매번 다르게 답하므로
+    어긋나게 만들 것이 없다.
+    """
+    base = settings().llm_seed
+    return None if base is None else base + attempt - 1
+
+
 def score(
     item_id: str,
     question: str,
@@ -168,6 +197,7 @@ def score(
             model_cls=Judgment,
             schema_name="Judgment",
             system=load_system_prompt(),
+            seed=_attempt_seed(attempt),
         )
         judgment = _pin_prompt_version(judgment)
         judgment = _pin_item_id(judgment, item_id)

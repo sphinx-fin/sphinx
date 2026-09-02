@@ -609,27 +609,56 @@ def test_measurement_invalid_is_distinguishable_from_llm_outage():
     assert scoring.MeasurementInvalid is not LlmError
 
 
-def test_retry_must_vary_when_seed_gets_pinned():
-    """❗**`#281` 이 머지되는 순간 깨지라고 있는 테스트다.**
+def test_retry_varies_the_seed():
+    """★ 재시도가 **다른 seed** 로 나간다 (`#281` 트립와이어의 후신).
 
-    `#281` 이 `seed` 를 기본 고정하면 **같은 프롬프트 재시도가 같은 답을 받는다** —
-    이 재시도가 무력해진다. 두 PR 이 각자 맞는데 합치면 기능이 없어지는 모양이고,
-    `#160`·`#207` 에서 겪은 것과 같다.
+    ## 이 테스트의 전신
 
-    지금 `main` 에는 seed 가 없어서 재시도가 실제로 다른 답을 받는다. `#281` 이 들어오면
-    여기서 실패하고, 그때 해야 할 일이 실패 메시지에 적혀 있다.
+    원래는 *"`#281` 이 머지되는 순간 깨지라고"* 있던 트립와이어였다. `seed` 가 고정되면
+    같은 프롬프트 재시도가 같은 답을 받아 **이 재판정이 무력해진다** — 두 PR 이 각자 맞는데
+    합치면 기능이 없어지는 자리였고, 실제로 `#281` 머지 직후 이 파일에서 실패했다.
+    그때 해야 할 3단계를 실패 메시지에 적어 뒀고 그대로 따랐다.
+
+    지금은 **그 배선이 살아 있는지**를 잠근다. `seed` 를 안 넘기는 쪽으로 되돌리면
+    두 호출의 seed 가 같아져서 여기서 걸린다.
+
+    첫 시도가 설정값 그대로인 것도 같이 고정한다 — 단발 호출의 동작이 `#281` 과 같아야
+    하고, 재시도만 어긋나야 한다.
     """
     from app import config
 
-    seed = getattr(config, "DEFAULT_SEED", None)
-    if seed is None:
-        return          # main 상태 — seed 미고정. 재시도가 유효하다
+    bad = make_judgment(rubric_clause="루브릭에 없는 조항이다")
+    good = make_judgment()
+    llm = SequenceLlm(bad, good)
 
-    pytest.fail(
-        "seed 가 고정됐다(#281). 같은 프롬프트 재시도는 같은 답을 받으므로 이 재시도가 "
-        "무력하다. 고칠 것:\n"
-        "  1. complete_json 에 seed 를 넘길 수 있게 하고 재시도마다 다른 값을 준다\n"
-        "     (예: cfg.llm_seed + attempt)\n"
-        "  2. 그 사실을 MAX_SCORING_ATTEMPTS docstring 에 적는다\n"
-        "  3. 이 테스트를 '재시도가 seed 를 바꾼다' 대조로 바꾼다"
+    scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
+
+    seeds = [c.get("seed") for c in llm.calls]
+    assert len(seeds) == 2, f"재판정이 두 번 불려야 한다: {seeds}"
+    assert seeds[0] != seeds[1], (
+        f"두 시도가 같은 seed 로 나갔다 — 같은 답이 와서 재판정이 무력하다: {seeds}"
     )
+    assert seeds[0] == config.settings().llm_seed, (
+        "첫 시도는 설정값 그대로여야 한다 — 단발 호출의 동작이 #281 과 달라지면 안 된다"
+    )
+
+
+def test_seed_stays_off_when_it_is_off():
+    """`LLM_SEED=` 로 끈 경우에는 어긋나게 만들 것이 없다.
+
+    프로바이더가 매번 다르게 답하므로 재판정은 그것만으로 유효하다. 여기서 억지로 숫자를
+    만들어 넣으면 **끈 것을 코드가 되살리는** 것이 된다 — `_reasoning_effort` 가 빈 문자열을
+    기본값으로 되살렸던 것과 같은 결이고, 그건 실제로 한 번 그랬다.
+    """
+    import dataclasses
+    from unittest.mock import patch
+
+    from app import config
+
+    assert scoring._attempt_seed(1) is not None, "기본 설정에서는 seed 가 있다"
+
+    # settings() 는 lru_cache 라 캐시를 지우면 다른 테스트에 번진다. 값만 바꿔 끼운다.
+    off = dataclasses.replace(config.settings(), llm_seed=None)
+    with patch.object(scoring, "settings", lambda: off):
+        assert scoring._attempt_seed(1) is None
+        assert scoring._attempt_seed(2) is None
