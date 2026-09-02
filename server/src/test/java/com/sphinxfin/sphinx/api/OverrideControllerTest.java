@@ -144,7 +144,7 @@ class OverrideControllerTest {
     private String seed(Signal signal) {
         Session s = Session.create(new CreateSessionCommand("ELS-001", Channel.FACE_TO_FACE, "60대",
                 "없음", "5천만원대", "CT-1", "SUIT-v1", Map.of()));
-        s.recordGate(new GateResult(signal, List.of("R-01")), Instant.now());
+        s.recordGate(new GateResult(signal, List.of("R-01"), 0, 3), Instant.now());
         return repository.save(s).id();
     }
 }
