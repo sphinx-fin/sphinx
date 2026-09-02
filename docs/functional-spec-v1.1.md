@@ -22,6 +22,26 @@
 - **P3** 고객 텍스트가 `ai-service`로 나가는 유일한 경로는 `PiiGateway.mask()` → `AiServiceClient`.
   세션 생성 입력에 성명·주민번호 필드는 존재하지 않는다.
 
+## 설계 원칙 (P4~P6) — ❗**전사 미완. 아래는 조항이 아니다**
+
+**원본 v1.1 이 이 레포에 없다**(`docs/` 에 색인만 있고 원본 문서는 추적되지 않는다).
+그래서 P4~P6 은 **조항 문면을 옮기지 못했다.** 아래는 조항이 아니라 **코드가 실제로
+강제하고 있는 것의 색인**이고, 위 머리말의 경고가 여기에 특히 걸린다 — **이 문단을
+명세 조항으로 인용하지 말 것.**
+
+색인이라도 두는 이유는, 지금 이 셋의 문면이 **코드 주석에만** 있어서 주석이 원본 역할을
+하고 있기 때문이다(이슈 #290). 어디가 그것을 강제하는지라도 한곳에 있어야 원본이
+들어왔을 때 대조할 자리가 생긴다.
+
+| | 코드가 강제하는 것 | 강제 지점 |
+|---|---|---|
+| **P4** | 근거 없는 판정은 무효 — 발화 인용 + 루브릭 조항이 비면 안 된다 | `domain/Judgment` 컴팩트 생성자 · `EvidenceRequiredException` → 502 · ai-service `scoring.verify_quote_is_verbatim`·`verify_rubric_clause_is_published` |
+| **P5** | 미탐(놓침)을 과탐보다 비싸게 다룬다 — 못 잰 것은 통과가 아니다 | `gate_rules.yaml` R-00(미측정이면 RED)·R-01 · `POST /judge` 판정 0건 가드([ADR-004](adr/004-evidence-append-contract.md) §6) · `eval/metrics.py` 의 `miss_rate` 를 QWK 에 접지 않는 것 |
+| **P6** | 수치는 원문 인용만 — 지어낸 값이 들어갈 자리가 없다 | `contracts/risk_item.schema.json` `condition.value_text`(*"원문 인용만 허용 (P6)"*) · `pages[page].text[start:end] == value_text` 항등식 · ai-service `reexplain` 의 환각 수치 검사 · `extraction` 의 좁히기 거부 |
+
+**원본이 들어오면 이 표를 지우고 조항 문면으로 갈아 넣는다.** 그때 `CLAUDE.md` 의
+「핵심 불변식」도 P4 까지에서 P6 까지로 같이 늘려야 한다(지금 P5·P6 이 거기에도 없다).
+
 ## 기능ID 색인
 
 출처: [역할 분담표 v1.2](role-assignment-v1.2.md). 구현 위치는 현재 레포 기준.
