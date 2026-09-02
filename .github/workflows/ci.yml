@@ -66,19 +66,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ❗**잡이 하나다 — 넷이 아니다.** GitHub 는 **잡 단위로 1분 미만을 1분으로 올림** 과금해서
+  # 4초짜리 판별 잡도 1분이 나가고, 스킵된 잡만 0분이다. 넷으로 갈라 두면 실측 총합보다
+  # 훨씬 많이 나간다 — 이슈 #276 실측으로 **99 실행에 실측 108분 · 과금 341분**이었고,
+  # 한 잡으로 합치면 **211분**이다(실행별로 올림해서 더한 값. 평균으로 추정하면 안 된다).
+  #
+  # 합치면서 **잃지 않으려고 붙잡은 것 셋**이 아래 `if:` 들의 이유다.
+  #
+  # ① **경로 필터를 그대로 둔다.** 없애자는 안이 있었는데 실측에서 손해였다(#276: 반사실
+  #    둘 다 +19~50분). 스킵된 잡은 0분이라 **게이트 1분이 세 잡의 판정을 대신 사 준다.**
+  #    이제는 별도 잡이 아니라 같은 잡의 첫 스텝이라 올림 대상도 아니다 — 게이트가 공짜가 됐다.
+  #
+  # ② **한 모듈이 깨져도 나머지가 돈다.** 잡이 갈려 있을 때는 공짜로 얻던 성질이다. 스텝은
+  #    앞이 실패하면 멈추므로, 모듈 블록마다 `!cancelled() && <선택됨>` 을 걸어 **서로
+  #    독립**으로 만들었다. server 가 빨개도 web 빌드 결과를 같은 실행에서 본다.
+  #    모듈 *안에서는* 원래대로 순차다 — 설치가 실패하면 그 모듈의 테스트는 안 돈다.
+  #
+  # ③ **어느 모듈이 돌았는지 한눈에 보인다.** 갈려 있을 때는 체크 목록에 `skipping` 이 떠서
+  #    그냥 보였다. 합치면 로그를 열어야 하므로 **마지막 스텝이 요약(`$GITHUB_STEP_SUMMARY`)
+  #    에 적는다.** 이게 없으면 "web 이 안 돈 것"과 "web 이 통과한 것"이 같아 보인다.
+  #
+  # ❗`always()` 가 아니라 `!cancelled()` 다. `always()` 는 **취소된 실행에서도** 남은 스텝을
+  # 계속 돌린다. 이 워크플로는 `cancel-in-progress: true` 라 새 커밋마다 취소가 나고, 그때
+  # 스텝이 끝까지 도는 것은 정확히 우리가 줄이려던 그 분이다.
   # job id 는 ASCII 다 — `[A-Za-z_][A-Za-z0-9_-]*` 를 벗어나면 워크플로 스키마 검증에서
   # 걸리고, 그 실패는 **잡 0건 · 로그 없음 · 목록에서 name 자리에 파일 경로**로 나타난다
   # (정세현 #130 리뷰). YAML 은 정상이라 로컬 파서로는 안 잡힌다. `name:` 과 스텝 이름은
   # 제약이 없어서 이 레포의 다른 워크플로 셋이 한글로 돌고 있다 — id 만 규칙이 다르다.
-  changes:
-    name: 변경 모듈 판별
+  test:
+    name: 테스트 (3모듈)
     runs-on: ubuntu-latest
-    outputs:
-      server: ${{ steps.filter.outputs.server }}
-      ai-service: ${{ steps.filter.outputs['ai-service'] }}
-      web: ${{ steps.filter.outputs.web }}
     steps:
-      - id: filter
+      - name: 체크아웃
+        uses: actions/checkout@v4
+        # data/ 는 전부 커밋돼 있으므로 checkout 만으로 충분하다(이슈 #37 코멘트 ②).
+        # LFS 도 서브모듈도 쓰지 않는다. 세 모듈이 한 잡이라 **한 번만** 받는다.
+
+      - name: 변경 모듈 판별
+        id: filter
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -89,7 +114,7 @@ jobs:
           # push(main)·수동 실행은 판별 대상이 없다 — 전부 돈다.
           if [ -z "${PR:-}" ]; then
             echo "PR 이 아니다 — 3모듈 전부 실행"
-            { echo "server=true"; echo "ai-service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            { echo "server=true"; echo "ai_service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -101,7 +126,7 @@ jobs:
           # 워크플로 자신이 바뀌면 판별을 믿을 수 없다 — 전부 돈다.
           if printf '%s\n' "$files" | grep -qE '^\.github/workflows/ci\.yml$'; then
             echo "워크플로 변경 — 3모듈 전부 실행"
-            { echo "server=true"; echo "ai-service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            { echo "server=true"; echo "ai_service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -133,19 +158,11 @@ jobs:
           web=false;       hit '^(web/|data/timeseries/VERSION$)' && web=true
 
           echo "── 판별 ── server=$server ai-service=$ai web=$web"
-          { echo "server=$server"; echo "ai-service=$ai"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
+          { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
 
-  server:
-    name: server · JUnit
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        # data/ 는 전부 커밋돼 있으므로 checkout 만으로 충분하다(이슈 #37 코멘트 ②).
-        # LFS 도 서브모듈도 쓰지 않는다.
-
-      - name: JDK 17 고정
+      # ── server ──────────────────────────────────────────────────────────────
+      - name: server · JDK 17 고정
+        if: ${{ !cancelled() && steps.filter.outputs.server == 'true' }}
         uses: actions/setup-java@v4
         with:
           # build.gradle 이 toolchain languageVersion=17 로 박아두는데 그 값이 README·
@@ -154,13 +171,14 @@ jobs:
           java-version: '17'
           distribution: temurin
           cache: gradle
-
-      - name: 테스트
+      - name: server · 테스트
+        id: server_test
+        if: ${{ !cancelled() && steps.filter.outputs.server == 'true' }}
         working-directory: server
         run: ./gradlew test --console=plain
-
-      - name: skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
-        if: always()
+      - name: server · skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
+        id: server_skip
+        if: ${{ !cancelled() && steps.filter.outputs.server == 'true' }}
         working-directory: server
         run: |
           set -euo pipefail
@@ -188,8 +206,9 @@ jobs:
               print("::error::테스트 결과가 비어 있다 — test 태스크가 실제로 돌았는지 확인한다.")
               sys.exit(1)
           PY
-
-      - name: 기동 스모크 — GET /products 200
+      - name: server · 기동 스모크 — GET /products 200
+        id: server_smoke
+        if: ${{ !cancelled() && steps.filter.outputs.server == 'true' && steps.server_test.outcome == 'success' && steps.server_skip.outcome == 'success' }}
         working-directory: server
         run: |
           set -uo pipefail
@@ -220,9 +239,8 @@ jobs:
           grep -q "Started SphinxApplication" bootrun.log \
             && echo "기동 확인 — Started SphinxApplication · GET /products 200" \
             || echo "GET /products 200 (기동 로그 문구는 못 찾음)"
-
-      - name: 실패 시 리포트 보존
-        if: failure()
+      - name: server · 실패 시 리포트 보존
+        if: ${{ !cancelled() && (steps.server_test.outcome == 'failure' || steps.server_skip.outcome == 'failure' || steps.server_smoke.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: server-test-results
@@ -232,15 +250,10 @@ jobs:
             server/bootrun.log
           retention-days: 7
 
-  ai-service:
-    name: ai-service · pytest
-    needs: changes
-    if: needs.changes.outputs['ai-service'] == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      # ── ai-service ──────────────────────────────────────────────────────────
+      - name: ai-service · Python 3.11 고정
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' }}
+        uses: actions/setup-python@v5
         with:
           # 로컬 실측 기준이다(3.11 에서 244건 통과). requirements 에 상한이 없어서
           # 러너 기본 파이썬을 따라가면 어느 날 조용히 버전이 올라가는데, pdfplumber·
@@ -250,20 +263,22 @@ jobs:
           cache-dependency-path: |
             ai-service/requirements.txt
             ai-service/requirements-dev.txt
-
-      - name: 의존성 설치
+      - name: ai-service · 의존성 설치
+        id: ai_deps
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' }}
         working-directory: ai-service
         # requirements-dev.txt 가 첫 줄에서 requirements.txt 를 당긴다. 테스트 전용
         # 의존성(jsonschema·reportlab)을 런타임과 섞지 않으려는 분리다.
         run: pip install -r requirements-dev.txt
-
-      - name: 테스트
+      - name: ai-service · 테스트
+        id: ai_test
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.ai_deps.outcome == 'success' }}
         working-directory: ai-service
         # LLM 키 없이 돌아야 한다 — 외부 호출이 있는 테스트는 그 자체로 결함이다.
         run: pytest -q --junitxml=pytest-results.xml
-
-      - name: skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
-        if: always()
+      - name: ai-service · skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
+        id: ai_skip
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.ai_deps.outcome == 'success' }}
         working-directory: ai-service
         run: |
           set -euo pipefail
@@ -285,36 +300,32 @@ jobs:
                       print(f"::error::skip → {tc.get('classname')}::{tc.get('name')}")
               sys.exit(1)
           PY
-
-      - name: 실패 시 리포트 보존
-        if: failure()
+      - name: ai-service · 실패 시 리포트 보존
+        if: ${{ !cancelled() && (steps.ai_test.outcome == 'failure' || steps.ai_skip.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: ai-service-test-results
           path: ai-service/pytest-results.xml
           retention-days: 7
 
-  web:
-    name: web · tsc + build
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      # ── web ─────────────────────────────────────────────────────────────────
+      - name: web · Node 20 고정
+        if: ${{ !cancelled() && steps.filter.outputs.web == 'true' }}
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: web/package-lock.json
-
-      - name: 의존성 설치
+      - name: web · 의존성 설치
+        id: web_deps
+        if: ${{ !cancelled() && steps.filter.outputs.web == 'true' }}
         working-directory: web
         # npm ci 다 — package-lock.json 이 커밋돼 있고, install 은 락을 갱신해 버려서
         # "러너에서만 다른 버전"이 생긴다.
         run: npm ci
-
-      - name: 타입 검사 + 빌드
+      - name: web · 타입 검사 + 빌드
+        id: web_build
+        if: ${{ !cancelled() && steps.filter.outputs.web == 'true' && steps.web_deps.outcome == 'success' }}
         working-directory: web
         # `npm run build` 가 `tsc --noEmit && vite build` 다. 타입만 보면 **빌드 단계에서만
         # 나는 실패**(에셋 해석·번들 크기·플러그인)가 안 걸린다 — #81 이 폰트를 자체
@@ -322,8 +333,9 @@ jobs:
         # (강희진 #130 리뷰). 타입 쪽은 그대로다: 계약 타입이 camelCase 로 정합한지(#25),
         # 봉투 해제 계층이 서 있는지가 앞단 tsc 에 걸린다.
         run: npm run build
-
-      - name: 기초자산 표기표 대조 — VERSION 과 S-04 가 갈리면 실패 (이슈 #219)
+      - name: web · 기초자산 표기표 대조 — VERSION 과 S-04 가 갈리면 실패 (이슈 #219)
+        id: web_table
+        if: ${{ !cancelled() && steps.filter.outputs.web == 'true' && steps.web_build.outcome == 'success' }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -392,3 +404,52 @@ jobs:
               sys.exit(1)
           print("표기표 일치")
           PY
+
+      # ── 어느 모듈이 돌았는지 남긴다 ──────────────────────────────────────────
+      - name: 실행 요약
+        # ❗잡이 갈려 있을 때는 체크 목록에 `server · JUnit  skipping` 이 떠서 **어느 모듈이
+        # 안 돌았는지가 그냥 보였다.** 한 잡이 되면 체크가 하나뿐이라 그 정보가 사라진다 —
+        # 초록만 보고 "web 도 통과했다" 로 읽으면 안 되는데 구별이 안 된다. 그래서 요약에
+        # 적는다. 이게 이 합치기에서 유일하게 **의도적으로 되사는** 성질이다.
+        #
+        # `!cancelled()` 라 실패한 실행에서도 남는다 — 오히려 그때 제일 필요하다.
+        if: ${{ !cancelled() }}
+        env:
+          SERVER: ${{ steps.filter.outputs.server }}
+          AI: ${{ steps.filter.outputs.ai_service }}
+          WEB: ${{ steps.filter.outputs.web }}
+          SERVER_TEST: ${{ steps.server_test.outcome }}
+          SERVER_SKIP: ${{ steps.server_skip.outcome }}
+          SERVER_SMOKE: ${{ steps.server_smoke.outcome }}
+          AI_TEST: ${{ steps.ai_test.outcome }}
+          AI_SKIP: ${{ steps.ai_skip.outcome }}
+          WEB_BUILD: ${{ steps.web_build.outcome }}
+          WEB_TABLE: ${{ steps.web_table.outcome }}
+        run: |
+          set -euo pipefail
+          # 선택되지 않은 모듈과 실패한 모듈이 문면으로 갈려야 한다. `skipped` 를 그냥
+          # 찍으면 "안 돌았다" 와 "앞 스텝이 실패해서 못 돌았다" 가 같아 보인다.
+          mark() {   # $1=모듈 선택 여부  $2..=스텝 결과들
+            local sel="$1"; shift
+            [ "$sel" = "true" ] || { echo "⏭ 경로 필터에서 제외 — 이 PR 이 안 건드린다"; return; }
+            for r in "$@"; do
+              case "$r" in
+                failure) echo "❌ 실패"; return ;;
+                skipped) echo "⚠ 앞 스텝이 실패해 못 돌았다"; return ;;
+              esac
+            done
+            echo "✅ 통과"
+          }
+          {
+            echo "## 모듈별 결과"
+            echo
+            echo "| 모듈 | 결과 |"
+            echo "|---|---|"
+            echo "| server · JUnit + 스모크 | $(mark "$SERVER" "$SERVER_TEST" "$SERVER_SKIP" "$SERVER_SMOKE") |"
+            echo "| ai-service · pytest | $(mark "$AI" "$AI_TEST" "$AI_SKIP") |"
+            echo "| web · tsc + build + 표기표 | $(mark "$WEB" "$WEB_BUILD" "$WEB_TABLE") |"
+            echo
+            echo "경로 필터 근거는 \`.github/workflows/ci.yml\` 머리말 ② 다 — 파일 위치가 아니라"
+            echo "**각 모듈이 실제로 읽는 경로**로 정한다."
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
