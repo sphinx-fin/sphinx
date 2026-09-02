@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import patch
 
 from app import misconception, rubrics
 
@@ -44,17 +45,16 @@ from app import misconception, rubrics
 # 로그는 stderr 에 찍히는데 캡처만 안 되므로 **테스트가 거짓으로 실패한다.**
 from app.main import _log_enforcement_gap
 
-#: 오해 조건을 선언했는데 **라이브러리 링크가 하나도 없는** 루브릭.
+#: 강제 통로가 **없고 그것이 의도도 아닌** 루브릭. 지금은 없다.
 #:
-#: 이 항목의 조건은 **모델이 놓치면 아무 일도 안 일어난다** — 결정론적 U4 상향이 존재하지
-#: 않는다. `VAR-PARTIAL-DEPOSIT-INSURANCE` 의 첫 조건(*"예금처럼 전액 보호된다"*)은
-#: 누가 봐도 `M02-DEPOSIT-INSURANCE` 자리인데 링크가 비어 있다 — 단순 누락으로 보이고
-#: `#284` 에서 정세현에게 확인 요청했다.
+#: 처음에는 여기에 `VAR-PARTIAL-DEPOSIT-INSURANCE` 를 넣고 *"누가 봐도 M02 자리인데 링크가
+#: 비어 있다 — 단순 누락으로 보인다"* 고 적었다. **틀렸다**(`#298` 리뷰). 그 파일 머리말이
+#: 이유를 이미 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고 변액에서 *"예금자보호 되는
+#: 줄"* 은 **부분적으로 참**이라 결정론 상향이 **오판**이었다.
 #:
-#: **변액 예금자보호는 데모 시나리오에 들어간다.** 그래서 이 한 건은 리허설 전에도 값이 있다.
-_NO_ENFORCEMENT_PATH = {
-    "VAR-PARTIAL-DEPOSIT-INSURANCE",
-}
+#: 그래서 그 항목은 `rubrics._INTENTIONALLY_UNLINKED` 로 갔다. **빈 집합이 정상 상태다** —
+#: 여기 뭐가 생기면 그건 진짜 사각이고, 의도라면 근거와 함께 그쪽 목록에 넣어야 한다.
+_NO_ENFORCEMENT_PATH: set[str] = set()
 
 #: 링크를 가진 루브릭 수 / 전체. 조용히 줄면 잡는다.
 #:
@@ -79,10 +79,62 @@ def test_the_no_enforcement_set_is_exactly_what_we_measured() -> None:
 
 
 def test_the_gap_reports_the_conditions_not_just_the_item() -> None:
-    """항목ID 만 알려주면 무엇이 강제 안 되는지 사람이 다시 찾아야 한다."""
-    conditions = rubrics.enforcement_gaps()["VAR-PARTIAL-DEPOSIT-INSURANCE"]
-    assert "예금처럼 전액 보호된다" in conditions
-    assert len(conditions) == 3
+    """항목ID 만 알려주면 무엇이 강제 안 되는지 사람이 다시 찾아야 한다.
+
+    지금은 진짜 사각이 0 이라 **합성 루브릭으로 잰다.** 실물이 없다고 이 경로를 안 재면
+    다음에 사각이 생겼을 때 조건 문면이 빠져 있어도 아무도 모른다.
+    """
+    from app.rubrics import Rubric
+
+    synthetic = Rubric(
+        item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
+        required_elements=("가",), misconception_conditions=("전액 보호된다", "둘"),
+        related_misconceptions=(),
+    )
+    with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
+        gaps = rubrics.enforcement_gaps()
+
+    assert gaps == {"SYNTH-NO-LINK": ("전액 보호된다", "둘")}, (
+        "항목ID 만 담고 조건을 버리면 로그에서 무엇이 강제 안 되는지 알 수 없다"
+    )
+
+
+def test_the_intentional_exception_is_not_reported_as_a_gap() -> None:
+    """★ `#298` 리뷰가 잡은 것 — 의도된 정정을 사각으로 세지 않는다.
+
+    이 기능이 내는 경고는 지금 이것뿐이었다. **오탐 하나가 기동 로그에 상시로 서면 다음에
+    진짜 사각이 생겨도 같은 줄로 보인다.** 그리고 확인받는 쪽이 M02 를 도로 링크할 수 있다 —
+    `#57` 이 오판이라고 판정한 상향이 돌아온다.
+    """
+    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in rubrics.intentionally_unlinked()
+    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" not in rubrics.enforcement_gaps()
+
+    rubric = rubrics.get("VAR-PARTIAL-DEPOSIT-INSURANCE")
+    assert rubric.misconception_conditions, "조건이 없으면 이 대조의 전제가 사라진다"
+    assert not rubric.related_misconceptions, "링크가 생겼으면 예외 목록에서 빼야 한다"
+
+
+def test_intentional_exceptions_cite_their_reason() -> None:
+    """★ 예외 목록을 **손으로 채울 수 없게** 한다.
+
+    각 항목의 루브릭 파일에 그 근거 PR 번호가 실제로 적혀 있는지 대조한다. 없는데 적으면
+    이 목록이 *"경고가 시끄러우니 끄는"* 통로가 된다 — `#204` 에서 `units` 선언을 계약
+    샘플과 대조한 것과 같은 이유다.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(rubrics.__file__).resolve().parent / "rubrics"
+    for item_id, why in rubrics.intentionally_unlinked().items():
+        path = root / f"{item_id}.yaml"
+        assert path.exists(), f"{item_id}: 루브릭 파일이 없는데 예외 목록에 있다"
+        head = path.read_text(encoding="utf-8")
+        number = re.search(r"#(\d+)", why)
+        assert number, f"{item_id}: 근거 문면에 PR 번호가 없다 — {why!r}"
+        assert f"#{number.group(1)}" in head or f"PR {number.group(1)}" in head, (
+            f"{item_id}: 루브릭 파일이 {why} 를 근거로 적고 있지 않다. "
+            "판단이 파일에 없으면 예외가 아니라 경고를 끈 것이다"
+        )
 
 
 def test_linked_rubric_count_does_not_shrink_quietly() -> None:
@@ -110,20 +162,44 @@ def test_the_declared_conditions_outnumber_the_library() -> None:
     )
 
 
-def test_startup_warns_about_the_gap(caplog) -> None:
-    """★ 기동 로그에 남는다 — 배포된 컨테이너에서 이걸 볼 수 있어야 한다.
+def test_startup_records_the_intentional_exception_as_info(caplog) -> None:
+    """의도된 예외는 `INFO` 로 남긴다 — 안 남기면 사각이 0 인 이유를 알 수 없다.
 
-    `#121` 이 넣은 로그 레벨 설정 덕에 `INFO` 도 배포에서 보인다. 통로 없음은 `WARNING`
-    이고 비율은 `INFO` 다 — 앞은 사실이고 뒤는 판단 재료라 레벨을 가른다.
+    `#121` 이 넣은 로그 레벨 설정 덕에 `INFO` 도 배포에서 보인다.
     """
     with caplog.at_level(logging.INFO, logger="app.main"):
         _log_enforcement_gap()
 
-    levels = {r.levelno for r in caplog.records}
-    assert logging.WARNING in levels, "통로 없는 루브릭이 있는데 경고가 없다"
-    assert logging.INFO in levels, "비율이 안 남으면 판단 재료가 없다"
-
+    assert logging.WARNING not in {r.levelno for r in caplog.records}, (
+        "진짜 사각이 0 인데 경고가 있다 — 오탐이 상시로 서면 진짜 사각도 같은 줄로 보인다"
+    )
     text = caplog.text
     assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in text
-    assert "예금처럼 전액 보호된다" in text, "조건 문면이 로그에 없으면 다시 찾아야 한다"
-    assert "#284" in text, "출처가 없으면 이 경고가 왜 있는지 다음 사람이 모른다"
+    assert "의도" in text, "왜 세지 않는지 문면에 없으면 다음 사람이 누락으로 읽는다"
+    assert "#284" in text, "출처가 없으면 이 로그가 왜 있는지 다음 사람이 모른다"
+
+
+def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
+    """★ 진짜 사각이 생기면 경고가 선다 — 합성 루브릭으로 그 경로를 실제로 태운다.
+
+    지금 사각이 0 이라 **이 경로가 아무 테스트도 안 타는 상태**가 되기 쉽다. 그러면 다음에
+    사각이 생겨도 경고가 안 뜨는 것을 아무도 모른다.
+    """
+    from app.rubrics import Rubric
+
+    synthetic = Rubric(
+        item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
+        required_elements=("가",), misconception_conditions=("전액 보호된다",),
+        related_misconceptions=(),
+    )
+    with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
+        with caplog.at_level(logging.INFO, logger="app.main"):
+            _log_enforcement_gap()
+
+    assert logging.WARNING in {r.levelno for r in caplog.records}, "사각인데 경고가 없다"
+    text = caplog.text
+    assert "SYNTH-NO-LINK" in text
+    assert "전액 보호된다" in text, "조건 문면이 없으면 사람이 다시 찾아야 한다"
+    assert "_INTENTIONALLY_UNLINKED" in text, (
+        "의도라면 어디에 넣어야 하는지 문면이 알려줘야 한다"
+    )

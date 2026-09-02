@@ -73,6 +73,30 @@ def all_rubrics() -> dict[str, Rubric]:
     return dict(_all())
 
 
+#: 링크가 비어 있는 것이 **누락이 아니라 의도**인 루브릭 → 그 판단이 적힌 PR (이슈 #298 리뷰).
+#:
+#: 처음에는 이 딕셔너리 없이 냈고, `VAR-PARTIAL-DEPOSIT-INSURANCE` 를 *"누가 봐도 M02 자리인데
+#: 링크가 비어 있다 — 단순 누락으로 보인다"* 고 적었다. **틀렸다.** 그 파일 머리말이 이미 이유를
+#: 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고, 변액에서 *"예금자보호 되는 줄"* 은
+#: **부분적으로 참**이라 결정론 상향이 **오판**이었다. 빈 목록이 그 정정의 결과다.
+#:
+#: 그 항목은 대신 `required_elements` 가 *"어디까지 보호되는가"* 를 요구하는 쪽으로 설계됐다
+#: (`ADR-007` 부수 발견 · `PR #53`) — 결정론 보조가 없는 것을 전제로 조항이 촘촘하다.
+#:
+#: ❗**그래서 경고를 내면 안 된다.** 이 기능이 내는 경고는 지금 이것뿐이라, 오탐 하나가 기동
+#: 로그에 상시로 서면 **다음에 진짜 사각이 생겨도 같은 줄로 보인다.** 그리고 확인받는 쪽이
+#: M02 를 도로 링크할 수 있다 — `#57` 이 오판이라고 판정한 상향이 돌아온다.
+#:
+#: `#228` 의 `_CUE_UNREACHABLE` 과 성격이 다르다. 그건 *닿지 못하는 것*을 못박은 것이고
+#: 이건 *닿지 않게 한 것*이다. 그래서 이름도 `unlinked` 가 아니라 `intentionally` 다.
+#:
+#: **손으로 채울 수 없다.** `test_intentional_exceptions_cite_their_reason` 이 각 항목의
+#: 루브릭 파일에 그 PR 번호가 실제로 적혀 있는지 대조한다 — 없으면 실패한다.
+_INTENTIONALLY_UNLINKED: dict[str, str] = {
+    "VAR-PARTIAL-DEPOSIT-INSURANCE": "PR #57",
+}
+
+
 def enforcement_gaps() -> dict[str, tuple[str, ...]]:
     """오해 조건을 선언했는데 **강제할 통로가 없는** 루브릭 → 그 조건들 (이슈 #284).
 
@@ -110,9 +134,16 @@ def enforcement_gaps() -> dict[str, tuple[str, ...]]:
     """
     gaps: dict[str, tuple[str, ...]] = {}
     for item_id, rubric in _all().items():
+        if item_id in _INTENTIONALLY_UNLINKED:
+            continue                    # 의도된 정정이다 — 위 주석 참고
         if rubric.misconception_conditions and not rubric.related_misconceptions:
             gaps[item_id] = rubric.misconception_conditions
     return gaps
+
+
+def intentionally_unlinked() -> dict[str, str]:
+    """링크가 비어 있는 것이 의도인 루브릭 → 근거 PR. 공개 진입점."""
+    return dict(_INTENTIONALLY_UNLINKED)
 
 
 def enforcement_coverage() -> tuple[int, int, int]:
