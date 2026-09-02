@@ -282,10 +282,9 @@ public class AiServiceClient {
      * 502 라 상태 코드로는 못 가른다. 그래서 ai-service 가 본문에 코드를 싣고(PR #286)
      * 여기서 읽는다.
      *
-     * <p>❗<b>방어적으로 읽는다.</b> {@code detail} 이 객체이고 {@code code} 가 있을 때만
-     * 구조화로 보고, 아니면 지금처럼 문자열로 둔다 — 내부 오류 응답 형식이 아직 계약에 없어서
-     * (결정 10.40) <b>한 자리만 구조화돼 있고 나머지는 문자열</b>이다. 그 상태에서 전부
-     * 객체로 가정하면 나머지 경로가 파싱 실패로 죽는다.
+     * <p>❗<b>방어적으로 읽는다.</b> {@code code} 를 못 찾으면 구조화가 아닌 것으로 본다 —
+     * 내부 오류 응답 형식이 아직 계약에 없어서(결정 10.40) <b>한 자리만 구조화돼 있고
+     * 나머지는 문자열</b>이다. 그 상태에서 전부 객체로 가정하면 나머지 경로가 죽는다.
      */
     private static ErrorHandler failure(String endpoint) {
         return (req, resp) -> {
@@ -300,12 +299,24 @@ public class AiServiceClient {
 
     /** {@code {"detail": {"code": …}}} 에서 code 만. 그 모양이 아니면 {@code null}. */
     private static String errorCode(org.springframework.http.client.ClientHttpResponse resp) {
+        // ❗**실제로 던져지는 것만 잡는다.** 처음엔 `catch (Exception)` 이었는데, 그러면
+        // 아래 읽기가 터져도 삼켜져서 **방어가 도는지 아무도 못 잰다** — `isObject()` 를
+        // 지우거나 `path()` 를 `get()` 으로 바꿔도 테스트가 전부 초록이었다(#293 리뷰,
+        // 윤지석 실측). 넓은 catch 가 "문자열 detail 도 안전하다" 를 **두 가지 이유로**
+        // 참으로 만들고 둘을 구별하지 못했다: 읽기가 방어적이라서인지, 터졌는데 삼켜서인지.
         try {
+            // ❗**방어는 `path()` 하나다.** 처음엔 `isObject() ? … : null` 을 앞에 뒀는데
+            // 그 가드를 지워도 답이 안 바뀐다 — `path()` 는 객체가 아닌 노드에도
+            // {@code MissingNode} 를 주고 `asText(null)` 이 null 이 된다. **방어처럼 생긴
+            // 죽은 줄**이라 지웠다: 다음 사람이 그걸 믿고 `get()` 으로 바꾸면 문자열
+            // detail 에서 NPE 다(#293 리뷰에서 실제로 그 변이가 걸렸다).
+            //
+            // `get()` 을 쓰면 안 되는 이유가 여기 있다 — 없는 키에 null 을 준다.
             JsonNode detail = ERROR_MAPPER.readTree(resp.getBody()).path("detail");
-            return detail.isObject() ? detail.path("code").asText(null) : null;
-        } catch (Exception e) {
-            // 본문이 없거나 JSON 이 아니면 코드가 없는 것이다 — 그 자체가 정보이므로
-            // 여기서 던지지 않는다. 호출자는 AiServiceException 을 받는다.
+            return detail.path("code").asText(null);
+        } catch (java.io.IOException e) {
+            // 본문이 없거나 JSON 이 아니다. 코드가 없는 것이고 그 자체가 정보다 —
+            // 호출자는 AiServiceException 을 받는다.
             return null;
         }
     }

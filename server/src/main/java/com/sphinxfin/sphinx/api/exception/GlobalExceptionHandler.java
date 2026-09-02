@@ -116,7 +116,16 @@ public class GlobalExceptionHandler {
      * 다시 난다(PR #286 리뷰).
      *
      * <p>{@code EVIDENCE_REQUIRED} 와 겹쳐 보이지만 다르다 — 그쪽은 <b>근거가 비었다</b>,
-     * 이쪽은 <b>근거가 있는데 우리 검증을 통과 못 했다</b> 다.
+     * 이쪽은 <b>근거가 있는데 우리 검증을 통과 못 했다</b> 다. 뒤엣것에 갈래가 셋 있다.
+     *
+     * <pre>
+     *   ① 인용이 실제 발화에 없다 (모델이 지어냈다)   verify_quote_is_verbatim
+     *   ② 루브릭 밖 조항을 인용했다                    verify_rubric_clause_is_published
+     *   ③ 신뢰도가 없거나 0~1 을 벗어났다
+     * </pre>
+     *
+     * <p>❗①이 <b>심사에서 제일 물어볼 것</b>이다 — <i>"AI 가 근거를 지어내면요?"</i> 의 답이
+     * 이 코드다(PR #293 리뷰, 윤지석). 화면 문면은 셋을 다 덮으므로 안 가른다.
      */
     @ExceptionHandler(MeasurementInvalidException.class)
     public ResponseEntity<ApiResponse<Void>> measurementInvalid(MeasurementInvalidException e) {
