@@ -24,13 +24,13 @@
 #
 # 환경변수
 #   BASE      서버 주소 (기본 http://localhost:8000)
-#   ACTOR     행위자 ID (기본 seller-01) — 개방 모드에서 nginx 가 넣는 것과 같은 값
-#   AUTH      Basic 자격 "user:pass". 주면 curl -u 로 붙인다. 로컬 permitAll 이면 불필요
+#   AUTH      Basic 자격 "id:pw". 세션의 주인(sellerId)이 여기서 정해진다 — 안 주면
+#             주인 없는 세션이 되고, 그 세션은 own_session 으로 아무도 못 읽는다.
+#             서버가 sphinx.security.enforce=true 여야 인증 주체가 생긴다
 #   PYTHON    pdfplumber 가 든 파이썬 (기본 python3). 7단계 내용 검사에만 쓴다
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8000}"
-ACTOR="${ACTOR:-seller-01}"
 PRODUCT=""
 ANSWERS_FILE=""
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
@@ -47,7 +47,7 @@ done
 
 CURL=(curl -sS --max-time 60)
 [ -n "${AUTH:-}" ] && CURL+=(-u "$AUTH")
-JSON=(-H "Content-Type: application/json" -H "X-Actor-Id: $ACTOR")
+JSON=(-H "Content-Type: application/json")
 
 step() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 ok()   { printf '   ✅ %s\n' "$*"; }
@@ -100,9 +100,18 @@ fi
 ok "productId=$PRODUCT"
 
 step "2. 세션을 만든다 (S-01)"
+# ❗귀속은 스프링 시큐리티 인증 주체에서만 온다(CurrentActor). AUTH 가 없으면 sellerId 가
+# null 이고, 그 세션은 나중에 own_session 으로 아무도 못 읽는다 — 계정이 생긴 뒤에 붙일
+# 수도 없다. 응답(SessionResponse)에 sellerId 가 없어 되읽어 확인할 방법도 없으므로
+# 여기서 조건으로 말한다.
+if [ -z "${AUTH:-}" ]; then
+    bad "AUTH 가 없다 — 이 세션은 주인(sellerId)이 없다"
+    bad "SELLER 로 여는 시연(ADR-001 차단 시연 포함)에는 못 쓴다"
+    bad "  AUTH=<demo_accounts.yaml 의 id>:<pw> 로 다시 돌린다 (서버는 enforce=true 여야 한다)"
+fi
 SID=$(unwrap "$("${CURL[@]}" "${JSON[@]}" -X POST "$BASE/sessions" -d "$(jq -nc \
         --arg p "$PRODUCT" '{productId:$p, channel:"FACE_TO_FACE", ageBand:"60대",
-                             experienceLevel:"NONE", amountBand:"50000000"}')")" \
+                             experienceLevel:"없음", amountBand:"5천만원대"}')")" \
      "세션 생성" | jq -r '.sessionId')
 [ -n "$SID" ] && [ "$SID" != "null" ] || exit 1
 ok "sessionId=$SID"
@@ -182,8 +191,12 @@ PYEOF
 )
     ITEMS=$(grep -cE '^· ' <<<"$TEXT" || true)
     GATES=$(grep -cE '(GREEN|YELLOW|RED)' <<<"$TEXT" || true)
+    # "기록 없음" 은 렌더러가 **빈 경우에만** 찍는다. 항목 불릿("· ")은 지면 모양이라
+    # 바뀔 수 있는데, 그때 불릿만 세면 찬 리포트를 비었다고 말한다 — 참을 거짓이라
+    # 하는 방향이라 리허설 당일에 제일 나쁘다. 둘을 같이 본다.
+    EMPTY_MARK=$(grep -c '기록 없음' <<<"$TEXT" || true)
     printf '   판정 이력 %s항목 · 게이트 변천 %s건\n' "$ITEMS" "$GATES"
-    if [ "$ITEMS" -gt 0 ] && [ "$GATES" -gt 0 ]; then
+    if { [ "$ITEMS" -gt 0 ] || [ "$EMPTY_MARK" -eq 0 ]; } && [ "$GATES" -gt 0 ]; then
         ok "내용이 있다 — 교부 문서 시연에 쓸 수 있다"
     else
         bad "리포트 내용이 비었다 — 이 세션은 교부 문서 시연에 못 쓴다"
