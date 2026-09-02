@@ -129,6 +129,33 @@ class StoredEvidenceRecorderTest {
         }
 
         @Test
+        @DisplayName("❗게이트 기록이 판정을 만든 입력을 같이 든다 — 재계산으로 못 되돌린다 (이슈 #295)")
+        void gateEntryCarriesItsInputs() {
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 3, 3), T0);
+
+            Map<String, Object> payload = payloads().get(0);
+            assertThat(payload.get("unmeasured"))
+                    .as("몇 개를 못 쟀는지가 안 남으면 R-00 이 물었다는 것까지만 남는다 — "
+                        + "13항목 중 1개인지 5개인지가 감사에서 다른 이야기다")
+                    .isEqualTo(3);
+            assertThat(payload.get("rulesVersion"))
+                    .as("어느 룰셋으로 잰 건지 — gate_rules.yaml 은 언제든 바뀐다")
+                    .isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("❗미측정 0 을 생략하지 않는다 — 없음과 미기재를 가른다")
+        void zeroUnmeasuredIsRecordedNotOmitted() {
+            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of("R-06"), 0, 3), T0);
+
+            assertThat(payloads().get(0))
+                    .as("키가 없으면 '전부 쟀다' 와 '이 필드가 생기기 전 기록' 이 같아 보인다 — "
+                        + "misconceptionType·promptVersion·escalate 와 같은 규약이다(이슈 #136)")
+                    .containsKey("unmeasured");
+            assertThat(payloads().get(0).get("unmeasured")).isEqualTo(0);
+        }
+
+        @Test
         @DisplayName("게이트 판정도 매 호출 남는다 — 최종 신호가 아니라 신호의 변천")
         void gateSignalsAccumulate() {
             recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);

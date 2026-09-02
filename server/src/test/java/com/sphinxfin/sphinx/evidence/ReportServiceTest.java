@@ -115,6 +115,24 @@ class ReportServiceTest {
         }
 
         @Test
+        @DisplayName("❗리포트가 판정을 만든 입력도 낸다 — 기록에만 있으면 스트림을 열어야 한다 (이슈 #280 ②)")
+        void gateHistoryCarriesTheJudgementInputs() {
+            seedSession();
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 2, 3),
+                    T0.plusSeconds(120));
+            em.flush();
+            em.clear();
+
+            Map<String, Object> last = list(reports.render(SID), "gateHistory").get(2);
+            assertThat(last.get("signal")).isEqualTo("RED");
+            assertThat(last.get("unmeasured"))
+                    .as("교부 문서가 'R-00 이 물었다' 까지만 말하면 몇 항목을 못 쟀는지 "
+                        + "감사에서 스트림을 직접 열어야 한다 — 이슈 #280 이 든 나머지 절반이다")
+                    .isEqualTo(2);
+            assertThat(last.get("rulesVersion")).isEqualTo(3);
+        }
+
+        @Test
         @DisplayName("색은 담지 않는다 (ADR-004 §5) — grade 원값과 근거만")
         void doesNotStoreColor() {
             seedSession();
