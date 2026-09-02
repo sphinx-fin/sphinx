@@ -105,15 +105,25 @@ public class GlobalExceptionHandler {
      * 위반이므로 구분한다. 차단 사실을 로그로 남긴다(감사 로그 F-CMN-002 붙기 전까지의 최소 기록).
      */
     /**
-     * 측정값이 계약을 벗어난 판정 — 근거 누락(P4)과 같은 502 지만 코드를 가른다.
-     * 상류에 무엇을 고치라고 말하려면 "근거가 없다"와 "신뢰도가 없다"가 달라야 한다.
+     * 모델이 낸 <b>측정값이 검증을 통과하지 못했다</b> — 근거 누락(P4)과 같은 502 지만 코드를
+     * 가른다. 상류에 무엇을 고치라고 말하려면 <i>"근거가 없다"</i> 와 <i>"측정을 못 믿는다"</i>
+     * 가 달라야 한다.
+     *
+     * <p>❗<b>{@code confidence} 얘기만이 아니다.</b> 처음엔 문면이 <i>"신뢰도가 없거나 계약
+     * 범위를 벗어난"</i> 이었는데, ai-service 가 이 예외로 내는 것은 셋이고 그중 하나가
+     * <b>루브릭 밖 조항 인용</b>(P4)이다 — {@code confidence} 와 무관하다. 좁은 문면을 두면
+     * 이 코드가 고치려던 문제(<i>"고칠 곳이 반대편인데 반대편을 가리킨다"</i>)가 한 칸 안쪽에서
+     * 다시 난다(PR #286 리뷰).
+     *
+     * <p>{@code EVIDENCE_REQUIRED} 와 겹쳐 보이지만 다르다 — 그쪽은 <b>근거가 비었다</b>,
+     * 이쪽은 <b>근거가 있는데 우리 검증을 통과 못 했다</b> 다.
      */
     @ExceptionHandler(MeasurementInvalidException.class)
     public ResponseEntity<ApiResponse<Void>> measurementInvalid(MeasurementInvalidException e) {
         log.warn("측정값 계약 위반: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ApiError.of("MEASUREMENT_INVALID",
-                        "신뢰도가 없거나 계약 범위를 벗어난 판정은 처리할 수 없습니다")));
+                        "측정값이 검증을 통과하지 못했습니다 — 다시 시도해 주세요")));
     }
 
     @ExceptionHandler(EvidenceRequiredException.class)

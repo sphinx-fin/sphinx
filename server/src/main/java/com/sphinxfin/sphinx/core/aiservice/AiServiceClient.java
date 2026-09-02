@@ -1,5 +1,9 @@
 package com.sphinxfin.sphinx.core.aiservice;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.sphinxfin.sphinx.domain.MeasurementInvalidException;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.web.client.RestClient.ResponseSpec.ErrorHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -41,6 +45,10 @@ import com.sphinxfin.sphinx.core.pii.PiiGateway;
  */
 @Component
 public class AiServiceClient {
+
+    /** 오류 본문 전용. 경계 매퍼(SNAKE_CASE·엄격)와 섞지 않는다 — 오류는 계약 밖 모양이다. */
+    private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
+
 
     private final RestClient restClient;
 
@@ -95,10 +103,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(status -> status.isError(), (req, resp) -> {
-                        throw new AiServiceException(
-                                "ai-service /internal/score 실패: HTTP " + resp.getStatusCode());
-                    })
+                    .onStatus(HttpStatusCode::isError, failure("/internal/score"))
                     .body(Judgment.class);
             return new Scored(judgment, masked);
         } catch (EvidenceRequiredException | AiServiceException e) {
@@ -143,10 +148,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(status -> status.isError(), (req, resp) -> {
-                        throw new AiServiceException(
-                                "ai-service /internal/mismatch 실패: HTTP " + resp.getStatusCode());
-                    })
+                    .onStatus(HttpStatusCode::isError, failure("/internal/mismatch"))
                     .body(MismatchResponse.class);
         } catch (AiServiceException e) {
             throw e;
@@ -183,10 +185,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(status -> status.isError(), (req, resp) -> {
-                        throw new AiServiceException(
-                                "ai-service /internal/question 실패: HTTP " + resp.getStatusCode());
-                    })
+                    .onStatus(HttpStatusCode::isError, failure("/internal/question"))
                     .body(QuestionResponse.class);
         } catch (AiServiceException e) {
             throw e;
@@ -233,10 +232,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(status -> status.isError(), (req, resp) -> {
-                        throw new AiServiceException(
-                                "ai-service /internal/reexplain 실패: HTTP " + resp.getStatusCode());
-                    })
+                    .onStatus(HttpStatusCode::isError, failure("/internal/reexplain"))
                     .body(ReExplainResponse.class);
         } catch (AiServiceException e) {
             throw e;
@@ -273,6 +269,46 @@ public class AiServiceClient {
      */
     record MismatchRequest(String sessionId, Map<String, Object> surveyResult,
                            List<Utterance> utterances, String surveySchemaVersion) {}
+
+    /**
+     * non-2xx 한 곳 처리 — <b>본문의 {@code detail.code} 를 읽는다</b> (이슈 #280 ③).
+     *
+     * <p>❗예전에는 네 경로가 각자 상태 코드만 보고 {@link AiServiceException} 을 던졌다.
+     * 그래서 ai-service 가 <i>"모델이 인용을 지어냈고 다시 물어도 그랬다"</i>
+     * ({@code MEASUREMENT_INVALID})를 실어 보내도 화면에는 <b>"AI 서비스를 사용할 수
+     * 없습니다"</b> 가 떴다 — <b>고칠 곳이 반대편인데 반대편을 가리킨다.</b>
+     *
+     * <p>{@code MEASUREMENT_INVALID} 와 {@code AI_SERVICE_UNAVAILABLE} 은 계약에서 둘 다
+     * 502 라 상태 코드로는 못 가른다. 그래서 ai-service 가 본문에 코드를 싣고(PR #286)
+     * 여기서 읽는다.
+     *
+     * <p>❗<b>방어적으로 읽는다.</b> {@code detail} 이 객체이고 {@code code} 가 있을 때만
+     * 구조화로 보고, 아니면 지금처럼 문자열로 둔다 — 내부 오류 응답 형식이 아직 계약에 없어서
+     * (결정 10.40) <b>한 자리만 구조화돼 있고 나머지는 문자열</b>이다. 그 상태에서 전부
+     * 객체로 가정하면 나머지 경로가 파싱 실패로 죽는다.
+     */
+    private static ErrorHandler failure(String endpoint) {
+        return (req, resp) -> {
+            String code = errorCode(resp);
+            String where = "ai-service " + endpoint + " 실패: HTTP " + resp.getStatusCode();
+            if ("MEASUREMENT_INVALID".equals(code)) {
+                throw new MeasurementInvalidException(where + " — " + code);
+            }
+            throw new AiServiceException(where);
+        };
+    }
+
+    /** {@code {"detail": {"code": …}}} 에서 code 만. 그 모양이 아니면 {@code null}. */
+    private static String errorCode(org.springframework.http.client.ClientHttpResponse resp) {
+        try {
+            JsonNode detail = ERROR_MAPPER.readTree(resp.getBody()).path("detail");
+            return detail.isObject() ? detail.path("code").asText(null) : null;
+        } catch (Exception e) {
+            // 본문이 없거나 JSON 이 아니면 코드가 없는 것이다 — 그 자체가 정보이므로
+            // 여기서 던지지 않는다. 호출자는 AiServiceException 을 받는다.
+            return null;
+        }
+    }
 
     /** 세션 내 발화 한 건. text 는 이미 마스킹된 값이다. */
     record Utterance(String itemId, String text) {}
