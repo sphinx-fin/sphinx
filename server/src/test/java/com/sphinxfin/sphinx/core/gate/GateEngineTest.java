@@ -79,6 +79,53 @@ class GateEngineTest {
                 .isEqualTo(engine.judge(List.of(judgment(Grade.U1, "0.7")), false, false, 0).signal());
     }
 
+    @Test
+    @DisplayName("❗못 잰 항목이 있으면 GREEN 이 아니다 — 전부 U1 이어도 RED (R-00, 이슈 #280 ②)")
+    void unmeasuredItemsBlockGreen() {
+        // 13항목 중 12개가 U1 이고 1개가 채점 실패(502)인 상태다. 그 1건은 judgments 에
+        // **안 들어온다** — 그래서 게이트가 보기에는 "전부 U1" 이고 R-06 이 GREEN 을 냈다.
+        // judgments().isEmpty() 가드는 0건만 막았고 부분은 아무도 안 막았다.
+        List<Judgment> twelveAllU1 = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(i -> judgment(Grade.U1)).toList();
+
+        GateResult withHole = engine.judge(twelveAllU1, false, false, 0, 1);
+        assertThat(withHole.signal())
+                .as("못 잰 항목이 있는데 GREEN 이면, 감사에서 GREEN 을 보고 "
+                        + "'전 항목이 통과했다' 로 읽는다 — 기록에는 signal 과 ruleTrace 뿐이다")
+                .isEqualTo(Signal.RED);
+        assertThat(withHole.ruleTrace()).contains("R-00");
+    }
+
+    @Test
+    @DisplayName("❗못 잰 것이 없으면 R-00 은 안 문다 — 항상 RED 면 게이트가 아무것도 안 가른다")
+    void nothingUnmeasuredLeavesTheVerdictAlone() {
+        List<Judgment> twelveAllU1 = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(i -> judgment(Grade.U1)).toList();
+
+        GateResult clean = engine.judge(twelveAllU1, false, false, 0, 0);
+        assertThat(clean.signal()).isEqualTo(Signal.GREEN);
+        assertThat(clean.ruleTrace()).doesNotContain("R-00");
+    }
+
+    @Test
+    @DisplayName("❗못 잰 항목이 있으면 U2 가 있어도 RED 다 — 재설명으로 풀리는 문제가 아니다")
+    void unmeasuredOutranksTheYellowRules() {
+        // R-00 이 무는 자리는 **황색 룰 앞**이다. R-01 앞인 것은 덤이다 — 둘 다 RED 라
+        // 순서를 바꿔도 답이 같다(trace 가 이긴 신호와 같은 룰을 전부 담는다).
+        //
+        // 여기가 진짜 자리다: 못 잰 항목이 있으면서 U2 도 있는 세션. R-00 을 R-04 뒤로
+        // 옮기면 YELLOW 가 되고 **재설명 루프로 간다** — 그런데 못 잰 것은 재설명으로
+        // 안 풀린다. 고객은 답을 했고 우리가 못 잰 것이다.
+        GateResult r = engine.judge(List.of(judgment(Grade.U1), judgment(Grade.U2)),
+                false, false, 0, 1);
+
+        assertThat(r.signal())
+                .as("R-00 이 황색 룰 뒤로 가면 여기가 YELLOW 가 되고, R-00 은 신호가 달라 "
+                        + "trace 에도 안 남는다 — 못 쟀다는 사실이 기록에서 통째로 사라진다")
+                .isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).contains("R-00");
+    }
+
     private static Judgment judgment(Grade grade) {
         return judgment(grade, "0.9");
     }

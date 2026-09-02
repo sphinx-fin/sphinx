@@ -270,6 +270,21 @@ public class Session extends BaseEntity {
         askedQuestionSourceByItem.put(itemId, source);
     }
 
+    /**
+     * 질문을 보냈는데 <b>판정이 없는</b> 항목 수 (이슈 #280 ②).
+     *
+     * <p>게이트가 분모를 알아야 하는데 <b>"몇 항목이어야 하는가"(추출 결과)가 아직 목</b>이라,
+     * 실제로 물어본 것과 대조한다. 채점이 502 로 죽었거나 고객이 답을 안 한 항목이 여기 잡힌다.
+     *
+     * <p>둘 다 <b>판정할 수 없는 상태</b>다 — 게이트가 그 둘을 가릴 필요는 없다. 가려야 하는
+     * 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00} 이 한다.
+     */
+    public int unmeasuredItemCount() {
+        java.util.Set<String> judged = judgments().stream()
+                .map(Judgment::itemId).collect(java.util.stream.Collectors.toSet());
+        return (int) askedQuestionsByItem.keySet().stream().filter(id -> !judged.contains(id)).count();
+    }
+
     /** 그 항목에 마지막으로 보여준 질문의 출처. 보여준 적이 없으면 {@code null}. */
     public EvidenceRecorder.QuestionSource askedQuestionSource(String itemId) {
         return askedQuestionSourceByItem.get(itemId);

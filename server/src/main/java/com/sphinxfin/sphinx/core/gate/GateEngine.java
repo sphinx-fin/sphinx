@@ -85,10 +85,31 @@ public class GateEngine {
      */
     public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch,
                            boolean suitabilityUnknown, int reverifyFailed) {
+        return judge(judgments, suitabilityMismatch, suitabilityUnknown, reverifyFailed, 0);
+    }
+
+    /**
+     * {@code unmeasured} 는 <b>물어봤는데 판정이 없는 항목 수</b>다 (이슈 #280 ②).
+     *
+     * <p>❗<b>이 값이 없던 동안 게이트가 분모를 몰랐다.</b> 13항목 중 12개가 U1 이고 1개가
+     * 채점 실패(502)면 {@code judgments} 에 12건이 들어오고 <b>전부 U1 이라 R-06 이 GREEN</b>
+     * 을 냈다. {@code SessionService} 의 {@code judgments().isEmpty()} 가드는 0건만 막는다 —
+     * 부분은 열려 있었다.
+     *
+     * <p>그리고 조용했다. 기록에 남는 것은 {@code GateResult(signal, ruleTrace)} 뿐이라
+     * 감사 시점에 GREEN 을 보면 <b>전 항목이 통과한 것으로 읽힌다.</b>
+     *
+     * <p>❗<b>"몇 항목이어야 하는가"(추출 결과)를 쓰지 않는다.</b> 그 값이 아직 목이다
+     * ({@code MockData.RISK_ITEMS}). 대신 <b>질문을 보낸 항목</b>과 대조한다 — 물어본 것조차
+     * 못 잰 상태가 제일 나쁘고, 그게 {@code #280} 이 보여준 실물이다. 추출이 붙으면 그 값으로
+     * 바꾸는 것이 맞고, 그때까지도 이 구멍은 막힌다.
+     */
+    public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch,
+                           boolean suitabilityUnknown, int reverifyFailed, int unmeasured) {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
         List<BigDecimal> confidences = judgments.stream().map(Judgment::confidence).toList();
         Context ctx = new Context(grades, confidences, suitabilityMismatch,
-                suitabilityUnknown, reverifyFailed);
+                suitabilityUnknown, reverifyFailed, unmeasured);
 
         // 신호는 first-match-wins(파일 순서 = 우선순위). 트레이스는 그 신호를 낸 발화 룰을 전부
         // 남긴다 — 감사 시점에 "왜 이 신호였나"를 모든 사유로 설명하기 위함(예: YELLOW가
@@ -167,6 +188,11 @@ public class GateEngine {
             Grade g = parseSingleGrade(e);
             return ctx -> ctx.grades().contains(g);
         }
+        Matcher unmeasured = Pattern.compile("unmeasured\\s*>\\s*(\\d+)").matcher(e);
+        if (unmeasured.matches()) {
+            int limit = Integer.parseInt(unmeasured.group(1));
+            return ctx -> ctx.unmeasured() > limit;
+        }
         if (e.startsWith("allGrade")) {
             Grade g = parseSingleGrade(e);
             return ctx -> !ctx.grades().isEmpty() && ctx.grades().stream().allMatch(x -> x == g);
@@ -199,7 +225,7 @@ public class GateEngine {
     /** 평가 컨텍스트: 룰이 참조하는 값의 전부. */
     record Context(List<Grade> grades, List<BigDecimal> confidences,
                    boolean suitabilityMismatch, boolean suitabilityUnknown,
-                   int reverifyFailed) {}
+                   int reverifyFailed, int unmeasured) {}
 
     /** 컴파일된 룰. */
     /**
