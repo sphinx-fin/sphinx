@@ -75,11 +75,14 @@ tasks.named('test') {
     // 실측했다: 코드를 하나 지워도 "4 actionable tasks: 4 up-to-date" 로 통과한다.
     // 대조 테스트를 붙여놓고 정작 어긋난 순간에 안 도는 것은 없느니만 못하다.
     inputs.file('../CLAUDE.md')
+            .withPropertyName('claudeMd')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // docs/functional-spec-v1.1.md 의 강제 지점 색인이 실재하는 룰을 가리키는지
     // SpecEnforcementIndexTest 가 대조한다. 안 걸면 **그 문서만 고친 PR 에서 UP-TO-DATE 로
     // 안 돈다** — survey.ts 때 실제로 밟은 함정이다(#186 · 결정 9.26).
     inputs.file('../docs/functional-spec-v1.1.md')
-            .withPropertyName('claudeMd')
+            .withPropertyName('specEnforcementIndex')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
     // web/src/lib/survey.ts 도 같은 이유다. SurveyIsOptionOnlyTest 가 그 파일을 읽어

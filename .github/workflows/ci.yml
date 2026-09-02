@@ -134,23 +134,28 @@ jobs:
 
           # 각 모듈이 **실제로 읽는** 경로다. 파일 위치가 아니라 의존을 기준으로 적었다 —
           # 근거는 이 파일 상단 ②.
-
           # ❗`server/` 밖인데 **server 테스트가 지키는** 파일들이다. 정본은
           # `server/build.gradle` 의 `inputs.file` 목록이고 여기는 그 사본이다(이슈 #285).
           #
           #   web/src/lib/survey.ts                    SurveyIsOptionOnlyTest
           #   web/docker-entrypoint.d/15-demo-mode.sh  DemoModeAccountMapTest
           #   ai-service/app/scoring.py                EchoCapBelowR05Test
+          #   docs/functional-spec-v1.1.md             SpecEnforcementIndexTest
           #
           # 두 목록이 막는 것이 다르다. `inputs.file` 은 **Gradle 이 UP-TO-DATE 로 건너뛰는
           # 것**을 막고, 이 줄은 **잡 자체가 안 뜨는 것**을 막는다. 한쪽만 있으면 대조
           # 테스트가 정작 갈리는 순간에 안 돈다 — `#270`(지도를 고치는데 `DemoModeAccountMapTest`
           # 가 CI 에서 안 돌았다)이 그 실측이다.
           #
+          # ❗넷째(`docs/functional-spec-v1.1.md`)는 이 PR 이 정본에 더한 것이다. 정본에만
+          # 넣고 여기 안 옮기면 `#285` 가 잡은 결함이 그대로 다시 생긴다 — 그 사이가
+          # 반나절이었다.
+          #
           # `^web/` 통짜로 넓히지 않는다. 화면만 고치는 PR 에 JUnit 이 붙으면 `#276`(잡
           # 개수에 비례하는 올림 과금)이 도로 는다. `survey.ts` 가 `ai-service` 필터에
           # 이름으로 박혀 있는 것은 이 단정과 무관하다 — 그 파일을 지키는 것은 JUnit 이다.
-          server_extra='web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring\.py$'
+          # `docs/` 도 통짜로 넓히지 않는다 — decision-log.md 만 고치는 PR 이 대부분이다.
+          server_extra='web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring\.py$|docs/functional-spec-v1\.1\.md$'
           server=false;    hit '^(server/|contracts/|data/timeseries/|CLAUDE\.md$|'"$server_extra"')' && server=true
           ai=false;        hit '^(ai-service/|contracts/|data/|web/src/lib/survey\.ts$)' && ai=true
           # `data/timeseries/VERSION` 이 여기 있는 이유는 상단 ③ 이다. 기초자산이 늘거나
