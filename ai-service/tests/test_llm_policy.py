@@ -115,10 +115,11 @@ def _stub_client(monkeypatch, *, content: str, finish_reason: str,
     return client
 
 
-def _send(monkeypatch, caller_body: dict | None = None, **env: str) -> dict:
+def _send(monkeypatch, caller_body: dict | None = None,
+          seed: int | None = None, **env: str) -> dict:
     cfg = _settings(monkeypatch, LLM_API_KEY="test-key", **env)
     rec = _Recorder(cfg)
-    rec.send(prompt="안녕하세요", extra_body=caller_body)
+    rec.send(prompt="안녕하세요", extra_body=caller_body, seed=seed)
     return rec.kwargs
 
 
@@ -182,6 +183,38 @@ def test_unparsable_seed_falls_back_and_warns(monkeypatch, caplog):
     assert any("LLM_SEED" in r.getMessage() for r in caplog.records), (
         "경고 없이 기본값으로 돌아가면 안 된다"
     )
+
+
+def test_caller_seed_beats_the_setting(monkeypatch):
+    """★ 호출자가 준 seed 가 설정을 이긴다.
+
+    재판정(`scoring.MAX_SCORING_ATTEMPTS`)이 시도마다 다른 seed 를 줘야 하기 때문이다 —
+    고정 seed 로 같은 프롬프트를 다시 물으면 같은 답이 와서 **재판정 자체가 무력해진다.**
+
+    ## 왜 여기에도 두나 — `test_scoring` 만으로는 안 잡힌다
+
+    `test_retry_varies_the_seed` 는 `SequenceLlm` 스텁을 쓴다. 그 스텁은
+    `complete_json` 을 통째로 덮어써서 **`send()` 까지 오지 않는다.** 그래서 우선순위를
+    되돌려도(설정이 호출자를 덮어쓰게) 그쪽은 초록이었다 — 변이 역검증에서 실제로 그랬다.
+    호출자 값이 실제 요청에 실리는 것은 `send()` 에 닿는 여기서만 확인된다.
+    """
+    kwargs = _send(monkeypatch, seed=999)
+    assert kwargs["seed"] == 999, kwargs.get("seed")
+    assert kwargs["seed"] != config.DEFAULT_SEED
+
+
+def test_caller_seed_none_falls_back_to_the_setting(monkeypatch):
+    """seed 를 안 넘긴 호출은 설정값을 그대로 쓴다 — 대부분의 경로가 이쪽이다."""
+    assert _send(monkeypatch)["seed"] == config.DEFAULT_SEED
+
+
+def test_caller_seed_cannot_revive_a_disabled_seed(monkeypatch):
+    """끈 상태(`LLM_SEED=`)에서 호출자가 `None` 을 주면 여전히 안 보낸다.
+
+    `scoring._attempt_seed()` 가 그 경우 `None` 을 주도록 돼 있고, 여기서 되살아나면
+    **끈 것을 코드가 되살리는** 것이 된다.
+    """
+    assert "seed" not in _send(monkeypatch, seed=None, LLM_SEED="")
 
 
 def test_truncated_response_is_its_own_error(monkeypatch):

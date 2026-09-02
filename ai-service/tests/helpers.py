@@ -57,3 +57,20 @@ def make_judgment(
         reason=reason,
         misconception_type=misconception_type,
     )
+
+
+class SequenceLlm(LlmClient):
+    """호출마다 **다른 판정**을 돌려준다 — 재판정 경로 검증용 (이슈 #280 ①).
+
+    `FakeLlm` 은 같은 값을 무한히 돌려주므로 *"다시 물으면 통과한다"* 를 못 잰다.
+    """
+
+    def __init__(self, *judgments: Judgment) -> None:  # super().__init__ 호출하지 않는다
+        self._queue = list(judgments)
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_json(self, **kwargs: Any) -> Judgment:  # type: ignore[override]
+        self.calls.append(kwargs)
+        if not self._queue:
+            raise AssertionError("스텁이 준비한 것보다 많이 불렸다")
+        return self._queue.pop(0) if len(self._queue) > 1 else self._queue[0]

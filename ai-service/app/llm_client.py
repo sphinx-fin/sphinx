@@ -96,6 +96,7 @@ class LlmClient:
         response_format: dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
         model: str | None = None,
+        seed: int | None = None,
         pii_scope: str = "customer",
     ) -> str:
         """원문 응답 문자열을 돌려준다. 외부로 나가는 유일한 경로 (P3).
@@ -127,8 +128,14 @@ class LlmClient:
         # ❗**이것으로 재현성이 확보되지 않는다** — 같은 seed 로 complete_json 3회가
         # 3가지였다(실측). 실행 간 재현성은 결정 10.10 의 재판정 경로 몫이다.
         # None 이면 안 보낸다 — 튜닝에서 표본을 여러 개 보려고 끄는 경우가 있다.
-        if self._cfg.llm_seed is not None:
-            kwargs["seed"] = self._cfg.llm_seed
+        #
+        # ❗**호출자가 준 seed 가 이긴다.** 재판정(`scoring`)이 시도마다 다른 값을 줘야
+        # 하기 때문이다 — 고정 seed 로 같은 프롬프트를 다시 물으면 같은 답이 와서 재판정
+        # 자체가 무력해진다. 두 조치가 각자 맞는데 합치면 기능이 없어지는 자리였고,
+        # `test_retry_varies_the_seed` 가 그것을 잠근다.
+        effective_seed = seed if seed is not None else self._cfg.llm_seed
+        if effective_seed is not None:
+            kwargs["seed"] = effective_seed
         if response_format:
             kwargs["response_format"] = response_format
         body = self._extra_body(extra_body)
@@ -169,6 +176,7 @@ class LlmClient:
         system: str | None = None,
         extra_body: dict[str, Any] | None = None,
         model: str | None = None,
+        seed: int | None = None,
         pii_scope: str = "customer",
     ) -> T:
         """JSON 스키마를 강제하고, 받은 결과를 pydantic으로 재검증해서 반환한다.
@@ -189,6 +197,7 @@ class LlmClient:
             response_format=response_format,
             extra_body=extra_body,
             model=model,
+            seed=seed,
             pii_scope=pii_scope,
         )
         try:
