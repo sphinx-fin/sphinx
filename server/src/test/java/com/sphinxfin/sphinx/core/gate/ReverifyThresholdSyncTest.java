@@ -57,7 +57,7 @@ class ReverifyThresholdSyncTest {
     @DisplayName("❗R-03 이 없으면 기동에서 던진다 — 기본값으로 떨어지면 조용히 돈다")
     void missingRuleFailsFast() {
         GateEngine noReverifyRule = new GateEngine(java.util.List.of(
-                new GateEngine.Rule("R-06", "allGrade == 'U1'",
+                new GateEngine.Rule("R-06", "모든 항목의 이해가 확인되었습니다", "allGrade == 'U1'",
                         ctx -> true, com.sphinxfin.sphinx.domain.Signal.GREEN)));
 
         assertThatThrownBy(noReverifyRule::reverifyThreshold)

@@ -2,7 +2,10 @@
 # 룰이 늘거나 순서가 바뀌면 판정이 바뀐다 — 번호를 올린다(감사 기준).
 # 2: R-02b(suitabilityUnknown → YELLOW) 추가 (결정 10.9)
 # 3: R-00(unmeasured > 0 → RED) 추가 — 부분 채점이 GREEN 이었다 (이슈 #280 ②)
-version: 3
+# 4: 룰마다 label 추가 — 화면·교부 문서가 R-00 이라는 코드만 내놓고 있었다 (이슈 #320).
+#    ❗label 은 **결과만 말하고 조건은 말하지 않는다** — 판매자가 읽는 글이라 임계값이
+#    새면 그 위를 겨냥할 수 있다(7-4 역이용 방지). RuleLabelSafetyTest 가 잠근다.
+version: 4
 rules:
   # ❗**측정 자체가 안 된 항목이 있으면 판정하지 않는다** (이슈 #280 ②).
   #
@@ -19,12 +22,15 @@ rules:
   # `unmeasured` 는 **질문을 보냈는데 판정이 없는 항목 수**다. "몇 항목이어야 하는가"(추출
   # 결과)가 아직 목이라 그것을 안 쓴다 — 물어본 것조차 못 잰 상태가 제일 나쁘다.
   - id: R-00
+    label: "채점되지 않은 항목이 있습니다"
     if: "unmeasured > 0"
     then: RED
   - id: R-01
+    label: "오해가 확인된 항목이 있습니다"
     if: "anyGrade == 'U4'"
     then: RED
   - id: R-02
+    label: "설명 내용과 투자성향이 어긋납니다"
     if: "suitabilityMismatch == true"
     then: RED
   # 재검증 상한 도달·실패 → RED.
@@ -36,9 +42,11 @@ rules:
   #   전에는 application.yml 에도 같은 숫자가 있었고 대조 테스트로 묶어 뒀는데, 그건
   #   **어긋난 뒤에 잡는 것**이었다. 고칠 자리가 둘이면 언젠가 한 곳만 바뀐다.
   - id: R-03
+    label: "재검증을 반복했지만 이해가 확인되지 않았습니다"
     if: "reverifyFailed >= 2"
     then: RED
   - id: R-04
+    label: "이해가 확인되지 않은 항목이 있습니다"
     if: "anyGrade in ['U2','U3']"
     then: YELLOW
   # 적합성 모순을 **판정하지 못한** 경우 → 황색 (결정 10.9).
@@ -52,6 +60,7 @@ rules:
   #    suitabilityUnknown 이면서 재검증 상한에 도달한 세션이 R-03(RED) 대신 여기서 YELLOW 로
   #    잡힌다. 확정 RED 가 가려진다.
   - id: R-02b
+    label: "투자성향을 확인할 수 없습니다"
     if: "suitabilityUnknown == true"
     then: YELLOW
   # 신뢰도 기반 황색 강등. U4 예외는 순서로 보장(R-01이 U4를 이미 RED로 잡음).
@@ -86,8 +95,10 @@ rules:
   # 남는 사각: 복창이 아닌 형태로 얕게 이해한 답변은 R-04(U2·U3)가 받고, R-05 의 두 번째 겹은
   # 지금 비어 있다. 계산된 신호를 하나 더 만드는 것은 3주차 이후다(#268 (d)).
   - id: R-05
+    label: "판정 신뢰도가 낮은 항목이 있습니다"
     if: "anyConfidenceBelow 0.7"
     then: YELLOW
   - id: R-06
+    label: "모든 항목의 이해가 확인되었습니다"
     if: "allGrade == 'U1'"
     then: GREEN

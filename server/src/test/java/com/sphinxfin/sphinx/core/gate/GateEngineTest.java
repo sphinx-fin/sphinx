@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.gate;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Judgment;
@@ -29,7 +30,7 @@ class GateEngineTest {
     void mismatchConfirmedIsRed() {
         GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).contains("R-02");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-02");
     }
 
     @Test
@@ -41,7 +42,7 @@ class GateEngineTest {
         assertThat(r.signal())
                 .as("판정하지 못한 것을 통과로 읽으면 안 된다")
                 .isEqualTo(Signal.YELLOW);
-        assertThat(r.ruleTrace()).contains("R-02b");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-02b");
     }
 
     @Test
@@ -93,7 +94,7 @@ class GateEngineTest {
                 .as("못 잰 항목이 있는데 GREEN 이면, 감사에서 GREEN 을 보고 "
                         + "'전 항목이 통과했다' 로 읽는다 — 기록에는 signal 과 ruleTrace 뿐이다")
                 .isEqualTo(Signal.RED);
-        assertThat(withHole.ruleTrace()).contains("R-00");
+        assertThat(withHole.ruleTrace()).extracting(RuleRef::id).contains("R-00");
     }
 
     @Test
@@ -104,7 +105,7 @@ class GateEngineTest {
 
         GateResult clean = engine.judge(twelveAllU1, false, false, 0, 0);
         assertThat(clean.signal()).isEqualTo(Signal.GREEN);
-        assertThat(clean.ruleTrace()).doesNotContain("R-00");
+        assertThat(clean.ruleTrace()).extracting(RuleRef::id).doesNotContain("R-00");
     }
 
     @Test
@@ -123,7 +124,7 @@ class GateEngineTest {
                 .as("R-00 이 황색 룰 뒤로 가면 여기가 YELLOW 가 되고, R-00 은 신호가 달라 "
                         + "trace 에도 안 남는다 — 못 쟀다는 사실이 기록에서 통째로 사라진다")
                 .isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).contains("R-00");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-00");
     }
 
     private static Judgment judgment(Grade grade) {
@@ -152,7 +153,7 @@ class GateEngineTest {
     void anyU4_isRed() {
         GateResult r = judge(List.of(Grade.U1, Grade.U4, Grade.U1));
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-01");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-01");
     }
 
     @Test
@@ -160,7 +161,7 @@ class GateEngineTest {
     void onlyU2U3_isYellow() {
         GateResult r = judge(List.of(Grade.U1, Grade.U2, Grade.U3));
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
-        assertThat(r.ruleTrace()).containsExactly("R-04");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-04");
     }
 
     @Test
@@ -168,7 +169,7 @@ class GateEngineTest {
     void allU1_isGreen() {
         GateResult r = judge(List.of(Grade.U1, Grade.U1));
         assertThat(r.signal()).isEqualTo(Signal.GREEN);
-        assertThat(r.ruleTrace()).containsExactly("R-06");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-06");
     }
 
     @Test
@@ -177,7 +178,7 @@ class GateEngineTest {
         GateResult r = engine.judge(
                 List.of(judgment(Grade.U1, "0.6"), judgment(Grade.U1, "0.9")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
-        assertThat(r.ruleTrace()).containsExactly("R-05");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-05");
     }
 
     @Test
@@ -186,7 +187,7 @@ class GateEngineTest {
         // U2(R-04 YELLOW) + 저신뢰(R-05 YELLOW) 동시 → 신호는 YELLOW, 트레이스엔 둘 다
         GateResult r = engine.judge(List.of(judgment(Grade.U2, "0.6")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.YELLOW);
-        assertThat(r.ruleTrace()).containsExactly("R-04", "R-05");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-04", "R-05");
     }
 
     @Test
@@ -194,7 +195,7 @@ class GateEngineTest {
     void lowConfidenceU4_stillRed() {
         GateResult r = engine.judge(List.of(judgment(Grade.U4, "0.5")), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-01");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-01");
     }
 
     @Test
@@ -202,7 +203,7 @@ class GateEngineTest {
     void suitabilityMismatch_isRed() {
         GateResult r = engine.judge(List.of(judgment(Grade.U1)), true, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-02");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-02");
     }
 
     @Test
@@ -210,7 +211,7 @@ class GateEngineTest {
     void reverifyFailedTwice_isRed() {
         GateResult r = engine.judge(List.of(judgment(Grade.U1)), false, false, 2);
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-03");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-03");
     }
 
     // ── 우선순위·엣지케이스 ────────────────────────────────────────────
@@ -220,7 +221,7 @@ class GateEngineTest {
     void red_takesPriorityOverYellow() {
         GateResult r = judge(List.of(Grade.U2, Grade.U4));
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-01");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-01");
     }
 
     @Test
@@ -228,7 +229,7 @@ class GateEngineTest {
     void emptyJudgments_failsClosedToRed() {
         GateResult r = engine.judge(List.of(), false, false, 0);
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly(GateEngine.DEFAULT_TRACE);
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly(GateEngine.DEFAULT_TRACE);
     }
 
     @Test
