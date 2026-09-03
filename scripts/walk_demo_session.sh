@@ -78,16 +78,35 @@ DOWN
    메시지에 갇혀 서버 로그까지만 간다. 그래서 **ai-service 를 직접 찔러 본다** — 그쪽
    `detail` 에는 SDK 원문이 그대로 있다.
 
-     curl -s -X POST "${AI_BASE:-http://localhost:8100}/internal/score" \
-       -H 'Content-Type: application/json' -d @- <<'PROBE' | head -c 300
-     {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
-      "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
-      "name":"probe","importance":"required","status":"extracted",
-      "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
-     PROBE
+   ❗**alpha 는 밖에서 못 닿는다.** `docker-compose.yml` 의 `ai-service` 에 `ports:` 가
+   없어서 EC2 호스트에서도 :8100 이 안 보인다. 그리고 `/internal/*` 이 공유 시크릿을
+   요구하고(결정 10.4) alpha 는 `SPHINX_REQUIRE_INTERNAL_AUTH=1` 로 **꺼질 수가 없다.**
+   그래서 alpha 는 컨테이너 안에서 치고, 토큰은 **컨테이너 자기 환경변수에서 꺼낸다** —
+   사람이 SSM 을 열 필요도, 값을 화면에 띄울 필요도 없다.
 
-     "LLM_API_KEY 미설정"                        키가 그 프로세스에 없다      503
-     "Error code: 401" / "Incorrect API key"     키가 있는데 틀렸다           502
+   # alpha
+   docker compose exec -T ai-service sh -c \
+     'curl -s -X POST localhost:8100/internal/score \
+        -H "Content-Type: application/json" \
+        -H "x-sphinx-internal-token: $SPHINX_INTERNAL_TOKEN" -d @-' <<'PROBE' | head -c 300
+   {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
+    "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
+    "name":"probe","importance":"required","status":"extracted",
+    "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
+   PROBE
+
+   # 로컬 — 토큰이 비어 있으면 인증이 꺼지므로 헤더 없이 그대로 된다
+   curl -s -X POST "${AI_BASE:-http://localhost:8100}/internal/score" \
+     -H 'Content-Type: application/json' -d @- <<'PROBE' | head -c 300
+   {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
+    "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
+    "name":"probe","importance":"required","status":"extracted",
+    "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
+   PROBE
+
+     401 "x-sphinx-internal-token …"            토큰이 안 맞는다 — 키 문제가 아니다
+     503 "LLM_API_KEY 미설정"                    키가 그 프로세스에 없다
+     502 "Error code: 401" / "Incorrect API key" 키가 있는데 틀렸다  ← #266 뒤 옛 Gemini 키
 
    ❗뒤엣것이 지금 제일 나올 만하다. 정책 모델은 gpt-5-mini 다(#266) — 그 전 정책이
    gemini-3.5-flash-lite 였으므로 .env 나 SSM 에 옛 Gemini 키가 남아 있으면 이 모양이 된다.
