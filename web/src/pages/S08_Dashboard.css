@@ -9,7 +9,12 @@
    집계에는 판정 3색을 쓰지 않는다. 명도만으로 강도를 낸다 — 여기에 적색을 쓰면
    집계가 판정처럼 보이고, 그러면 "지점 성과 지표"로 읽힌다. */
 
-.s08 { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
+/* min-width: 0 은 장식이 아니다. `#root` 가 flex 컨테이너라(global.css) 이 화면은 flex
+   아이템이고, flex 아이템의 기본값 `min-width: auto` 는 min-content 로 버틴다 — 표·KPI 가
+   1152px 를 요구하면 뷰포트가 744px 이어도 안 줄고 페이지 전체가 가로로 스크롤된다(이슈 #312).
+   같은 이유의 세로축 짝(`#root > main { min-height: 0 }`)은 global.css 에 이미 있다.
+   표 자체는 `.s08__table-wrap` 이 overflow-x 로 감싸므로 여기서 밀려나는 것은 루트다. */
+.s08 { max-width: 72rem; min-width: 0; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
   display: flex; flex-direction: column; gap: var(--space-5); }
 .s08__loading { color: var(--text-muted); padding: var(--space-6); }
 

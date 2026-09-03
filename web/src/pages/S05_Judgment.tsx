@@ -417,11 +417,25 @@ export default function S05Judgment() {
           )
         )}
 
-        {/* 적색이면 오버라이드 요청 경로를 연다. 승인은 MGR 이 S-06 에서 한다. */}
-        {gate?.signal === "RED" && (
+        {/* 적색이면 오버라이드 요청 경로를 연다. 승인은 MGR 이 S-06 에서 한다.
+
+            ❗`settled` 를 같이 본다. 미리보기 적색은 **아직 판정이 아니다** — 응답 0건
+            세션도 `R-00`(unmeasured > 0)으로 RED 가 서므로, 이 조건이 신호만 보면
+            인터뷰를 시작도 안 한 세션에서 버튼이 열리고 서버가 409 를 낸다(이슈 #311).
+            바로 위 `판정 확정` 이 이미 같은 규칙을 지킨다 — 눌러서 409 를 받는 것보다
+            눌리지 않는 게 낫다(설계 판단 ③). `recorded` 를 둔 목적이 미리보기를 확정으로
+            오인하지 않게 하는 것이고(결정 2.6), 여기가 정확히 그 자리다. */}
+        {gate?.signal === "RED" && gate.settled && (
           <button type="button" className="s05__btn" onClick={() => navigate(`/override/${sid}`)}>
             적색 진행 요청(오버라이드)
           </button>
+        )}
+
+        {/* 잠긴 이유를 적는다. 안 적으면 판매자가 "적색인데 버튼이 없다"에서 멈춘다. */}
+        {gate?.signal === "RED" && !gate.settled && (
+          <p className="s05__action-note">
+            적색 진행 요청은 <b>판정을 확정한 뒤</b>에 할 수 있습니다.
+          </p>
         )}
 
         {gate?.settled && (
