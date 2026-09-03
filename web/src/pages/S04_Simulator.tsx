@@ -310,6 +310,11 @@ export default function S04Simulator() {
                   >
                     <h2 className="sm__card-name">{s.name}</h2>
                     <p className="sm__card-path">{describePath(s) ?? ""}</p>
+                    {/* 비중은 **금액보다 작게** 둔다. 설계 판단 ②가 "확률을 주인공으로 쓰지
+                        않는다" 이므로 주인공은 그대로 금액이고, 이 줄은 세 카드가 등확률이
+                        아니라는 사실만 말한다(이슈 #313). 없을 때 숨기지 않는 이유는
+                        describeShare 주석에 적었다. */}
+                    <p className="sm__card-share">{describeShare(s)}</p>
                     <p className="sm__flow">
                       {/* ❗`amount` 가 아니라 **이 응답이 계산된 금액**이다. 슬라이더를 따라가게
                           두면 아직 안 부른 동안 좌우가 다른 금액의 쌍이 된다(설계 판단 ⑦). */}
@@ -339,9 +344,15 @@ export default function S04Simulator() {
                 </p>
               ) : null}
 
+              {/* ❗"똑같이" 를 뺐다(이슈 #313). 세 카드가 등폭이고 비중이 없으면 그 말이
+                  **등확률 주장**으로 읽히는데, 실제 값은 2.9% 대 85.7% 다. 3열 동일 비중은
+                  "최선만 강조하는 관행의 정반대"를 위한 것이지(기획서 4절) 셋이 같은 확률이라는
+                  뜻이 아니다 — 확률을 빼 두면 반대편 오독이 생긴다. 그래서 비중을 적되,
+                  **과거 빈도이지 미래 확률이 아니라는 것**을 같은 문단에서 말한다. */}
               <p className="sm__alert sm__alert--info">
                 세 가지 모두 실제로 있었던 지수 구간을 대입한 결과입니다. 어느 쪽이 될지는
-                아무도 알 수 없고, <b>가장 나쁜 경우도 똑같이 일어날 수 있습니다.</b>
+                아무도 알 수 없습니다. <b>카드의 비중은 과거 구간에서 그 전개가 나온 빈도이고,
+                앞으로의 확률이 아닙니다.</b>
               </p>
 
               {/* P2 재현성 — 어느 상품 조건·어느 지수 스냅샷에서 나온 수치인지 (설계 판단 ⑥) */}
@@ -375,6 +386,22 @@ export default function S04Simulator() {
  * 통째로 백지가 되므로 라벨만 비운다 — 리허설 중에 이 화면이 사라지는 것보다 낫다.
  * 대신 조용히 넘기지 않고 콘솔에 계약 위반으로 남긴다.
  */
+/**
+ * 전개별 비중 한 줄. 계약 `SimScenario.share`(0~1)를 그대로 읽는다 — 화면이 계산하지 않는다(P2).
+ *
+ * ❗**없을 때 숨기지 않는다.** `share` 는 `number | null` 이라 빠질 수 있는데, 조건부로
+ * 가리면 **부재가 곧 신호가 된다** — 어떤 카드에만 비중이 붙으면 안 붙은 카드가 "비중이
+ * 작다" 로 읽힌다. 그래서 못 받은 것을 문면으로 말한다.
+ *
+ * 자릿수는 소수 첫째 자리다. 정수로 반올림하면 `0.0287` 이 "3%" 가 되어 `0.0250` 과
+ * 구분이 사라지는데, 이 화면에서 갈리는 것이 정확히 그 자리(최악이 얼마나 드문가)다.
+ */
+function describeShare(s: SimScenario): string {
+  const v = s.share;
+  if (typeof v !== "number" || !Number.isFinite(v)) return "과거 구간 비중 정보 없음";
+  return `과거 구간의 ${(Math.round(v * 1000) / 10).toFixed(1)}%`;
+}
+
 function describePath(s: SimScenario | undefined): string | null {
   if (!s?.pathMeta?.startDate) {
     console.warn("[S-04] 계약 위반: SimScenario.pathMeta 가 없다 (openapi.yaml required). 역사 구간 라벨을 생략한다.");

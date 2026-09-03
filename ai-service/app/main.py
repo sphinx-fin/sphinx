@@ -194,6 +194,51 @@ def _check_internal_auth() -> None:
     )
 
 
+def _log_enforcement_gap() -> None:
+    """선언한 오해 중 **강제되는 것이 얼마인지**를 기동 로그에 남긴다 (이슈 #284).
+
+    ## 왜 기동 시점인가
+
+    `#284` 의 실물은 `els-0028` 이었다 — 루브릭이 *"기초자산만 오르면 안전하다"* 를 오해
+    조건으로 적어 뒀는데 모델이 `U2` 로 부르고 통과했다. `apply_misconception_floor` 는
+    `related_misconceptions` 만 보고 등급을 올리므로 **선언은 프롬프트 문면일 뿐**이다.
+
+    그 사실이 코드에도 로그에도 없었다. 채점은 성공하고, 놓친 것만 조용히 늘어난다 —
+    우리가 반복해서 고쳐 온 모양이라 **로딩 시점으로 끌어올린다.**
+
+    ## 던지지 않는다
+
+    `WARNING` 은 `related` 가 **아예 빈** 루브릭에만 낸다. 그건 계산이 아니라 사실이다
+    (그 항목의 결정론적 상향이 존재하지 않는다). 링크는 있는데 조건에 안 맞는 경우는
+    정적으로 알 수 없어서 비율만 `INFO` 로 남긴다 — 판단 재료이지 경고가 아니다.
+
+    기동을 막지 않는 이유는 유형 추가가 **근거 자료를 요구**하기 때문이다
+    (`misconceptions.yaml` 의 `source`). 데이터가 준비되기 전에 서비스를 못 띄우면
+    고칠 사람이 확인할 방법도 없어진다.
+    """
+    declared, linked, total = rubrics.enforcement_coverage()
+    log.info(
+        "F-DET-001 강제 범위: 선언된 오해 조건=%d · 라이브러리 링크를 가진 루브릭=%d/%d "
+        "· 라이브러리 유형=%d (이슈 #284)",
+        declared, linked, total, len(misconception.library()),
+    )
+    # 의도된 정정은 세지 않는다 — 오탐 하나가 상시로 서면 진짜 사각도 같은 줄로 보인다
+    # (`#298` 리뷰). 무엇이 예외인지는 남긴다 — 안 남기면 이 숫자가 왜 0 인지 알 수 없다.
+    for item_id, (why, until) in rubrics.unlinked_until().items():
+        log.info(
+            "F-DET-001 강제 통로 없음(아직): item_id=%s — %s 의 판단이다. 빼는 조건: %s "
+            "(이슈 #298)",
+            item_id, why, until,
+        )
+    for item_id, conditions in rubrics.enforcement_gaps().items():
+        log.warning(
+            "F-DET-001 강제 통로 없음: item_id=%s 조건=%d개 — related_misconceptions 가 "
+            "비어 있고 '아직' 목록에도 없다. 모델이 놓치면 U4 상향이 아예 일어나지 않는다. "
+            "의도라면 rubrics._UNLINKED_UNTIL 에 근거와 함께 넣는다 (%s)",
+            item_id, len(conditions), " / ".join(conditions),
+        )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """기동 시점에 데이터 파일을 실제로 읽는다 — 첫 요청 때 죽지 않게.
@@ -209,6 +254,7 @@ async def lifespan(_: FastAPI):
     misconception.library()          # 파일 읽기 + products 계약 검증
     rubrics.all_rubrics()            # 루브릭 파싱
     rubrics.assert_related_misconceptions_exist()
+    _log_enforcement_gap()
     log.info(
         "데이터 로드 완료: data_dir=%s 오해유형=%d 루브릭=%d",
         settings().data_dir, len(misconception.library()), len(rubrics.all_rubrics()),
