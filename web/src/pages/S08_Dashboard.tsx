@@ -64,7 +64,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { ApiRequestError, get } from "../api/client";
 import type {
   HeatmapCell, HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse,
-  ProductSummary,
+  ProductSummary, RiskItem,
 } from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
@@ -111,7 +111,18 @@ export default function S08Dashboard() {
   const [blocked, setBlocked] = useState(false);
   /** 집계는 상품 id 만 준다. 이름은 이미 있는 `/products` 로 푼다 — 새 계약이 필요 없다.
       못 풀면 id 를 그대로 보여준다(합성·구 상품이면 목록에 없을 수 있다). */
+  /** 상품ID → 상품명. `GET /products` 가 준다. */
   const [names, setNames] = useState<Record<string, string>>({});
+  /**
+   * 이해항목ID → 항목명. **`names` 와 섞지 않는다**(이슈 #317).
+   *
+   * 한 맵에 담으면 상품과 항목의 키 공간이 한 곳에 뭉쳐서, 폴백(`?? id`)이 어느 축의
+   * 것인지 문면으로 구분이 안 된다. 실제로 그래서 항목 축이 `names` 로 그려지고 있었고
+   * — `names` 는 `productId → name` 이라 항목ID 는 언제나 폴백으로 떨어졌다 —
+   * `ELS-MATURITY-LOSS-CONDITION` 이 심사위원 화면에 스무 줄 깔렸다. 에러가 아니라
+   * 폴백이라 아무것도 안 말한다.
+   */
+  const [itemNames, setItemNames] = useState<Record<string, string>>({});
   /**
    * 툴팁 하나를 화면 좌표로 띄운다.
    *
@@ -241,6 +252,40 @@ export default function S08Dashboard() {
       ranked,
     };
   }, [data]);
+
+  /* ── 이해항목 표시명 (이슈 #317) ─────────────────────────────────────────
+   * 히트맵 응답에는 항목명이 없다. `GET /products/{id}/risk-items` 가 주는 `name` 이
+   * 유일한 출처이고, S-02·S-03 이 "원금손실 조건" 을 그리는 것도 그 값이다.
+   *
+   * ❗**web 에 항목명 표를 두지 않는다.** 그러면 `INDEX_LABEL`(결정 10.59)처럼 표가 두
+   * 벌이 되고, web 에는 러너가 없어 갈려도 아무것도 안 말한다 — 그때는 CI 대조 스텝을
+   * 따로 붙여야 했다. 항목은 상품보다 자주 늘어서 그쪽이 더 나쁘다.
+   *
+   * 계약에 표시명을 싣는 쪽이 방향으로는 맞지만(같은 이슈에 적었다) 그건 강희진 승인이
+   * 필요하다. 그때까지는 화면이 긁는다 — 축에 **실제로 뜬 상품만** 부르므로 요청 수가
+   * 표의 행 수를 안 넘는다.
+   *
+   * 실패해도 화면은 뜬다. 상품명(`names`)과 같은 규칙으로 id 폴백이다.                */
+  const productKey = products.join("\u0000");
+  useEffect(() => {
+    if (products.length === 0) return;
+    let alive = true;
+    (async () => {
+      const entries = await Promise.all(products.map(async (pid) => {
+        try {
+          const res = await get<{ items: RiskItem[] }>(`/products/${pid}/risk-items`);
+          return (res.items ?? []).map((i) => [i.itemId, i.name] as const);
+        } catch {
+          return [];
+        }
+      }));
+      if (!alive) return;
+      setItemNames((prev) => ({ ...prev, ...Object.fromEntries(entries.flat()) }));
+    })();
+    return () => { alive = false; };
+    // products 는 매 렌더 새 배열이라 내용으로 비교한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productKey]);
 
   /* ── 선행지표 축 ────────────────────────────────────────────────────────
    * 계열 순서를 서버 순서(키 사전순)로 두지 않는다 — 8주 × N행 표에서 **먼저 봐야 하는
@@ -408,7 +453,7 @@ export default function S08Dashboard() {
           show={showTip} hide={hideTip}
           label="최다 오해 항목"
           value={ranked[0] ? `${Math.round(ranked[0].rate * 100)}%` : "—"}
-          sub={ranked[0]?.item ?? "값이 있는 칸 없음"}
+          sub={ranked[0] ? (itemNames[ranked[0].item] ?? ranked[0].item) : "값이 있는 칸 없음"}
           tipId="tip-top"
           tip="값이 있는 칸만 놓고 항목별로 합쳤을 때 오해율이 가장 높은 항목입니다."
         />
@@ -423,7 +468,7 @@ export default function S08Dashboard() {
           <ol className="s08__rank-list">
             {ranked.map((r) => (
               <li key={r.item} className="s08__rank-row">
-                <span className="s08__rank-name">{r.item}</span>
+                <span className="s08__rank-name">{itemNames[r.item] ?? r.item}</span>
                 <span className="s08__rank-track">
                   <span className="s08__rank-bar" style={{ width: `${Math.max(r.rate * 100, 1)}%` }} />
                 </span>
@@ -445,7 +490,12 @@ export default function S08Dashboard() {
             <thead>
               <tr>
                 <th scope="col">상품 \ 이해항목</th>
-                {items.map((it) => <th key={it} scope="col">{it}</th>)}
+                {items.map((it) => (
+                  <th key={it} scope="col">
+                    {itemNames[it] ?? it}
+                    {itemNames[it] && <span className="s08__row-id">{it}</span>}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -470,7 +520,7 @@ export default function S08Dashboard() {
                           tabIndex={0}
                           onMouseEnter={(e) => showTip(e.currentTarget, (
                             <>
-                              <b>{names[p] ?? p}</b>{it}
+                              <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
                               <span className="s08__tip-val">
                                 표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
                               </span>
@@ -479,7 +529,7 @@ export default function S08Dashboard() {
                           onMouseLeave={hideTip}
                           onFocus={(e) => showTip(e.currentTarget, (
                             <>
-                              <b>{names[p] ?? p}</b>{it}
+                              <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
                               <span className="s08__tip-val">
                                 표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
                               </span>
@@ -503,14 +553,14 @@ export default function S08Dashboard() {
                         tabIndex={0}
                         onMouseEnter={(e) => showTip(e.currentTarget, (
                           <>
-                            <b>{names[p] ?? p}</b>{it}
+                            <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
                             <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
                           </>
                         ))}
                         onMouseLeave={hideTip}
                         onFocus={(e) => showTip(e.currentTarget, (
                           <>
-                            <b>{names[p] ?? p}</b>{it}
+                            <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
                             <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
                           </>
                         ))}
