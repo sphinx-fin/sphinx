@@ -31,7 +31,7 @@ cd web && npm run build
 # eval (F-CMN-003 채점 성능 평가)
 python eval/run_eval.py
 
-# 실세션 하나를 S-01~S-07 로 통과시킨다 (교부 문서 시연용 — 이슈 #278 ①)
+# 실세션 하나를 S-01~S-07 로 통과시킨다 (교부 문서 시연용 — 이슈 #278 의 1번)
 scripts/walk_demo_session.sh
 BASE=https://alpha... PYTHON=.venv/bin/python scripts/walk_demo_session.sh
 ```

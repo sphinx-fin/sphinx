@@ -64,14 +64,23 @@ print(f'ADR 연번    001~{max(nums):03d}' if nums else 'ADR 없음',
 if holes: bad = 1
 
 # ── 5. 미결 담당자 ──────────────────────────────────────────────────────
-# 이름 표는 .github/workflows/pr-reviewer-label.yml 이 정본이다(CLAUDE.md).
+# 이름 표는 .github/workflows/pr-review.yml 이 정본이다(CLAUDE.md).
 # 여기서 하드코딩하면 또 두 벌이 되고, 팀원이 바뀔 때 한쪽만 고쳐진다.
-wf = '.github/workflows/pr-reviewer-label.yml'
+#
+# ❗못 찾으면 **건너뛰지 않고 실패한다.** 전에는 건너뛰었는데, #306 이 리뷰 워크플로 셋을
+# pr-review.yml 하나로 합치면서 이 경로가 죽었고 그때부터 오타 검사가 **아무것도 안 재면서
+# 초록이었다**(2026-09-03 발견). 미결은 원래 안 움직이니 이름이 틀려 무주가 된 행도
+# 이상해 보이지 않는다 — 검사가 쉬는 것이 가장 안 보이는 자리다. 이슈 #180 에서 가드가
+# "판정을 못 했다" 를 "승인이 부족하다" 와 갈라 낸 것과 같은 이유다.
+wf = '.github/workflows/pr-review.yml'
 names = set(re.findall(r'\)\s*echo "([가-힣]{2,4})"', open(wf, encoding='utf-8').read())) \
         if os.path.exists(wf) else set()
 
 if not names:
-    print('미결 담당자  건너뜀 — 이름 표를 못 찾았다:', wf)
+    print('미결 담당자')
+    print('  !! 이름 표를 못 찾았다:', wf, '— 오타 검사가 아무것도 재지 못한다.')
+    print('     워크플로가 옮겨졌으면 이 경로를 고친다. 건너뛰면 무주 행이 안 보인다')
+    bad = 1
 else:
     rows, typos, unassigned = 0, [], []
     section = False
