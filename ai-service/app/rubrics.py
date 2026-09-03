@@ -82,18 +82,54 @@ def assert_related_misconceptions_exist() -> None:
     (M07-YIELD-OVERCONFIDENCE, 근거 미확보로 삭제). 그때 이 검사가 없어서 테스트의
     개수 단정문이 뒤늦게 잡았다.
 
+    ## ❗ID 실재만으로는 부족하다 — 도달 불가 링크 (이슈 #284, 정세현 지적)
+
+    매처는 `products` 로 **먼저 거른다.** 그래서 루브릭의 `product_type` 이 그 유형의
+    `products` 에 없으면 **매칭이 아예 만들어지지 않는다.**
+
+        misconception.match(발화, product_type)
+          [ELS               ] "예금자보호 되는 상품 아닌가요" → ['M02-DEPOSIT-INSURANCE']
+          [VARIABLE_INSURANCE] 같은 발화                      → []   ← M02 는 products: [ELS]
+
+    ID 만 보면 **통과한다.** 그러면 링크는 초록인데 floor 는 안 걸리고, 더 나쁘게는
+    `enforcement_gaps()` 가 *"링크가 있으니 강제된다"* 로 세어서 **공백이 공백으로 안
+    보이게 된다.** `#284` 가 드러낸 그 공백 위에 아무것도 안 하는 링크가 얹히는 모양이다.
+
+    `applies_to()` 를 그대로 쓴다 — 매처가 거를 때 쓰는 그 함수다. 여기서 `products` 를
+    따로 해석하면 판정 기준이 두 벌이 되고, 언젠가 한쪽만 바뀐다.
+
+    **던지는 이유**: 참조가 실재해도 **도달할 수 없으면 데이터 오류**다. 위 `dangling` 과
+    같은 성격이고, `enforcement_gaps()` 가 로그로만 남기는 것(*"유형이 아직 없다"*)과는
+    다르다 — 그쪽은 **아직 안 만든 것**이고 이쪽은 **잘못 이은 것**이다.
+
     misconception 을 지연 임포트한다 — 그쪽이 이 모듈을 쓰지는 않지만 순환 위험을 남기지 않는다.
     """
     from .misconception import library
 
-    known = {m.type_id for m in library()}
+    types = {m.type_id: m for m in library()}
     dangling: dict[str, list[str]] = {}
+    dead: dict[str, list[str]] = {}
     for item_id, rubric in _all().items():
-        missing = [t for t in rubric.related_misconceptions if t not in known]
+        missing = [t for t in rubric.related_misconceptions if t not in types]
         if missing:
             dangling[item_id] = missing
+        # ❗도달 불가 링크 — 유형은 실재하는데 그 상품에서는 **매처가 만들지 않는다**
+        unreachable = [
+            t for t in rubric.related_misconceptions
+            if t in types and not types[t].applies_to(rubric.product_type)
+        ]
+        if unreachable:
+            dead[item_id] = unreachable
     if dangling:
         raise ValueError(
             "라이브러리에 없는 오해 유형을 참조하는 루브릭이 있다 "
             f"(결정론 상향이 조용히 사라진다): {dangling}"
+        )
+    if dead:
+        raise ValueError(
+            "그 상품에서 도달할 수 없는 오해 유형을 참조하는 루브릭이 있다 — 링크는 "
+            "있는데 매처가 그 유형을 만들지 않으므로 결정론 상향이 일어나지 않는다. "
+            "유형의 products 를 넓히는 것은 그 유형이 그 상품에서도 참일 때만 하고, "
+            "아니면 그 상품용 유형을 새로 만든다(결정 10.24). "
+            f"{ {k: [f'{t}(products={types[t].products})' for t in v] for k, v in dead.items()} }"
         )
