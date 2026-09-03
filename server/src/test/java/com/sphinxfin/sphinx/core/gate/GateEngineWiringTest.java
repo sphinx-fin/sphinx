@@ -49,13 +49,21 @@ class GateEngineWiringTest {
     private static final Pattern INJECTED =
             Pattern.compile("new\\s+GateEngine\\s*\\(\\s*[^)\\s]");
 
+    /** 스캔이 여기 닿지 않았으면 아래 단정은 아무것도 안 잰다. */
+    private static final String WIRING = "core/gate/GateConfig.java";
+
     @Test
     @DisplayName("❗프로덕션 코드는 룰 주입 생성자를 쓰지 않는다 — 쓰면 기록의 룰셋 버전이 사라진다")
     void productionNeverInjectsRules() throws IOException {
         List<String> offenders = new ArrayList<>();
+        String wiringSource = null;
+
         try (Stream<Path> sources = Files.walk(Path.of("src/main/java"))) {
             for (Path file : sources.filter(p -> p.toString().endsWith(".java")).toList()) {
                 String text = Files.readString(file, StandardCharsets.UTF_8);
+                if (file.toString().replace('\\', '/').endsWith(WIRING)) {
+                    wiringSource = text;
+                }
                 Matcher m = INJECTED.matcher(text);
                 while (m.find()) {
                     offenders.add(file + " — " + line(text, m.start()));
@@ -63,10 +71,27 @@ class GateEngineWiringTest {
             }
         }
 
+        // ❗양성 대조. offenders 가 비는 이유는 둘인데 관측이 같다 — "위반이 없다" 와
+        // "아무것도 안 읽었다". 소스 루트가 움직이면(Files.walk 는 .java 없는 실재
+        // 디렉토리에서 예외를 안 낸다) **배선이 깨진 채로 초록**이 된다. 개수 단정은
+        // "뭔가 읽었다" 까지인데 사각은 하필 배선 파일을 못 읽는 것이라 그 자리를 짚는다.
+        assertThat(wiringSource)
+                .as("배선 파일(%s)을 안 읽었다. 스캔 뿌리가 움직였으면 아래 단정은 "
+                        + "위반이 있어도 초록이다.", WIRING)
+                .isNotNull();
+        assertThat(wiringSource)
+                .as("배선이 무인자 생성자를 쓰지 않는다 — 엔진을 다른 데서 만들게 됐으면 "
+                        + "이 테스트가 지키는 자리도 거기로 옮긴다.")
+                .contains("new GateEngine()");
+
         assertThat(offenders)
                 .as("룰을 주입한 엔진은 gate_rules.yaml 의 version 을 모른다. 그 엔진이 낸 판정이 "
                         + "감사 기록에 들어가면 '어느 룰셋으로 쟀는지' 가 영구히 비고, evidence 는 "
-                        + "append-only 라 나중에 못 채운다. 테스트/DI 용으로만 쓴다.")
+                        + "append-only 라 나중에 못 채운다. 테스트/DI 용으로만 쓴다.%n"
+                        + "  · 버전을 인자로 받는 형태(new GateEngine(new Ruleset(...)))도 배선에는 "
+                        + "쓰지 않는다 — 버전의 근거가 파일이어야 한다.%n"
+                        + "  · 주석·문자열도 소스로 센다. 이 형태를 문서에 적으려면 new 를 빼고 "
+                        + "GateEngine(List) 처럼 쓴다.")
                 .isEmpty();
     }
 
