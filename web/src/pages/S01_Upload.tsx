@@ -29,8 +29,10 @@
  */
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiRequestError, get, post, postForm } from "../api/client";
+import { get, post, postForm } from "../api/client";
 import type { RiskItem } from "../api/types";
+import ErrorNote from "../components/ErrorNote";
+import { describeError, type ShownError } from "../lib/errorText";
 import "./S01_Upload.css";
 
 /** 계약 `UploadResponse`. types.ts 에 아직 없어 여기서 좁게 선언한다(계약 타입 추가는 강희진 몫). */
@@ -47,7 +49,7 @@ export default function S01Upload() {
   const [upload, setUpload] = useState<UploadResponse | null>(null);
   const [items, setItems] = useState<RiskItem[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ShownError | null>(null);
 
   async function submit() {
     if (!file) return;
@@ -65,7 +67,7 @@ export default function S01Upload() {
       // 설계 판단 ③ — 파싱이 실패했으면 추출로 넘어가지 않는다. 문서를 다시 넣어야 한다.
       if (res.status === "parsed") await extract(res.productId);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -84,7 +86,7 @@ export default function S01Upload() {
       setItems(res.items ?? []);
       setError(null);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -102,7 +104,7 @@ export default function S01Upload() {
         </p>
       </header>
 
-      {error && <p className="s01__error" role="alert">{error}</p>}
+      {error && <ErrorNote error={error} className="s01__error" />}
 
       <section className="s01__upload">
         <label className="s01__label" htmlFor="doc">상품 문서 (PDF)</label>
@@ -218,7 +220,3 @@ export default function S01Upload() {
   );
 }
 
-function describe(e: unknown): string {
-  if (e instanceof ApiRequestError) return `${e.message} (${e.code})`;
-  return "처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-}

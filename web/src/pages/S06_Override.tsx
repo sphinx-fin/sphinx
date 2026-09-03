@@ -35,6 +35,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type { GatePreview, SessionResponse } from "../api/types";
+import ErrorNote from "../components/ErrorNote";
+import { describeError, type ShownError } from "../lib/errorText";
 import "./S06_Override.css";
 
 /** ADR-002 견제 장치. 서버가 400 으로 막는 값과 같아야 한다 — 화면이 더 느슨하면 의미가 없다. */
@@ -57,7 +59,7 @@ export default function S06Override() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ShownError | null>(null);
   /** #124 가 닫히기 전까지 승인자가 만날 수 있는 상태. 빈 화면으로 두지 않는다(설계 판단 ⑤). */
   const [forbidden, setForbidden] = useState(false);
 
@@ -79,7 +81,7 @@ export default function S06Override() {
       setError(null);
     } catch (e) {
       if (e instanceof ApiRequestError && e.status === 403) setForbidden(true);
-      else setError(describe(e));
+      else setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -95,7 +97,7 @@ export default function S06Override() {
       setReason("");
       setError(null);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -109,7 +111,7 @@ export default function S06Override() {
       await load();
       setError(null);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -148,7 +150,7 @@ export default function S06Override() {
         </p>
       </header>
 
-      {error && <p className="s06__error" role="alert">{error}</p>}
+      {error && <ErrorNote error={error} className="s06__error" />}
 
       {/* ── 상태 ──────────────────────────────────────────────────────────── */}
       <section className={`s06__state s06__state--${status.toLowerCase().replace(/_/g, "-")}`}>
@@ -234,11 +236,3 @@ export default function S06Override() {
   );
 }
 
-function describe(e: unknown): string {
-  if (e instanceof ApiRequestError) {
-    if (e.code === "OVERRIDE_NOT_ELIGIBLE") return "적색 판정 세션이 아니거나 요청 없이 승인하려 했습니다.";
-    if (e.code === "VALIDATION_ERROR") return `사유가 너무 짧습니다 (최소 ${MIN_REASON}자).`;
-    return `${e.message} (${e.code})`;
-  }
-  return "처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-}
