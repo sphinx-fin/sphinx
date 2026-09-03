@@ -53,7 +53,7 @@ class AiServiceClientTest {
     void setUp() {
         builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new AiServiceClient(builder, BASE, "");   // 로컬 목: 토큰 없음 → 헤더 안 붙음
+        client = new AiServiceClient(builder, BASE, "", new com.sphinxfin.sphinx.core.pii.PiiMeter());   // 로컬 목: 토큰 없음 → 헤더 안 붙음
     }
 
     private static final String SCORE_OK = """
@@ -66,7 +66,7 @@ class AiServiceClientTest {
     void sendsInternalTokenHeaderWhenConfigured() {
         RestClient.Builder b = RestClient.builder();
         MockRestServiceServer srv = MockRestServiceServer.bindTo(b).build();
-        AiServiceClient tokened = new AiServiceClient(b, BASE, "s3cr3t-token");
+        AiServiceClient tokened = new AiServiceClient(b, BASE, "s3cr3t-token", new com.sphinxfin.sphinx.core.pii.PiiMeter());
         srv.expect(requestTo(BASE + "/internal/score"))
                 .andExpect(header(AiServiceClient.INTERNAL_TOKEN_HEADER, "s3cr3t-token"))
                 .andRespond(withSuccess(SCORE_OK, MediaType.APPLICATION_JSON));
@@ -393,4 +393,28 @@ class AiServiceClientTest {
                 .isEqualTo("발화가 두 건뿐이라 판단할 수 없다");
     }
 
+
+    @Test
+    @DisplayName("❗P3 경계를 지나면 계량기가 센다 — 마스킹만 하고 안 세면 증거가 다시 없어진다")
+    void theBoundaryFeedsTheMeter() {
+        // ❗PiiGateway·PiiMeter 를 각각 재는 것으로는 부족하다. score() 가 maskWithHits 대신
+        // mask() 를 부르면 마스킹은 그대로 되고 **계량기만 조용히 0** 이 된다 — 이슈 #326 이
+        // 없애려는 상태가 그대로 돌아온다. 그 층을 여기서 지나간다.
+        com.sphinxfin.sphinx.core.pii.PiiMeter meter = new com.sphinxfin.sphinx.core.pii.PiiMeter();
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer mockServer = MockRestServiceServer.bindTo(builder).build();
+        AiServiceClient metered = new AiServiceClient(builder, BASE, "", meter);
+
+        mockServer.expect(requestTo(BASE + "/internal/score"))
+                .andRespond(withSuccess(SCORE_OK, MediaType.APPLICATION_JSON));
+
+        metered.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?",
+                "제 번호는 010-1234-5678 입니다", ITEM, "ELS");
+
+        assertThat(meter.calls()).isEqualTo(1);
+        assertThat(meter.removed())
+                .as("경계를 지난 발화의 PII 가 안 세어지면, 마스킹이 동작했다는 증거가 "
+                        + "다시 코드 읽기밖에 안 남는다")
+                .containsEntry("PHONE", 1L);
+    }
 }

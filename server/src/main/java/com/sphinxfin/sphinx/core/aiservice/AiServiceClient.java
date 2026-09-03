@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import com.sphinxfin.sphinx.core.pii.PiiGateway;
+import com.sphinxfin.sphinx.core.pii.PiiMeter;
 
 /**
  * ai-service(FastAPI) 호출 클라이언트. 소유: 강희진 (엔드포인트 스펙: 윤지석과 협의)
@@ -50,14 +51,40 @@ public class AiServiceClient {
     private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
 
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AiServiceClient.class);
+
     private final RestClient restClient;
+
+    /** P3 경계가 몇 번 작동했는지 센다 (이슈 #326). 원문은 안 담긴다 — PiiMeter 주석 참고. */
+    private final PiiMeter piiMeter;
+
+    /**
+     * P3 경계를 한 번 지난다 — 마스킹하고 계량기에 올린다 (이슈 #326).
+     *
+     * <p>❗<b>로그에 원문도 조각도 안 찍는다.</b> 종류와 개수뿐이다 — 무엇이 걸렸는지를
+     * 남기면 그게 곧 PII 저장이고, 지우려고 만든 경로가 새는 자리가 된다.
+     *
+     * <p>{@code WARN} 이 아니라 {@code INFO} 다. <b>걸린 것은 결함이 아니라 경계가 일한
+     * 것</b>이다 — 경고로 두면 정상 동작이 매번 붉게 뜨고, 그러면 진짜 경고가 안 읽힌다.
+     */
+    private PiiGateway.Masked maskAndCount(String text) {
+        PiiGateway.Masked masked = PiiGateway.maskWithHits(text);
+        piiMeter.record(masked);
+        if (masked.total() > 0) {
+            log.info("P3 마스킹: {} (누적 {})", masked.hits(), piiMeter.summary());
+        }
+        return masked;
+    }
 
     /** /internal/* 공유 시크릿 헤더명 — ai-service(PR #198)와 문자열이 같아야 한다. */
     static final String INTERNAL_TOKEN_HEADER = "x-sphinx-internal-token";
 
     public AiServiceClient(RestClient.Builder builder,
                            @Value("${sphinx.ai-service.base-url}") String baseUrl,
-                           @Value("${sphinx.ai-service.internal-token:}") String internalToken) {
+                           @Value("${sphinx.ai-service.internal-token:}") String internalToken,
+                           PiiMeter piiMeter) {
+        this.piiMeter = piiMeter;
         // 이 경계 전용 매퍼 — 전역 Jackson과 분리한다(웹은 camelCase 유지).
         ObjectMapper snakeMapper = JsonMapper.builder()
                 .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
@@ -95,8 +122,9 @@ public class AiServiceClient {
      */
     public Scored score(String itemId, String question, String answerText,
                         RiskItem riskItem, String productType) {
-        String masked = PiiGateway.mask(answerText);   // P3 — 원문은 절대 나가지 않는다
-        ScoreRequest request = new ScoreRequest(itemId, question, masked, riskItem, productType);
+        // P3 — 원문은 절대 나가지 않는다. 무엇이 몇 번 지워졌는지만 센다(이슈 #326).
+        PiiGateway.Masked masked = maskAndCount(answerText);
+        ScoreRequest request = new ScoreRequest(itemId, question, masked.text(), riskItem, productType);
         try {
             Judgment judgment = restClient.post()
                     .uri("/internal/score")
@@ -105,7 +133,7 @@ public class AiServiceClient {
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, failure("/internal/score"))
                     .body(Judgment.class);
-            return new Scored(judgment, masked);
+            return new Scored(judgment, masked.text());
         } catch (EvidenceRequiredException | AiServiceException e) {
             throw e;   // P4/상류 실패는 그대로 502로 매핑되게 둔다
         } catch (RestClientException e) {
@@ -137,7 +165,7 @@ public class AiServiceClient {
         // 이미 마스킹된 값이지만 mask() 는 멱등이라 한 번 더 태운다 — 저장 경로가 나중에
         // 바뀌어 원문이 섞여 들어와도 여기서 걸린다 (P3 를 관행이 아니라 구조로).
         List<Utterance> utterances = maskedUtterances.entrySet().stream()
-                .map(e -> new Utterance(e.getKey(), PiiGateway.mask(e.getValue())))
+                .map(e -> new Utterance(e.getKey(), maskAndCount(e.getValue()).text()))
                 .toList();
         MismatchRequest request = new MismatchRequest(
                 sessionId, surveyResult, utterances, surveySchemaVersion);

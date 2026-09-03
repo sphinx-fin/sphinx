@@ -45,7 +45,7 @@ class MeasurementInvalidWireTest {
     void setUp() {
         builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new AiServiceClient(builder, BASE, "");
+        client = new AiServiceClient(builder, BASE, "", new com.sphinxfin.sphinx.core.pii.PiiMeter());
     }
 
     private void respond(String body) {
