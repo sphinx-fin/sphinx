@@ -15,6 +15,8 @@ from pathlib import Path
 
 import yaml
 
+from .schemas import PRODUCT_TYPES
+
 RUBRIC_DIR = Path(__file__).resolve().parent / "rubrics"
 
 
@@ -42,9 +44,28 @@ def _parse(path: Path) -> Rubric:
     missing = [k for k in ("item_id", "required_elements") if not raw.get(k)]
     if missing:
         raise ValueError(f"{path.name}: 필수 키 누락 {missing}")
+
+    # ❗`product_type` 을 검증한다 (PR #310 리뷰, 정세현).
+    #
+    # 전에는 `raw.get("product_type", "ELS")` 였다 — 그 줄이 빠진 변액 루브릭이 **조용히
+    # ELS 가 됐다.** 그 필드를 읽는 곳이 없어서 아무 일도 안 일어났는데, 이 PR 이 그것을
+    # 처음 소비하면서(도달 불가 대조) **누락이 엉뚱한 자리에서 터진다** — 가드가 유형의
+    # `products` 를 탓하고, 그 안내를 따르면 결정 10.24 가 막는 변경을 하게 된다.
+    #
+    # 같은 레포의 다른 로더 셋은 전부 검증한다 — `misconception` 의
+    # `_assert_products_are_canonical`, `templates` 의 필수 키, `parsing` 의 PRODUCT_TYPES
+    # 대조. **여기만 없었다.** 기본값을 남겨 두지 않는 이유는 루브릭이 상품별로 갈리는
+    # 파일이라 *"안 적으면 ELS"* 가 조용히 참이 되는 자리가 없어야 하기 때문이다.
+    product_type = raw.get("product_type")
+    if product_type not in PRODUCT_TYPES:
+        raise ValueError(
+            f"{path.name}: product_type 은 {PRODUCT_TYPES} 중 하나여야 한다 — "
+            f"받은 값 {product_type!r}. 안 적으면 기본값으로 떨어지지 않는다(PR #310 리뷰)"
+        )
+
     return Rubric(
         item_id=raw["item_id"],
-        product_type=raw.get("product_type", "ELS"),
+        product_type=product_type,
         name=raw.get("name", raw["item_id"]),
         status=raw.get("status", "draft"),
         required_elements=tuple(raw["required_elements"]),
@@ -126,10 +147,24 @@ def assert_related_misconceptions_exist() -> None:
             f"(결정론 상향이 조용히 사라진다): {dangling}"
         )
     if dead:
+        # ❗**두 변을 다 싣는다** (PR #310 리뷰, 정세현). 도달 불가는 루브릭의
+        # `product_type` 과 유형의 `products` 사이의 관계인데, 유형 쪽만 보이면 메시지가
+        # 사람을 **틀린 쪽으로 보낸다.**
+        #
+        # 실측된 경로: `VAR-PRINCIPAL-LOSS.yaml` 에서 `product_type:` 한 줄이 빠지면
+        # 로더가 조용히 `ELS` 로 떨어뜨리고(아래 `_parse` 참고) 이 가드가 잡는다. 그때
+        # 유형 쪽만 보이면 *"M05-SAVINGS 의 products 에 ELS 를 더해라"* 로 읽히는데
+        # **그건 결정 10.24 가 막는 변경**이다. 실제로 고칠 것은 루브릭 한 줄이다.
+        detail = {
+            f"{k}(product_type={_all()[k].product_type})":
+                [f"{t}(products={types[t].products})" for t in v]
+            for k, v in dead.items()
+        }
         raise ValueError(
             "그 상품에서 도달할 수 없는 오해 유형을 참조하는 루브릭이 있다 — 링크는 "
             "있는데 매처가 그 유형을 만들지 않으므로 결정론 상향이 일어나지 않는다. "
-            "유형의 products 를 넓히는 것은 그 유형이 그 상품에서도 참일 때만 하고, "
-            "아니면 그 상품용 유형을 새로 만든다(결정 10.24). "
-            f"{ {k: [f'{t}(products={types[t].products})' for t in v] for k, v in dead.items()} }"
+            "**먼저 루브릭의 product_type 이 맞는지 본다** — 그 줄이 빠지면 로더가 조용히 "
+            "ELS 로 떨어뜨린다. 그게 맞다면, 유형의 products 를 넓히는 것은 그 유형이 그 "
+            "상품에서도 참일 때만 하고 아니면 그 상품용 유형을 새로 만든다(결정 10.24). "
+            f"{detail}"
         )

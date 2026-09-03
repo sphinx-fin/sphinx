@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import dataclasses
+import textwrap
 
 import pytest
 
@@ -130,3 +131,68 @@ def test_a_missing_type_still_raises_its_own_message(monkeypatch) -> None:
 
     assert "라이브러리에 없는" in str(exc.value)
     assert "도달할 수 없는" not in str(exc.value), "두 실패가 한 메시지로 뭉치면 고칠 곳을 모른다"
+
+
+def test_the_message_names_both_sides(monkeypatch) -> None:
+    """★ 도달 불가는 **두 변의 관계**다 — 유형 쪽만 보이면 사람을 틀린 쪽으로 보낸다.
+
+    `#310` 리뷰(정세현)가 실측한 경로다. `VAR-PRINCIPAL-LOSS.yaml` 에서 `product_type:`
+    한 줄이 빠지면 로더가 조용히 `ELS` 로 떨어뜨리고 이 가드가 잡는데, 그때 메시지가
+    유형의 `products` 만 싣고 있으면 이렇게 읽힌다.
+
+        메시지가 제안   M05-SAVINGS 의 products 에 ELS 를 더한다   ← 결정 10.24 가 막는 변경
+        실제 고칠 것    루브릭 한 줄                               ← 메시지에 안 나온다
+
+    **시키는 두 가지가 둘 다 틀린** 상태였다.
+    """
+    var_only = _type("M05-SAVINGS", ("VARIABLE_INSURANCE",))
+    monkeypatch.setattr(misconception, "library", lambda: (var_only,))
+    monkeypatch.setattr(rubrics, "_all", lambda: {
+        "VAR-X": _rubric("VAR-X", "ELS", ("M05-SAVINGS",)),   # product_type 이 틀린 상태
+    })
+
+    with pytest.raises(ValueError) as exc:
+        rubrics.assert_related_misconceptions_exist()
+
+    msg = str(exc.value)
+    assert "product_type=ELS" in msg, "루브릭 쪽 변이 없으면 고칠 자리를 못 찾는다"
+    assert "products=('VARIABLE_INSURANCE',)" in msg, "유형 쪽 변도 있어야 관계가 보인다"
+    assert "먼저 루브릭의 product_type" in msg, (
+        "어느 쪽을 먼저 볼지 안 적으면 사람이 유형을 고치는 쪽으로 간다"
+    )
+
+
+def test_a_rubric_without_product_type_is_rejected(tmp_path, monkeypatch) -> None:
+    """★ `product_type:` 이 빠지면 **로딩에서 터진다** — 조용히 ELS 가 되지 않는다.
+
+    같은 레포의 다른 로더 셋은 전부 검증하는데(`misconception`·`templates`·`parsing`)
+    여기만 `.get(..., "ELS")` 였다. 그 필드를 읽는 곳이 없어서 무해했는데, 이 PR 이
+    처음 소비하면서 **누락이 엉뚱한 자리에서 터지게** 됐다.
+    """
+    path = tmp_path / "VAR-NO-TYPE.yaml"
+    path.write_text(textwrap.dedent("""
+        item_id: VAR-NO-TYPE
+        name: 상품유형 없는 루브릭
+        required_elements:
+          - 무언가
+    """).strip(), encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc:
+        rubrics._parse(path)
+
+    assert "product_type" in str(exc.value)
+    assert "ELS" in str(exc.value), "허용값을 안 적으면 무엇을 써야 하는지 모른다"
+
+
+def test_an_unknown_product_type_is_rejected(tmp_path) -> None:
+    """오타도 같은 자리에서 잡는다 — `VARIABLE-INSURANCE`(하이픈)가 실제로 나올 오타다."""
+    path = tmp_path / "X.yaml"
+    path.write_text(textwrap.dedent("""
+        item_id: X
+        product_type: VARIABLE-INSURANCE
+        required_elements:
+          - 무언가
+    """).strip(), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="product_type"):
+        rubrics._parse(path)
