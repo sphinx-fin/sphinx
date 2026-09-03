@@ -9,12 +9,7 @@
    집계에는 판정 3색을 쓰지 않는다. 명도만으로 강도를 낸다 — 여기에 적색을 쓰면
    집계가 판정처럼 보이고, 그러면 "지점 성과 지표"로 읽힌다. */
 
-/* min-width: 0 은 장식이 아니다. `#root` 가 flex 컨테이너라(global.css) 이 화면은 flex
-   아이템이고, flex 아이템의 기본값 `min-width: auto` 는 min-content 로 버틴다 — 표·KPI 가
-   1152px 를 요구하면 뷰포트가 744px 이어도 안 줄고 페이지 전체가 가로로 스크롤된다(이슈 #312).
-   같은 이유의 세로축 짝(`#root > main { min-height: 0 }`)은 global.css 에 이미 있다.
-   표 자체는 `.s08__table-wrap` 이 overflow-x 로 감싸므로 여기서 밀려나는 것은 루트다. */
-.s08 { max-width: 72rem; min-width: 0; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
+.s08 { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
   display: flex; flex-direction: column; gap: var(--space-5); }
 .s08__loading { color: var(--text-muted); padding: var(--space-6); }
 
@@ -70,7 +65,19 @@
   box-shadow: var(--shadow-1);
   padding: var(--space-5);
 }
-.s08__table-wrap { overflow-x: auto; }
+/* ❗`position: relative` 는 장식이 아니다. 이 안에는 셀마다 `.sr-only`(position: absolute)가
+   있는데, 래퍼가 `static` 이면 **그것들의 컨테이닝 블록이 래퍼가 아니라 그 위쪽**이라
+   `overflow-x` 가 자르지 못한다 — 1px 짜리 34개가 보이지도 않으면서 표 폭(약 3,570px)만큼
+   문서를 가로로 넘긴다(이슈 #312). 표 자신은 자기 안에서 정상적으로 스크롤하고 있다.
+
+   `.sr-only` 의 `clip: rect(0 0 0 0)` 으로는 안 막힌다 — `clip` 은 **그리는 것만** 자르고
+   레이아웃과 스크롤 영역은 그대로다. 그래서 안 보이면서 넘친다.
+
+   ❗`.s08 { min-width: 0 }` 은 이 결함에 **no-op** 이다(#328 리뷰 실측: 3653 → 3653).
+   flex 아이템의 자동 최소 크기 규칙은 **주축에만** 걸리는데 `#root` 가 `column` 이라
+   주축은 세로다 — 그 자리의 짝은 이미 있는 `#root > main { min-height: 0 }` 이고,
+   가로는 그 규칙이 걸리는 축이 아니다. 넘치는 것은 `.s08` 이 아니라 그 자손이다. */
+.s08__table-wrap { overflow-x: auto; position: relative; }
 .s08__table { border-collapse: collapse; width: 100%; font-size: calc(14px * var(--scale)); }
 .s08__table th, .s08__table td {
   border: 1px solid var(--surface);   /* 칸 사이 2px 여백 — 잉크 면끼리 붙지 않게 */
