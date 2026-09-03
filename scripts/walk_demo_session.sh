@@ -53,14 +53,31 @@ step() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 ok()   { printf '   ✅ %s\n' "$*"; }
 bad()  { printf '   ❗%s\n' "$*" >&2; }
 
-# ai-service 가 막혔을 때 **무엇이 없어서인지**를 가른다. 둘은 같은 502 로 나오는데
-# 고치는 자리가 다르다 — 하나는 프로세스, 하나는 키다.
+# ai-service 가 막혔을 때 **무엇이 없어서인지**를 가른다. 같은 502 로 나오는데 고치는
+# 자리가 다르다 — 프로세스냐 키냐.
+#
+# ❗**도달 검사가 상태를 셋으로 갈라야 한다** (#338 리뷰 2차). 호스트에서 :8100 이
+# 안 열리는 것은 alpha 에서 **설계**다 — `docker-compose.yml` 의 ai-service 에 `ports:`
+# 가 없다. 그래서 호스트 curl 하나로 판정하면 alpha 에서 **늘 "안 떠 있다"** 가 되고,
+# 안내가 `uvicorn` 을 띄우라고 한다. 떠 있는데 띄우라고 하는 것이고, 정작 아래
+# 「키 갈래」 안내에는 도달하지 못한다 — **이 스크립트가 고치려는 그 모양이다.**
+reachable() {
+    curl -sS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null && return 0
+    # 호스트에서 안 보여도 컨테이너 안에서 보이면 떠 있는 것이다 (alpha 의 정상 상태).
+    docker compose exec -T ai-service sh -c \
+        'curl -sf --max-time 5 -o /dev/null localhost:8100/docs' 2>/dev/null
+}
+
 diagnose_502() {
-    curl -sS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null || {
+    reachable || {
         cat >&2 <<'DOWN'
 
    ai-service 가 응답하지 않는다. 서버는 그걸 502 로 옮길 뿐이다.
-     cd ai-service && uvicorn app.main:app --port 8100
+     로컬   cd ai-service && uvicorn app.main:app --port 8100
+     alpha  docker compose ps ai-service · docker compose logs --tail=50 ai-service
+
+   ❗alpha 에서 호스트의 :8100 이 안 열리는 것은 정상이다(ports: 가 없다). 위 판정은
+   컨테이너 안에서도 안 보이는 경우만 여기로 온다.
 DOWN
         return
     }
