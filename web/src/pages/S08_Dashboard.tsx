@@ -930,6 +930,14 @@ function Kpi({ label, value, sub, tip, tipId, show, hide }: {
  * ❗**가려진 줄도 자리를 지운다.** 표본이 30건 미만이면 값과 분포가 둘 다 없지만 줄은
  * 남긴다 — 없애면 화면이 "대비" 를 못 그리고, 가려졌다는 사실 자체가 사라진다(히트맵
  * 칸과 같은 규칙). 그래서 빈칸이 아니라 **"가려짐 · n=12"** 로 적극적으로 그린다.
+ *
+ * ❗**줄의 상태는 셋이다 — 값 · 가려짐 · 데이터 없음.** 설계 판단 ② 가 가르라고 한 둘을
+ * 여기서 합쳐 뒀었다: 필터를 좁혀 표본이 0 이 되면 *"30건 미만이라 가렸습니다"* 가 떴다.
+ * **`masked` 로는 못 가른다** — 계약이 `n < 30` 이면 `masked` 이고 0 도 그 안이라 서버가
+ * 둘에 같은 값을 준다. `n` 을 봐야 하고, 계약이 *"`n` 은 masked 여도 내려간다"* 고 못
+ * 박은 이유가 이 구분이다(추이 표 `TrendCell` 이 같은 방식으로 셋을 가른다).
+ * 없는 것을 "숨겼다" 로 말하면 **마스킹이 일하는 자리를 못 보여주면서** 데이터를 감춘
+ * 화면처럼 읽힌다 — 소표본 마스킹은 기획 7-4 의 실물 근거라 그 오독의 대가가 크다.
  */
 function ContrastBand({ row }: { row: ContrastRow }) {
   const label = BAND_LABEL[row.band];
@@ -948,7 +956,12 @@ function ContrastBand({ row }: { row: ContrastRow }) {
         <span className="s08__cband-label">{label}</span>
         <span className="s08__cband-n">표본 {row.n.toLocaleString()}건</span>
       </p>
-      {pct == null ? (
+      {row.n === 0 ? (
+        <>
+          <p className="s08__cband-value s08__cband-value--none">데이터 없음</p>
+          <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+        </>
+      ) : pct == null ? (
         <>
           <p className="s08__cband-value s08__cband-value--masked">가려짐</p>
           <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다</p>
@@ -999,11 +1012,23 @@ function ContrastBand({ row }: { row: ContrastRow }) {
  *
  * 한쪽이라도 가려지면 **차이를 말하지 않는다.** 없는 값으로 뺄셈을 하는 것보다,
  * 왜 못 내는지 적는 편이 낫다 — 가려졌다는 사실이 이 화면에서는 증거다.
+ *
+ * ❗**못 내는 이유는 둘이고 문면도 둘이다.** 표본이 아예 0 인 것과 30건에 못 미쳐 가린
+ * 것은 다른 사실이라(`ContrastBand` 와 같은 규칙), 한 문장으로 뭉치면 두 줄이 "데이터
+ * 없음" 인 화면 아래에 *"30건 미만이라"* 가 붙는다.
  */
 function ContrastGap({ rows }: { rows: ContrastRow[] }) {
   const v = rows.find((r) => r.band === "vulnerable");
   const o = rows.find((r) => r.band === "other");
   if (!v || !o) return null;
+
+  if (v.n === 0 || o.n === 0) {
+    return (
+      <p className="s08__cgap s08__cgap--none">
+        이 필터에 해당하는 판정이 없습니다.
+      </p>
+    );
+  }
 
   if (v.misrate == null || o.misrate == null) {
     return (

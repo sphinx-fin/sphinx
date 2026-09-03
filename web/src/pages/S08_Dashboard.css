@@ -499,8 +499,12 @@
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
-/* 가려진 줄은 값 자리가 비지 않는다 — 빈칸은 "데이터 없음" 으로 읽힌다(설계 판단 ②). */
-.s08__cband-value--masked {
+/* 가려진 줄은 값 자리가 비지 않는다 — 빈칸은 "데이터 없음" 으로 읽힌다(설계 판단 ②).
+   그리고 진짜 "데이터 없음" 은 그 자리에 그렇게 적는다. 두 상태는 문면이 다르지만 **크기와
+   색은 같다** — 둘 다 값이 아니라 값이 없는 사유이고, 한쪽만 크게 그리면 없는 쪽이 더 큰
+   사건으로 보인다. */
+.s08__cband-value--masked,
+.s08__cband-value--none {
   font-size: calc(20px * var(--scale));
   color: var(--text-muted);
   letter-spacing: 0;
