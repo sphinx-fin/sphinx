@@ -120,7 +120,7 @@ class EnvelopeContractTest {
     private String redSession() throws Exception {
         String sid = newSession();
         var session = repository.findById(sid).orElseThrow();
-        session.recordGate(new GateResult(Signal.RED, List.of("R-01")), Instant.now());
+        session.recordGate(new GateResult(Signal.RED, List.of("R-01"), 0, 3), Instant.now());
         repository.save(session);
         return sid;
     }

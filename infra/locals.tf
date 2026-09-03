@@ -52,7 +52,7 @@ locals {
       # ❗**이 값은 출력용이다.** 실제로 nginx 가 인증서를 찾는 이름은 배포 워크플로가
       # `SPHINX_PUBLIC_HOST` 로 넘긴다(.github/workflows/deploy.yml). 두 곳이 갈리면
       # 화면 주소만 틀리게 찍히고 서비스는 멀쩡하므로, 여기를 근거로 삼지 않는다.
-      public_host = "sphinx2026.duckdns.org"
+      public_host = "sphinxfin.duckdns.org"
 
       # main 에 머지되면 자동으로 여기로 나간다.
       oidc_subs = [

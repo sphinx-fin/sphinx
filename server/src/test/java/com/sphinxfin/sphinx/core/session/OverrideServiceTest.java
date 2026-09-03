@@ -159,7 +159,7 @@ class OverrideServiceTest {
     /** 지정 신호로 판정 기록된 세션을 저장한다. */
     private Session save(Signal signal) {
         Session s = Session.create(cmd());
-        s.recordGate(new GateResult(signal, List.of("R-01")), Instant.now());
+        s.recordGate(new GateResult(signal, List.of("R-01"), 0, 3), Instant.now());
         return repository.save(s);
     }
 

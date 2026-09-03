@@ -245,7 +245,7 @@ curl --max-time 3 http://<EC2 퍼블릭 IP>:8000/products  # server 직접 — �
 ## 9. 도메인과 https (alpha)
 
 ```
-sphinx2026.duckdns.org   →  43.201.87.150 (alpha EIP)   DuckDNS A 레코드
+sphinxfin.duckdns.org    →  54.116.240.212 (alpha EIP)  DuckDNS A 레코드
 인증서                    →  Let's Encrypt · HTTP-01 · certbot 컨테이너
 ```
 
@@ -268,11 +268,22 @@ location 을 고르기 전에 돌아서 그냥 두면 챌린지까지 튕긴다 
 ```bash
 # 박스에서 (aws ssm start-session --target <instance-id>)
 cd /opt/sphinx
-SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinx2026.duckdns.org ./scripts/deploy_ec2.sh --cert
+SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinxfin.duckdns.org SPHINX_DEMO_OPEN=1 \
+  ./scripts/deploy_ec2.sh --cert
 ```
 
 발급하고 web 을 재기동하는 것까지 한 줄이다. 끝나면 `TLS 켜짐 — https://…` 이 찍힌다.
 만료 알림을 받으려면 `LETSENCRYPT_EMAIL=…` 을 같이 넘긴다(비우면 등록 없이 받는다).
+
+❗**`SPHINX_DEMO_OPEN=1` 을 빼지 않는다(alpha 한정).** `--cert` 는 web 을 두 번 재기동하는데
+그때 넘어간 값으로 새로 뜬다 — 안 주면 개방 모드(§9.3)가 꺼진 채 돌아와 **인증서는 받았는데
+전 화면이 401** 이 된다. prod 는 애초에 개방 모드가 아니므로 붙이지 않는다.
+
+`--cert` 가 **web 만**(`--no-deps`) 건드리는 것도 같은 종류의 사고를 막는다. 이 분기는
+`exit 0` 으로 끝나서 `SPHINX_DEMO_SYNTHETIC_SESSIONS` 를 켜는 줄(결정 10.58)까지 못 가는데,
+compose 가 `depends_on` 을 따라 `server` 까지 재생성하면 server 가 기본값 `false` 로 돌아와
+**합성 세션을 안 읽고 S-08 대시보드가 빈 표**가 된다. 화면도 로그도 정상이라 #179 와 똑같이
+조용하다 — 2026-09-03 계정 이관 중 실제로 이 경로로 대시보드가 비었다.
 
 ❗**`docker compose run --rm certbot …` 을 손으로 치면 안 된다.** 두 가지가 걸린다.
 
@@ -318,9 +329,9 @@ prod 배포의 노출 확인은 여전히 `401` 이 아니면 실패하므로 `#
 ### 9.4 확인
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' http://sphinx2026.duckdns.org/     # 301 (https 로)
-curl -sS -o /dev/null -w '%{http_code}\n' https://sphinx2026.duckdns.org/    # 200 (로그인 없음)
-curl -sS https://sphinx2026.duckdns.org/api/dashboard/heatmap | head -c 200   # 200 · compl-01 로 나간다
+curl -sS -o /dev/null -w '%{http_code}\n' http://sphinxfin.duckdns.org/     # 301 (https 로)
+curl -sS -o /dev/null -w '%{http_code}\n' https://sphinxfin.duckdns.org/    # 200 (로그인 없음)
+curl -sS https://sphinxfin.duckdns.org/api/dashboard/heatmap | head -c 200   # 200 · compl-01 로 나간다
 ```
 
 `http://` 가 200 이면 인증서가 아직 없는 것이다(§9.2). `https://` 가 401 이면 개방 모드가

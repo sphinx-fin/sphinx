@@ -377,7 +377,8 @@ public class SessionService {
 
     /** 세션에 기록된 게이트 결과(감사 기준점). 재계산하지 않는다. */
     private GateResult recordedGate(Session session) {
-        return new GateResult(session.gateSignal(), session.gateRuleTrace());
+        return new GateResult(session.gateSignal(), session.gateRuleTrace(),
+                session.gateUnmeasured(), session.gateRulesVersion());
     }
 
     /** 세션 중단(고객 이탈 등) → ABORTED. */

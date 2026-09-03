@@ -71,7 +71,7 @@ jobs:
           #
           # prod 는 도메인도 아직 없다. 비면 nginx 가 443 을 안 세우고 :80 만 뜬다.
           if [ "$TARGET" = alpha ]; then
-            echo "public_host=sphinx2026.duckdns.org" >> "$GITHUB_OUTPUT"
+            echo "public_host=sphinxfin.duckdns.org" >> "$GITHUB_OUTPUT"
             echo "demo_open=1"                        >> "$GITHUB_OUTPUT"
           else
             echo "public_host=" >> "$GITHUB_OUTPUT"

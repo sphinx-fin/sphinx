@@ -71,6 +71,20 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         Map<String, Object> payload = envelope("gate", sessionId, at);
         payload.put("signal", result.signal());
         payload.put("ruleTrace", result.ruleTrace());
+        // 판정을 만든 입력. 0 이어도 생략하지 않는다 — misconceptionType·promptVersion·escalate
+        // 와 같은 규약이다(없음과 미기재를 가른다, 이슈 #136).
+        //
+        // ❗재계산으로 못 되돌리는 값이라 여기서 담는다. 항목이 마저 채점되면 미측정은 0 이
+        // 되고 gate_rules.yaml 은 언제든 바뀐다 — 그러면 "왜 이 신호였나" 를 되짚을 수 없다.
+        // 그리고 역산 경로가 없다: 세션은 인메모리이고, askedQuestion 은 appendJudgment 안에서만
+        // 실려서(판정이 있는 항목만) **물어봤는데 못 잰 항목은 이 스트림에 아예 안 온다**
+        // (이슈 #280 ② · #295).
+        //
+        // rulesVersion 이 0 이면 "버전 0 인 룰셋" 이 아니라 **파일을 안 지나온 룰**이다
+        // (GateEngine.UNVERSIONED). 프로덕션 경로는 GateConfig 가 파일을 읽는 생성자뿐이라
+        // 그 값이 기록에 나오지 않는다 — 호출부가 테스트 셋뿐인 것을 확인했다.
+        payload.put("unmeasured", result.unmeasured());
+        payload.put("rulesVersion", result.rulesVersion());
         store.append(streamOf(sessionId), payload);
     }
 

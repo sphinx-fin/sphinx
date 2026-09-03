@@ -160,7 +160,17 @@ if [ "$CERT_ONLY" = 1 ]; then
 
   # web 이 :80 으로 챌린지를 내보내야 발급이 된다. 안 떠 있으면 먼저 띄운다 —
   # `--cert` 를 배포 직후가 아니라 나중에 부르는 경우가 있다.
-  docker compose up -d web
+  #
+  # ❗**`--no-deps` 가 있어야 한다.** 없으면 compose 가 `depends_on` 을 따라 `server` 까지
+  # 같이 재생성하는데, 이 분기는 아래에서 `exit 0` 으로 끝나므로 **`SPHINX_DEMO_SYNTHETIC_SESSIONS`
+  # 를 export 하는 줄(F-DSH-003 · 결정 10.58)에 도달하지 못한다.** 그러면 server 가 기본값
+  # `false` 로 다시 떠서 합성 세션 71건을 안 읽고, S-08 대시보드가 **빈 표**가 된다 —
+  # 화면도 로그도 정상이라 #179 와 똑같이 조용하다. `SPHINX_DEMO_OPEN` 도 같은 자리에서
+  # 샌다(안 넘기면 web 이 잠금 모드로 돌아와 전 화면 401).
+  #
+  # 인증서 발급에 필요한 것은 :80 의 챌린지 응답 하나뿐이라 web 만 건드리면 된다.
+  # 2026-09-03 계정 이관 중 실제로 이 경로로 대시보드가 비었다.
+  docker compose up -d --no-deps web
 
   echo "인증서 발급 — $SPHINX_PUBLIC_HOST"
   # ❗`--entrypoint certbot` 이 있어야 한다. **`docker compose run` 은 `command` 만 덮고
@@ -179,8 +189,9 @@ if [ "$CERT_ONLY" = 1 ]; then
     ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
 
   # 20-tls.sh 는 **기동 때** 인증서 유무를 본다. 재기동해야 443 이 선다.
+  # 여기도 `--no-deps` 다 — 위와 같은 이유이고, 빠뜨리면 발급은 됐는데 대시보드가 빈다.
   echo "web 재기동 — 443 을 세운다"
-  docker compose up -d --force-recreate web
+  docker compose up -d --no-deps --force-recreate web
   docker compose logs --tail 20 web | grep -E "TLS|모드" || true
   exit 0
 fi
