@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Signal;
 
 import java.io.IOException;
@@ -34,6 +35,13 @@ public class GateEngine {
 
     /** 파일에 매칭되는 룰이 없을 때의 fail-closed 판정에 남기는 트레이스 ID. */
     static final String DEFAULT_TRACE = "R-DEFAULT";
+
+    /**
+     * 그때의 문면. 룰 파일에 없는 판정이라 라벨도 여기서 낸다 — 화면이 {@code R-DEFAULT} 만
+     * 받으면 <b>왜 막혔는지</b>를 아무도 못 말한다(이슈 #320). 조건을 말하지 않는 것은
+     * 다른 라벨과 같다.
+     */
+    static final RuleRef DEFAULT_RULE = new RuleRef(DEFAULT_TRACE, "판정 근거를 만들지 못했습니다");
 
     /** 룰을 직접 주입할 때 쓰는 버전 값 — 파일에서 온 게 아니라 "모른다" 는 뜻이다. */
     static final int UNVERSIONED = 0;
@@ -124,21 +132,21 @@ public class GateEngine {
         // 남긴다 — 감사 시점에 "왜 이 신호였나"를 모든 사유로 설명하기 위함(예: YELLOW가
         // R-04(부분이해)와 R-05(저신뢰)에서 동시에 나오면 둘 다 기록). #10 결정.
         Signal winning = null;
-        List<String> trace = new ArrayList<>();
+        List<RuleRef> trace = new ArrayList<>();
         for (Rule rule : rules) {
             if (rule.predicate().test(ctx)) {
                 if (winning == null) {
                     winning = rule.signal();
                 }
                 if (rule.signal() == winning) {
-                    trace.add(rule.id());
+                    trace.add(rule.ref());
                 }
             }
         }
         if (winning == null) {
             // fail-closed. 여기서도 입력을 싣는다 — 룰이 하나도 안 맞은 판정일수록
             // "무엇을 보고 그랬나" 가 남아야 한다.
-            return new GateResult(Signal.RED, List.of(DEFAULT_TRACE), unmeasured, rulesVersion);
+            return new GateResult(Signal.RED, List.of(DEFAULT_RULE), unmeasured, rulesVersion);
         }
         return new GateResult(winning, List.copyOf(trace), unmeasured, rulesVersion);
     }
@@ -165,7 +173,13 @@ public class GateEngine {
             }
             List<Rule> compiled = new ArrayList<>(file.rules.size());
             for (RawRule raw : file.rules) {
-                compiled.add(new Rule(raw.id, raw.ifExpr, compile(raw.ifExpr), Signal.valueOf(raw.then)));
+                if (raw.label == null || raw.label.isBlank()) {
+                    // 라벨 없는 룰이 들어오면 화면이 그 룰에 대해 아무 말도 못 한다.
+                    // 로드 시점에 막는다 — 런타임까지 숨기면 판정이 난 뒤에야 드러난다.
+                    throw new IllegalStateException("룰에 label 이 없다: " + raw.id);
+                }
+                compiled.add(new Rule(raw.id, raw.label, raw.ifExpr,
+                        compile(raw.ifExpr), Signal.valueOf(raw.then)));
             }
             return new Ruleset(file.version, compiled);
         } catch (IOException e) {
@@ -251,7 +265,11 @@ public class GateEngine {
      * 컴파일된 룰. {@code ifExpr} 원문을 함께 든다 — 술어로 접고 나면 임계값을 되읽을 수
      * 없는데, {@link #reverifyThreshold()} 가 그 숫자를 필요로 한다(이슈 #66).
      */
-    record Rule(String id, String ifExpr, Predicate<Context> predicate, Signal signal) {}
+    record Rule(String id, String label, String ifExpr, Predicate<Context> predicate, Signal signal) {
+        RuleRef ref() {
+            return new RuleRef(id, label);
+        }
+    }
 
     /** gate_rules.yaml 역직렬화 형태. */
     private static final class RulesFile {
@@ -261,6 +279,7 @@ public class GateEngine {
 
     private static final class RawRule {
         public String id;
+        public String label;
         @JsonProperty("if")
         public String ifExpr;
         public String then;

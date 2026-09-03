@@ -56,6 +56,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, BASE, get, post } from "../api/client";
 import type { ReportResponse } from "../api/types";
+import ErrorNote from "../components/ErrorNote";
+import { describeError, type ShownError } from "../lib/errorText";
 import "./S07_Report.css";
 
 /** 적재 결과. "아직 발행 안 됨" 은 실패가 아니라 상태이므로 에러와 따로 둔다(설계 판단 ②). */
@@ -75,7 +77,7 @@ export default function S07Report() {
    * 적재·발행 공통 오류 문구. 배너가 한 곳이라 상태도 하나로 둔다 — 둘로 나눠 놓고
    * 같은 자리에 그리면 이름만 갈리고 화면은 같아서, 나중에 어느 쪽인지 알 수 없다.
    */
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ShownError | null>(null);
   const [copied, setCopied] = useState(false);
 
   /* ── 적재 — GET 만 한다. 발행하지 않는다(설계 판단 ①) ────────────────────── */
@@ -93,7 +95,7 @@ export default function S07Report() {
         setState(await sessionExists(sid) ? { kind: "not-issued" } : { kind: "no-session" });
       } else {
         setState(null);
-        setError(describe(e));
+        setError(describeError(e));
       }
     } finally {
       setLoading(false);
@@ -112,11 +114,16 @@ export default function S07Report() {
     } catch (e) {
       // 조회는 되는데 발행만 막히는 상태가 정상적으로 있다(설계 판단 ⑥).
       if (e instanceof ApiRequestError && e.status === 403) {
-        setError(
-          "이 세션의 리포트를 교부할 권한이 없습니다. 교부는 세션을 진행한 창구 직원(SELLER)이 " +
-          "합니다 — 관리자·준법감시는 조회만 할 수 있습니다.");
+        // 공용 FORBIDDEN 문면보다 이 자리가 구체적이다 — 누가 교부할 수 있는지까지
+        // 말해야 판매자가 다음 행동을 안다. 원문은 공용 헬퍼와 같은 모양으로 남긴다.
+        setError({
+          text:
+            "이 세션의 리포트를 교부할 권한이 없습니다. 교부는 세션을 진행한 창구 직원(SELLER)이 " +
+            "합니다 — 관리자·준법감시는 조회만 할 수 있습니다.",
+          detail: `${e.code}: ${e.message}`,
+        });
       } else {
-        setError(describe(e));
+        setError(describeError(e));
       }
     } finally {
       setIssuing(false);
@@ -145,7 +152,7 @@ export default function S07Report() {
         <p className="s07__sid">세션 <code>{sid}</code></p>
       </header>
 
-      {error && <p className="s07__error" role="alert">{error}</p>}
+      {error && <ErrorNote error={error} className="s07__error" />}
 
       {state?.kind === "no-session" && (
         <section className="s07__empty">
@@ -283,8 +290,3 @@ function formatAt(iso: string): string {
   }).format(d);
 }
 
-/** 봉투에서 풀린 에러를 사람이 읽는 문장으로. 코드까지 보이면 판매자가 옮겨 적을 수 있다. */
-function describe(e: unknown): string {
-  if (e instanceof ApiRequestError) return `${e.message} (${e.code})`;
-  return "리포트를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-}

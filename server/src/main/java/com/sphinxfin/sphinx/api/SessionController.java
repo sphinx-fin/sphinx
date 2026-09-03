@@ -173,8 +173,12 @@ public class SessionController {
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         // 화면에는 JudgmentView 로 낸다 — misconceptionType 이 신호 그 자체라 판매자에게
         // 안 보낸다 (#144). 도메인 판정은 그대로 기록·재설명 경로로 간다.
+        // ❗inputMeta 를 여기서 버리지 않는다 (이슈 #325). 화면이 매 답변마다 보내는데
+        // 서버가 역직렬화하고 버리고 있었다 — 붙여넣기로 채운 되말하기는 발화 내용만
+        // 보면 완벽한 U1 이라, 이 값이 없으면 그 행동을 구분할 방법이 아예 없다.
         return ApiResponse.ok(JudgmentView.of(sessionService.recordJudgment(
-                sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source())));
+                sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source(),
+                body.domainInputMeta())));
     }
 
     /**

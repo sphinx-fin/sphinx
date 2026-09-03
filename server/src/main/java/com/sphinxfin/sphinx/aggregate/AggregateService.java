@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.aggregate;
 
+import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionRepository;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -101,6 +102,18 @@ public class AggregateService {
     public record Cell(String product, String item, BigDecimal misrate, long n, boolean masked,
                        Grades grades) {}
 
+    /**
+     * 취약/비취약 한 줄. {@code band} 는 {@code "vulnerable"} · {@code "other"} 둘뿐이다.
+     *
+     * <p><b>두 줄을 항상 함께 낸다</b> — 한쪽이 소표본이라 가려져도 자리를 남긴다. 없는 줄을
+     * 빼면 화면이 "비교" 를 못 그리고, 가려졌다는 사실이 화면에서 사라진다(마스킹을 셀 제거로
+     * 하지 않는 것과 같은 이유다).
+     */
+    public record ContrastRow(String band, BigDecimal misrate, long n, boolean masked,
+                              Grades grades) {}
+
+    public record ContrastView(boolean synthetic, String scope, List<ContrastRow> rows) {}
+
     public record HeatmapView(boolean synthetic, String scope, List<Cell> cells) {}
 
     public record Point(String period, BigDecimal misrate, long n, boolean masked) {}
@@ -114,8 +127,20 @@ public class AggregateService {
 
     private final SessionRepository sessions;
 
-    public AggregateService(SessionRepository sessions) {
+    /**
+     * ❗<b>취약 여부를 여기서 다시 정의하지 않는다.</b> {@code vulnerability_weights.yaml} 이
+     * 유일한 근거이고 그것을 읽는 것은 {@link CoachingScoreService} 다. 연령대만으로
+     * "50대 이상은 취약" 같은 판정을 이 클래스에 적으면 <b>정의가 두 벌이 되고</b>, 실제 정의는
+     * 연령·가입금액대·투자경험·채널 네 요인의 합이라 두 값이 처음부터 다르다.
+     *
+     * <p>같은 함정이 web 쪽에도 있다 — {@code lib/sessionAttrs.ts} 의 {@code weighted} 는
+     * <b>연령만 보는 근사</b>다. 화면 표시용이고 집계 기준이 아니다.
+     */
+    private final CoachingScoreService coaching;
+
+    public AggregateService(SessionRepository sessions, CoachingScoreService coaching) {
         this.sessions = sessions;
+        this.coaching = coaching;
     }
 
     /**
@@ -184,6 +209,57 @@ public class AggregateService {
             outlier(label(groupBy), key, points).ifPresent(outliers::add);
         });
         return new IndicatorView(SYNTHETIC, label(scope), series, outliers);
+    }
+
+    /**
+     * 취약 고객과 나머지의 오해율 대비 (F-DSH-001 · 이슈 #321 의 1번).
+     *
+     * <h3>왜 필터가 아니라 대비인가</h3>
+     *
+     * <p>화면에는 이미 연령대 <b>필터</b>가 있다. 70대만 걸러 볼 수는 있는데 그 값 하나로는
+     * <i>"나머지보다 얼마나 높은가"</i> 를 알 수 없고, 사람은 <b>29%</b> 라는 수를 보면 그것이
+     * 높은지 낮은지 판단할 기준을 화면 밖에서 가져온다. 두 줄을 나란히 놓으면 그 기준이
+     * 화면 안에 있다 — {@code eval} 리포트가 모델 점수 옆에 <b>평가자 간 일치도(상한)</b> 를
+     * 같이 내는 것과 같은 이유다.
+     *
+     * <p>그리고 이 대비가 곧 {@code vulnerability_weights.yaml} 이 존재하는 이유다. 지금은
+     * 그 가중이 코칭 스코어 안에서만 쓰여 <b>화면 어디에도 근거가 안 보인다.</b>
+     *
+     * <h3>취약의 정의는 여기 없다</h3>
+     *
+     * <p>{@link CoachingScoreService#score} 가 그대로 답한다. {@code suitabilityMismatch} 도
+     * 세션이 들고 있는 실제 값을 넘긴다 — 여기서 {@code false} 로 뭉개면 모순이 있던 세션의
+     * 가산점(+2)이 빠져서 <b>같은 세션이 코칭 경로와 집계 경로에서 다르게 분류된다.</b>
+     *
+     * <h3>마스킹</h3>
+     *
+     * <p>히트맵과 같은 규칙({@code MIN_CELL_SAMPLE})이다. <b>두 줄은 언제나 둘 다 낸다</b> —
+     * 한쪽이 가려져도 자리를 지운다면 화면이 대비를 못 그리고, 무엇보다 <b>가려졌다는 사실이
+     * 증거</b>이므로 지우면 안 된다.
+     */
+    @Transactional(readOnly = true)
+    public ContrastView vulnerabilityContrast(AccessPolicy.Scope scope, String branchId,
+                                              Filters filters) {
+        Tally vulnerable = new Tally();
+        Tally other = new Tally();
+
+        for (Session session : visible(scope, branchId)) {
+            if (!matches(session, filters)) {
+                continue;
+            }
+            Tally bucket = coaching.score(session, session.suitabilityMismatch()).vulnerable()
+                    ? vulnerable : other;
+            session.judgmentsByItem().forEach((itemId, judgment) -> bucket.add(judgment));
+        }
+
+        return new ContrastView(SYNTHETIC, label(scope), List.of(
+                row("vulnerable", vulnerable),
+                row("other", other)));
+    }
+
+    private static ContrastRow row(String band, Tally tally) {
+        return new ContrastRow(band, tally.misrateOrNull(), tally.n(), tally.masked(),
+                tally.gradesOrNull());
     }
 
     // ── 내부 ──────────────────────────────────────────────────────────────

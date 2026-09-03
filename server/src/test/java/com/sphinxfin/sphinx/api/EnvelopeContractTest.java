@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.jayway.jsonpath.JsonPath;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.session.SessionRepository;
@@ -120,7 +121,7 @@ class EnvelopeContractTest {
     private String redSession() throws Exception {
         String sid = newSession();
         var session = repository.findById(sid).orElseThrow();
-        session.recordGate(new GateResult(Signal.RED, List.of("R-01"), 0, 3), Instant.now());
+        session.recordGate(new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), Instant.now());
         repository.save(session);
         return sid;
     }

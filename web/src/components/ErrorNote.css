@@ -1,0 +1,15 @@
+/* 접힌 기술 정보. 에러 박스 안에 들어가므로 배경·테두리는 박스 것을 그대로 쓴다. */
+.errnote__detail { margin-top: var(--space-2); }
+.errnote__detail summary {
+  cursor: pointer;
+  font-size: calc(12px * var(--scale));
+  opacity: 0.8;
+}
+.errnote__detail code {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: calc(12px * var(--scale));
+  /* 서버 원문은 길고 줄바꿈이 없다. 안 감싸면 에러 박스가 가로로 늘어난다(#312 와 같은 결). */
+  overflow-wrap: anywhere;
+  opacity: 0.9;
+}

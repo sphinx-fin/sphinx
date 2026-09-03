@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
@@ -76,8 +77,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("판정 → 게이트 → 오버라이드 순서가 기록에 남는다")
         void keepsCrossKindOrder() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04", "R-05"), 0, 3), T0.plusSeconds(1));
+            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면"), new RuleRef("R-05", "테스트 문면")), 0, 3), T0.plusSeconds(1));
             recorder.appendOverride(SID, "고객이 충분히 이해했다고 판단하여 진행합니다", "mgr-01", T0.plusSeconds(2));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
@@ -89,7 +90,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("기록 한 건이 스스로 어느 세션·언제인지 말한다")
         void entriesAreSelfDescribing() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
 
             Map<String, Object> payload = payloads().get(0);
             assertThat(payload.get("sessionId")).isEqualTo(SID);
@@ -101,7 +102,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("세션이 다르면 사슬도 다르다")
         void streamsAreSeparatedBySession() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0);
 
             assertThat(payloads()).hasSize(1);
@@ -116,8 +117,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("같은 항목의 재검증이 두 건으로 남는다 — 덮어쓰기가 아니다")
         void reverificationIsAppendedNotOverwritten() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
+            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
 
             List<Map<String, Object>> stored = payloads();
             assertThat(stored).hasSize(2);
@@ -129,9 +130,39 @@ class StoredEvidenceRecorderTest {
         }
 
         @Test
+        @DisplayName("❗판정 기록이 입력 메타데이터를 든다 — 붙여넣기는 발화로는 안 보인다 (이슈 #325)")
+        void judgmentEntryCarriesHowItWasTyped() {
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 0, "질문",
+                    EvidenceRecorder.QuestionSource.DISPLAYED,
+                    new com.sphinxfin.sphinx.domain.InputMeta(120, 400, true, 0, 42, false), T0);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meta = (Map<String, Object>) payloads().get(0).get("inputMeta");
+            assertThat(meta)
+                    .as("붙여넣기로 채운 되말하기는 발화 내용만 보면 완벽한 U1 이다 — "
+                            + "이 값이 없으면 그 행동을 구분할 방법이 아예 없다")
+                    .isNotNull();
+            assertThat(meta.get("pasteDetected")).isEqualTo(true);
+            assertThat(meta.get("charCount")).isEqualTo(42);
+        }
+
+        @Test
+        @DisplayName("❗안 보낸 것을 생략하지 않는다 — 없음과 미기재를 가른다")
+        void anAbsentInputMetaIsRecordedAsNull() {
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 0, "질문",
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+
+            assertThat(payloads().get(0))
+                    .as("키가 없으면 '화면이 안 보냈다' 와 '이 필드가 생기기 전 기록' 이 "
+                            + "같아 보인다 — askedQuestion·misconceptionType 과 같은 규약이다(#136)")
+                    .containsKey("inputMeta");
+            assertThat(payloads().get(0).get("inputMeta")).isNull();
+        }
+
+        @Test
         @DisplayName("❗게이트 기록이 판정을 만든 입력을 같이 든다 — 재계산으로 못 되돌린다 (이슈 #295)")
         void gateEntryCarriesItsInputs() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 3, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-00", "테스트 문면")), 3, 3), T0);
 
             Map<String, Object> payload = payloads().get(0);
             assertThat(payload.get("unmeasured"))
@@ -150,7 +181,7 @@ class StoredEvidenceRecorderTest {
             // `if (rulesVersion != 0) put(...)` 변이가 그때 전건 통과했다 — 다른 테스트는
             // 전부 rulesVersion 을 3 으로 넣어서 0 인 경로를 아무도 안 지나갔다(PR #299 리뷰).
             // 문면이 두 필드를 같은 규약으로 말하는데 그물이 한쪽만 있으면 규약이 아니다.
-            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of("R-06"), 0, 0), T0);
+            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(new RuleRef("R-06", "테스트 문면")), 0, 0), T0);
 
             assertThat(payloads().get(0))
                     .as("키가 없으면 '전부 쟀다' 와 '이 필드가 생기기 전 기록' 이 같아 보인다 — "
@@ -166,8 +197,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("게이트 판정도 매 호출 남는다 — 최종 신호가 아니라 신호의 변천")
         void gateSignalsAccumulate() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(60));
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(60));
             recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(120));
 
             assertThat(payloads()).extracting(p -> p.get("signal"))
@@ -182,7 +213,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("grade 원값과 근거가 들어간다. 색은 안 들어간다 (ADR-004 §5)")
         void storesGradeAndEvidenceButNoColor() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Map<String, Object> item = child(payloads().get(0), "judgment");
             assertThat(item.get("grade")).isEqualTo("U4");
@@ -195,7 +226,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("misconceptionType 이 null 이어도 키를 남긴다 — 생략하면 '없음' 과 '미기재' 가 같아진다")
         void keepsNullMisconceptionType() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             assertThat(child(payloads().get(0), "judgment").keySet())
                     .contains("misconceptionType");
@@ -213,7 +244,7 @@ class StoredEvidenceRecorderTest {
                     "꺾기 정황", null, "F-SCR-001_v2", true);
 
             recorder.appendJudgment(SID, escalating, 0, "질문 문면",
-                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Map<String, Object> item = child(payloads().get(0), "judgment");
             assertThat(item.get("escalate"))
@@ -238,7 +269,7 @@ class StoredEvidenceRecorderTest {
             Set<String> deliberatelyOmitted = Set.of();
 
             recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면",
-                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             Set<String> recorded = child(payloads().get(0), "judgment").keySet();
 
             List<String> components = Arrays.stream(Judgment.class.getRecordComponents())
@@ -255,8 +286,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("적재한 뒤에도 사슬이 검증된다 — 왕복이 성립한다")
         void chainStaysVerifiableAfterReplay() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(30));
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(30));
             em.flush();
 
             assertThat(store.verify(StoredEvidenceRecorder.streamOf(SID)).ok()).isTrue();
@@ -281,7 +312,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("문자열이나 Double 이 아니라 BigDecimal 값으로 왕복한다")
         void roundTripsAsNumber() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Object confidence = child(payloads().get(0), "judgment").get("confidence");
             assertThat(confidence)
@@ -372,7 +403,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("게이트와 다른 사슬 항목이다 — 재검증마다 도는 게이트와 발생 시점이 다르다")
         void mismatchIsItsOwnKind() {
             recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-02"), 0, 3), T0.plusSeconds(1));
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-02", "테스트 문면")), 0, 3), T0.plusSeconds(1));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
                     .as("게이트에 얹으면 재검증마다 같은 모순 근거가 중복으로 쌓인다")

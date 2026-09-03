@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.evidence;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,7 +54,8 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
     @Override
     @Transactional
     public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                               String askedQuestion, QuestionSource questionSource, Instant at) {
+                               String askedQuestion, QuestionSource questionSource,
+                               InputMeta inputMeta, Instant at) {
         Map<String, Object> payload = envelope("judgment", sessionId, at);
         payload.put("reverifyCount", reverifyCount);
         // 판정을 만든 질문. null 은 "이 필드가 생기기 전 레코드" 하나만 뜻한다 —
@@ -62,6 +64,13 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         // 문면만으로는 폴백을 못 가른다 — 목 문면도 질문처럼 생겼다 (#136 3항).
         payload.put("questionSource", questionSource);
         payload.put("judgment", judgmentPayload(judgment));
+        // F-INT-003 입력 메타데이터 (이슈 #325). **무엇을 말했나가 아니라 어떻게 입력했나** 다 —
+        // 붙여넣기로 채운 되말하기는 발화 내용만 보면 완벽한 U1 로 채점된다.
+        //
+        // null 은 "화면이 안 보냈다" 이고 생략하지 않는다 — askedQuestion·misconceptionType 과
+        // 같은 규약이다(없음과 미기재를 가른다, 이슈 #136). append-only 라 지금부터 쌓이는
+        // 것만 남고, 이 필드가 생기기 전 항목은 영원히 null 이다.
+        payload.put("inputMeta", inputMeta);
         store.append(streamOf(sessionId), payload);
     }
 

@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -61,10 +62,10 @@ class ReportServiceTest {
 
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
-        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
-        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(1));
+        recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
+        recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(90));
         recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));
         em.flush();
         em.clear();
@@ -118,7 +119,7 @@ class ReportServiceTest {
         @DisplayName("❗리포트가 판정을 만든 입력도 낸다 — 기록에만 있으면 스트림을 열어야 한다 (이슈 #280 ②)")
         void gateHistoryCarriesTheJudgementInputs() {
             seedSession();
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 2, 3),
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-00", "테스트 문면")), 2, 3),
                     T0.plusSeconds(120));
             em.flush();
             em.clear();
@@ -212,10 +213,10 @@ class ReportServiceTest {
             String hashHere = reports.contentHash(reports.render(SID));
 
             // 같은 내용을 다른 세션에 쌓으면 체인 위치는 다르지만 내용은 같다.
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
-            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
-            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(90));
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(1));
+            recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
+            recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(90));
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));
             em.flush();
             em.clear();
@@ -233,7 +234,7 @@ class ReportServiceTest {
             seedSession();
             String before = reports.contentHash(reports.render(SID));
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(150));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(150));
             em.flush();
             em.clear();
 
@@ -271,7 +272,7 @@ class ReportServiceTest {
             ReportService.Report first = reports.issue(SID, T0.plusSeconds(200));
             em.flush();
 
-            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(250));
+            recorder.appendJudgment(SID, judgment("ELS-C", Grade.U2, "0.6"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(250));
             em.flush();
             em.clear();
 
@@ -311,9 +312,9 @@ class ReportServiceTest {
         @Test
         @DisplayName("❗판정마다 그때 물은 질문이 따로 남는다 — 세션 테이블은 마지막 것만 갖는다")
         void eachJudgmentKeepsItsOwnQuestion() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "첫 질문", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "첫 질문", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1,
-                    "다시 여쭙는 질문", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
+                    "다시 여쭙는 질문", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
             em.flush();
             em.clear();
 
@@ -329,7 +330,7 @@ class ReportServiceTest {
         @DisplayName("❗confidence 옆에 그 정의(promptVersion)가 같이 온다")
         void confidenceCarriesItsDefinition() {
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.65", "F-SCR-001_v2"),
-                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             em.flush();
             em.clear();
 
@@ -346,9 +347,9 @@ class ReportServiceTest {
         @DisplayName("❗고객이 못 본 문면은 SERVER_FALLBACK 으로 구별된다 — 문면은 똑같이 생겼다")
         void questionSourceSeparatesFallbackFromDisplayed() {
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0,
-                    "같은 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    "같은 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 1,
-                    "같은 문면", EvidenceRecorder.QuestionSource.SERVER_FALLBACK, T0.plusSeconds(60));
+                    "같은 문면", EvidenceRecorder.QuestionSource.SERVER_FALLBACK, null, T0.plusSeconds(60));
             em.flush();
             em.clear();
 
@@ -367,7 +368,7 @@ class ReportServiceTest {
         @DisplayName("❗출처가 바뀌면 contentHash 가 바뀐다")
         void questionSourceIsPartOfTheHashedContent() {
             recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0,
-                    "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             em.flush();
             em.clear();
 
@@ -386,7 +387,7 @@ class ReportServiceTest {
         @Test
         @DisplayName("❗질문이 바뀌면 contentHash 가 바뀐다 — 안 그러면 대조로 못 잡는다")
         void questionIsPartOfTheHashedContent() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, "물은 질문 A", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             em.flush();
             em.clear();
 
@@ -411,7 +412,7 @@ class ReportServiceTest {
         @Test
         @DisplayName("null 을 생략하지 않는다 — 없음과 미기재를 가른다")
         void nullsAreWrittenNotOmitted() {
-            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, null, EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.9"), 0, null, EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             em.flush();
             em.clear();
 
@@ -441,7 +442,7 @@ class ReportServiceTest {
                             new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",
                                     "끼워팔기 인지 실패"),
                             "판매자 발화 인용", "M08-TYING"),
-                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             em.flush();
             em.clear();
             return reports.render(SID);
@@ -529,7 +530,7 @@ class ReportServiceTest {
 
             // 교부 뒤에 재검증이 한 번 더 있었다. 스트림은 append-only 라 이게 그대로 쌓인다.
             recorder.appendJudgment(SID, judgment("ELS-C", Grade.U4, "0.99"), 0, "나중 질문",
-                    EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(200));
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(200));
             em.flush();
             em.clear();
 

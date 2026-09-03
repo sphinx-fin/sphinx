@@ -55,10 +55,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
-  GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem,
+  GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem, RuleRef,
   SessionResponse, Signal, SuitabilityStatus,
 } from "../api/types";
 import { stashReExplanation } from "../lib/reexplain";
+import ErrorNote from "../components/ErrorNote";
+import { describeError, type ShownError } from "../lib/errorText";
 import "./S05_Judgment.css";
 
 /** 등급 라벨. 명세서 0.5 의 4단계 — 색이 아니라 말로 읽힌다. */
@@ -92,7 +94,7 @@ const SIGNAL_DESC: Record<Signal, string> = {
  */
 interface GateView {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /** 감사 기준점으로 기록됐는가. **응답이 알려준다**(설계 판단 ⑥). */
   settled: boolean;
   /** 미리보기일 때만 값이 있다. `/judge` 응답에는 이 필드가 없으므로 확정 뒤에는 null. */
@@ -137,7 +139,7 @@ export default function S05Judgment() {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ShownError | null>(null);
   /** 재설명을 요청 중인 항목. 버튼 하나만 도는 것이 보여야 한다. */
   const [reExplaining, setReExplaining] = useState<string | null>(null);
   const [reNotes, setReNotes] = useState<ReExplainNote[]>([]);
@@ -164,7 +166,7 @@ export default function S05Judgment() {
       setGate(previewView(g));
       setError(null);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
     } finally {
       setLoading(false);
     }
@@ -182,7 +184,7 @@ export default function S05Judgment() {
       setConfirming(false);
       setError(null);
     } catch (e) {
-      setError(describe(e));
+      setError(describeError(e));
       setConfirming(false);
     } finally {
       setBusy(false);
@@ -239,7 +241,7 @@ export default function S05Judgment() {
         </p>
       </header>
 
-      {error && <p className="s05__error" role="alert">{error}</p>}
+      {error && <ErrorNote error={error} className="s05__error" />}
 
       {/* ── 세션 신호등. 이 화면에서 신호등 3색을 쓰는 유일한 자리다(설계 판단 ②) ── */}
       {gate && (
@@ -298,7 +300,15 @@ export default function S05Judgment() {
         <section className="s05__trace">
           <h2>발화한 룰</h2>
           <ul>
-            {gate.ruleTrace.map((r) => <li key={r}><code>{r}</code></li>)}
+            {/* ID 와 문면을 같이 그린다 — ID 만 그리면 "R-00" 이 근거가 되고(이슈 #320),
+                문면만 그리면 감사·심사가 근거로 삼는 룰 ID 가 화면에서 사라진다.
+                ❗문면에 임계값을 덧붙이지 않는다 — 서버가 조건을 안 말하기로 한 규약이
+                화면에서 깨진다(7-4 역이용 방지). */}
+            {gate.ruleTrace.map((r) => (
+              <li key={r.id}>
+                <code>{r.id}</code> {r.label}
+              </li>
+            ))}
           </ul>
           <p className="s05__trace-note">
             이 신호를 만든 룰입니다. 판정 근거로 기록에 남습니다.
@@ -438,11 +448,6 @@ export default function S05Judgment() {
   );
 }
 
-/** 봉투에서 풀린 에러를 사람이 읽는 문장으로. 코드까지 보이면 판매자가 옮겨 적을 수 있다. */
-function describe(e: unknown): string {
-  if (e instanceof ApiRequestError) return `${e.message} (${e.code})`;
-  return "판정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
-}
 
 /**
  * 재설명 거절을 항목 옆 문장으로.
@@ -476,7 +481,8 @@ function noteFor(itemId: string, e: unknown): ReExplainNote {
         text: "지금 상태에서는 재설명을 시작할 수 없습니다. 화면을 새로고침해 주세요.",
       };
     }
-    return { itemId, kind: "failed", text: `재설명을 시작하지 못했습니다 — ${e.message}` };
+    // 서버 원문을 그대로 붙이지 않는다 — 이 자리도 판매자가 보는 화면이다(#316).
+    return { itemId, kind: "failed", text: `재설명을 시작하지 못했습니다. ${describeError(e).text}` };
   }
   return { itemId, kind: "failed", text: "재설명을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요." };
 }

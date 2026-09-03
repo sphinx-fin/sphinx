@@ -15,6 +15,12 @@
  * 떨어진다(계약 주석이 직접 경고하는 지점). 서버 쪽은 `ErrorCodeContractTest` 가 핸들러와
  * enum 의 일치를 강제하지만, 이 유니온은 사람이 맞춰야 한다.
  *
+ * ❗**이 유니온이 실제로 세 개 뒤처져 있었다**(이슈 #316 · 9/3 실측). 핸들러 13종 ·
+ * `openapi.yaml` 13종인데 여기만 10종이었고, 빠진 것이 `UNAUTHORIZED`·`FORBIDDEN`·
+ * `MEASUREMENT_INVALID` 였다. `FORBIDDEN` 이 특히 나쁘다 — **기획서 7-4 역할 차단 시연이
+ * 내는 코드**라, 데모에서 보여줄 것을 화면이 타입으로 모르고 있었다. `MEASUREMENT_INVALID`
+ * 는 `#286`·`#293` 으로 막 들어온 새것이다. 사람이 맞추는 목록은 이렇게 갈린다.
+ *
  * 400 두 개를 코드로 가른 이유(결정 1.4): 화면 처리가 다르다 —
  * `REEXPLAIN_NOT_ELIGIBLE` 은 조용히 다음 항목으로, `REVERIFY_EXHAUSTED` 는 "판정으로
  * 넘어간다"를 고객에게 알려야 한다. 문면 파싱으로 가르면 서버 문구가 바뀔 때 조용히 깨진다.
@@ -27,6 +33,9 @@ export type ErrorCode =
   | "VALIDATION_ERROR"          // 400 @Valid 실패
   | "MALFORMED_REQUEST"         // 400 본문 파싱 실패(잘못된 JSON·허용되지 않은 enum)
   | "ILLEGAL_STATE_TRANSITION"  // 409 허용되지 않은 세션 상태 전이
+  | "UNAUTHORIZED"              // 401 인증되지 않은 요청 — 로그인하면 해소된다
+  | "FORBIDDEN"                 // 403 권한 없음(F-CMN-002) — 로그인해도 해소되지 않는다
+  | "MEASUREMENT_INVALID"       // 502 모델 측정값이 검증 실패(지어낸 인용·루브릭 밖 조항·신뢰도 이탈)
   | "REEXPLAIN_NOT_ELIGIBLE"    // 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
   | "REVERIFY_EXHAUSTED"        // 400 재검증 상한 도달 — 판정으로 진행
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
@@ -165,12 +174,29 @@ export interface Judgment {
 }
 
 /**
+ * 발화한 게이트 룰 하나 — ID 와 **사람이 읽는 문면** (이슈 #320).
+ *
+ * `label` 은 서버의 `gate_rules.yaml` 이 들고 있다. **web 에 ID→문면 표를 두지 않는다** —
+ * 표가 두 벌이 되고 여기엔 테스트 러너가 없어서(결정 10.59) 갈려도 아무것도 안 말한다.
+ * `ErrorCode` 유니온이 실제로 그렇게 셋 갈렸다(이슈 #316).
+ *
+ * `id` 를 같이 그리는 이유는 감사·심사에서 **룰 ID 자체가 근거**이기 때문이다.
+ *
+ * ❗`label` 은 **결과만 말하고 조건은 말하지 않는다**(7-4 역이용 방지). 화면이 그 문면에
+ * 임계값을 덧붙이면 그 규약이 화면 쪽에서 깨진다.
+ */
+export interface RuleRef {
+  id: string;
+  label: string;
+}
+
+/**
  * 게이트 **확정** 판정 (`POST /sessions/{id}/judge`).
- * `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다.
+ * `ruleTrace`는 발화한 룰 — 감사 대상이므로 화면에도 노출한다.
  */
 export interface GateResult {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /**
    * 판정 시점의 **미측정 항목 수** — 질문은 보냈는데 판정이 안 돌아온 항목.
    * 1 이상이면 `R-00` 이 RED 를 낸다.
@@ -235,7 +261,7 @@ export type SuitabilityStatus = "NOT_EVALUATED" | "NO_MISMATCH" | "MISMATCH" | "
  */
 export interface GatePreview {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /**
    * 감사 기준점으로 기록된 값인가. false 면 아직 확정이 아니다.
    *

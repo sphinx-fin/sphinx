@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.session;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.OverrideStatus;
@@ -159,7 +160,7 @@ class OverrideServiceTest {
     /** 지정 신호로 판정 기록된 세션을 저장한다. */
     private Session save(Signal signal) {
         Session s = Session.create(cmd());
-        s.recordGate(new GateResult(signal, List.of("R-01"), 0, 3), Instant.now());
+        s.recordGate(new GateResult(signal, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), Instant.now());
         return repository.save(s);
     }
 
@@ -176,7 +177,7 @@ class OverrideServiceTest {
         public void appendJudgment(String sessionId, com.sphinxfin.sphinx.domain.Judgment judgment,
                                    int reverifyCount,
                                    String askedQuestion, QuestionSource questionSource,
-                                   Instant at) { }
+                                   com.sphinxfin.sphinx.domain.InputMeta inputMeta, Instant at) { }
 
         @Override
         public void appendMismatch(String sessionId,

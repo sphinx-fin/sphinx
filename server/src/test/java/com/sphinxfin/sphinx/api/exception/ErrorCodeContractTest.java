@@ -34,11 +34,30 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>세 번 같은 방식으로 낡았으면 <b>사람이 기억하는 방식이 안 되는 것</b>이다. 이 파일이 이미
  * 소스와 yaml을 정규식으로 읽으므로 파일 하나 더 읽는 비용은 작다.
  *
+ * <h2>❗네 번째 사본 — web 유니온 (이슈 #316)</h2>
+ *
+ * <p>위 문단이 <i>"프론트가 이 목록을 유니온 타입으로 들고 있어 어긋나면 조용히 default로
+ * 떨어진다"</i> 를 이 테스트의 <b>존재 이유</b>로 적어 놓고, 정작 그 유니온은 안 봤다.
+ * 그래서 <b>같은 방식으로 네 번째로 낡았다</b>.
+ *
+ * <pre>
+ * 핸들러 13 · openapi 13 · CLAUDE.md 13 · web 10
+ *   빠진 것: UNAUTHORIZED · FORBIDDEN · MEASUREMENT_INVALID
+ * </pre>
+ *
+ * <p>{@code FORBIDDEN} 이 특히 나쁘다 — <b>기획서 7-4 역할 차단 시연이 내는 코드</b>인데
+ * 화면이 타입으로 모르고 있었다. {@code MEASUREMENT_INVALID} 는 {@code #293} 으로 하루 전에
+ * 들어온 새것이라, <b>코드를 더한 사람이 그 사본을 모른 채 지나간다</b>는 것을 그대로 보여준다.
+ *
+ * <p>위 문단이 <i>"세 번 같은 방식으로 낡았으면 사람이 기억하는 방식이 안 되는 것"</i> 이라고
+ * 적었는데, 그 판단이 네 번째 사본에도 그대로 적용된다. {@code web/} 에는 테스트 러너가
+ * 없으므로({@code 결정 10.59}) 여기서 본다.
+ *
  * <p><b>상태 코드까지 본다.</b> CLAUDE.md는 {@code `CODE`(404)}로, openapi는
  * {@code - CODE  # 404}로 각각 상태를 적어둔다. 코드 이름만 맞고 상태가 어긋난 문서는
  * <b>빠진 항목보다 나쁘다</b> — 없는 것은 찾아보게 되는데 틀린 것은 그대로 믿는다.
  */
-@DisplayName("에러 코드 계약 — 핸들러 ≡ openapi.yaml ≡ CLAUDE.md")
+@DisplayName("에러 코드 계약 — 핸들러 ≡ openapi.yaml ≡ CLAUDE.md ≡ web 유니온")
 class ErrorCodeContractTest {
 
     private static final Path REPO_ROOT = Path.of("..");   // server/ 에서 실행된다
@@ -46,6 +65,10 @@ class ErrorCodeContractTest {
 
     /** CLAUDE.md의 {@code `CODE`(404)} 형식 — 코드와 상태를 함께 읽는다. */
     private static final Pattern CLAUDE_MD_ENTRY = Pattern.compile("`([A-Z_]+)`\\((\\d{3})\\)");
+
+    /** web 유니온의 {@code | "CODE"  // 404 설명} 형식 — 코드와 상태를 함께 읽는다. */
+    private static final Pattern WEB_UNION_ENTRY =
+            Pattern.compile("\\|\\s*\"([A-Z_]+)\"\\s*(?://\\s*(\\d{3}))?");
 
     /** openapi enum의 {@code - CODE  # 404 설명} 형식. */
     private static final Pattern CONTRACT_ENTRY =
@@ -83,6 +106,53 @@ class ErrorCodeContractTest {
                 .as("CLAUDE.md가 적은 상태 코드가 계약과 다르다. 없는 항목은 찾아보게 되는데 "
                         + "틀린 항목은 그대로 믿는다")
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗web ErrorCode 유니온이 openapi enum과 같다 — 프론트가 분기하는 목록이다")
+    void webUnionMatchesContract() throws Exception {
+        assertThat(webUnion().keySet())
+                .as("화면이 모르는 코드가 오면 조용히 default 문면으로 떨어진다. 코드를 "
+                        + "더했으면 web/src/api/types.ts 의 ErrorCode 에도 넣는다 — "
+                        + "그 파일이 없으면 %s 처럼 데모에서 보여줄 것을 화면이 모른다", "FORBIDDEN")
+                .isEqualTo(contractStatuses().keySet());
+    }
+
+    @Test
+    @DisplayName("❗web 유니온이 적은 상태 코드가 openapi 주석과 같다")
+    void webUnionStatusesMatchContract() throws Exception {
+        Map<String, String> contract = contractStatuses();
+        Map<String, String> mismatched = new TreeMap<>();
+        webUnion().forEach((code, status) -> {
+            String expected = contract.get(code);
+            if (expected != null && !status.isEmpty() && !expected.equals(status)) {
+                mismatched.put(code, status + " != " + expected);
+            }
+        });
+        assertThat(mismatched)
+                .as("web 유니온 주석의 상태가 계약과 다르다 — 화면이 그 숫자로 분기를 짜면 "
+                        + "타입은 통과하고 동작만 어긋난다")
+                .isEmpty();
+    }
+
+    /** web ErrorCode 유니온의 코드 → 주석에 적힌 상태(없으면 빈 문자열). */
+    private Map<String, String> webUnion() {
+        String src = read("web/src/api/types.ts");
+        int from = src.indexOf("export type ErrorCode");
+        assertThat(from)
+                .as("web/src/api/types.ts 에서 ErrorCode 유니온을 못 찾았다 — 타입 이름이 "
+                        + "바뀌었으면 이 대조도 같이 고친다. 안 고치면 조용히 통과한다")
+                .isNotNegative();
+        String union = src.substring(from, src.indexOf(';', from));
+
+        Map<String, String> out = new TreeMap<>();
+        Matcher m = WEB_UNION_ENTRY.matcher(union);
+        while (m.find()) {
+            out.put(m.group(1), m.group(2) == null ? "" : m.group(2));
+        }
+        assertThat(out).as("유니온에서 코드를 하나도 못 읽었다면 이 테스트의 정규식이 낡은 것이다")
+                .isNotEmpty();
+        return out;
     }
 
     /** CLAUDE.md api/ 절의 코드 → 상태. */

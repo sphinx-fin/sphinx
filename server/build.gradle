@@ -78,6 +78,12 @@ tasks.named('test') {
             .withPropertyName('claudeMd')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // web/src/api/types.ts 의 ErrorCode 유니온이 계약의 **네 번째 사본**이다.
+    // ErrorCodeContractTest 가 대조하는데, 안 걸면 그 파일만 고친 PR 에서 안 돈다 (이슈 #316).
+    inputs.file('../web/src/api/types.ts')
+            .withPropertyName('webErrorCodeUnion')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // docs/functional-spec-v1.1.md 의 강제 지점 색인이 실재하는 룰을 가리키는지
     // SpecEnforcementIndexTest 가 대조한다. 안 걸면 **그 문서만 고친 PR 에서 UP-TO-DATE 로
     // 안 돈다** — survey.ts 때 실제로 밟은 함정이다(#186 · 결정 9.26).

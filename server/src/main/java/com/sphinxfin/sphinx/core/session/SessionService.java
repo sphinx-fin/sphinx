@@ -3,10 +3,12 @@ package com.sphinxfin.sphinx.core.session;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -119,6 +121,24 @@ public class SessionService {
     public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer,
                                    String askedQuestion,
                                    EvidenceRecorder.QuestionSource questionSource) {
+        return recordJudgment(sessionId, judgment, maskedAnswer, askedQuestion, questionSource, null);
+    }
+
+    /**
+     * F-INT-003 입력 메타데이터를 같이 기록한다 (이슈 #325).
+     *
+     * <p>지금까지 {@code AnswerRequest} 가 받아서 <b>버렸다</b> — 화면은 매 답변마다 실어
+     * 보내는데 서버 쪽 참조가 DTO 선언 두 줄뿐이었다. {@code evidence/} 는 append-only 라
+     * 늦을수록 복구가 안 된다.
+     *
+     * <p>❗<b>게이트에 안 물린다.</b> 측정이지 판정이 아니다(P1) — 기록에 남기고 집계에서
+     * 본다. 그리고 판매자 화면에 안 나간다({@link com.sphinxfin.sphinx.domain.InputMeta}).
+     */
+    @Transactional
+    public Judgment recordJudgment(String sessionId, Judgment judgment, String maskedAnswer,
+                                   String askedQuestion,
+                                   EvidenceRecorder.QuestionSource questionSource,
+                                   InputMeta inputMeta) {
         Session session = get(sessionId);
         if (maskedAnswer != null) {
             session.recordUtterance(judgment.itemId(), maskedAnswer);
@@ -145,7 +165,7 @@ public class SessionService {
         // 대한 답을 잰 것인가" 에 답할 수 없다 (#136).
         evidenceRecorder.appendJudgment(
                 sessionId, judgment, session.reverifyCount(judgment.itemId()),
-                askedQuestion, questionSource, Instant.now());
+                askedQuestion, questionSource, inputMeta, Instant.now());
         publishIfUnfairSales(sessionId, judgment);
         return judgment;
     }
@@ -414,7 +434,7 @@ public class SessionService {
      * <p>신호를 바꾸지 않고 그 사실을 드러낸다. {@code NOT_EVALUATED} 면 화면은
      * "적합성 미확인" 을 함께 보여야 하고, 이 GREEN 을 최종 통과로 그리면 안 된다.
      */
-    public record GatePreview(Signal signal, List<String> ruleTrace,
+    public record GatePreview(Signal signal, List<RuleRef> ruleTrace,
                               boolean recorded, Instant judgedAt,
                               SuitabilityStatus suitabilityStatus) {}
 }
