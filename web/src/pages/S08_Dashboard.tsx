@@ -63,8 +63,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
 import type {
-  HeatmapCell, HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse,
-  ProductSummary, RiskItem,
+  ContrastResponse, ContrastRow, GradeDistribution, HeatmapCell, HeatmapResponse,
+  IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse, ProductSummary, RiskItem,
 } from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
@@ -80,6 +80,41 @@ import "./S08_Dashboard.css";
  * 범례 눈금도 **같은 상한**을 쓴다. 다르면 눈금이 거짓말을 한다.
  */
 const INK_MAX = 60;
+
+/**
+ * 「설명 자료 개선 대상」 표시의 **개수 상한** (이슈 #321 의 5번).
+ *
+ * ❗이것은 *"몇 개까지가 나쁜 항목인가"* 가 아니라 *"한 번에 몇 개를 먼저 보게 할 것인가"*
+ * 다. 잘린 항목도 목록에 그대로 남고 오해율이 옆에 적혀 있으므로 이 상한은 아무것도 감추지
+ * 않는다. 값은 화면 문면에 그대로 적힌다 — 안 적으면 조용한 정책이 된다.
+ *
+ * 전체 평균 초과만으로 고르면 실측에서 **15개 중 8개**에 표시가 붙었다(alpha, 필터 없음).
+ * 절반에 붙는 표시는 우선순위가 아니라 순위를 한 번 더 적은 것이다.
+ */
+const FOCUS_MAX = 3;
+
+/**
+ * 취약 대비 두 줄의 라벨 (이슈 #321 의 1번).
+ *
+ * **"비취약" 이라고 쓰지 않는다.** 취약의 반대말을 만들면 그쪽이 하나의 집단처럼 읽히는데,
+ * 실제로는 *"임계값을 넘지 않은 나머지"* 일 뿐이다 — 판정이 아니라 잔여다.
+ */
+const BAND_LABEL: Record<ContrastRow["band"], string> = {
+  vulnerable: "취약 고객",
+  other: "그 외",
+};
+
+/**
+ * 등급 라벨과 그리는 순서. **U1 → U4** 로 고정한다 — 왼쪽이 "이해", 오른쪽으로 갈수록
+ * 나쁜 쪽이라 막대의 방향 자체가 뜻을 갖는다. 잉크 농도도 그 순서로 짙어진다.
+ */
+const GRADE_ORDER: readonly (keyof GradeDistribution)[] = ["u1", "u2", "u3", "u4"];
+const GRADE_LABEL: Record<keyof GradeDistribution, string> = {
+  u1: "이해",
+  u2: "부분이해",
+  u3: "미이해",
+  u4: "오해",
+};
 
 const SCOPE_LABEL: Record<HeatmapResponse["scope"], string> = {
   branch: "자기 지점",
@@ -100,6 +135,19 @@ export default function S08Dashboard() {
   const [view, setView] = useState<View>("heatmap");
   const [data, setData] = useState<HeatmapResponse | null>(null);
   const [indicator, setIndicator] = useState<LeadingIndicatorResponse | null>(null);
+  /**
+   * 취약 고객 대비 (이슈 #321 의 1번).
+   *
+   * 히트맵과 **같은 권한·같은 필터**라 같은 시점에 같이 받는다. 따로 받으면 필터가 한
+   * 요청에만 걸리는 순간 두 패널이 다른 모집단을 그리는데, 화면에는 아무 표시도 안 난다.
+   *
+   * `null` 은 "아직 못 받았다" 이고 `rows` 가 빈 것과 다르다 — 서버는 표본이 0 이어도
+   * 두 줄을 낸다(계약 `minItems: 2`). 그래서 이 값이 `null` 이면 데이터가 없는 것이
+   * 아니라 **요청이 실패한 것**이고, 화면도 그렇게 말한다.
+   */
+  const [contrast, setContrast] = useState<ContrastResponse | null>(null);
+  /** 대비만 실패했는가. 히트맵이 떴는데 이것만 없으면 침묵하지 않고 그 자리에 적는다. */
+  const [contrastFailed, setContrastFailed] = useState(false);
   /** 집계 축. 계약 기본값과 같은 `branch` 로 연다 — 화면이 서버와 다른 기본을 갖지 않는다. */
   const [axis, setAxis] = useState<IndicatorAxis>("branch");
   const [product, setProduct] = useState("");
@@ -166,7 +214,19 @@ export default function S08Dashboard() {
         if (ageBand) qs.set("ageBand", ageBand);
         if (channel) qs.set("channel", channel);
         const q = qs.toString();
-        setData(await get<HeatmapResponse>(`/dashboard/heatmap${q ? `?${q}` : ""}`));
+        const suffix = q ? `?${q}` : "";
+        /* 대비는 **따로 실패시킨다.** 히트맵이 이 화면의 본체라 그쪽 실패만 에러·차단으로
+           올린다 — `Promise.all` 로 묶으면 대비 하나가 죽을 때 히트맵까지 안 그려진다.
+           대신 조용히 사라지게 두지도 않는다(`contrastFailed`). 권한이 같은 엔드포인트라
+           히트맵이 떴는데 이쪽만 죽는 것은 정상 상태가 아니고, 그 사실이 보여야 한다. */
+        const [heat, cont] = await Promise.all([
+          get<HeatmapResponse>(`/dashboard/heatmap${suffix}`),
+          get<ContrastResponse>(`/dashboard/vulnerability-contrast${suffix}`)
+            .then((r) => r, () => null),
+        ]);
+        setData(heat);
+        setContrast(cont);
+        setContrastFailed(cont === null);
       } else {
         // `periods` 는 보내지 않는다 — 계약이 기본 8주를 갖고 있고, 화면이 같은 숫자를
         // 다시 들면 두 벌이 된다. 바꿀 일이 생기면 계약이 먼저 바뀐다.
@@ -180,6 +240,10 @@ export default function S08Dashboard() {
         setBlocked(true);
         setData(null);
         setIndicator(null);
+        /* 차단은 대비에도 똑같이 걸린다(권한이 같은 action 이다). 남겨 두면 차단 화면
+           뒤에 직전 수치가 살아 있다가 뷰를 되돌릴 때 튀어나온다. */
+        setContrast(null);
+        setContrastFailed(false);
       } else {
         setError(describe(e));
       }
@@ -241,9 +305,36 @@ export default function S08Dashboard() {
       cur.mis += (c.misrate ?? 0) * c.n;
       byItem.set(c.item, cur);
     }
-    const ranked = [...byItem.entries()]
+    /* ── 다음 행동 (이슈 #321 의 5번) ──────────────────────────────────────
+     * 순위만 있으면 화면이 *"그래서 뭘 하라는 건가"* 에 답하지 않는다. 상위 항목을
+     * **설명 자료 개선 대상**으로 따로 뽑아 순위를 보고서에서 도구로 바꾼다.
+     *
+     * 조건이 둘이고, **둘 다 순위 밑에 문면으로 적는다** — 적지 않으면 그게 아무도
+     * 합의하지 않은 조용한 정책이 된다.
+     *
+     * ① **전체 오해율(표본 가중 평균)을 넘을 것.** 이 화면이 이미 크게 적고 있는 수치라
+     *    근거가 화면 안에 있고, 데이터가 바뀌면 선도 같이 움직인다. 이 조건이 있어서
+     *    **전부 낮으면 아무것도 표시되지 않는다** — 목록이 없는 급함을 지어내지 않는다.
+     * ② **그중 상위 `FOCUS_MAX` 개까지.** ①만 쓰면 평균 초과가 곧 절반이라 실측에서
+     *    15개 중 8개에 표시가 붙었다(alpha, 필터 없음). 절반에 붙는 표시는 우선순위가
+     *    아니라 순위를 한 번 더 적은 것이고, *"먼저 무엇을 고치나"* 에 답하지 못한다.
+     *
+     * 표본 하한은 따로 안 둔다 — **이미 걸려 있다.** `shown` 이 마스킹된 칸을 뺐고
+     * 서버가 n<30 을 마스킹하므로, 여기 올라온 항목은 전부 30건 이상을 근거로 한다.
+     * 여기서 상수를 또 쓰면 마스킹 임계값이 web 에 두 벌이 된다.
+     *
+     * ❗**사람을 가리키지 않는다.** 축이 이해항목이라 이 표시가 가리키는 것은 *"이 항목의
+     * 설명 자료"* 이지 *"이 항목을 많이 놓치는 창구"* 가 아니다. 후자는 기획 7-4(역이용
+     * 방지)와 정면으로 부딪친다 — 판매자 축에는 이 표시를 절대 붙이지 않는다. */
+    const sorted = [...byItem.entries()]
       .map(([item, v]) => ({ item, n: v.n, rate: v.mis / v.n }))
       .sort((a, b) => b.rate - a.rate);
+    const focused = new Set(
+      weighted == null
+        ? []
+        : sorted.filter((r) => r.rate > weighted).slice(0, FOCUS_MAX).map((r) => r.item),
+    );
+    const ranked = sorted.map((r) => ({ ...r, focus: focused.has(r.item) }));
 
     return {
       products: ps, items: its, byKey: map,
@@ -467,8 +558,14 @@ export default function S08Dashboard() {
           <h2 className="s08__panel-title">항목별 오해율</h2>
           <ol className="s08__rank-list">
             {ranked.map((r) => (
-              <li key={r.item} className="s08__rank-row">
-                <span className="s08__rank-name">{itemNames[r.item] ?? r.item}</span>
+              <li key={r.item} className={`s08__rank-row${r.focus ? " s08__rank-row--focus" : ""}`}>
+                <span className="s08__rank-name">
+                  {itemNames[r.item] ?? r.item}
+                  {/* 표식은 색이 아니라 **말**이다. 이 화면에서 3색은 판정 전용이고
+                      (tokens.css 규칙 1) 이건 판정이 아니라 우선순위다 — 색을 쓰면
+                      집계가 게이트 신호처럼 읽힌다. */}
+                  {r.focus && <span className="s08__rank-flag">설명 자료 개선 대상</span>}
+                </span>
                 <span className="s08__rank-track">
                   <span className="s08__rank-bar" style={{ width: `${Math.max(r.rate * 100, 1)}%` }} />
                 </span>
@@ -477,6 +574,49 @@ export default function S08Dashboard() {
               </li>
             ))}
           </ol>
+          {/* 기준선을 문면이 그대로 적는다 — 적지 않으면 그게 조용한 정책이 된다.
+              선이 없는 경우(전부 가려짐)는 표식도 없으므로 이 문장도 안 낸다. */}
+          {stats.weighted != null && (
+            <p className="s08__panel-note">
+              전체 오해율(<b>{Math.round(stats.weighted * 100)}%</b>)을 넘는 항목 중
+              <b> 상위 {FOCUS_MAX}개</b>를 <b>설명 자료 개선 대상</b>으로 표시했습니다.
+              기준은 이 화면의 오해율 그대로라 데이터가 바뀌면 같이 움직이고, 개수 상한은
+              <b> 먼저 볼 것을 좁히려는 것</b>이지 나머지가 괜찮다는 뜻이 아닙니다 — 표시가
+              없는 항목도 오해율은 옆에 그대로 적혀 있습니다. <b>가려진 칸은 순위에
+              들어가지 않습니다</b> — 여기 있는 항목은 모두 표본 30건 이상을 근거로 합니다.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* ── 취약 고객 대비 (이슈 #321 의 1번) ─────────────────────────────────
+          연령대는 지금까지 **필터**였다. 70·80대만 걸러 볼 수는 있었는데 *"나머지보다
+          얼마나 높은가"* 가 안 보였고, 그래서 `vulnerability_weights.yaml` 이 왜 가중을
+          매기는지가 화면에서 증명되지 않았다. 두 줄을 나란히 놓는 것이 그 증명이다. */}
+      {(contrast || contrastFailed) && (
+        <section className="s08__contrast" aria-label="취약 고객 대비">
+          <h2 className="s08__panel-title">취약 고객 대비</h2>
+          {contrast ? (<>
+            <div className="s08__contrast-rows">
+              {contrast.rows.map((row) => (
+                <ContrastBand key={row.band} row={row} />
+              ))}
+            </div>
+            <ContrastGap rows={contrast.rows} />
+            <p className="s08__panel-note">
+              취약 여부는 <b>서버가 정합니다</b> — 연령대만이 아니라 가입금액대·투자경험·
+              채널까지 네 요인의 합입니다(<code>vulnerability_weights.yaml</code>). 같은
+              연령대 안에서도 두 줄이 갈립니다. 위 필터는 <b>두 줄에 똑같이</b> 걸리고,
+              표본 30건 미만인 줄은 히트맵 칸과 같은 규칙으로 가려집니다.
+            </p>
+          </>) : (
+            /* 조용히 사라지게 두지 않는다 — 히트맵과 권한이 같은 엔드포인트라 여기만
+               죽는 것은 정상 상태가 아니다. 빈 자리는 "데이터가 없다" 로 읽힌다. */
+            <p className="s08__contrast-fail">
+              대비 수치를 불러오지 못했습니다. 오해 지도는 정상이므로 이 칸만 다시 받으면
+              됩니다 — 필터를 바꾸면 다시 시도합니다.
+            </p>
+          )}
         </section>
       )}
 
@@ -777,6 +917,110 @@ function Kpi({ label, value, sub, tip, tipId, show, hide }: {
       <p className="s08__kpi-value">{value}</p>
       <p className="s08__kpi-sub">{sub}</p>
     </article>
+  );
+}
+
+/**
+ * 취약 대비의 한 줄 (이슈 #321 의 1번).
+ *
+ * 오해율 하나만 그리면 이 패널은 히트맵이 이미 하는 말을 반복한다. 그래서 **등급 분포를
+ * 같이 그린다** — `misrate` 는 U4 비율이라 *"나머지가 이해했다"* 를 말하지 못하는데
+ * (이슈 #177), 취약 대비는 정확히 *"이해했는가"* 를 묻는 자리다.
+ *
+ * ❗**가려진 줄도 자리를 지운다.** 표본이 30건 미만이면 값과 분포가 둘 다 없지만 줄은
+ * 남긴다 — 없애면 화면이 "대비" 를 못 그리고, 가려졌다는 사실 자체가 사라진다(히트맵
+ * 칸과 같은 규칙). 그래서 빈칸이 아니라 **"가려짐 · n=12"** 로 적극적으로 그린다.
+ */
+function ContrastBand({ row }: { row: ContrastRow }) {
+  const label = BAND_LABEL[row.band];
+  const pct = row.misrate == null ? null : Math.round(row.misrate * 100);
+  const grades = row.grades;
+  const total = grades ? GRADE_ORDER.reduce((a, g) => a + grades[g], 0) : 0;
+  /* 분포는 문장 하나로만 만든다 — 막대와 문면이 각자 숫자를 들면 한쪽만 고치는 날
+     보는 것과 읽히는 것이 갈린다. 여기서는 문면이 사실이고 막대는 그 그림이다. */
+  const breakdown = grades
+    ? GRADE_ORDER.map((g) => `${GRADE_LABEL[g]} ${grades[g].toLocaleString()}건`).join(" · ")
+    : null;
+
+  return (
+    <article className="s08__cband">
+      <p className="s08__cband-head">
+        <span className="s08__cband-label">{label}</span>
+        <span className="s08__cband-n">표본 {row.n.toLocaleString()}건</span>
+      </p>
+      {pct == null ? (
+        <>
+          <p className="s08__cband-value s08__cband-value--masked">가려짐</p>
+          <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다</p>
+        </>
+      ) : (<>
+        <p className="s08__cband-value">{pct}%</p>
+        {/* ❗오해율 막대를 따로 그리지 않는다. `misrate` 는 정의상 `u4 / n` 이라 아래
+            등급 막대의 **마지막 조각이 곧 그 값**이다 — 둘 다 그리면 같은 수치를 두 번
+            그리는 것이고, 보는 사람은 다른 두 가지로 읽는다. 두 줄의 막대 폭이 같아서
+            오해(U4) 조각끼리 바로 견줘지고, 그게 이 패널이 시키려는 비교다. */}
+        {grades && total > 0 && (<>
+          {/* 등급 막대. 색이 아니라 **한 가지 잉크의 농도**로 낸다 — 이 화면에서 3색은
+              판정 전용이고(tokens.css 규칙 1), 등급은 판정이 아니라 측정이다.
+              U1(옅음) → U4(짙음) 순서라 막대의 방향 자체가 뜻을 갖는다.
+
+              ❗**막대는 장식이고 사실은 아래 줄에 있다.** 그래서 `aria-hidden` 이고 포커스도
+              안 받는다. 처음에는 툴팁 + `.sr-only` 로 숫자를 숨겨 뒀는데, 그러면 ⓐ 마우스를
+              올려야만 읽히고 ⓑ 옅은 조각(U1)이 트랙과 1.34:1 이라 **막대만으로는 비율조차
+              안 읽힌다.** 숫자를 그냥 아래에 적으면 셋 다 없어진다 — 툴팁도, 두 벌 문면도,
+              스크롤 컨테이너 안 `.sr-only` 도(그게 #312 의 원인이었다). */}
+          <span className="s08__gbar" aria-hidden="true">
+            {GRADE_ORDER.map((g) => (
+              grades[g] === 0 ? null : (
+                <span
+                  key={g}
+                  className={`s08__gseg s08__gseg--${g}`}
+                  style={{ flexGrow: grades[g] }}
+                />
+              )
+            ))}
+          </span>
+          {/* 범례와 값이 한 줄이다. 범례 상자를 따로 두면 막대보다 범례가 커지고, 값을
+              툴팁에만 두면 **검산(u1+u2+u3+u4 = 표본)이 화면에서 안 된다** — 건수로 받는
+              이유가 그 검산인데(계약 `GradeDistribution`) 숨기면 받은 뜻이 없어진다. */}
+          <p className="s08__cband-sub">왼쪽부터 {breakdown}</p>
+        </>)}
+      </>)}
+    </article>
+  );
+}
+
+/**
+ * 두 줄의 차이 한 문장 (이슈 #321 의 1번).
+ *
+ * ❗**화면에 적힌 두 수의 차이로 낸다.** 원값(`misrate`)끼리 빼면 41% 와 41% 가 나란히
+ * 있는데 *"1%p 높습니다"* 가 붙는 일이 생긴다 — 보는 사람이 검산을 못 하고, 그 순간
+ * 이 패널의 두 수치가 의심받는다. 반올림한 값끼리 빼면 화면 안에서 산수가 맞는다.
+ *
+ * 한쪽이라도 가려지면 **차이를 말하지 않는다.** 없는 값으로 뺄셈을 하는 것보다,
+ * 왜 못 내는지 적는 편이 낫다 — 가려졌다는 사실이 이 화면에서는 증거다.
+ */
+function ContrastGap({ rows }: { rows: ContrastRow[] }) {
+  const v = rows.find((r) => r.band === "vulnerable");
+  const o = rows.find((r) => r.band === "other");
+  if (!v || !o) return null;
+
+  if (v.misrate == null || o.misrate == null) {
+    return (
+      <p className="s08__cgap s08__cgap--none">
+        한쪽 표본이 30건 미만이라 대비를 낼 수 없습니다.
+      </p>
+    );
+  }
+
+  const gap = Math.round(v.misrate * 100) - Math.round(o.misrate * 100);
+  if (gap === 0) {
+    return <p className="s08__cgap">두 줄의 오해율이 같습니다.</p>;
+  }
+  return (
+    <p className="s08__cgap">
+      취약 고객의 오해율이 <b>{Math.abs(gap)}%p</b> {gap > 0 ? "높습니다" : "낮습니다"}.
+    </p>
   );
 }
 
