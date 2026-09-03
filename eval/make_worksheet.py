@@ -155,7 +155,7 @@ def submit(name: str, src_dir: pathlib.Path, labels_dir: pathlib.Path) -> None:
 
     ## 왜 스크립트가 옮기나
 
-    ❗`labels/` 에는 **다른 라벨러의 파일**이 있다. 40건 2인 전수라 먼저 낸 사람의 파일이
+    ❗`labels/` 에는 **다른 라벨러의 파일**이 있다. 2인 전수라 먼저 낸 사람의 파일이
     거기 있고, 두 번째 사람이 손으로 `mv` 하면 그 디렉토리를 지난다 — 파일명만 봐도 누가
     냈는지 알고, 한 번 열면 등급이 다 보인다.
 
@@ -192,7 +192,7 @@ def submit(name: str, src_dir: pathlib.Path, labels_dir: pathlib.Path) -> None:
     if dup:
         problems.append(f"같은 (표본, 항목)이 두 번: {dup[:5]} — 어느 쪽이 판단인지 알 수 없다")
     if missing:
-        problems.append(f"안 붙인 항목 {len(missing)}건 — 전수여야 상한이 40건 모집단의 값이다")
+        problems.append(f"안 붙인 항목 {len(missing)}건 — 전수여야 상한이 표본 전체 모집단의 값이다")
     if problems:
         sys.exit("❗제출 안 함:\n  " + "\n  ".join(problems))
 

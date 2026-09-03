@@ -73,12 +73,17 @@ def main() -> int:
     # ── 이어받기 ──────────────────────────────────────────────────────────────
     # 이미 채점된 표본은 다시 부르지 않는다. 429 로 끊긴 회차를 이어서 채우는 것이
     # 목적이고, 덤으로 같은 표본을 두 번 채점해 값이 갈리는 일도 막는다.
-    done: dict[str, dict] = {}
+    #
+    # ❗키는 **(표본, 항목)** 이다. `sample_id` 만으로 잡으면 한 발화가 두 항목에 걸릴 때
+    # (guideline §1 — *"고객이 한 마디로 두 항목을 건드릴 수 있다"*) 두 번째 항목이
+    # **이미 채점된 것으로 보여 조용히 건너뛴다.** 이 블록이 막으려던 바로 그 상태
+    # ("일부만 채점된 model.jsonl 이 남는 것이 제일 나쁘다")가 다른 경로로 재현된다.
+    done: dict[tuple[str, str], dict] = {}
     if OUT.exists():
         for line in OUT.read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.startswith("#"):
                 r = json.loads(line)
-                done[r["sample_id"]] = r
+                done[(r["sample_id"], r["item_id"])] = r
     if done:
         print(f"이어받기: 이미 {len(done)}건이 채점돼 있다")
 
@@ -88,7 +93,7 @@ def main() -> int:
                for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
 
     for i, s in enumerate(samples, 1):
-        if s["sample_id"] in done:
+        if (s["sample_id"], s["item_id"]) in done:
             continue
         ctx = contexts.get(s["product_type"])
         item = (ctx or {}).get("risk_items", {}).get(s["item_id"])
