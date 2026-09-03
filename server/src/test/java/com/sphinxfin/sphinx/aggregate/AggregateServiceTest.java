@@ -7,6 +7,7 @@ import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.security.AccessPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -432,6 +433,25 @@ class AggregateServiceTest {
             assertThat(view.rows()).extracting(AggregateService.ContrastRow::band)
                     .containsExactly("vulnerable", "other");
             assertThat(row(view, "vulnerable").n()).isZero();
+        }
+
+        @Test
+        @DisplayName("❗적합성 모순 가산점이 산다 — false 로 뭉개면 이 세션이 반대편으로 간다")
+        void mismatchBonusCounts() {
+            // MOBILE(1) + 5천만원대(1) = 2 로 threshold(4) 아래다. 모순 가산점(+2)이 있어야
+            // 4 가 되어 취약으로 간다. coaching.score(session, false) 로 뭉개면 2 에 머물러
+            // other 로 떨어지고, 그러면 같은 세션이 코칭 경로와 집계 경로에서 다르게 분류된다.
+            Session session = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.MOBILE, "30대", "3년이상", "5천만원대", null,
+                    "s02-survey-v1", Map.of(), "seller-m", "BR-1"));
+            session.recordSuitability(SuitabilityStatus.MISMATCH);
+            session.recordJudgment(judgment(ITEM, Grade.U4));
+            em.persist(session);
+
+            AggregateService.ContrastView view = orgContrast();
+
+            assertThat(row(view, "vulnerable").n()).isEqualTo(1);
+            assertThat(row(view, "other").n()).isZero();
         }
 
         @Test
