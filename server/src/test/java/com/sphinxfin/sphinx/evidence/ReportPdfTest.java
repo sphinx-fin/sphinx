@@ -230,4 +230,64 @@ class ReportPdfTest {
                 .as("한 줄로 그리면 오른쪽이 잘려 나가는데 PDF 는 예외를 안 낸다")
                 .contains(longOne.replaceAll("\\s+", ""));
     }
+
+    // ── 빈 절 표식 ────────────────────────────────────────────────────────────
+    //
+    // ❗**절마다 다른 문면인 것이 요건이다.** 같은 문면이면 지면을 읽는 쪽이 어느 절이
+    // 비었는지 못 가른다 — `scripts/walk_demo_session.sh` 가 `"기록 없음"` 하나로
+    // *"판정 이력이 비었나"* 를 판정했는데 그것은 **게이트 절 표식**이었고, 판정 이력
+    // 절에는 표식이 아예 없었다. 그래서 **판정 이력이 통째로 빈 리포트를 "교부 문서
+    // 시연에 쓸 수 있다" 로 판정했다**(PR #302 리뷰 3번).
+
+    /** 항목 없이, 게이트 기록만 있는 내용. #302 가 오판한 그 조합이다. */
+    private static Map<String, Object> withoutItems() {
+        return Map.of(
+                "sessionId", "S-9",
+                "items", List.of(),
+                "gateHistory", List.of(Map.of(
+                        "at", "2026-09-03T10:01:00Z", "signal", "RED", "ruleTrace", List.of("R-01"),
+                        "unmeasured", 2, "rulesVersion", 3)),
+                "overrides", List.of());
+    }
+
+    @Test
+    @DisplayName("★ 판정 이력이 비면 지면이 그렇다고 적는다 — 빈 절은 게이트 표식과 구별된다")
+    void anEmptyJudgmentHistorySaysSoInItsOwnWords() throws Exception {
+        String text = textOf(pdf.render(withoutItems(), "abc123", AT));
+
+        assertThat(text)
+                .as("판정 이력 절에 빈 표식이 없으면 항목 0 인 지면과 불릿 글리프만 바뀐 "
+                        + "지면이 같은 관측이 된다 — 그 둘을 가르는 것이 이 표식의 전부다")
+                .contains("판정 이력 없음");
+        assertThat(text)
+                .as("게이트 기록은 있으므로 그쪽 표식은 없어야 한다. 두 절이 같은 문면을 쓰면 "
+                        + "이 단정이 설 자리가 없다")
+                .doesNotContain("게이트 기록 없음");
+    }
+
+    @Test
+    @DisplayName("★ 세 절의 빈 표식이 서로 다르다 — 같으면 어느 절이 빈지 못 가른다")
+    void eachSectionSaysEmptyInItsOwnWords() throws Exception {
+        String text = textOf(pdf.render(
+                Map.of("sessionId", "S-0", "items", List.of(),
+                       "gateHistory", List.of(), "overrides", List.of()),
+                "h", AT));
+
+        assertThat(text)
+                .contains("판정 이력 없음")
+                .contains("게이트 기록 없음")
+                .contains("오버라이드 승인 없음");
+    }
+
+    @Test
+    @DisplayName("찬 리포트에는 빈 표식이 하나도 없다 — 양성 대조")
+    void aFullReportCarriesNoEmptyMarker() throws Exception {
+        String text = textOf(pdf.render(content("S-1", "원금은 지켜지죠"), "h", AT));
+
+        assertThat(text)
+                .as("표식이 빈 경우에만 찍히는 것이 이 대조의 전제다. 늘 찍히면 위 두 "
+                        + "테스트가 아무것도 안 잰다")
+                .doesNotContain("판정 이력 없음")
+                .doesNotContain("게이트 기록 없음");
+    }
 }
