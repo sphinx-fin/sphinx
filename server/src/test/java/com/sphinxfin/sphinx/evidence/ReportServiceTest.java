@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -62,7 +63,7 @@ class ReportServiceTest {
     /** 재검증 한 번을 포함한 전형적인 세션을 만든다. */
     private void seedSession() {
         recorder.appendJudgment(SID, judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
-        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
+        recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(1));
         recorder.appendJudgment(SID, judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
         recorder.appendJudgment(SID, judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(90));
         recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));
@@ -118,7 +119,7 @@ class ReportServiceTest {
         @DisplayName("❗리포트가 판정을 만든 입력도 낸다 — 기록에만 있으면 스트림을 열어야 한다 (이슈 #280 ②)")
         void gateHistoryCarriesTheJudgementInputs() {
             seedSession();
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 2, 3),
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-00", "테스트 문면")), 2, 3),
                     T0.plusSeconds(120));
             em.flush();
             em.clear();
@@ -213,7 +214,7 @@ class ReportServiceTest {
 
             // 같은 내용을 다른 세션에 쌓으면 체인 위치는 다르지만 내용은 같다.
             recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
-            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(1));
+            recorder.appendGate("S-2", new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(1));
             recorder.appendJudgment("S-2", judgment("ELS-A", Grade.U1, "0.95"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
             recorder.appendJudgment("S-2", judgment("ELS-B", Grade.U1, "0.9"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(90));
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(91));

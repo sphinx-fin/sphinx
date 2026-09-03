@@ -8,6 +8,7 @@ import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SessionState;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Signal;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -433,7 +434,7 @@ public class SessionService {
      * <p>신호를 바꾸지 않고 그 사실을 드러낸다. {@code NOT_EVALUATED} 면 화면은
      * "적합성 미확인" 을 함께 보여야 하고, 이 GREEN 을 최종 통과로 그리면 안 된다.
      */
-    public record GatePreview(Signal signal, List<String> ruleTrace,
+    public record GatePreview(Signal signal, List<RuleRef> ruleTrace,
                               boolean recorded, Instant judgedAt,
                               SuitabilityStatus suitabilityStatus) {}
 }

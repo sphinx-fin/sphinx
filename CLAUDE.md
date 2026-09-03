@@ -140,7 +140,9 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
   `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
-  세 벌(핸들러·openapi·이 문단)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부 대조한다.
+  네 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온)이 어긋나지
+  않도록 `ErrorCodeContractTest`가 전부 대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
+  (이슈 #316 — `UNAUTHORIZED`·`FORBIDDEN`·`MEASUREMENT_INVALID`가 없었다).
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다

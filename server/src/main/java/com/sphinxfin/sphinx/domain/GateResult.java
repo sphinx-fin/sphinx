@@ -6,7 +6,7 @@ import java.util.List;
  * F-GTE-001 출력.
  *
  * @param signal       판정 신호
- * @param ruleTrace    발화한 룰 ID 목록 — 그 신호를 낸 사유 전부
+ * @param ruleTrace    발화한 룰 — 그 신호를 낸 사유 전부. ID 와 사람이 읽는 문면을 같이 든다(#320)
  * @param unmeasured   판정 시점의 미측정 항목 수 (R-00 이 보는 값)
  * @param rulesVersion 판정에 쓴 {@code gate_rules.yaml} 의 {@code version}
  *
@@ -25,4 +25,4 @@ import java.util.List;
  * 그전까지 파싱만 되고 버려져서 {@code version:} 을 고쳐도 아무 일도 일어나지 않았다 —
  * "바꿔도 안 깨지는 설정값" 이라 언젠가 낡는다.
  */
-public record GateResult(Signal signal, List<String> ruleTrace, int unmeasured, int rulesVersion) {}
+public record GateResult(Signal signal, List<RuleRef> ruleTrace, int unmeasured, int rulesVersion) {}

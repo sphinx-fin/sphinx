@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -68,7 +69,7 @@ class GateResultWireContractTest {
 
     /** 판정 하나. 값이 아니라 <b>키</b>를 재므로 내용은 아무거나 된다. */
     private static GateResult sample() {
-        return new GateResult(Signal.RED, List.of("R-00"), 1, 3);
+        return new GateResult(Signal.RED, List.of(new RuleRef("R-00", "테스트 문면")), 1, 3);
     }
 
     private static JsonNode contractSchema() throws Exception {

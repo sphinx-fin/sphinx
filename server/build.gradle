@@ -78,6 +78,12 @@ tasks.named('test') {
             .withPropertyName('claudeMd')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // web/src/api/types.ts 의 ErrorCode 유니온이 계약의 **네 번째 사본**이다.
+    // ErrorCodeContractTest 가 대조하는데, 안 걸면 그 파일만 고친 PR 에서 안 돈다 (이슈 #316).
+    inputs.file('../web/src/api/types.ts')
+            .withPropertyName('webErrorCodeUnion')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // web/src/lib/survey.ts 도 같은 이유다. SurveyIsOptionOnlyTest 가 그 파일을 읽어
     // "전 문항이 선택지다" 를 잠근다 — surveyResult 를 불변 기록에 원문으로 싣는 근거가
     // 그것 하나이기 때문이다(이슈 #169). 그 파일만 바뀌었을 때가 정확히 이 단정이 필요한

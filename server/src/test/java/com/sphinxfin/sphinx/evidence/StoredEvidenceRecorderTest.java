@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
@@ -77,7 +78,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("판정 → 게이트 → 오버라이드 순서가 기록에 남는다")
         void keepsCrossKindOrder() {
             recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04", "R-05"), 0, 3), T0.plusSeconds(1));
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면"), new RuleRef("R-05", "테스트 문면")), 0, 3), T0.plusSeconds(1));
             recorder.appendOverride(SID, "고객이 충분히 이해했다고 판단하여 진행합니다", "mgr-01", T0.plusSeconds(2));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
@@ -89,7 +90,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("기록 한 건이 스스로 어느 세션·언제인지 말한다")
         void entriesAreSelfDescribing() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
 
             Map<String, Object> payload = payloads().get(0);
             assertThat(payload.get("sessionId")).isEqualTo(SID);
@@ -101,7 +102,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("세션이 다르면 사슬도 다르다")
         void streamsAreSeparatedBySession() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
             recorder.appendGate("S-2", new GateResult(Signal.GREEN, List.of(), 0, 3), T0);
 
             assertThat(payloads()).hasSize(1);
@@ -161,7 +162,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("❗게이트 기록이 판정을 만든 입력을 같이 든다 — 재계산으로 못 되돌린다 (이슈 #295)")
         void gateEntryCarriesItsInputs() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-00"), 3, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-00", "테스트 문면")), 3, 3), T0);
 
             Map<String, Object> payload = payloads().get(0);
             assertThat(payload.get("unmeasured"))
@@ -180,7 +181,7 @@ class StoredEvidenceRecorderTest {
             // `if (rulesVersion != 0) put(...)` 변이가 그때 전건 통과했다 — 다른 테스트는
             // 전부 rulesVersion 을 3 으로 넣어서 0 인 경로를 아무도 안 지나갔다(PR #299 리뷰).
             // 문면이 두 필드를 같은 규약으로 말하는데 그물이 한쪽만 있으면 규약이 아니다.
-            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of("R-06"), 0, 0), T0);
+            recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(new RuleRef("R-06", "테스트 문면")), 0, 0), T0);
 
             assertThat(payloads().get(0))
                     .as("키가 없으면 '전부 쟀다' 와 '이 필드가 생기기 전 기록' 이 같아 보인다 — "
@@ -196,8 +197,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("게이트 판정도 매 호출 남는다 — 최종 신호가 아니라 신호의 변천")
         void gateSignalsAccumulate() {
-            recorder.appendGate(SID, new GateResult(Signal.RED, List.of("R-01"), 0, 3), T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-04"), 0, 3), T0.plusSeconds(60));
+            recorder.appendGate(SID, new GateResult(Signal.RED, List.of(new RuleRef("R-01", "테스트 문면")), 0, 3), T0);
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면")), 0, 3), T0.plusSeconds(60));
             recorder.appendGate(SID, new GateResult(Signal.GREEN, List.of(), 0, 3), T0.plusSeconds(120));
 
             assertThat(payloads()).extracting(p -> p.get("signal"))
@@ -402,7 +403,7 @@ class StoredEvidenceRecorderTest {
         @DisplayName("게이트와 다른 사슬 항목이다 — 재검증마다 도는 게이트와 발생 시점이 다르다")
         void mismatchIsItsOwnKind() {
             recorder.appendMismatch(SID, detected(), "s02-survey-v2", SURVEY, T0);
-            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of("R-02"), 0, 3), T0.plusSeconds(1));
+            recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-02", "테스트 문면")), 0, 3), T0.plusSeconds(1));
 
             assertThat(payloads()).extracting(p -> p.get("type"))
                     .as("게이트에 얹으면 재검증마다 같은 모순 근거가 중복으로 쌓인다")
