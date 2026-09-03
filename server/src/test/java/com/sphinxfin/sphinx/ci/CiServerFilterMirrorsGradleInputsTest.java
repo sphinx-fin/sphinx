@@ -82,6 +82,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 예외를 목록에서 조용히 빼면 다음 사람이 왜 하나만 빠져 있는지 못 읽으므로, 이유와 함께
  * 여기 적어 둔다.
  *
+ * <p>❗<b>그 이유도 단정으로 잠근다</b>({@code theExemptPathIsCoveredByTheEarlyExit}).
+ * 이 예외가 참인 근거는 {@code ci.yml} 안의 조기 종료 한 줄뿐인데, <b>그 줄이 사라져도
+ * 예외는 그대로 남는다</b> — 그러면 {@code ci.yml} 만 고친 PR 에서 server 잡이 안 뜨는데
+ * 이 파일은 초록이고, 하필 <b>이 테스트 자신이 안 도는 상태</b>가 된다(자기가 지키는
+ * 파일이라). 주석이 사실을 기술하기만 하면 그 사실이 바뀌는 것을 아무도 못 본다.
+ *
  * <h2>문면이 바뀌면 죽는다 — 그게 맞다</h2>
  *
  * <p>{@code ci.yml} 의 판별 줄 모양을 정규식으로 집는다. 배선이 바뀌면 <b>조용히 통과하지
@@ -200,6 +206,48 @@ class CiServerFilterMirrorsGradleInputsTest {
                         `<경로>$` 로 더한다. 필터가 필요 없는 경로라면 이 테스트의 EXEMPT 에 \
                         **이유와 함께** 적는다. 지금 판별식: %s""", filter.pattern())
                 .isEmpty();
+    }
+
+    /**
+     * {@code EXEMPT} 의 근거가 {@code ci.yml} 에 실재하는지 본다 (`#336` 리뷰).
+     *
+     * <p>❗<b>조기 종료 줄을 EXEMPT 에서 만들어 찾는다.</b> 문자열을 손으로 적으면 그게 또
+     * 하나의 사본이 되고, 예외를 늘리면서 근거를 안 만든 경우를 못 본다 — 새 예외가 들어오면
+     * 이 대조가 <b>그 경로의 조기 종료를 같이 요구한다.</b> 다른 이유로 면제되는 경로가
+     * 생겼다면 이 테스트가 빨개지는 것이 맞다: 그때는 예외의 근거가 무엇인지 여기서 다시
+     * 정해야 한다.
+     *
+     * <p>줄이 있는 것만으로는 모자라서 <b>그 갈래가 실제로 server 를 켜는지</b>까지 본다.
+     * 조기 종료가 {@code server=true} 없이 끝나면 예외의 뜻(그 파일은 필터 없이도 잡이
+     * 뜬다)이 거짓이 되는데, 줄만 세면 그 변경이 그대로 지나간다.
+     */
+    @Test
+    @DisplayName("❗EXEMPT 의 근거가 ci.yml 에 실재한다 — 조기 종료가 없어지면 예외만 남는다")
+    void theExemptPathIsCoveredByTheEarlyExit() throws IOException {
+        String ci = Files.readString(CI);
+
+        for (String path : EXEMPT) {
+            String needle = "grep -qE '^" + path.replace(".", "\\.") + "$'";
+            int at = ci.indexOf(needle);
+            assertThat(at)
+                    .as("""
+                            EXEMPT 는 "필터에 없어도 조기 종료가 대신 잡는다" 는 뜻인데, ci.yml \
+                            에 그 조기 종료가 없다(찾은 문면: %s). 근거가 사라지면 그 경로만 \
+                            고친 PR 에서 server 잡이 안 뜨고, 하필 이 테스트 자신이 그 PR 에서 \
+                            안 돈다 — 초록인 채로 뚫린다. 조기 종료를 되살리든지, 그 경로를 \
+                            ci.yml 의 server_extra 로 옮기고 EXEMPT 에서 뺀다""", needle)
+                    .isNotNegative();
+
+            int end = ci.indexOf("\n          fi", at);
+            assertThat(end)
+                    .as("조기 종료 갈래의 끝(`fi`)을 못 찾았다 — 이 대조가 무엇을 읽는지 다시 정한다")
+                    .isGreaterThan(at);
+
+            assertThat(ci.substring(at, end))
+                    .as("조기 종료 갈래가 %s 를 잡기는 하는데 server 를 켜지 않는다. 그러면 "
+                            + "EXEMPT 의 전제(필터 없이도 server 잡이 뜬다)가 거짓이다", path)
+                    .contains("server=true");
+        }
     }
 
     @Test
