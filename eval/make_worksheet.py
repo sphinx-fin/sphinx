@@ -46,7 +46,14 @@ ROOT = pathlib.Path(__file__).resolve().parent
 REPO = ROOT.parent
 CORPUS = ROOT / "corpus" / "els.jsonl"
 RUBRICS = REPO / "ai-service" / "app" / "rubrics"
-OUT_DIR = ROOT / "data" / "worksheet"
+# ❗`eval/data/` 밖이다. 그 디렉토리에 model.jsonl · ai-reference.jsonl · labels/ 가 있고,
+# 작업지를 거기 두면 "안 열어도 되게 한다" 가 성립하지 않는다 — 라벨러가 그 디렉토리를
+# 지나야 작업지를 연다. `eval/labeling/` 에는 guideline.md 하나뿐이고, 라벨러가 봐야 하는
+# 것이 정확히 그 둘이라 자리가 맞다.
+OUT_DIR = ROOT / "labeling" / "worksheet"
+LABELS_DIR = ROOT / "data" / "labels"
+
+GRADES = ("U1", "U2", "U3", "U4")
 
 #: 작업지에 있으면 안 되는 것. 등급 토큰이 하나라도 새면 그게 닻이다.
 FORBIDDEN = re.compile(r"\bU[1-4]\b")
@@ -138,11 +145,74 @@ def _assert_blind(text: str, what: str) -> None:
                  f"(guideline.md 0절). 표본·루브릭 쪽을 고친다.")
 
 
+def submit(name: str, src_dir: pathlib.Path, labels_dir: pathlib.Path) -> None:
+    """채운 골격을 검증하고 `eval/data/labels/` 로 옮긴다 (이슈 #324).
+
+    ## 왜 스크립트가 옮기나
+
+    ❗`labels/` 에는 **다른 라벨러의 파일**이 있다. 40건 2인 전수라 먼저 낸 사람의 파일이
+    거기 있고, 두 번째 사람이 손으로 `mv` 하면 그 디렉토리를 지난다 — 파일명만 봐도 누가
+    냈는지 알고, 한 번 열면 등급이 다 보인다.
+
+    **그리고 그게 이 측정이 지키려는 값 그 자체다.** 2인 전수의 실질은 평가자 간
+    일치도(상한)이고, 그건 두 라벨이 **독립일 때만** 뜻이 있다. 모델을 안 봤어도 상대를
+    보면 그 수치가 무의미해진다 — 닻이 모델에서 사람으로 바뀐 것뿐이다.
+
+    ## 검증까지 하는 이유
+
+    작업지가 *"애매해도 비워 두지 않는다 — 빈 항목은 두 사람의 교집합에서 빠져 표본만
+    줄인다"* 고 적어 두는데, **여기서 기계가 세면 그 문장이 규약에서 검사로 바뀐다.**
+    """
+    src = src_dir / f"{name}.jsonl"
+    if not src.exists():
+        sys.exit(f"채운 골격이 없다: {src}\n"
+                 f"  먼저 작업지를 만든다: python3 {pathlib.Path(__file__).name} --name {name}")
+
+    rows = [json.loads(line) for line in src.read_text(encoding="utf-8").splitlines() if line.strip()]
+    expected = {(r["sample_id"], r["item_id"]) for r in load_corpus()}
+
+    blank = [r["sample_id"] for r in rows if not r.get("grade")]
+    bad = [f'{r["sample_id"]}={r["grade"]}' for r in rows if r.get("grade") and r["grade"] not in GRADES]
+    seen: set[tuple[str, str]] = set()
+    dup = [r["sample_id"] for r in rows
+           if (r["sample_id"], r["item_id"]) in seen or seen.add((r["sample_id"], r["item_id"]))]
+    missing = expected - {(r["sample_id"], r["item_id"]) for r in rows}
+
+    problems = []
+    if blank:
+        problems.append(f"빈 등급 {len(blank)}건: {blank[:5]} — 비워 두면 두 사람의 "
+                        f"교집합에서 빠져 표본만 줄어든다(guideline.md §4)")
+    if bad:
+        problems.append(f"등급이 U1~U4 가 아니다: {bad[:5]} — 러너가 거부한다")
+    if dup:
+        problems.append(f"같은 (표본, 항목)이 두 번: {dup[:5]} — 어느 쪽이 판단인지 알 수 없다")
+    if missing:
+        problems.append(f"안 붙인 항목 {len(missing)}건 — 전수여야 상한이 40건 모집단의 값이다")
+    if problems:
+        sys.exit("❗제출 안 함:\n  " + "\n  ".join(problems))
+
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    dest = labels_dir / f"{name}.jsonl"
+    dest.write_text("".join(
+        json.dumps({"sample_id": r["sample_id"], "item_id": r["item_id"], "grade": r["grade"]},
+                   ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    # ❗디렉토리 목록을 안 찍는다 — 다른 라벨러의 파일명이 보이면 여기서 새는 것이다.
+    print(f"제출 {len(rows)}건 — {dest}")
+    print("다른 라벨러의 파일은 열지도 나열하지도 않았다.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="라벨링 블라인드 작업지")
     ap.add_argument("--name", required=True, help="라벨러 이름 — 파일명이 된다")
     ap.add_argument("--out", type=pathlib.Path, default=OUT_DIR)
+    ap.add_argument("--labels", type=pathlib.Path, default=LABELS_DIR)
+    ap.add_argument("--submit", action="store_true",
+                    help="채운 골격을 검증하고 labels/ 로 옮긴다 — 사람이 그 디렉토리를 안 연다")
     args = ap.parse_args()
+
+    if args.submit:
+        submit(args.name, args.out, args.labels)
+        return
 
     rows = load_corpus()
     md, sk = render(rows, args.name), skeleton(rows)
@@ -156,7 +226,7 @@ def main() -> None:
     print(f"작업지 {len(rows)}건 — {args.out / (args.name + '.md')}")
     print(f"골격       — {args.out / (args.name + '.jsonl')}")
     print(f"안 연 파일 — {' · '.join(NEVER_READ)}")
-    print("다 채우면 eval/data/labels/<이름>.jsonl 로 옮긴다.")
+    print(f"다 채우면:  python3 {pathlib.Path(__file__).name} --submit --name {args.name}")
 
 
 if __name__ == "__main__":

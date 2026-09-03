@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -24,11 +25,87 @@ SCRIPT = ROOT / "make_worksheet.py"
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory) -> tuple[str, str]:
+    """작업지를 실제로 만들어 둔다.
+
+    ❗<b>생성기가 죽으면 이 픽스처가 못 서고, 그 결과가 `FAILED` 가 아니라 `errors` 로
+    나온다.</b> 그게 정상 경로다 — 등급이 새면 파일을 안 남기고 죽는 것이 이 도구의 설계라,
+    "테스트가 깨졌다" 가 아니라 "가드가 걸렸다" 로 읽는다.
+    """
     out = tmp_path_factory.mktemp("ws")
     subprocess.run([sys.executable, str(SCRIPT), "--name", "검사", "--out", str(out)],
                    check=True, capture_output=True)
     return ((out / "검사.md").read_text(encoding="utf-8"),
             (out / "검사.jsonl").read_text(encoding="utf-8"))
+
+
+def test_the_worksheet_lives_outside_the_data_dir() -> None:
+    """❗작업지가 `eval/data/` 밖에 놓인다 — 거기 model.jsonl 이 있다.
+
+    그 안에 두면 이 도구의 주장(*"그 디렉토리를 안 열어도 되게 한다"*)이 성립하지 않는다.
+    라벨러가 작업지를 열려면 그 디렉토리를 지나고, `model.jsonl` 이 바로 옆이다.
+    """
+    sys.path.insert(0, str(ROOT))
+    import make_worksheet
+
+    assert "data" not in make_worksheet.OUT_DIR.relative_to(ROOT).parts, \
+        f"작업지가 eval/data/ 안이다: {make_worksheet.OUT_DIR}"
+
+
+def test_submitting_refuses_an_incomplete_sheet(tmp_path) -> None:
+    """❗빈 등급·잘못된 등급·중복·누락을 제출 시점에 센다.
+
+    작업지가 *"애매해도 비워 두지 않는다 — 빈 항목은 교집합에서 빠져 표본만 줄인다"* 고
+    적어 두는데, 기계가 세야 그 문장이 규약에서 검사로 바뀐다.
+    """
+    sys.path.insert(0, str(ROOT))
+    import make_worksheet
+
+    src, labels = tmp_path / "ws", tmp_path / "labels"
+    src.mkdir()
+    corpus = make_worksheet.load_corpus()
+    def write(rows): (src / "검사.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+    write([{"sample_id": r["sample_id"], "item_id": r["item_id"], "grade": ""} for r in corpus])
+    with pytest.raises(SystemExit) as blank:
+        make_worksheet.submit("검사", src, labels)
+    assert "빈 등급" in str(blank.value)
+
+    write([{"sample_id": r["sample_id"], "item_id": r["item_id"], "grade": "U1"} for r in corpus[:3]])
+    with pytest.raises(SystemExit) as short:
+        make_worksheet.submit("검사", src, labels)
+    assert "안 붙인 항목" in str(short.value), "부분 제출을 받으면 교집합이 그만큼 줄어든다"
+
+    assert not labels.exists(), "거부했는데 파일을 남기면 러너가 그걸 라벨로 센다"
+
+    write([{"sample_id": r["sample_id"], "item_id": r["item_id"], "grade": "U1"} for r in corpus])
+    make_worksheet.submit("검사", src, labels)
+    assert (labels / "검사.jsonl").exists()
+
+
+def test_submitting_never_lists_other_labelers(tmp_path, capsys) -> None:
+    """❗제출 출력에 다른 라벨러의 파일명이 안 나온다.
+
+    `labels/` 에는 먼저 낸 사람의 파일이 있다. 두 번째 사람이 그 디렉토리를 지나면
+    파일명만 봐도 누가 냈는지 알고, 한 번 열면 등급이 보인다 — **닻이 모델에서 사람으로
+    바뀐 것뿐이고 상한은 똑같이 무의미해진다.**
+    """
+    sys.path.insert(0, str(ROOT))
+    import make_worksheet
+
+    src, labels = tmp_path / "ws", tmp_path / "labels"
+    src.mkdir(); labels.mkdir()
+    (labels / "먼저낸사람.jsonl").write_text('{"sample_id":"els-0001","item_id":"X","grade":"U4"}\n',
+                                              encoding="utf-8")
+    corpus = make_worksheet.load_corpus()
+    (src / "검사.jsonl").write_text("".join(
+        json.dumps({"sample_id": r["sample_id"], "item_id": r["item_id"], "grade": "U1"},
+                   ensure_ascii=False) + "\n" for r in corpus), encoding="utf-8")
+
+    make_worksheet.submit("검사", src, labels)
+
+    out = capsys.readouterr().out
+    assert "먼저낸사람" not in out and "U4" not in out
 
 
 def test_the_worksheet_carries_no_grade(built) -> None:
