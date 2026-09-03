@@ -30,7 +30,16 @@ cd web && npm run build
 
 # eval (F-CMN-003 채점 성능 평가)
 python eval/run_eval.py
+
+# 실세션 하나를 S-01~S-07 로 통과시킨다 (교부 문서 시연용 — 이슈 #278 ①)
+scripts/walk_demo_session.sh
+BASE=https://alpha... PYTHON=.venv/bin/python scripts/walk_demo_session.sh
 ```
+
+합성 세션은 집계용이라 불변 기록(`evidence/`)을 안 쌓는다. 그래서 대시보드에서 합성
+세션을 눌러 교부 문서를 열면 **내용이 빈 PDF** 가 나온다 — 시연에 쓸 세션은
+`walk_demo_session.sh` 로 만든다. 이 스크립트는 채점이 막히면 **ai-service 가 안 뜬
+것인지 LLM 키가 없는 것인지** 갈라서 알려준다(둘 다 같은 502 로 나온다).
 
 **주의**: `server/`의 Gradle 래퍼(`gradlew`)는 8.10.2로 고정돼 있다(Boot 3.3.2 플러그인 호환,
 PR #6). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`web`·`eval`에는
