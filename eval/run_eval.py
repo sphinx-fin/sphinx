@@ -6,9 +6,13 @@
 
 ── ❗이 스크립트가 하지 않는 것 ────────────────────────────────────────────────
 
-**라벨을 만들지 않는다.** 라벨은 강희진·오준서가 독립으로 붙이고, 프롬프트 당사자(윤지석)와
-운영자(정세현)는 라벨링에서 빠진다(eval/README.md · 역할표 F-EXT-003 *"평가자와 피평가자를
-분리"*). 여기서 라벨을 채우면 그 분리가 무너지고, **무너진 사실이 숫자 어디에도 안 남는다.**
+**라벨을 만들지 않는다.** 라벨은 사람이 붙이고 프롬프트 당사자(윤지석)는 라벨링에서
+빠진다(eval/README.md · 역할표 F-EXT-003 *"평가자와 피평가자를 분리"*). 여기서 라벨을
+채우면 그 분리가 무너지고, **무너진 사실이 숫자 어디에도 안 남는다.**
+
+❗이 회차 라벨러는 **정세현 · 강희진**이고 정세현이 운영자다 — 분리가 완전하지 않다.
+그 조건은 `eval/labeling/guideline.md` §5 에 있고, 아래 1번 수치를 조건 없이
+「상한」으로 인용하지 않는 이유다.
 
 그래서 입력이 없으면 **비영점으로 죽는다.** 0.0 이나 빈 리포트를 내지 않는다 — 파이프라인이
 "돌긴 돌았다"로 읽히는 상태가 제일 나쁘다.
@@ -111,7 +115,7 @@ def load_labelers() -> "OrderedDict[str, OrderedDict[tuple[str, str], str]]":
     if not LABELS_DIR.is_dir():
         raise InputError(
             f"라벨 디렉토리가 없다: {LABELS_DIR.relative_to(ROOT.parent)}\n"
-            "  라벨은 강희진·오준서가 독립으로 붙인다(eval/README.md). "
+            "  라벨은 사람이 붙인다 — 이 회차는 정세현·강희진이다(eval/README.md). "
             "가이드라인: eval/labeling/guideline.md"
         )
     files = sorted(p for p in LABELS_DIR.glob("*.jsonl"))
@@ -191,6 +195,13 @@ def main() -> int:
     lines.append("")
     lines.append("사람도 안 맞는 항목에서 모델이 사람과 맞기를 기대할 수 없다. 모델 점수는")
     lines.append("아래 값과 **나란히** 읽어야 의미가 있다.")
+    lines.append("")
+    # ❗상한은 두 라벨러가 서로 독립일 때만 상한이다. 그 조건은 회차마다 다르고 코드가
+    # 알 수 없으므로(이름을 여기 박지 않는다) 문서를 가리킨다 — 조건을 안 적고 숫자만
+    # 내면 그게 "표기가 거짓" 이다(PR #343).
+    lines.append("❗이 수치가 **상한 구실을 하려면 두 라벨러가 서로 독립**이어야 한다.")
+    lines.append("이 회차의 독립 조건은 `eval/labeling/guideline.md` §5 와")
+    lines.append("`eval/ai-reference-diff.md` 에 있다 — **조건과 함께 인용한다.**")
     lines.append("")
     a, b = names[0], names[1]
     keys_ab = aligned(labelers[a], labelers[b])

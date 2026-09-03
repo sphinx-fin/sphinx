@@ -1,6 +1,7 @@
 # 평가 표본 (F-CMN-003)
 
-소유: 정세현. 라벨은 여기 **없다** — 강희진·오준서가 `eval/data/labels/` 에 따로 붙인다.
+소유: 정세현. 라벨은 여기 **없다** — 정세현·강희진이 `eval/data/labels/` 에 따로 붙인다
+(라벨러 구성과 그 조건: `eval/labeling/guideline.md` §5).
 
 ```
 els.jsonl   ELS 10개 이해항목 × 4 = 40건
