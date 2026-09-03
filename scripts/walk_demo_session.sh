@@ -66,8 +66,20 @@ DOWN
     }
     cat >&2 <<'NOKEY'
 
-   ai-service 는 떠 있다. 그러면 남는 것은 LLM 키다.
-   ai-service 로그에 `llm_error(LlmNotConfigured)` 가 있으면 키가 그 프로세스에 없다.
+   ai-service 는 떠 있다. 그러면 남는 것은 LLM 키인데 **갈래가 둘이다.**
+   ai-service 로그(app.llm_client)에서 어느 쪽인지 가른다.
+
+     llm_error(LlmNotConfigured)   키가 그 프로세스에 없다        503
+     llm_error(LlmError) + 401/403 키가 있는데 틀렸다             502
+
+   ❗뒤엣것이 지금 제일 나올 만하다. 정책 모델은 gpt-5-mini 다(#266) — 그 전 정책이
+   gemini-3.5-flash-lite 였으므로 .env 나 SSM 에 옛 Gemini 키가 남아 있으면 이 모양이 된다.
+   `LlmNotConfigured` 만 찾으면 로그에 없고, 키는 있으니 그것도 아니라고 읽게 된다.
+
+   값을 안 보고 프로바이더를 가른다 — 길이가 자릿수로 다르다.
+     awk -F= '/^LLM_API_KEY/{print length($2)}' ai-service/.env
+       세 자리 → OpenAI(sk-proj-…)      두 자리 → Gemini(AQ.…)
+   배포 쪽은 deploy_ec2.sh 가 같은 줄을 /var/log/sphinx-deploy.log 에 찍는다.
 
    ❗채점에는 폴백이 없다(P1) — 측정에 폴백을 두면 AI 가 재지 않은 값이 판정에 들어간다.
    질문은 템플릿으로 조용히 내려가지만 채점은 여기서 막힌다. 이슈 #278 ② 가 그것이다.
