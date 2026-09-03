@@ -62,17 +62,28 @@ public class AiServiceClient {
     /**
      * P3 경계를 한 번 지난다 — 마스킹하고 계량기에 올린다 (이슈 #326).
      *
-     * <p>❗<b>로그에 원문도 조각도 안 찍는다.</b> 종류와 개수뿐이다 — 무엇이 걸렸는지를
-     * 남기면 그게 곧 PII 저장이고, 지우려고 만든 경로가 새는 자리가 된다.
+     * <p>❗<b>건별 줄에는 종류를 안 싣는다. 개수만이다.</b> 로그 줄에는 <b>시각</b>이 있고,
+     * 그 시각이 <b>세션 축 노릇을 한다</b> — 답변 제출 한 건이 한 요청이라 그 요청의 다른
+     * 로그 줄(예: {@code UnfairSignalLog} 의 {@code session=…})과 시각으로 붙는다.
+     * 그러면 로그만 읽어서 <i>"세션 S-xxx 의 고객이 주민번호를 적었다"</i> 가 복원되는데,
+     * <b>그게 마스킹이 지운 그 사실이다.</b>
+     *
+     * <p>❗<b>누적도 여기 안 찍는다.</b> 안 보이는 자리인데 — 누적을 <b>매 호출</b> 찍으면
+     * 연속한 두 줄의 <b>차분</b>이 곧 그 호출의 종류별 건수다. 즉 종류를 빼도 누적이
+     * 남아 있으면 같은 정보가 나온다. 누적은 <b>시각과 무관한 자리</b>에서 낸다
+     * ({@link PiiMeter} 종료 요약 · {@code #326} 2번의 조회 경로).
      *
      * <p>{@code WARN} 이 아니라 {@code INFO} 다. <b>걸린 것은 결함이 아니라 경계가 일한
      * 것</b>이다 — 경고로 두면 정상 동작이 매번 붉게 뜨고, 그러면 진짜 경고가 안 읽힌다.
+     * 개수까지 지우려면 {@code DEBUG} 로 내려야 하는데, 그러면 <b>경계가 일하는 것을
+     * 리허설에서 못 보여준다</b> — <i>"PII 가 있었다"</i> 와 <i>"주민번호가 있었다"</i> 는
+     * 민감도가 다르므로 종류를 떼는 선까지로 둔다.
      */
     private PiiGateway.Masked maskAndCount(String text) {
         PiiGateway.Masked masked = PiiGateway.maskWithHits(text);
         piiMeter.record(masked);
         if (masked.total() > 0) {
-            log.info("P3 마스킹: {} (누적 {})", masked.hits(), piiMeter.summary());
+            log.info("P3 마스킹 {}건", masked.total());
         }
         return masked;
     }

@@ -34,6 +34,8 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class PiiMeter {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(PiiMeter.class);
+
     private final AtomicLong calls = new AtomicLong();
     private final Map<String, AtomicLong> removed = new ConcurrentHashMap<>();
 
@@ -56,7 +58,22 @@ public class PiiMeter {
         return Map.copyOf(out);
     }
 
-    /** {@code 호출 12건 · EMAIL=1 PHONE=2} — 로그·스크립트가 그대로 쓴다. */
+    /**
+     * 종료 시점에 <b>한 번</b> 낸다 — 종류별 누적이 로그에 남는 유일한 자리다.
+     *
+     * <p>❗<b>매 호출 찍으면 안 된다.</b> 연속한 두 줄의 <b>차분</b>이 곧 그 호출의 종류별
+     * 건수이고, 로그 줄의 시각이 세션 축 노릇을 하므로 <i>"이 고객이 주민번호를 적었다"</i>
+     * 가 복원된다. 여기서는 프로세스가 끝날 때 한 줄이라 <b>어느 호출의 것인지 알 수 없다</b> —
+     * 집계는 남고 개별 사건은 안 남는다.
+     */
+    @jakarta.annotation.PreDestroy
+    void logSummaryOnce() {
+        if (calls.get() > 0) {
+            LOG.info("P3 경계 누적 — {}", summary());
+        }
+    }
+
+    /** {@code 호출 12건 · EMAIL=1 PHONE=2} — 종료 요약·조회 경로가 쓴다. */
     public String summary() {
         StringBuilder sb = new StringBuilder("호출 ").append(calls.get()).append("건");
         removed().forEach((k, v) -> sb.append(" · ").append(k).append('=').append(v));
