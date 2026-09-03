@@ -76,6 +76,7 @@ class UnfairSignalNotExposedTest {
                 @Override public void appendJudgment(String sid, Judgment j, int r,
                         String askedQuestion,
                         com.sphinxfin.sphinx.core.EvidenceRecorder.QuestionSource src,
+                        com.sphinxfin.sphinx.domain.InputMeta inputMeta,
                         java.time.Instant at) {
                     RECORDED_TYPES.add(j.misconceptionType());
                 }

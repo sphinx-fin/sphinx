@@ -2,6 +2,7 @@ package com.sphinxfin.sphinx.core;
 
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 
 import java.time.Instant;
@@ -43,7 +44,8 @@ public interface EvidenceRecorder {
      * 사례의 채점이 어긋난 판정을 정상 판정과 구별할 방법이 없다(이슈 #136 3항).
      */
     void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                        String askedQuestion, QuestionSource questionSource, Instant at);
+                        String askedQuestion, QuestionSource questionSource,
+                        InputMeta inputMeta, Instant at);
 
     /**
      * 기록된 질문 문면이 어디서 왔는가.
@@ -129,7 +131,8 @@ public interface EvidenceRecorder {
     EvidenceRecorder NO_OP = new EvidenceRecorder() {
         @Override
         public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
-                                   String askedQuestion, QuestionSource questionSource, Instant at) {
+                                   String askedQuestion, QuestionSource questionSource,
+                                   InputMeta inputMeta, Instant at) {
             // F-GTE-004 미착수 — 구현 등록 시 자동으로 대체된다.
         }
 
