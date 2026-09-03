@@ -876,7 +876,10 @@ components:
       required: [signal, ruleTrace, recorded, suitabilityStatus]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
-        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+        ruleTrace:
+          type: array
+          items: {$ref: '#/components/schemas/RuleRef'}
+          description: "발화한 룰 — 그 신호를 낸 사유 전부"
         recorded:
           type: boolean
           description: >
@@ -1150,12 +1153,27 @@ components:
         data:    {$ref: '#/components/schemas/LeadingIndicatorResponse'}
         error:   {type: object, nullable: true}
 
+    RuleRef:
+      type: object
+      required: [id, label]
+      description: >-
+        발화한 게이트 룰 하나. `label` 은 gate_rules.yaml 이 들고 있고 판정 시점의 값이
+        기록에 남는다 — 룰 파일이 바뀌어도 옛 판정의 문면은 안 바뀐다.
+        ❗label 은 **결과만 말하고 조건은 말하지 않는다**. 판매자가 읽는 글이라 임계값이
+        새면 그 위를 겨냥할 수 있다(기획서 7-4 역이용 방지).
+      properties:
+        id:    {type: string, description: "룰 ID (예: R-00). 감사·심사에서 이것 자체가 근거다"}
+        label: {type: string, description: "사람이 읽는 문면 (예: 채점되지 않은 항목이 있습니다)"}
+
     GateResult:
       type: object
       required: [signal, ruleTrace, unmeasured, rulesVersion]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
-        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01). 그 신호를 낸 사유 전부 — 하나가 아닐 수 있다"}
+        ruleTrace:
+          type: array
+          items: {$ref: '#/components/schemas/RuleRef'}
+          description: "발화한 룰 — 그 신호를 낸 사유 전부. 하나가 아닐 수 있다"
         unmeasured:
           type: integer
           minimum: 0

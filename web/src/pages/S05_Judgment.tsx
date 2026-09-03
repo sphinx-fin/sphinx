@@ -55,7 +55,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
-  GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem,
+  GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem, RuleRef,
   SessionResponse, Signal, SuitabilityStatus,
 } from "../api/types";
 import { stashReExplanation } from "../lib/reexplain";
@@ -92,7 +92,7 @@ const SIGNAL_DESC: Record<Signal, string> = {
  */
 interface GateView {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /** 감사 기준점으로 기록됐는가. **응답이 알려준다**(설계 판단 ⑥). */
   settled: boolean;
   /** 미리보기일 때만 값이 있다. `/judge` 응답에는 이 필드가 없으므로 확정 뒤에는 null. */
@@ -298,7 +298,15 @@ export default function S05Judgment() {
         <section className="s05__trace">
           <h2>발화한 룰</h2>
           <ul>
-            {gate.ruleTrace.map((r) => <li key={r}><code>{r}</code></li>)}
+            {/* ID 와 문면을 같이 그린다 — ID 만 그리면 "R-00" 이 근거가 되고(이슈 #320),
+                문면만 그리면 감사·심사가 근거로 삼는 룰 ID 가 화면에서 사라진다.
+                ❗문면에 임계값을 덧붙이지 않는다 — 서버가 조건을 안 말하기로 한 규약이
+                화면에서 깨진다(7-4 역이용 방지). */}
+            {gate.ruleTrace.map((r) => (
+              <li key={r.id}>
+                <code>{r.id}</code> {r.label}
+              </li>
+            ))}
           </ul>
           <p className="s05__trace-note">
             이 신호를 만든 룰입니다. 판정 근거로 기록에 남습니다.

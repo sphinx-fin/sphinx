@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.session;
 
+import com.sphinxfin.sphinx.domain.RuleRef;
 import java.math.BigDecimal;
 
 import com.sphinxfin.sphinx.domain.Channel;
@@ -441,7 +442,7 @@ class SessionServiceTest {
 
         var result = service.judge(s.id());
         assertThat(result.signal()).isEqualTo(Signal.RED);
-        assertThat(result.ruleTrace()).containsExactly("R-01");
+        assertThat(result.ruleTrace()).extracting(RuleRef::id).containsExactly("R-01");
         // 판정 후 → JUDGED + 게이트 결과 기록(F-GTE-004 감사 기준점)
         Session judged = service.get(s.id());
         assertThat(judged.state()).isEqualTo(SessionState.JUDGED);
@@ -457,8 +458,13 @@ class SessionServiceTest {
                 .createNativeQuery("select gate_rule_trace from sessions where id = ?1")
                 .setParameter(1, s.id())
                 .getSingleResult();
-        assertThat(raw.toString()).isEqualTo("[\"R-01\"]");
+        // 문면까지 같이 남는다 — 판정 뒤에 gate_rules.yaml 이 바뀌어도 그때의 말이 남아야
+        // 한다(이슈 #320 · RuleRefListConverter 주석).
+        assertThat(raw.toString())
+                .contains("\"id\":\"R-01\"")
+                .contains("\"label\":");
         assertThat(repository.findById(s.id()).orElseThrow().gateRuleTrace())
+                .extracting(RuleRef::id)
                 .containsExactly("R-01");
     }
 
@@ -498,7 +504,7 @@ class SessionServiceTest {
                 .as("A 가 U1 이라 R-06 이 GREEN 을 냈다 — 물어본 B 를 못 쟀는데도. "
                         + "이 경로를 안 지나가면 계산이 0 을 돌려줘도 아무도 모른다")
                 .isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).contains("R-00");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-00");
         assertThat(r.unmeasured())
                 .as("신호만 재면 'R-00 이 물었다' 까지만 남는다. 몇 개를 못 쟀는지가 결과에 "
                         + "실려야 계산이 0 을 돌려주는 변이가 **숫자로** 잡힌다 (#294 ①)")
@@ -578,7 +584,7 @@ class SessionServiceTest {
 
         var r = service.judge(s.id());
         assertThat(r.signal()).isEqualTo(Signal.RED);
-        assertThat(r.ruleTrace()).containsExactly("R-03");
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).containsExactly("R-03");
     }
 
     @Test
@@ -765,6 +771,6 @@ class SessionServiceTest {
         assertThat(preview.recorded()).isTrue();
         assertThat(preview.judgedAt()).isNotNull();
         assertThat(preview.signal()).isEqualTo(judged.signal());
-        assertThat(preview.ruleTrace()).isEqualTo(judged.ruleTrace());
+        assertThat(preview.ruleTrace()).isEqualTo(judged.ruleTrace()).extracting(RuleRef::id);
     }
 }

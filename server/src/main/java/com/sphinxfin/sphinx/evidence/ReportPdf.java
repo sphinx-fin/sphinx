@@ -257,7 +257,7 @@ public class ReportPdf {
         sb.append(str(g.get("at"))).append("  ").append(str(g.get("signal")));
         List<?> trace = g.get("ruleTrace") instanceof List<?> l ? l : List.of();
         sb.append("  걸린 룰 ").append(trace.isEmpty() ? "없음"
-                : trace.stream().map(ReportPdf::str).collect(Collectors.joining("·")));
+                : trace.stream().map(ReportPdf::ruleText).collect(Collectors.joining(" · ")));
 
         // 판정을 만든 입력. 이 키가 없거나 null 인 항목은 **이 필드가 생기기 전 기록**이다 —
         // append-only 라 옛 세션의 항목은 고쳐지지 않는다. "미측정 -" 로 찍으면 0(전부 쟀다)과
@@ -275,6 +275,25 @@ public class ReportPdf {
         sb.append("  룰셋 ").append(Integer.valueOf(0).equals(rulesVersion)
                 ? "미버전(룰 파일을 지나지 않았다)" : "v" + str(rulesVersion));
         return sb.toString();
+    }
+
+    /**
+     * 룰 하나 — {@code R-00 채점되지 않은 항목이 있습니다}.
+     *
+     * <p>❗<b>ID 만 찍으면 종이가 {@code R-00} 이라는 코드로 근거를 말한다</b>(이슈 #320).
+     * 문면만 찍는 것도 답이 아니다 — 감사·심사에서는 룰 ID 자체가 근거이고, 문면은
+     * {@code gate_rules.yaml} 이 바뀌면 달라진다.
+     *
+     * <p>문면이 없는 항목은 <b>이 필드가 생기기 전 기록</b>이다. append-only 라 못 고치므로
+     * ID 만 찍는다 — 없는 문면을 지어내지 않는다.
+     */
+    private static String ruleText(Object o) {
+        if (o instanceof Map<?, ?> m) {
+            Object id = m.get("id");
+            Object label = m.get("label");
+            return label == null ? str(id) : str(id) + " " + str(label);
+        }
+        return str(o);   // 옛 기록은 문자열 ID 였다
     }
 
     private static String str(Object o) {

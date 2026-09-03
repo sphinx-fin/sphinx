@@ -109,7 +109,7 @@ class SessionControllerTest {
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())          // 502 로 판매를 멈추지 않는다
                 .andExpect(jsonPath("$.data.signal").value("YELLOW"))
-                .andExpect(jsonPath("$.data.ruleTrace", hasItem("R-02b")));
+                .andExpect(jsonPath("$.data.ruleTrace[*].id", hasItem("R-02b")));
     }
 
     @Test
@@ -270,7 +270,10 @@ class SessionControllerTest {
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.signal").value("RED"))
-                .andExpect(jsonPath("$.data.ruleTrace[0]").value("R-01"));
+                .andExpect(jsonPath("$.data.ruleTrace[0].id").value("R-01"))
+                // ID 옆에 사람이 읽는 문면이 같이 나간다 — 화면이 "R-01" 만 받으면
+                // 판정 근거를 못 말한다(이슈 #320).
+                .andExpect(jsonPath("$.data.ruleTrace[0].label").isNotEmpty());
         mvc.perform(get("/sessions/" + sid))
                 .andExpect(jsonPath("$.data.state").value("JUDGED"));
     }
@@ -317,7 +320,10 @@ class SessionControllerTest {
         // "적색인데 승인으로 진행" 이 별도로 기록될 뿐, 신호가 녹색이 되는 게 아니다.
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(jsonPath("$.data.signal").value("RED"))
-                .andExpect(jsonPath("$.data.ruleTrace[0]").value("R-01"));
+                .andExpect(jsonPath("$.data.ruleTrace[0].id").value("R-01"))
+                // ID 옆에 사람이 읽는 문면이 같이 나간다 — 화면이 "R-01" 만 받으면
+                // 판정 근거를 못 말한다(이슈 #320).
+                .andExpect(jsonPath("$.data.ruleTrace[0].label").isNotEmpty());
     }
 
     @Test

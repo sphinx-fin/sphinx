@@ -6,6 +6,7 @@ import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.OverrideStatus;
 import com.sphinxfin.sphinx.domain.SessionState;
+import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.Signal;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import jakarta.persistence.CollectionTable;
@@ -37,6 +38,7 @@ import java.util.UUID;
 import com.sphinxfin.sphinx.core.persistence.BaseEntity;
 import com.sphinxfin.sphinx.core.persistence.JsonMapConverter;
 import com.sphinxfin.sphinx.core.persistence.JudgmentMapConverter;
+import com.sphinxfin.sphinx.core.persistence.RuleRefListConverter;
 import com.sphinxfin.sphinx.core.persistence.StringListConverter;
 
 /**
@@ -196,10 +198,11 @@ public class Session extends BaseEntity {
     @Enumerated(EnumType.STRING)
     private Signal gateSignal;              // 판정 전이면 null
 
-    // 발화 룰 ID 목록(예: ["R-01"]). 콤마 결합하지 않는다 — StringListConverter 주석 참고.
-    @Convert(converter = StringListConverter.class)
+    // 발화 룰(ID + 문면). 문면까지 남기는 이유는 RuleRefListConverter 주석에 있다 — 판정 뒤에
+    // gate_rules.yaml 이 바뀌면 재계산으로는 그때의 말이 안 나온다 (이슈 #320).
+    @Convert(converter = RuleRefListConverter.class)
     @Column(columnDefinition = "TEXT")
-    private List<String> gateRuleTrace;
+    private List<RuleRef> gateRuleTrace;
 
     // 판정 시점의 미측정 항목 수와 룰셋 버전. 신호·트레이스만 남기면 "R-00 이 물었다"까지만
     // 알고 몇 개를 못 쟀는지도 어느 룰셋으로 쟀는지도 모르는 기록이 된다 — 판정 뒤에는

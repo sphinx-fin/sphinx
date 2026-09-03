@@ -165,12 +165,29 @@ export interface Judgment {
 }
 
 /**
+ * 발화한 게이트 룰 하나 — ID 와 **사람이 읽는 문면** (이슈 #320).
+ *
+ * `label` 은 서버의 `gate_rules.yaml` 이 들고 있다. **web 에 ID→문면 표를 두지 않는다** —
+ * 표가 두 벌이 되고 여기엔 테스트 러너가 없어서(결정 10.59) 갈려도 아무것도 안 말한다.
+ * `ErrorCode` 유니온이 실제로 그렇게 셋 갈렸다(이슈 #316).
+ *
+ * `id` 를 같이 그리는 이유는 감사·심사에서 **룰 ID 자체가 근거**이기 때문이다.
+ *
+ * ❗`label` 은 **결과만 말하고 조건은 말하지 않는다**(7-4 역이용 방지). 화면이 그 문면에
+ * 임계값을 덧붙이면 그 규약이 화면 쪽에서 깨진다.
+ */
+export interface RuleRef {
+  id: string;
+  label: string;
+}
+
+/**
  * 게이트 **확정** 판정 (`POST /sessions/{id}/judge`).
- * `ruleTrace`는 발화한 룰 ID(예: R-01) — 감사 대상이므로 화면에도 노출한다.
+ * `ruleTrace`는 발화한 룰 — 감사 대상이므로 화면에도 노출한다.
  */
 export interface GateResult {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /**
    * 판정 시점의 **미측정 항목 수** — 질문은 보냈는데 판정이 안 돌아온 항목.
    * 1 이상이면 `R-00` 이 RED 를 낸다.
@@ -235,7 +252,7 @@ export type SuitabilityStatus = "NOT_EVALUATED" | "NO_MISMATCH" | "MISMATCH" | "
  */
 export interface GatePreview {
   signal: Signal;
-  ruleTrace: string[];
+  ruleTrace: RuleRef[];
   /**
    * 감사 기준점으로 기록된 값인가. false 면 아직 확정이 아니다.
    *
