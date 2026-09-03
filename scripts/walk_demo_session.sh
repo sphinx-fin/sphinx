@@ -67,14 +67,30 @@ DOWN
     cat >&2 <<'NOKEY'
 
    ai-service 는 떠 있다. 그러면 남는 것은 LLM 키인데 **갈래가 둘이다.**
-   ai-service 로그(app.llm_client)에서 어느 쪽인지 가른다.
 
-     llm_error(LlmNotConfigured)   키가 그 프로세스에 없다        503
-     llm_error(LlmError) + 401/403 키가 있는데 틀렸다             502
+   ❗**로그가 아니라 응답 본문을 본다.** `app.llm_client` 는 아무것도 안 찍고
+   (`grep -c 'log\.' app/llm_client.py` → 0), `llm_error(...)` 문자열은 **질문 폴백
+   경로에만** 있다(`question_gen`). 그런데 질문 폴백은 502 를 안 낸다 — 조용히 템플릿으로
+   내려간다. 즉 여기까지 온 502 는 사실상 **채점**이고 그 경로엔 그 문자열이 없다.
+
+   ❗**서버 응답으로도 못 가른다.** `GlobalExceptionHandler` 가 고정 문면
+   ("채점 서비스에 연결할 수 없습니다")만 내고, ai-service 의 원문은 `AiServiceException`
+   메시지에 갇혀 서버 로그까지만 간다. 그래서 **ai-service 를 직접 찔러 본다** — 그쪽
+   `detail` 에는 SDK 원문이 그대로 있다.
+
+     curl -s -X POST "${AI_BASE:-http://localhost:8100}/internal/score" \
+       -H 'Content-Type: application/json' -d @- <<'PROBE' | head -c 300
+     {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
+      "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
+      "name":"probe","importance":"required","status":"extracted",
+      "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
+     PROBE
+
+     "LLM_API_KEY 미설정"                        키가 그 프로세스에 없다      503
+     "Error code: 401" / "Incorrect API key"     키가 있는데 틀렸다           502
 
    ❗뒤엣것이 지금 제일 나올 만하다. 정책 모델은 gpt-5-mini 다(#266) — 그 전 정책이
    gemini-3.5-flash-lite 였으므로 .env 나 SSM 에 옛 Gemini 키가 남아 있으면 이 모양이 된다.
-   `LlmNotConfigured` 만 찾으면 로그에 없고, 키는 있으니 그것도 아니라고 읽게 된다.
 
    값을 안 보고 프로바이더를 가른다 — 길이가 자릿수로 다르다.
      awk -F= '/^LLM_API_KEY/{print length($2)}' ai-service/.env
