@@ -50,7 +50,14 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
+import logging
+
+from pydantic import BaseModel, Field
+
 from . import textsim
+from .llm_client import LlmError
+
+log = logging.getLogger(__name__)
 
 #: 청크 목표 길이. 조항 경계로 자르고 넘치면 이 크기로 슬라이딩한다.
 #:
@@ -272,3 +279,143 @@ class Dense:
     def rank(self, query_vector: list[float]) -> list[tuple[int, float]]:
         scored = [(i, cosine(query_vector, v)) for i, v in enumerate(self._vectors)]
         return sorted(scored, key=lambda x: -x[1])
+
+
+# ── 리랭킹 ────────────────────────────────────────────────────────────────────
+#: 리랭커에 넘길 후보 수. RRF 상위 이만큼만 짝으로 다시 본다.
+#:
+#: 크게 잡으면 호출 하나가 길어져 모델이 뒤쪽 후보를 덜 본다(위치 편향). 작게 잡으면
+#: RRF 가 놓친 것을 리랭커가 구제할 기회가 없다. **`recall@k` 를 재고 나서 정한다** —
+#: 지금 값은 계약 샘플 청크 수(55·82)와 앵커 수(57·42)로 잡은 출발점이고 실측 근거가 없다.
+RERANK_CANDIDATES = 10
+
+#: 리랭커가 낼 최종 순위 길이.
+RERANK_TOP_N = 3
+
+
+class Reranked(BaseModel):
+    """리랭커 출력. **순위만 받는다 — 점수를 안 받는다.**
+
+    점수를 받으면 그 숫자가 임계값이 되고, 그러면 *"0.7 은 어떻게 정했나"* 를 심사에서
+    답해야 한다. 순위만 받으면 그 질문이 없어진다 — RRF 를 순위 융합으로 둔 것과 같은
+    이유다(`#204`·`#127` 에서 배운 방향: 임계값은 없앨 수 있으면 없앤다).
+    """
+
+    order: list[int] = Field(description="후보 번호를 관련도 높은 순으로. 0-based")
+    dropped: list[int] = Field(
+        default_factory=list,
+        description="이 항목의 조건이 아니라고 본 후보 번호. order 에 안 넣은 것을 여기 적는다",
+    )
+
+
+def rerank(
+    query: str,
+    candidates: list[Chunk],
+    client,
+    top_n: int = RERANK_TOP_N,
+) -> list[int]:
+    """(질의, 청크) 짝을 함께 보고 순위를 다시 매긴다. 후보 **인덱스** 목록을 돌려준다.
+
+    ## 왜 이 단계가 필요한가 — 앞 둘이 못 하는 것이 있다
+
+    BM25 는 어휘 겹침을, dense 는 주제 근접을 잰다. **둘 다 "이 문면이 이 항목의 조건인가"
+    를 못 판단한다.** F-DET-001 실측이 그것을 보였다 — 임베딩은 오해 문장과 그 부정을
+    0.560 vs 0.621 로 **뒤집어 놨다**(주제는 같고 입장만 다르다). 짝을 함께 보는 모델만
+    그 구별을 한다.
+
+    ## ❗결정론이 아니다 — 그리고 파라미터로 안 된다
+
+    `#281` 실측: `temperature` 는 정책 모델이 거부하고, `seed` 를 고정해도
+    `complete_json` 3회가 3가지였다. 그래서 **이 단계의 출력을 재현 가능하다고 적으면
+    안 된다.**
+
+    쓰는 자리가 그 성질을 견디게 골라야 한다.
+
+        루브릭 생성 · 커버리지 검사   ✅ 사람이 승인한다. 흔들려도 사람이 본다
+        F-EXT-002 추출 프롬프트 입력   ⚠️ 실행마다 top-k 가 달라진다 → `#280` 이 그 자리다
+        F-SCR-001 채점                ❌ 쓰지 않는다 (모듈 docstring 참고)
+
+    ## 후보가 적으면 부르지 않는다
+
+    후보가 `top_n` 이하면 순위를 바꿀 여지가 없다. 호출을 아끼는 것보다 **비결정성을
+    안 들이는 것**이 이유다.
+    """
+    if len(candidates) <= top_n:
+        return list(range(len(candidates)))
+
+    listing = "\n".join(
+        f"[{i}] (p{c.page}) {' '.join(c.text.split())[:300]}"
+        for i, c in enumerate(candidates)
+    )
+    prompt = (
+        f"[찾는 것]\n{query}\n\n"
+        f"[후보]\n{listing}\n\n"
+        f"위 후보 중 [찾는 것]의 **조건이 실제로 적힌** 것을 관련도 순으로 최대 {top_n}개 "
+        "고르라. 주제가 비슷한 것과 조건이 적힌 것은 다르다 — 조건이 없으면 dropped 에 "
+        "넣는다. JSON만 출력한다."
+    )
+    try:
+        out = client.complete_json(
+            prompt=prompt,
+            model_cls=Reranked,
+            schema_name="Reranked",
+            system=(
+                "당신은 공시문서에서 특정 이해항목의 조건이 적힌 문면을 골라내는 검색 "
+                "리랭커다. 요약하거나 해석하지 않는다. 고르기만 한다."
+            ),
+            pii_scope="public_document",
+        )
+    except LlmError:
+        # ❗**융합 순위로 되돌아간다.** 리랭커가 죽었다고 검색이 죽으면 안 된다 —
+        # 이 단계는 순위를 **개선**하는 것이고 만드는 것이 아니다. 그리고 조용히
+        # 되돌아가지 않는다: 호출부가 알 수 있게 로그를 남긴다.
+        log.warning("리랭커 실패 — RRF 순위를 그대로 쓴다 (query=%.40s)", query)
+        return list(range(min(top_n, len(candidates))))
+
+    # 모델이 범위 밖 번호를 내면 버린다 — 인덱스는 우리 값이다(모델 출력을 안 믿는다).
+    seen: list[int] = []
+    for idx in out.order:
+        if 0 <= idx < len(candidates) and idx not in seen:
+            seen.append(idx)
+    return seen[:top_n]
+
+
+def search(
+    query: str,
+    chunks: list[Chunk],
+    bm25: Bm25,
+    dense: Dense,
+    query_vector: list[float],
+    client=None,
+    top_n: int = RERANK_TOP_N,
+) -> list[Hit]:
+    """키워드 + dense → RRF → (client 가 있으면) 리랭킹. 최종 `Hit` 목록.
+
+    `client` 를 안 주면 RRF 까지만 한다 — **리랭킹 없이도 쓸 수 있어야 한다.** 테스트와
+    `recall@k` 측정이 LLM 없이 돌아야 하고, 리랭커가 정책·쿼터에 걸리는 날에도 검색은
+    돌아야 한다.
+    """
+    kw = bm25.rank(query)[:RERANK_CANDIDATES]
+    dn = dense.rank(query_vector)[:RERANK_CANDIDATES]
+    fused = rrf(kw, dn)
+
+    kw_rank = {i: r for r, (i, _) in enumerate(kw, start=1)}
+    dn_rank = {i: r for r, (i, _) in enumerate(dn, start=1)}
+    candidates = [i for i, _ in fused[:RERANK_CANDIDATES]]
+
+    order = list(range(len(candidates)))
+    if client is not None:
+        order = rerank(query, [chunks[i] for i in candidates], client, top_n)
+
+    hits: list[Hit] = []
+    for position, slot in enumerate(order[:top_n]):
+        idx = candidates[slot]
+        hits.append(Hit(
+            chunk=chunks[idx],
+            rrf=dict(fused).get(idx, 0.0),
+            bm25_rank=kw_rank.get(idx),
+            dense_rank=dn_rank.get(idx),
+            rerank=position + 1 if client is not None else None,
+            why="rerank" if client is not None else "rrf",
+        ))
+    return hits

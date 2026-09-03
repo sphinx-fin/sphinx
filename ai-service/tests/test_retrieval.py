@@ -176,3 +176,109 @@ def test_long_sections_overlap_so_a_condition_is_never_split() -> None:
     assert any(tail in c.text for c in chunks), (
         "'다만 …' 절이 어느 청크에도 온전히 없다 — 뜻이 뒤집힌 채로 검색된다"
     )
+
+
+# ── 리랭킹 ────────────────────────────────────────────────────────────────────
+class _StubClient:
+    """리랭커 스텁. 호출 여부와 넘긴 프롬프트를 기록한다."""
+
+    def __init__(self, order=None, dropped=None, raise_error=False):
+        self._order = [] if order is None else order
+        self._dropped = [] if dropped is None else dropped
+        self._raise = raise_error
+        self.prompts: list[str] = []
+
+    def embed(self, texts, model=None):
+        return [[1.0, 0.0] for _ in texts]
+
+    def complete_json(self, **kwargs):
+        from app.llm_client import LlmError
+
+        self.prompts.append(kwargs["prompt"])
+        if self._raise:
+            raise LlmError("스텁 실패")
+        return retrieval.Reranked(order=self._order, dropped=self._dropped)
+
+
+def _many_chunks(n: int = 6) -> list[retrieval.Chunk]:
+    return [retrieval.Chunk(page=1, start=i * 60, end=i * 60 + 60, text=f"조각{i} " + "가" * 50)
+            for i in range(n)]
+
+
+def test_rerank_is_skipped_when_candidates_fit() -> None:
+    """★ 후보가 `top_n` 이하면 부르지 않는다.
+
+    순위를 바꿀 여지가 없는데 부르면 **비결정성만 들인다** — `#281` 실측대로 이 단계는
+    같은 입력에 같은 답을 안 낸다. 호출을 아끼는 것보다 그게 이유다.
+    """
+    client = _StubClient(order=[2, 1, 0])
+    got = retrieval.rerank("질의", _many_chunks(3), client, top_n=3)
+    assert got == [0, 1, 2]
+    assert not client.prompts, "후보가 3개인데 리랭커를 불렀다"
+
+
+def test_rerank_drops_out_of_range_indices_from_the_model() -> None:
+    """★ 모델이 낸 번호를 그대로 안 믿는다 — 인덱스는 우리 값이다.
+
+    범위 밖 번호를 그대로 쓰면 `IndexError` 로 검색이 죽거나 남의 청크를 가리킨다.
+    `_pin_item_id`·`_drop_llm_misconception_type`(F-SCR-001)과 같은 층의 규칙이다.
+    """
+    client = _StubClient(order=[99, 1, -3, 1, 0])
+    got = retrieval.rerank("질의", _many_chunks(6), client, top_n=3)
+    assert got == [1, 0], f"범위 밖·중복을 안 걸렀다: {got}"
+
+
+def test_rerank_falls_back_to_fused_order_when_the_model_fails(caplog) -> None:
+    """★ 리랭커가 죽으면 **RRF 순위로 되돌아간다** — 검색이 같이 죽지 않는다.
+
+    이 단계는 순위를 *개선* 하는 것이고 만드는 것이 아니다. 그리고 **조용히 되돌아가지
+    않는다** — 로그가 없으면 리랭킹이 꺼진 채로 도는 것을 아무도 모른다(`#238` 이
+    폴백 로그를 넣은 것과 같은 이유).
+    """
+    import logging
+
+    client = _StubClient(raise_error=True)
+    with caplog.at_level(logging.WARNING, logger="app.retrieval"):
+        got = retrieval.rerank("질의", _many_chunks(6), client, top_n=3)
+
+    assert got == [0, 1, 2], "융합 순위로 안 돌아갔다"
+    assert any("리랭커 실패" in r.getMessage() for r in caplog.records), (
+        "조용히 폴백했다 — 리랭킹이 꺼진 것을 알 수 없다"
+    )
+
+
+def test_rerank_prompt_separates_topic_from_condition() -> None:
+    """프롬프트가 **주제 유사와 조건 실재를 가르라고** 말해야 한다.
+
+    이 단계가 존재하는 이유가 그 구별이다 — BM25 는 어휘를, dense 는 주제를 재고 둘 다
+    *"이 문면이 이 항목의 조건인가"* 를 못 본다(F-DET-001 실측: 임베딩이 오해 문장과 그
+    부정을 0.560 vs 0.621 로 뒤집어 놨다).
+    """
+    client = _StubClient(order=[0])
+    retrieval.rerank("원금손실 조건", _many_chunks(6), client)
+    prompt = client.prompts[0]
+    assert "조건이 실제로 적힌" in prompt
+    assert "주제가 비슷한 것과 조건이 적힌 것은 다르다" in prompt
+
+
+def test_search_works_without_a_client() -> None:
+    """★ 리랭킹 없이도 돌아야 한다.
+
+    `recall@k` 측정과 테스트가 LLM 없이 돌아야 하고, 리랭커가 정책·쿼터에 걸리는 날에도
+    검색은 돌아야 한다. `client=None` 이면 RRF 까지다.
+    """
+    chunks = _many_chunks(6)
+    bm = retrieval.Bm25(chunks)
+    dense = retrieval.Dense([[1.0, 0.0]] * 6)
+    hits = retrieval.search("조각0", chunks, bm, dense, [1.0, 0.0], client=None, top_n=3)
+    assert hits and all(h.why == "rrf" for h in hits)
+    assert all(h.rerank is None for h in hits)
+
+
+def test_hits_carry_which_retriever_found_them() -> None:
+    """어느 검색기가 찾았는지가 `Hit` 에 남아야 한다 — 안 남으면 왜 이 순위인지 못 짚는다."""
+    chunks = _many_chunks(6)
+    hits = retrieval.search("조각1", chunks, retrieval.Bm25(chunks),
+                            retrieval.Dense([[1.0, 0.0]] * 6), [1.0, 0.0], client=None)
+    assert any(h.bm25_rank is not None for h in hits)
+    assert any(h.dense_rank is not None for h in hits)
