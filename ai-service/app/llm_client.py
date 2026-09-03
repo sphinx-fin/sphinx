@@ -167,6 +167,36 @@ class LlmClient:
             )
         return content
 
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        pii_scope: str = "public_document",
+    ) -> list[list[float]]:
+        """텍스트 → 임베딩 벡터. **P3 경계를 지난다** (이슈 #363 준비 · retrieval.py).
+
+        ❗`pii_scope` 기본값이 `public_document` 다. 이 메서드를 부르는 곳은 지금
+        `retrieval` 뿐이고 거기 들어오는 것은 **공시 상품문서**다(기획 7-3: 공시 자료는
+        개인정보가 아니다). 고객 발화를 임베딩할 일이 생기면 **호출부가 `customer` 를
+        명시해야 한다** — 기본값에 기대면 넓은 휴리스틱이 꺼진 채로 나간다.
+
+        `send()` 와 같은 이유로 여기가 유일한 통로다. 임베딩 SDK 를 호출부에서 직접
+        부르면 P3 최종 방어선이 둘이 된다.
+        """
+        for i, text in enumerate(texts):
+            pii.assert_clean(text, f"llm.embed[{i}]", scope=pii_scope)
+        try:
+            resp = self._openai().embeddings.create(
+                model=model or self._cfg.llm_embed_model,
+                input=texts,
+            )
+        except LlmNotConfigured:
+            raise
+        except Exception as exc:
+            raise LlmError(f"임베딩 호출 실패: {exc}") from exc
+        return [d.embedding for d in resp.data]
+
     def complete_json(
         self,
         *,
