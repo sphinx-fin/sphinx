@@ -92,11 +92,18 @@ def build() -> list[dict]:
 
     # 화면 번호는 **표시 순서대로** 다시 매긴다. `els-0007` 을 그대로 보여주면 번호가
     # 원래 자리를 말해서 섞은 의미가 없어진다. 제출 JSONL 에는 진짜 sample_id 가 나간다.
-    n = 0
-    for item in out:
-        for s in item["samples"]:
-            n += 1
-            s["no"] = f"{n:02d}"
+    #
+    # ❗**`sample_id` 와 헷갈릴 수 없는 서식이어야 한다.** 처음엔 `01`~`70` 으로 매겼는데
+    # `els-0001`~`els-0067` 과 자릿수가 같고, 하필 앞 두 줄이 `01→els-0002`·`02→els-0003`
+    # 으로 +1 씩 겹쳐서 **"라벨이 하나씩 밀렸다"** 로 읽혔다. 실제로 라벨링을 마친 뒤
+    # 그 신고가 들어왔고, 데이터는 멀쩡한데 대조하느라 한참 걸렸다(#324).
+    #
+    # 항목 글자 + 항목 안 번호로 준다 — `A1`·`C4` 는 어떤 sample_id 와도 안 겹친다.
+    # 항목 안에서 다시 시작하므로 라벨러가 운영자에게 자리를 말하기도 쉽다("C4 가 애매했다").
+    for idx, item in enumerate(out):
+        letter = chr(ord("A") + idx) if idx < 26 else f"Z{idx - 25}"
+        for i, s in enumerate(item["samples"], 1):
+            s["no"] = f"{letter}{i}"
     return out
 
 
