@@ -9,7 +9,21 @@
    집계에는 판정 3색을 쓰지 않는다. 명도만으로 강도를 낸다 — 여기에 적색을 쓰면
    집계가 판정처럼 보이고, 그러면 "지점 성과 지표"로 읽힌다. */
 
-.s08 { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-8);
+/* ❗`width: 100%` + `max-width: min(…)` 이 한 짝이다. `max-width: 72rem` 만 두면 이 화면이
+   좁은 뷰포트에서 **min-content 로 버틴다** — 안쪽 `.s08__matrix` 의 min-content 가 3,618px
+   이라 뷰포트 744 에서도 폭이 1152 로 남고 408px 이 넘친다(이슈 #312 · PR #328 리뷰 실측).
+
+   ❗`min-width: 0` 으로는 안 풀린다. **`min-width` 는 하한을 올리는 속성이라 fit-content 를
+   min-content 아래로 내리지 못한다** — `.s08`·`.s08__matrix`·`.s08__table-wrap` 셋 다 줘도
+   1152 그대로였다. 폭을 지정해야 한다. (flex 자동 최소 크기 규칙은 주축에만 걸리는데
+   `#root` 가 `column` 이라 여기서 가로는 그 규칙의 축도 아니다 — `#root > main` 의
+   `min-height: 0` 이 그 자리다.)
+
+   ❗**1496 에서 재면 이 원인이 안 보인다** — 그 폭에서는 `max-width: 72rem` 으로 이미
+   뷰포트 안이라 가려진다. 재려면 뷰포트를 744 로 묶고 `.s08` 의 `clientWidth` 와
+   `documentElement.scrollWidth` 를 같이 본다. */
+.s08 { width: 100%; max-width: min(72rem, 100%); margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
   display: flex; flex-direction: column; gap: var(--space-5); }
 .s08__loading { color: var(--text-muted); padding: var(--space-6); }
 
@@ -73,10 +87,14 @@
    `.sr-only` 의 `clip: rect(0 0 0 0)` 으로는 안 막힌다 — `clip` 은 **그리는 것만** 자르고
    레이아웃과 스크롤 영역은 그대로다. 그래서 안 보이면서 넘친다.
 
-   ❗`.s08 { min-width: 0 }` 은 이 결함에 **no-op** 이다(#328 리뷰 실측: 3653 → 3653).
-   flex 아이템의 자동 최소 크기 규칙은 **주축에만** 걸리는데 `#root` 가 `column` 이라
-   주축은 세로다 — 그 자리의 짝은 이미 있는 `#root > main { min-height: 0 }` 이고,
-   가로는 그 규칙이 걸리는 축이 아니다. 넘치는 것은 `.s08` 이 아니라 그 자손이다. */
+   ❗**이 줄만으로는 안 끝난다 — 원인이 둘이다.** 뷰포트 744 에서 잰 값(#328 리뷰).
+
+     그대로                       문서 3481   .s08 1152   넘침 408
+     이 줄만                            1152        1152       408   ← 2,329px 를 닫는다
+     + 위쪽 `.s08` 의 폭 지정            744         744         0
+
+   나머지 408px 은 `.s08` 자신이 min-content 로 버티는 것이고, 그 처방은 이 파일 위쪽
+   `.s08` 규칙에 적어 뒀다. 둘은 다른 결함이라 한쪽만 고치면 절반만 닫힌다. */
 .s08__table-wrap { overflow-x: auto; position: relative; }
 .s08__table { border-collapse: collapse; width: 100%; font-size: calc(14px * var(--scale)); }
 .s08__table th, .s08__table td {
