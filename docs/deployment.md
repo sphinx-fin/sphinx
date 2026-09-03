@@ -245,7 +245,7 @@ curl --max-time 3 http://<EC2 퍼블릭 IP>:8000/products  # server 직접 — �
 ## 9. 도메인과 https (alpha)
 
 ```
-sphinx2026.duckdns.org   →  43.201.87.150 (alpha EIP)   DuckDNS A 레코드
+sphinx2026.duckdns.org   →  54.116.240.212 (alpha EIP)  DuckDNS A 레코드
 인증서                    →  Let's Encrypt · HTTP-01 · certbot 컨테이너
 ```
 
