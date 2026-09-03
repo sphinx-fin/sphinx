@@ -264,9 +264,29 @@ def test_display_numbers_hide_the_corpus_position():
     `els-0007` 을 그대로 보여주면 번호가 원래 자리를 말한다 — 예전 표본은 항목마다
     `U1 → U2 → U3 → U4` 순서였으므로 그 번호가 곧 등급이었다.
     """
-    numbers = [s["no"] for item in _baked() for s in item["samples"]]
-    assert numbers == [f"{i:02d}" for i in range(1, len(numbers) + 1)], (
-        "화면 번호가 1..N 연속이 아니다 — build_worksheet.py 를 본다"
-    )
-    sids = [s["sid"] for item in _baked() for s in item["samples"]]
+    baked = _baked()
+    for idx, item in enumerate(baked):
+        letter = chr(ord("A") + idx)
+        assert [s["no"] for s in item["samples"]] == \
+            [f"{letter}{i}" for i in range(1, len(item["samples"]) + 1)], \
+            f"{item['id']} 의 화면 번호가 {letter}1..{letter}N 이 아니다"
+    sids = [s["sid"] for item in baked for s in item["samples"]]
     assert sids != sorted(sids), "표시 순서가 sample_id 순서 그대로다 — 섞이지 않았다"
+
+
+def test_display_numbers_cannot_be_mistaken_for_a_sample_id():
+    """❗화면 번호가 `sample_id` 처럼 생기면 안 된다.
+
+    처음엔 `01`~`70` 으로 매겼는데 `els-0001`~`els-0067` 과 자릿수가 같았고, 하필
+    앞 두 줄이 `01 → els-0002` · `02 → els-0003` 으로 +1 씩 겹쳐서 라벨링을 마친
+    라벨러가 **"라벨이 하나씩 밀렸다"** 고 신고했다. 데이터는 멀쩡했다 — 화면·저장값·
+    파일이 70/70 같았고, 대조하는 데만 한참 걸렸다(#324).
+
+    번호가 숫자로만 되어 있으면 이 착시는 반드시 다시 난다.
+    """
+    for item in _baked():
+        for s in item["samples"]:
+            assert not s["no"].isdigit(), (
+                f"화면 번호 {s['no']!r} 가 숫자뿐이라 sample_id 와 헷갈린다 "
+                "— 항목 글자를 붙인다(A1·C4)"
+            )

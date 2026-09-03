@@ -160,5 +160,39 @@ class TestReport:
         write_jsonl(tmp_path / "data" / "labels" / "오준서.jsonl", disagreeing)
         r = run(tmp_path)
         assert r.returncode == 0, r.stderr
-        assert "상한(평가자 간)" in r.stdout
+        assert "상한과의 거리" in r.stdout
         assert "불일치 제외 10건" in r.stdout
+
+    def test_the_ceiling_is_compared_on_the_same_sample(self, tmp_path):
+        """❗상한과 나란히 놓는 값은 **2절**(전체 표본)이지 3절(합의 부분집합)이 아니다.
+
+        합의 집합은 두 사람이 갈린 항목이 빠진 쪽이라 모델에게 더 쉽다. 그래서 라벨이
+        멀쩡해도 3절 값이 상한을 넘을 수 있고, 예전 문면은 그때 *"표본·라벨을 먼저
+        의심한다"* 를 찍었다 — 읽는 사람이 있지도 않은 누출을 찾으러 간다.
+
+        실측으로 그렇게 났다(70건 회차): 3절 0.795 > 상한 0.769 인데 같은 표본에서는
+        0.706·0.682 로 상한 아래였다.
+        """
+        gold, model = corpus(40)
+        disagreeing = [{**g, "grade": "U3" if g["grade"] == "U4" else g["grade"]} for g in gold]
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        write_jsonl(tmp_path / "data" / "labels" / "강희진.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "오준서.jsonl", disagreeing)
+        r = run(tmp_path)
+        assert r.returncode == 0, r.stderr
+
+        block = r.stdout.split("상한과의 거리", 1)[1]
+        assert "모델 ↔ 강희진" in block and "모델 ↔ 오준서" in block, \
+            "상한 비교 블록이 2절의 라벨러별 값을 싣지 않는다"
+        # ❗3절(합의 부분집합) 값이 이 블록에 섞이면 안 된다 — 표본이 다르다.
+        assert "합의" not in block, "상한 비교에 합의 부분집합 값이 섞였다"
+
+    def test_section_three_warns_it_is_a_subset(self, tmp_path):
+        """3절 값을 상한과 직접 비교하지 말라는 경고가 문면에 있어야 한다."""
+        gold, model = corpus(40)
+        disagreeing = [{**g, "grade": "U3" if g["grade"] == "U4" else g["grade"]} for g in gold]
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", disagreeing)
+        r = run(tmp_path)
+        assert "1절 상한과 직접 비교하지 않는다" in r.stdout
