@@ -45,7 +45,7 @@ class SourceSpan(Strict):
 
 
 class Condition(Strict):
-    value_text: str = Field(description="원문 인용만 허용 (P6)")
+    value_text: str = Field(description="원문 인용만 허용 (P6 · 1절 F-EXT-002)")
     source_span: SourceSpan
 
 
@@ -218,7 +218,7 @@ class ExtractionWarning(Strict):
         "AMBIGUOUS_SPAN",        # 같은 문면이 페이지에 여러 번 — 어느 것인지 확정 불가
         "PAGE_CORRECTED",        # 모델이 지목한 페이지에 없어 다른 페이지에서 찾음
         "QUOTE_NARROWED",        # 긴 인용이 안 풀려 문장 경계로 좁혀 해소 — 수치는 전부 보존
-        "NARROWING_REFUSED",     # 좁히면 풀리지만 수치가 빠져 거부 (P6) → extraction_failed
+        "NARROWING_REFUSED",     # 좁히면 풀리지만 수치가 빠져 거부 (P6 · 1절) → extraction_failed
         "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
         "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
     ]
@@ -321,7 +321,7 @@ class ReexplainRequest(Strict):
 class ReexplainResponse(Strict):
     item_id: str
     content: str
-    cited_spans: list[SourceSpan] = Field(description="P6 — 수치는 원문 인용만, 생성 후 대조 검증")
+    cited_spans: list[SourceSpan] = Field(description="P6(0.2절) — 재설명 수치는 원문 인용만, 생성 후 대조 검증")
 
 
 # ── F-DET-002 적합성 모순 (초안 — proposals/suitability_mismatch.schema.json) ──

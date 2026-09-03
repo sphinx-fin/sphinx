@@ -228,6 +228,10 @@
 /* ── 행동 ───────────────────────────────────────────────────────────────── */
 .s05__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 
+/* 버튼이 없는 이유를 적는 자리(이슈 #311). 경고가 아니라 안내라 색으로 말하지 않는다 —
+   판정 3색은 이 화면에서 신호 전용이고, 여기에 색을 쓰면 안내가 판정처럼 읽힌다. */
+.s05__action-note { color: var(--text-muted); font-size: calc(14px * var(--scale)); }
+
 .s05__btn {
   font: inherit;
   font-size: calc(15px * var(--scale));

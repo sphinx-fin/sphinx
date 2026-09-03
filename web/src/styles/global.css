@@ -85,7 +85,17 @@ button, a, [role="button"], [role="radio"], label {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* 스크린리더 전용 */
+/* 스크린리더 전용.
+
+   ❗**이걸 `overflow` 스크롤 컨테이너 안에 넣을 때는 그 컨테이너에 `position: relative` 를
+   같이 준다.** `position: absolute` 라, 컨테이너가 `static` 이면 컨테이닝 블록이 그 위쪽이
+   되어 **컨테이너의 `overflow` 가 이걸 안 자른다** — 넘침이 문서로 전파돼 페이지가 통째로
+   가로 스크롤된다. `clip: rect(0 0 0 0)` 은 막아 주지 않는다: `clip` 은 **그리는 것만**
+   자르고 레이아웃·스크롤 영역은 그대로다.
+
+   그래서 증상이 **보이지 않는다** — 1px 짜리가 안 그려진 채로 폭만 만든다. S-08 의 표
+   래퍼에서 실제로 그랬고(셀마다 하나씩 34개 · 문서 폭 3,653px), 원인이 표나 `min-width` 로
+   보여서 한 번 헛짚었다(이슈 #312 · PR #328 리뷰). */
 .sr-only {
   position: absolute;
   width: 1px; height: 1px;
