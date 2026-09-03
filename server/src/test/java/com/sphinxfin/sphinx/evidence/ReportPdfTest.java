@@ -36,7 +36,8 @@ class ReportPdfTest {
                                 "askedQuestion", "낙인이 무엇인지 설명해 주시겠어요?",
                                 "reason", utterance)))),
                 "gateHistory", List.of(Map.of(
-                        "at", "2026-09-03T10:01:00Z", "signal", "RED", "ruleTrace", List.of("R-01"))),
+                        "at", "2026-09-03T10:01:00Z", "signal", "RED", "ruleTrace", List.of("R-01"),
+                        "unmeasured", 2, "rulesVersion", 3)),
                 "overrides", List.of());
     }
 
@@ -44,6 +45,82 @@ class ReportPdfTest {
         try (PDDocument doc = Loader.loadPDF(bytes)) {
             return new PDFTextStripper().getText(doc);
         }
+    }
+
+    /** 게이트 항목 하나만 갈아 끼운 내용. 옛 기록을 만들려면 null 을 담아야 해서 Map.of 를 못 쓴다. */
+    private static Map<String, Object> withGate(Map<String, Object> gate) {
+        Map<String, Object> c = new java.util.LinkedHashMap<>(content("S-9", "원금 보장인 줄 알았어요"));
+        c.put("gateHistory", List.of(gate));
+        return c;
+    }
+
+    private static Map<String, Object> gate(Object... keyValues) {
+        Map<String, Object> g = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            g.put(String.valueOf(keyValues[i]), keyValues[i + 1]);
+        }
+        return g;
+    }
+
+    @Test
+    @DisplayName("★ 게이트 절이 **왜 그 신호였는지**를 그린다 — 룰과 판정 입력까지")
+    void thePaperSaysWhyTheSignalWasWhatItWas() throws Exception {
+        // ❗데모에서 증명해야 하는 것이 "RED 였다" 가 아니라 "왜 RED 였나" 다. 기록과 JSON 은
+        // 넷을 들고 있는데 지면은 시각·신호뿐이었고, 픽스처가 ruleTrace 를 넣어 주면서도
+        // 게이트 절에 대한 단정이 한 줄도 없어서 그 사실이 안 드러났다(PR #299 리뷰, 강희진).
+        String text = textOf(pdf.render(content("S-7", "원금은 지켜지죠"), "abc123", AT));
+
+        assertThat(text)
+                .as("교부되는 것은 종이다 — 화면의 ruleTrace 는 닫히면 사라진다")
+                .contains("R-01")
+                .contains("미측정 2건")
+                .contains("v3");
+    }
+
+    @Test
+    @DisplayName("❗못 쟀는지 안 적었는지를 종이가 가른다 — 옛 항목은 '미측정 -' 이 아니다")
+    void anOlderEntrySaysSoInsteadOfPrintingADash() throws Exception {
+        // append-only 라 이 필드가 생기기 전에 적힌 게이트 항목은 영원히 그대로 남는다.
+        // ReportService 는 그 항목을 "unmeasured": null 로 낸다 — 키를 지우지 않는 것이
+        // 0(전부 쟀다)과 갈라 두려는 규약이다(StoredEvidenceRecorderTest 의 같은 단정).
+        // str(null) 이 "-" 라서 아무 것도 안 하면 종이가 "미측정 -건" 이 된다.
+        String text = textOf(pdf.render(
+                withGate(gate("at", "2026-09-03T10:01:00Z", "signal", "RED",
+                              "ruleTrace", List.of("R-01"), "unmeasured", null, "rulesVersion", null)),
+                "abc123", AT));
+
+        assertThat(text)
+                .as("'미측정 -건' 은 0 과 구별되지 않고, 침묵은 그 사실을 숨긴다")
+                .contains("판정 입력 미기재")
+                .doesNotContain("미측정 -");
+    }
+
+    @Test
+    @DisplayName("❗룰셋 0 을 'v0' 으로 찍지 않는다 — 존재하지 않는 버전을 말하는 것이다")
+    void versionZeroIsNotAVersion() throws Exception {
+        // rulesVersion 0 은 GateEngine.UNVERSIONED — 룰이 파일을 안 지나왔다는 뜻이다.
+        // 종이가 "룰셋 v0" 이라고 하면 그 문서로는 어느 룰셋으로 판정했는지 되짚을 수 없고,
+        // v0 인 gate_rules.yaml 을 찾으러 가게 된다.
+        String text = textOf(pdf.render(
+                withGate(gate("at", "2026-09-03T10:01:00Z", "signal", "RED",
+                              "ruleTrace", List.of("R-01"), "unmeasured", 0, "rulesVersion", 0)),
+                "abc123", AT));
+
+        assertThat(text)
+                .contains("미측정 0건")
+                .contains("미버전")
+                .doesNotContain("v0");
+    }
+
+    @Test
+    @DisplayName("걸린 룰이 없으면 '없음' 이라고 적는다 — 빈 자리로 두지 않는다")
+    void anEmptyTraceSaysNone() throws Exception {
+        String text = textOf(pdf.render(
+                withGate(gate("at", "2026-09-03T10:02:00Z", "signal", "GREEN",
+                              "ruleTrace", List.of(), "unmeasured", 0, "rulesVersion", 3)),
+                "abc123", AT));
+
+        assertThat(text).contains("걸린 룰 없음");
     }
 
     @Test

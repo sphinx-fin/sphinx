@@ -94,6 +94,95 @@ def all_rubrics() -> dict[str, Rubric]:
     return dict(_all())
 
 
+#: 링크가 없는 것이 **지금은 옳지만 영구는 아닌** 루브릭 → (근거, 빼는 조건).
+#:
+#: ## 왜 "의도" 가 아니라 "아직" 인가 (`#298` 리뷰)
+#:
+#: 처음에는 이 목록 없이 냈고 `VAR-PARTIAL-DEPOSIT-INSURANCE` 를 *"누가 봐도 M02 자리인데
+#: 링크가 비어 있다 — 단순 누락으로 보인다"* 고 적었다. **틀렸다.** 그 파일 머리말이 이유를
+#: 이미 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고, 변액에서 *"예금자보호 되는 줄"*
+#: 은 **부분적으로 참**이라 결정론 상향이 **오판**이었다.
+#:
+#: 그 다음에 `_INTENTIONALLY_UNLINKED` 로 고쳤는데 그것도 한 칸 틀렸다. **"의도적으로 링크
+#: 없음" 은 영구히 그렇다고 읽힌다.** 결정 10.24 가 답까지 적어 뒀다 —
+#:
+#:     (a)를 고르면 변액용 **신규 유형(부분 보호 범위 오인)** 이 필요하고,
+#:     그 유형은 **인용 가능한 근거가 있어야 한다**(3.3·3.17)
+#:
+#: 즉 지금 상태는 *"링크가 없기로 정했다"* 가 아니라 **"그 유형이 아직 없다"** 다. 앞엣것으로
+#: 적으면 **지우는 사건이 안 온다** — 결정 10.67(OIDC 이름 표기)에서 정리한 그 모양이다.
+#:
+#: 그래서 **조건을 기계가 볼 수 있게** 적는다. `test_unlinked_until_has_not_expired` 가
+#: 라이브러리에 변액을 덮는 예금자보호 유형이 열리는 순간 실패하고, 그때 이 항목을 뺀다.
+_UNLINKED_UNTIL: dict[str, tuple[str, str]] = {
+    "VAR-PARTIAL-DEPOSIT-INSURANCE": (
+        "PR #57",
+        "오해 라이브러리에 VARIABLE_INSURANCE 를 덮는 예금자보호 유형이 생길 때 (결정 10.24)",
+    ),
+}
+
+
+def enforcement_gaps() -> dict[str, tuple[str, ...]]:
+    """오해 조건을 선언했는데 **강제할 통로가 없는** 루브릭 → 그 조건들 (이슈 #284).
+
+    ## 무엇이 문제인가
+
+    루브릭에 목록이 둘 있고 **성격이 다르다.**
+
+        misconception_conditions   프롬프트에 실린다. 모델이 읽고 판단한다    → 강제력 없음
+        related_misconceptions     apply_misconception_floor 가 U4 로 올린다  → 강제력 있음
+
+    두 목록이 **어디서도 대조되지 않는다.** 그래서 루브릭이 *"이건 오해다"* 를 선언해도
+    모델이 놓치면 아무 일도 안 일어난다 — `els-0028`(발행사 신용위험)이 실물이다.
+    `gpt-5-mini` 가 `U2` 로 부르고 통과했는데, 그 항목 루브릭은
+    *"기초자산만 오르면 안전하다"* 를 이미 오해 조건으로 적어 뒀다.
+
+    ## 왜 여기서 다 못 잡나
+
+    조건 문면 → 라이브러리 유형ID 의 대응은 **정적으로 계산할 수 없다.**
+    `"증권사가 망할 리 없다"` 가 어느 유형인지 코드가 알 방법이 없고, 그걸 알아내려는 것이
+    `(b)`(유사도 매칭)인데 그건 채점 동작을 바꾸는 일이라 별건이다.
+
+    그래서 **확실한 것만** 잡는다: `related_misconceptions` 가 **비어 있으면** 그 루브릭의
+    조건은 하나도 강제될 수 없다. 이건 계산이 아니라 사실이다.
+
+    나머지(링크는 있는데 그 조건에 안 맞는 경우)는 이 함수로 안 보인다 —
+    `tests/test_enforcement_gap.py` 가 **전체 비율을 못박아** 조용히 늘지 않게 한다.
+
+    ## 예외를 던지지 않는 이유
+
+    `assert_related_misconceptions_exist` 는 던진다 — 그건 **참조가 깨진 것**이라 데이터
+    오류다. 이쪽은 *"아직 라이브러리에 그 유형이 없다"* 이고 유형 추가는 근거 자료가
+    필요하다(`misconceptions.yaml` 의 `source` 를 채워야 한다). 기동을 막으면 그 사이
+    서비스가 안 뜬다 — `#228` 이 cue 사각을 예외가 아니라 **목록으로 못박은** 것과 같은
+    판단이다.
+    """
+    gaps: dict[str, tuple[str, ...]] = {}
+    for item_id, rubric in _all().items():
+        if item_id in _UNLINKED_UNTIL:
+            continue                    # 아직 그 유형이 없다 — 위 주석 참고
+        if rubric.misconception_conditions and not rubric.related_misconceptions:
+            gaps[item_id] = rubric.misconception_conditions
+    return gaps
+
+
+def unlinked_until() -> dict[str, tuple[str, str]]:
+    """링크가 아직 없는 루브릭 → (근거, 빼는 조건). 공개 진입점."""
+    return dict(_UNLINKED_UNTIL)
+
+
+def enforcement_coverage() -> tuple[int, int, int]:
+    """(선언된 조건 수, 링크를 가진 루브릭 수, 전체 루브릭 수).
+
+    비율 자체가 결함은 아니다 — 조건 하나에 유형 하나가 대응할 이유가 없다. 다만 **그
+    비율이 어디쯤인지 아무도 모르는 것**이 `#284` 가 드러낸 상태였다. 기동 로그에 남긴다.
+    """
+    rs = _all().values()
+    declared = sum(len(r.misconception_conditions) for r in rs)
+    linked = sum(1 for r in rs if r.related_misconceptions)
+    return declared, linked, len(rs)
+
+
 def assert_related_misconceptions_exist() -> None:
     """루브릭의 `related_misconceptions` 가 오해 라이브러리에 실제로 있는지 확인한다.
 
