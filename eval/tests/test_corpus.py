@@ -96,13 +96,33 @@ class TestCoverage:
         unknown = sorted({s["item_id"] for s in samples()} - known)
         assert unknown == [], f"루브릭이 없는 item_id: {unknown}"
 
-    def test_sample_ids_are_unique(self):
-        ids = [s["sample_id"] for s in samples()]
-        dupes = sorted({i for i in ids if ids.count(i) > 1})
-        assert dupes == [], f"sample_id 중복: {dupes}"
+    def test_sample_item_pairs_are_unique(self):
+        """❗단위는 `sample_id` 가 아니라 **(표본, 항목)** 이다.
 
-    def test_utterances_are_distinct(self):
-        """같은 문장이 두 번 들어가면 라벨러가 두 번 판단하고 표본만 부풀린다."""
-        utts = [s["utterance"] for s in samples()]
-        dupes = sorted({u for u in utts if utts.count(u) > 1})
-        assert dupes == [], f"발화 중복: {dupes}"
+        guideline §1 이 *"같은 발화가 여러 항목에 대해 각각 라벨된다 — 고객이 한 마디로
+        두 항목을 건드릴 수 있기 때문이다"* 로 설계를 적어 뒀는데, 예전 문면은
+        `sample_id` 자체의 유일성을 요구해서 **그 설계를 금지하고 있었다.**
+        `run_eval.load_jsonl` 도 `make_worksheet` 도 이미 쌍으로 키를 잡는다.
+        """
+        pairs = [(s["sample_id"], s["item_id"]) for s in samples()]
+        dupes = sorted({p for p in pairs if pairs.count(p) > 1})
+        assert dupes == [], f"(sample_id, item_id) 중복: {dupes}"
+
+    def test_one_id_carries_one_utterance(self):
+        """한 `sample_id` 가 두 문장을 가리키면 그 id 가 무엇인지 말할 수 없게 된다."""
+        by_id: dict[str, set[str]] = {}
+        for s in samples():
+            by_id.setdefault(s["sample_id"], set()).add(s["utterance"])
+        split = sorted(i for i, u in by_id.items() if len(u) > 1)
+        assert split == [], f"한 sample_id 가 서로 다른 발화를 가리킨다: {split}"
+
+    def test_distinct_ids_do_not_share_an_utterance(self):
+        """같은 문장이 **다른 id 로** 두 번 들어가면 라벨러가 두 번 판단하고 표본만 부풀린다.
+
+        같은 id 로 여러 항목에 걸리는 것은 의도된 설계라 여기서 세지 않는다 (위 두 테스트).
+        """
+        by_utt: dict[str, set[str]] = {}
+        for s in samples():
+            by_utt.setdefault(s["utterance"], set()).add(s["sample_id"])
+        dupes = sorted(u for u, ids in by_utt.items() if len(ids) > 1)
+        assert dupes == [], f"같은 발화가 여러 id 로 들어가 있다: {dupes}"

@@ -1,40 +1,70 @@
-{"sample_id": "els-0001", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "제가 넣은 돈이 그대로 다 돌아오는 게 아니고, 상황에 따라서는 원금에서 깎여서 나올 수도 있다는 거네요."}
-{"sample_id": "els-0002", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "손실이 날 수도 있다고요? 네, 그건 아까 들었어요."}
-{"sample_id": "els-0003", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "네, 설명해 주신 대로요."}
-{"sample_id": "els-0004", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "그래도 은행 창구에서 파는 건데, 최소한 넣은 돈은 지켜 주는 거 아닌가요?"}
-{"sample_id": "els-0005", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "이건 예금이 아니라서 나라에서 보장해 주는 그 제도에는 안 들어간다는 거죠. 은행이 잘못돼도 그쪽으로는 못 받는 거고요."}
-{"sample_id": "els-0006", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "예금자보호는 안 된다고 하셨죠."}
-{"sample_id": "els-0007", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "그건 잘 모르겠는데요."}
-{"sample_id": "els-0008", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "5천만 원까지는 어차피 나라에서 지켜 주는 거 아니에요?"}
-{"sample_id": "els-0009", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "기간 중에 셋 중 어느 하나라도 그 선 밑으로 한 번 내려가 버리면 그때 조건이 걸리는 거고, 셋이 같이 떨어져야 하는 건 아니라는 거죠."}
-{"sample_id": "els-0010", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "정해 놓은 선 아래로 떨어지면 문제가 된다는 건 알겠어요."}
-{"sample_id": "els-0011", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "낙인이요? 그게 무슨 말이에요?"}
-{"sample_id": "els-0012", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "만기 때 가격만 보면 되는 거 아닌가요? 중간에 잠깐 빠지는 건 상관없잖아요."}
+{"sample_id": "els-0063", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "네네, 그건 아까 서류에서 본 것 같아요."}
+{"sample_id": "els-0058", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "발행한 증권사가 잘못되면 제 돈도 위험하다는 거잖아요. 그래도 그만한 회사가 넘어가는 일은 없을 테고, 지수만 안 빠지면 되는 거 아닌가요?"}
 {"sample_id": "els-0013", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "평가하는 날에 세 개가 다 기준 위에 있어야 조기상환이 되는 거고, 하나라도 못 미치면 다음 평가일까지 그냥 가는 거네요."}
-{"sample_id": "els-0014", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "6개월마다 조건 맞으면 일찍 끝난다고 하셨죠."}
-{"sample_id": "els-0015", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "네."}
-{"sample_id": "els-0016", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "만기까지만 들고 있으면 원금이랑 약속한 이자는 나오는 거죠?"}
-{"sample_id": "els-0017", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "만기에 기준보다 밑이면 손실이 나는데, 얼마나 떨어져 있느냐에 따라 손실도 같이 커지는 구조라는 거죠."}
-{"sample_id": "els-0018", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "만기에 많이 떨어져 있으면 손해라는 거군요."}
-{"sample_id": "els-0019", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "그건 그때 가 봐야 아는 거 아닌가요?"}
-{"sample_id": "els-0020", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "낙인만 안 건드리면 되고, 한 번 건드리면 그냥 손실 확정인 거죠?"}
-{"sample_id": "els-0021", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "최악이면 제가 넣는 5천만 원이 하나도 안 남을 수도 있다는 거네요."}
-{"sample_id": "els-0022", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "전액 손실도 가능하다고요."}
-{"sample_id": "els-0023", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "거기까지는 생각 안 해 봤어요."}
-{"sample_id": "els-0024", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "아무리 나빠도 절반 정도는 건지는 거 아닌가요?"}
-{"sample_id": "els-0025", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "이게 증권사가 자기 신용으로 발행하는 거라서, 그 회사가 잘못되면 지수가 어떻든 제 돈을 못 받을 수 있다는 거죠."}
-{"sample_id": "els-0026", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "발행한 증권사 신용도 봐야 한다는 거군요."}
-{"sample_id": "els-0027", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "발행사가 어디라고 하셨죠?"}
-{"sample_id": "els-0028", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "지수만 안 빠지면 되는 거 아니에요? 회사가 망하는 건 별개 문제고요."}
-{"sample_id": "els-0029", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "이건 주식처럼 시장에 내다 팔 수가 없어서, 중간에 돈이 필요하면 발행사한테 사 달라고 요청하는 수밖에 없다는 거죠."}
-{"sample_id": "els-0030", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "중간에 팔기는 어렵다고 하셨죠."}
-{"sample_id": "els-0031", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "그건 안 물어봤는데요."}
-{"sample_id": "els-0032", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "급하면 그냥 주식처럼 내놓고 팔면 되지 않나요?"}
-{"sample_id": "els-0033", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 빼면 그때 값에서 뭐가 빠지고 나오는 거라, 넣은 돈보다 적게 받을 수도 있다는 거네요."}
 {"sample_id": "els-0034", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중도에 해지하면 손해가 좀 있다고요."}
-{"sample_id": "els-0035", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 뺄 일은 없을 것 같은데요."}
+{"sample_id": "els-0066", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "그 확률이 3% 정도라고 하셨잖아요. 그 정도면 사실상 안 일어나는 거 아니에요?"}
+{"sample_id": "els-0028", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "지수만 안 빠지면 되는 거 아니에요? 회사가 망하는 건 별개 문제고요."}
+{"sample_id": "els-0061", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "이건 시장에 내다 팔 수 있는 물건이 아니라는 거죠."}
 {"sample_id": "els-0036", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "원금은 그대로 있고 이자만 못 받는 거 아니에요?"}
-{"sample_id": "els-0037", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "보여 주신 건 예전 데이터로 돌려 본 거라서, 앞으로도 그렇게 된다는 뜻은 아니라는 거죠."}
+{"sample_id": "els-0048", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "중간에 한 번이라도 그 선 밑으로 갔었는지를 먼저 보고, 그러고 나서 만기 때 기준 위로 올라와 있으면 손실은 안 나는 거죠."}
+{"sample_id": "els-0052", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "만기에 기준보다 밑이면 손실이 난다는 건 알겠어요. 그런데 그 손실이라는 게 미리 정해진 만큼만 빠지는 거죠? 그 이상 깎이지는 않고요."}
+{"sample_id": "els-0050", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "조기상환으로 끝나면 3년을 다 못 채우고 중간에 정리되는 거네요. 그럼 그 뒤로는 다시 알아봐야 하는 거고요."}
+{"sample_id": "els-0004", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "그래도 은행 창구에서 파는 건데, 최소한 넣은 돈은 지켜 주는 거 아닌가요?"}
 {"sample_id": "els-0038", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "과거 자료로 계산한 거라고 하셨죠."}
-{"sample_id": "els-0039", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "숫자가 좀 어렵네요."}
+{"sample_id": "els-0010", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "정해 놓은 선 아래로 떨어지면 문제가 된다는 건 알겠어요."}
+{"sample_id": "els-0065", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "그 표에 2008년 것도 들어가 있던데요. 그때가 제일 많이 빠졌던 때죠."}
+{"sample_id": "els-0006", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "예금자보호는 안 된다고 하셨죠."}
+{"sample_id": "els-0019", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "그건 그때 가 봐야 아는 거 아닌가요?"}
+{"sample_id": "els-0016", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "만기까지만 들고 있으면 원금이랑 약속한 이자는 나오는 거죠?"}
+{"sample_id": "els-0049", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "평가일에 세 개가 다 기준 위에 있어야 일찍 끝나는 거고, 조건이 안 되면 다음 평가일까지 가는 거죠. 그래도 만기까지 들고 있으면 원금이랑 이자는 나오는 거니까 크게 걱정할 건 없고요."}
 {"sample_id": "els-0040", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "지난 10년 동안 손실 난 적이 없었다면서요. 그럼 앞으로도 괜찮은 거죠."}
+{"sample_id": "els-0024", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "아무리 나빠도 절반 정도는 건지는 거 아닌가요?"}
+{"sample_id": "els-0057", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "최악이면 하나도 안 남을 수 있다는 거잖아요."}
+{"sample_id": "els-0053", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "낙인 한 번 걸리면 그냥 손실 확정 아니에요? …아니구나, 걸렸어도 만기 때 기준 위로 올라와 있으면 괜찮다고 하셨죠."}
+{"sample_id": "els-0007", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "그건 잘 모르겠는데요."}
+{"sample_id": "els-0025", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "이게 증권사가 자기 신용으로 발행하는 거라서, 그 회사가 잘못되면 지수가 어떻든 제 돈을 못 받을 수 있다는 거죠."}
+{"sample_id": "els-0001", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "제가 넣은 돈이 그대로 다 돌아오는 게 아니고, 상황에 따라서는 원금에서 깎여서 나올 수도 있다는 거네요."}
+{"sample_id": "els-0046", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "그렇죠, 뭐. 말씀하신 게 맞겠죠."}
+{"sample_id": "els-0064", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 빼면 얼마 떼인다는 건 알겠는데, 그래도 원금 자체는 그대로 있고 이자만 못 받는 거죠?"}
+{"sample_id": "els-0042", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "제가 맞게 이해한 건지 모르겠는데, 넣은 돈이 다 안 돌아올 수도 있다는 얘기죠? 그게 이 상품의 제일 큰 위험이고요."}
+{"sample_id": "els-0054", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "기준보다 밑이면 손해인 건 아는데, 얼마나 밑이든 손실은 똑같이 나는 거 아닌가요?"}
+{"sample_id": "els-0062", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 돈이 필요하면 시장에 파는 게 아니라 발행사한테 사 달라고 해야 하는 건데, 그때는 값에서 얼마가 빠지고 나와서 넣은 돈보다 적을 수도 있다는 거죠."}
+{"sample_id": "els-0012", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "만기 때 가격만 보면 되는 거 아닌가요? 중간에 잠깐 빠지는 건 상관없잖아요."}
+{"sample_id": "els-0031", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "그건 안 물어봤는데요."}
+{"sample_id": "els-0039", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "숫자가 좀 어렵네요."}
+{"sample_id": "els-0021", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "최악이면 제가 넣는 5천만 원이 하나도 안 남을 수도 있다는 거네요."}
+{"sample_id": "els-0003", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "네, 설명해 주신 대로요."}
+{"sample_id": "els-0037", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "보여 주신 건 예전 데이터로 돌려 본 거라서, 앞으로도 그렇게 된다는 뜻은 아니라는 거죠."}
+{"sample_id": "els-0062", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "중간에 돈이 필요하면 시장에 파는 게 아니라 발행사한테 사 달라고 해야 하는 건데, 그때는 값에서 얼마가 빠지고 나와서 넣은 돈보다 적을 수도 있다는 거죠."}
+{"sample_id": "els-0060", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "이건 예금이 아니라 증권사가 자기 이름으로 찍어내는 거라, 나라에서 지켜 주는 것도 없고 그 회사가 넘어가면 제 돈도 같이 없어지는 거네요."}
+{"sample_id": "els-0023", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "거기까지는 생각 안 해 봤어요."}
+{"sample_id": "els-0051", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "제가 이해한 게 맞나 모르겠는데… 평가하는 날에 셋 중에 하나라도 기준에 못 미치면 그날은 그냥 넘어가고, 다음 평가일을 또 기다리는 거예요. 그러다 끝까지 조건이 안 맞으면 만기까지 가는 거고요."}
+{"sample_id": "els-0011", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "낙인이요? 그게 무슨 말이에요?"}
+{"sample_id": "els-0017", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "만기에 기준보다 밑이면 손실이 나는데, 얼마나 떨어져 있느냐에 따라 손실도 같이 커지는 구조라는 거죠."}
+{"sample_id": "els-0056", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "최악이라고 해 봐야 한 30% 정도 손실이라고 보면 되는 거죠?"}
+{"sample_id": "els-0005", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "이건 예금이 아니라서 나라에서 보장해 주는 그 제도에는 안 들어간다는 거죠. 은행이 잘못돼도 그쪽으로는 못 받는 거고요."}
+{"sample_id": "els-0048", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "중간에 한 번이라도 그 선 밑으로 갔었는지를 먼저 보고, 그러고 나서 만기 때 기준 위로 올라와 있으면 손실은 안 나는 거죠."}
+{"sample_id": "els-0026", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "발행한 증권사 신용도 봐야 한다는 거군요."}
+{"sample_id": "els-0018", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "만기에 많이 떨어져 있으면 손해라는 거군요."}
+{"sample_id": "els-0002", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "손실이 날 수도 있다고요? 네, 그건 아까 들었어요."}
+{"sample_id": "els-0027", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "발행사가 어디라고 하셨죠?"}
+{"sample_id": "els-0043", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "이것도 5천까지는 나라에서 지켜 주는 거죠? …아, 아니네요. 이건 예금이 아니라 증권이라서 그 제도가 저한테는 아예 적용이 안 되는 거였어요."}
+{"sample_id": "els-0015", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "네."}
+{"sample_id": "els-0041", "product_type": "ELS", "item_id": "ELS-PRINCIPAL-LOSS-WARNING", "utterance": "원금에서 깎여 나올 수 있다는 건 알겠어요. 그래도 은행 창구에서 권해 주신 거니까 그렇게까지 위험한 건 아니겠죠?"}
+{"sample_id": "els-0014", "product_type": "ELS", "item_id": "ELS-EARLY-REDEMPTION-CONDITION", "utterance": "6개월마다 조건 맞으면 일찍 끝난다고 하셨죠."}
+{"sample_id": "els-0044", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "이게 이해하기 어려운 상품이라고 서류에 크게 적혀 있던데요. 그래서 설명을 더 자세히 해 주시는 거죠."}
+{"sample_id": "els-0008", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "5천만 원까지는 어차피 나라에서 지켜 주는 거 아니에요?"}
+{"sample_id": "els-0055", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "제가 넣는 5천만 원이 최악이면 절반 넘게 빠질 수도 있다는 거군요."}
+{"sample_id": "els-0067", "product_type": "ELS", "item_id": "ELS-LOSS-SIMULATION", "utterance": "과거 데이터로 돌려 본 거라 앞일을 장담할 수는 없다는 건 알겠어요. 그래도 그 표에 나온 수익률 정도는 기대해도 되는 거죠?"}
+{"sample_id": "els-0047", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "그 선이 55% 아래라고 하셨죠. 그 밑으로까지 빠질 일은 잘 없을 것 같은데요."}
+{"sample_id": "els-0033", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 빼면 그때 값에서 뭐가 빠지고 나오는 거라, 넣은 돈보다 적게 받을 수도 있다는 거네요."}
+{"sample_id": "els-0009", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "기간 중에 셋 중 어느 하나라도 그 선 밑으로 한 번 내려가 버리면 그때 조건이 걸리는 거고, 셋이 같이 떨어져야 하는 건 아니라는 거죠."}
+{"sample_id": "els-0022", "product_type": "ELS", "item_id": "ELS-TOTAL-LOSS-SCENARIO", "utterance": "전액 손실도 가능하다고요."}
+{"sample_id": "els-0029", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "이건 주식처럼 시장에 내다 팔 수가 없어서, 중간에 돈이 필요하면 발행사한테 사 달라고 요청하는 수밖에 없다는 거죠."}
+{"sample_id": "els-0032", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "급하면 그냥 주식처럼 내놓고 팔면 되지 않나요?"}
+{"sample_id": "els-0045", "product_type": "ELS", "item_id": "ELS-KNOCKIN-BARRIER", "utterance": "한 번이라도 그 선 밑으로 내려간 적이 있는지를 본다는 거잖아요. 그런데 셋이 같이 내려가야 걸리는 거지, 하나만 빠진 걸로는 안 걸리는 거죠?"}
+{"sample_id": "els-0060", "product_type": "ELS", "item_id": "ELS-NO-DEPOSIT-INSURANCE", "utterance": "이건 예금이 아니라 증권사가 자기 이름으로 찍어내는 거라, 나라에서 지켜 주는 것도 없고 그 회사가 넘어가면 제 돈도 같이 없어지는 거네요."}
+{"sample_id": "els-0030", "product_type": "ELS", "item_id": "ELS-NO-LISTING", "utterance": "중간에 팔기는 어렵다고 하셨죠."}
+{"sample_id": "els-0020", "product_type": "ELS", "item_id": "ELS-MATURITY-LOSS-CONDITION", "utterance": "낙인만 안 건드리면 되고, 한 번 건드리면 그냥 손실 확정인 거죠?"}
+{"sample_id": "els-0035", "product_type": "ELS", "item_id": "ELS-MIDWAY-REDEMPTION-COST", "utterance": "중간에 뺄 일은 없을 것 같은데요."}
+{"sample_id": "els-0059", "product_type": "ELS", "item_id": "ELS-ISSUER-CREDIT-RISK", "utterance": "이게 증권사가 자기 신용으로 내는 거라고 하셨던 것 같은데… 맞나요?"}
