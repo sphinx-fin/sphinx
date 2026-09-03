@@ -620,8 +620,11 @@ export default function S08Dashboard() {
               이상치 <span className="s08__count">{indicator?.outliers.length}건</span>
             </h2>
             <ul className="s08__out-list">
+              {/* 키 구분자는 데이터에 못 들어가는 문자라야 겹치지 않는다. 다만 리터럴 NUL 을
+                  파일에 박으면 rg·grep 이 이 파일을 바이너리로 보고 통째로 건너뛴다 — 검색이
+                  0건을 내고, 에러가 아니라 침묵으로 틀린다(이슈 #318). 같은 값을 이스케이프로 적는다. */}
               {indicator?.outliers.map((o) => (
-                <li key={`${o.groupBy} ${o.key}`} className="s08__out-row">
+                <li key={`${o.groupBy}\u0000${o.key}`} className="s08__out-row">
                   <span className="s08__out-key">{o.key}</span>
                   {/* 사유 문장은 서버 것을 그대로 낸다 — 화면이 고쳐 쓰면 근거가 갈린다. */}
                   <span className="s08__out-reason">{o.reason}</span>
