@@ -55,7 +55,7 @@ def reexplain(
         # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 여기만 거부하지
         # 않는 이유는 `_minimal()` 이 **이 경우를 위해 이미 설계돼 있기** 때문이다 — 인용
         # 형식을 쓰지 않고 cited_spans 를 비운다(#60 리뷰). 강희진의 재검증 루프가 진행할
-        # 것을 주는 쪽이 낫고, 그 문면은 P4·P6 을 어기지 않는다.
+        # 것을 주는 쪽이 낫고, 그 문면은 P4·P6(0.2절) 을 어기지 않는다.
         return _minimal(risk_item)
 
     allowed = source_numerics(risk_item)
@@ -140,7 +140,7 @@ def _minimal(risk_item: RiskItem) -> ReexplainResponse:
     **`extraction_failed` 항목은 원문 인용 형식을 쓰지 않는다** (PR #60 리뷰 ②).
     그 항목의 `condition.value_text` 는 실패 사유 문면이고 문서에 없는 문장이다. 그것을
     "설명서에는 이렇게 적혀 있습니다" 로 인용하면
-      - P6 — 상품설명서에 없는 문장을 원문 인용으로 고객 화면에 낸다
+      - P6(0.2절) — 상품설명서에 없는 문장을 원문 인용으로 고객 화면에 낸다
       - P4 — `text[0:0]` 인 빈 슬라이스를 가리키는 근거가 리포트에 남는다
     `cited_spans` 도 비운다. 이 파일이 *"근거 없는 설명에 스팬을 붙이면 리포트가 거짓 근거를
     갖는다"* 고 쓰고 있는데 폴백이 그 예외가 되어 있었다.

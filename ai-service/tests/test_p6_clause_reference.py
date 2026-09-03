@@ -27,62 +27,115 @@ import pytest
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
-#: 파일 → 그 파일의 P6 인용이 근거로 삼는 절.
+#: **방향이 확정된** 파일 → 그 파일의 P6 인용이 근거로 삼는 절.
 #:
-#: `reexplain` 이 0.2절인 이유: 그 조항이 *"재설명 생성 시"* 로 한정돼 있고 재설명이
-#: 정확히 그 범위다. 나머지는 추출 경로라 1절 F-EXT-002 다.
-_CLAUSE_BY_FILE = {
+#: ❗**이 목록은 「방향」만 잰다**(아래 (나)). *"절 표기가 있는가"* 는 손목록이 아니라
+#: `app/**.py` 전수로 잰다(아래 (가)) — 손으로 적으면 **손이 빠뜨린 것은 영원히 안
+#: 걸린다.** `schemas.py` 가 실제로 그랬다(`#308` 리뷰, 정세현): 이 PR 이 그 파일의 P6
+#: 인용 셋을 고쳤는데 목록에 없어서 **되돌려도 초록**이었다.
+#:
+#: `schemas.py` 를 목록에 못 넣은 이유는 **한 파일이 두 절을 다 인용**하기 때문이다.
+#:
+#:     value_text · NARROWING_REFUSED   추출     → 1절 F-EXT-002
+#:     cited_spans                      재설명   → 0.2절
+#:
+#: 파일 → 절 하나로는 표현할 칸이 없다. 갈라 두면 (가)가 그 파일을 받고 (나)는 안 받으므로
+#: 두 절이 섞여도 문제가 없다.
+_DIRECTION_BY_FILE = {
     "extraction.py": "1절",
     "templates.py": "1절",
     "reexplain.py": "0.2절",
 }
 
-#: 절 표기를 요구하지 않는 줄. 파일 머리말이 그 파일 전체의 절을 이미 선언한 경우다.
-#:
-#: ❗**예외를 목록으로 두는 이유**는 "왜 이 줄만 다른가" 를 다음 사람이 다시 조사하지
-#: 않게 하려는 것이다. 늘어나면 머리말 선언이 안 읽히고 있다는 신호다.
-_DECLARED_BY_MODULE_DOCSTRING = {
-    ("reexplain.py", "그건 정의상 P6 안전하다"),
-    ("reexplain.py", "그 문면은 P4·P6 을 어기지 않는다"),
-    ("reexplain.py", "P6 — 상품설명서에 없는 문장을"),
-}
+#: 절을 가리키는 표기. 하나라도 그 줄에 있으면 "절을 적었다" 로 본다.
+_NAMES_A_CLAUSE = ("0.2절", "1절", "F-EXT-002")
+
+_TRIPLE = ('"' * 3, "'" * 3)
 
 
-#: 두 절의 **대비를 설명하는** 줄. 인용이 아니라 해설이라 이 대조의 대상이 아니다.
-#:
-#: ❗이걸 안 가르면 *"1절이다(0.2절이 아니다)"* 같은 설명 문장이 **0.2절 인용으로 잡힌다** —
-#: 실제로 처음 돌렸을 때 그렇게 걸렸다. 대조가 문면을 읽으려 하면 이런 자리가 계속 나온다.
-_EXPLAINS_THE_SPLIT = re.compile(r"0\.2절 P6|두 자리|범위 밖|이 파일의|0\.2절이 아니다|쪽은 0\.2절이 맞다")
+def _module_docstring_span(text: str) -> tuple[int, int]:
+    """모듈 docstring 의 줄 범위 (0-based, [시작, 끝)).
 
+    ❗**해설을 문면이 아니라 위치로 가른다** (`#308` 리뷰, 정세현). 처음에는
+    `0.2절 P6|두 자리|범위 밖|…` 처럼 **문면으로** 지웠는데, 그러면 그 낱말이 우연히 든
+    맨 인용이 조용히 삼켜진다 — `# 범위 밖 값은 쓰지 않는다 (P6).` 이 실제로 통과했다.
 
-def _p6_lines(name: str) -> list[str]:
-    """그 파일의 P6 **인용** 줄. 두 절의 대비를 설명하는 줄은 뺀다."""
-    text = (APP / name).read_text(encoding="utf-8")
-    return [
-        ln.strip() for ln in text.splitlines()
-        if re.search(r"\bP6\b", ln) and not _EXPLAINS_THE_SPLIT.search(ln)
-    ]
-
-
-@pytest.mark.parametrize("name,clause", sorted(_CLAUSE_BY_FILE.items()))
-def test_every_p6_citation_names_its_clause(name: str, clause: str) -> None:
-    """★ 절 번호 없는 P6 인용이 없다.
-
-    새로 하나 넣으면 여기서 걸린다 — 그때 **어느 절인지 정해서 쓰게** 만드는 것이 요지다.
+    해설은 모듈 docstring 안에 있고 인용은 코드·필드 옆에 있다. 그 경계로 가른다.
     """
-    lines = _p6_lines(name)
-    assert lines, f"{name} 에 P6 인용이 하나도 없다 — 이 대조가 아무것도 안 잰다"
+    lines = text.splitlines()
+    if not lines:
+        return (0, 0)
+    head = lines[0].lstrip()
+    quote = next((q for q in _TRIPLE if head.startswith(q)), None)
+    if quote is None:
+        return (0, 0)
+    if lines[0].count(quote) >= 2:
+        return (0, 1)
+    for i, line in enumerate(lines[1:], start=1):
+        if quote in line:
+            return (0, i + 1)
+    return (0, len(lines))
 
-    bare = [
-        ln for ln in lines
-        if clause not in ln
-        and "F-EXT-002" not in ln
-        and not any(frag in ln for f, frag in _DECLARED_BY_MODULE_DOCSTRING if f == name)
+
+def _p6_citations(name: str) -> list[str]:
+    """그 파일의 P6 **인용** 줄. 모듈 docstring(해설)은 뺀다."""
+    text = (APP / name).read_text(encoding="utf-8")
+    start, end = _module_docstring_span(text)
+    return [
+        ln.strip() for i, ln in enumerate(text.splitlines())
+        if re.search(r"\bP6\b", ln) and not (start <= i < end)
     ]
+
+
+def _files_citing_p6() -> list[str]:
+    """`app/**.py` 중 P6 를 인용하는 파일 전수 — **손목록이 아니다.**"""
+    return [
+        path.relative_to(APP).as_posix()
+        for path in sorted(APP.rglob("*.py"))
+        if _p6_citations(path.relative_to(APP).as_posix())
+    ]
+
+
+# ── (가) 절 표기가 있는가 — 전수 ─────────────────────────────────────────────
+def test_p6_is_cited_somewhere() -> None:
+    """★ 공회전 방지 — 모집단이 비면 아래가 아무것도 안 잰다."""
+    assert _files_citing_p6(), "app/ 에서 P6 인용을 하나도 못 찾았다"
+
+
+def test_every_p6_citation_names_its_clause() -> None:
+    """★ 절 번호 없는 P6 인용이 **어느 파일에도** 없다.
+
+    모집단을 `app/**.py` 전수로 잡는다. 손목록이면 **손이 빠뜨린 것은 영원히 안 걸린다** —
+    `schemas.py` 가 그랬다(`#308` 리뷰).
+    """
+    bare = {
+        name: [ln for ln in _p6_citations(name)
+               if not any(tag in ln for tag in _NAMES_A_CLAUSE)]
+        for name in _files_citing_p6()
+    }
+    bare = {k: v for k, v in bare.items() if v}
     assert not bare, (
-        f"{name}: 절 번호 없는 P6 인용 — 0.2절은 「재설명 생성 시」로 한정돼 있어 "
-        f"추출에는 안 걸린다. 어느 절인지 적어라: {bare}"
+        "절 번호 없는 P6 인용 — 0.2절은 「재설명 생성 시」로 한정돼 있어 추출에는 안 "
+        f"걸린다. 어느 절인지 적어라: {bare}"
     )
+
+
+def test_schemas_is_in_the_population() -> None:
+    """★ `schemas.py` 가 모집단에 실제로 든다 — 이 PR 이 그 파일을 고쳤다.
+
+    전수로 바꿨다는 말이 참인지를 **그 파일 이름으로** 잰다. 전수 표현식이 낡으면 (가)가
+    조용히 좁아지는데, 그때 제일 먼저 빠질 파일이 이것이다.
+    """
+    assert "schemas.py" in _files_citing_p6()
+
+
+# ── (나) 방향이 맞는가 — 방향이 확정된 파일만 ────────────────────────────────
+@pytest.mark.parametrize("name,clause", sorted(_DIRECTION_BY_FILE.items()))
+def test_the_direction_matches(name: str, clause: str) -> None:
+    """그 파일의 P6 인용이 **자기 절**을 가리킨다."""
+    wrong = "0.2절" if clause == "1절" else "1절"
+    for line in _p6_citations(name):
+        assert wrong not in line, f"{name} 은 {clause} 인데 {wrong} 을 인용한다: {line}"
 
 
 def test_extraction_does_not_cite_the_reexplain_clause() -> None:
@@ -91,16 +144,13 @@ def test_extraction_does_not_cite_the_reexplain_clause() -> None:
     0.2절 P6 은 *"재설명 생성 시"* 로 시작한다. 추출은 그 범위가 아니다.
     """
     for name in ("extraction.py", "templates.py"):
-        for line in _p6_lines(name):
+        for line in _p6_citations(name):
             assert "0.2절" not in line, (
-                f"{name}: 추출 경로가 0.2절을 인용한다 — 그 조항은 재설명으로 한정돼 있다. "
-                f"1절 F-EXT-002 통제가 맞다: {line}"
+                f"{name}: 추출 경로가 0.2절을 인용한다 — 1절 F-EXT-002 가 맞다: {line}"
             )
 
 
 def test_reexplain_does_not_cite_the_extraction_clause() -> None:
     """반대 방향도 막는다 — F-EXT-002 는 추출 항목 반려 조항이라 재설명 근거가 아니다."""
-    for line in _p6_lines("reexplain.py"):
-        assert "F-EXT-002" not in line, (
-            f"재설명이 추출 조항을 인용한다 — 0.2절이 맞다: {line}"
-        )
+    for line in _p6_citations("reexplain.py"):
+        assert "F-EXT-002" not in line, f"재설명이 추출 조항을 인용한다 — 0.2절이 맞다: {line}"
