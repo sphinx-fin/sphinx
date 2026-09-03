@@ -282,3 +282,61 @@ def test_hits_carry_which_retriever_found_them() -> None:
                             retrieval.Dense([[1.0, 0.0]] * 6), [1.0, 0.0], client=None)
     assert any(h.bm25_rank is not None for h in hits)
     assert any(h.dense_rank is not None for h in hits)
+
+
+# ── 이웃 포함 (#283 ② — 항등식 제약 안에서의 정답) ────────────────────────────
+def test_neighbors_bring_the_adjacent_chunk() -> None:
+    """★ 정답이 적중 청크 **바로 옆**에 있을 때 구제한다.
+
+    `ELS-EARLY-REDEMPTION-CONDITION` 이 실물이다 — 정답이 청크30 에 **있는데** 리랭커가
+    31·32·33 을 위로 뽑았다(거리 1). 순위 문제이고, 이웃을 내면 30 이 따라온다.
+    """
+    chunks = _many_chunks(8)
+    hits = [retrieval.Hit(chunk=chunks[4], rrf=1.0)]
+    got = retrieval.with_neighbors(hits, chunks, span=1)
+    assert [chunks.index(c) for c in got] == [3, 4, 5]
+
+
+def test_neighbors_are_deduplicated_and_ordered() -> None:
+    """중복을 지우고 문서 순서로 낸다.
+
+    같은 문면이 프롬프트에 두 번 들어가면 모델이 그것을 강조로 읽는다. 그리고 순서가
+    문서 순이 아니면 조항의 앞뒤가 뒤바뀐 채로 들어간다.
+    """
+    chunks = _many_chunks(8)
+    hits = [retrieval.Hit(chunk=chunks[4], rrf=1.0),
+            retrieval.Hit(chunk=chunks[5], rrf=0.9),
+            retrieval.Hit(chunk=chunks[1], rrf=0.8)]
+    got = [chunks.index(c) for c in retrieval.with_neighbors(hits, chunks, span=1)]
+    assert got == sorted(set(got)), f"중복이거나 순서가 흐트러졌다: {got}"
+    assert got == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_neighbors_do_not_run_off_the_ends() -> None:
+    chunks = _many_chunks(3)
+    for i in (0, 2):
+        got = retrieval.with_neighbors([retrieval.Hit(chunk=chunks[i], rrf=1.0)], chunks, span=1)
+        assert all(c in chunks for c in got)
+
+
+def test_neighbors_cannot_reach_a_far_answer() -> None:
+    """★ **이웃 포함이 페이지 경계 문제를 구제하지 못한다** — 그 사실을 못 박는다.
+
+    `ELS-ISSUER-CREDIT-RISK` 는 정답 청크 45, 가져온 것 6 — **거리 39** 다. 정답 청크가
+    문장 중간에서 시작해서(`"따른 위험 파생상품적 성격을…"`, 그 문장은 앞 페이지에서
+    시작했다) 질의와 어휘·주제가 둘 다 안 맞는다.
+
+    반경을 늘려 39 를 덮으려면 청크 79개를 넣는 것이고 **그러면 문서 전체와 같다** —
+    이 모듈이 존재하는 이유가 없어진다. 그래서 이 한계를 늘리는 것으로 풀지 않는다.
+    """
+    chunks = _many_chunks(50)
+    # ❗기본 상수를 쓴다 — `span=1` 을 명시하면 `NEIGHBOR_SPAN` 을 40 으로 키우는 변조가
+    # 이 테스트를 안 지나간다(실측으로 그랬다). 그물은 **런타임이 쓰는 값**을 재야 한다.
+    got = retrieval.with_neighbors([retrieval.Hit(chunk=chunks[6], rrf=1.0)], chunks)
+    assert retrieval.NEIGHBOR_SPAN <= 3, (
+        f"NEIGHBOR_SPAN={retrieval.NEIGHBOR_SPAN} — 반경을 키워 먼 정답을 덮으려 하고 있다"
+    )
+    assert chunks[45] not in got, (
+        "반경을 키워 거리 39 를 덮으려 하고 있다 — 그러면 문서 전체를 넣는 것과 같다. "
+        "페이지 경계는 청크가 스팬 목록을 들거나 파서가 문장을 이어야 풀린다"
+    )
