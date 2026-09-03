@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 이해 기록 리포트 PDF (F-GTE-004 2번). 소유: 정세현
@@ -129,7 +130,7 @@ public class ReportPdf {
                 p.indented(SIZE_BODY, "기록 없음");
             }
             for (Map<String, Object> g : gate) {
-                p.indented(SIZE_BODY, str(g.get("at")) + "  " + str(g.get("signal")));
+                p.indented(SIZE_BODY, gateLine(g));
             }
 
             p.gap(8);
@@ -240,6 +241,40 @@ public class ReportPdf {
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> list(Object o) {
         return o instanceof List<?> l ? (List<Map<String, Object>>) l : List.of();
+    }
+
+    /**
+     * 게이트 판정 한 줄. <b>신호만이 아니라 그 신호를 만든 것을 적는다.</b>
+     *
+     * <p>시각과 신호뿐이면 종이가 <i>"RED 였다"</i> 까지만 말한다. 데모에서 증명해야 하는 것은
+     * <b>왜 RED 였는가</b>이고, 그 답은 어느 룰이 걸렸는지와 그 판정이 무엇을 보고 내려졌는지다.
+     * 기록과 JSON 은 넷을 다 들고 있는데 지면만 하나였다(이슈 #295 · PR #299 리뷰).
+     *
+     * <p>교부되는 것은 종이다 — 화면은 닫히면 사라진다.
+     */
+    private static String gateLine(Map<String, Object> g) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(str(g.get("at"))).append("  ").append(str(g.get("signal")));
+        List<?> trace = g.get("ruleTrace") instanceof List<?> l ? l : List.of();
+        sb.append("  걸린 룰 ").append(trace.isEmpty() ? "없음"
+                : trace.stream().map(ReportPdf::str).collect(Collectors.joining("·")));
+
+        // 판정을 만든 입력. 이 키가 없거나 null 인 항목은 **이 필드가 생기기 전 기록**이다 —
+        // append-only 라 옛 세션의 항목은 고쳐지지 않는다. "미측정 -" 로 찍으면 0(전부 쟀다)과
+        // 구별되지 않고, 아무 말도 안 하면 종이가 그 사실을 숨긴다.
+        Object unmeasured = g.get("unmeasured");
+        Object rulesVersion = g.get("rulesVersion");
+        if (unmeasured == null && rulesVersion == null) {
+            sb.append("  (판정 입력 미기재 — 이 항목이 적힐 때는 기록하지 않았다)");
+            return sb.toString();
+        }
+        sb.append("  미측정 ").append(str(unmeasured)).append("건");
+        // ❗0 을 "v0" 으로 찍지 않는다. rulesVersion 0 은 버전이 0 인 룰셋이 아니라
+        // 파일을 안 지나온 룰이다(GateEngine.UNVERSIONED). 종이가 존재하지 않는 버전을
+        // 말하면 그 문서로는 어느 룰셋으로 판정했는지 되짚을 수 없다.
+        sb.append("  룰셋 ").append(Integer.valueOf(0).equals(rulesVersion)
+                ? "미버전(룰 파일을 지나지 않았다)" : "v" + str(rulesVersion));
+        return sb.toString();
     }
 
     private static String str(Object o) {
