@@ -1,11 +1,13 @@
 package com.sphinxfin.sphinx.aggregate;
 
 import com.sphinxfin.sphinx.core.persistence.JpaAuditingConfig;
+import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.security.AccessPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,7 +37,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DataJpaTest
 // JpaAuditingConfig 가 있어야 createdAt 이 채워진다 — 추이 집계가 그 값으로 주를 가른다.
 // @DataJpaTest 는 @EnableJpaAuditing 을 자동으로 켜지 않는다.
-@Import({AggregateService.class, JpaAuditingConfig.class})
+// CoachingScoreService 가 취약 여부의 유일한 근거다(vulnerability_weights.yaml).
+@Import({AggregateService.class, CoachingScoreService.class, JpaAuditingConfig.class})
 @DisplayName("AggregateService — 오해 지도 집계")
 class AggregateServiceTest {
 
@@ -66,6 +69,22 @@ class AggregateServiceTest {
         for (int i = 0; i < count; i++) {
             seed(PRODUCT, branchId, "seller-" + i, "60대", Channel.FACE_TO_FACE, ITEM, grade);
         }
+    }
+
+    /** 취약 요인을 지정해 세션 하나를 심는다. 세션 하나가 표본 하나다. */
+    private void seedAttrs(String ageBand, String experienceLevel, Grade grade) {
+        Session session = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, ageBand, experienceLevel, null, null,
+                "s02-survey-v1", Map.of(), "seller-x", "BR-1"));
+        session.recordJudgment(judgment(ITEM, grade));
+        em.persist(session);
+    }
+
+    private AggregateService.ContrastView orgContrast() {
+        em.flush();
+        em.clear();
+        return aggregate.vulnerabilityContrast(
+                AccessPolicy.Scope.ORG, null, AggregateService.Filters.none());
     }
 
     private AggregateService.HeatmapView orgHeatmap() {
@@ -383,6 +402,88 @@ class AggregateServiceTest {
                 assertThat(aggregate.leadingIndicators(AccessPolicy.Scope.ORG, null,
                         AggregateService.GroupBy.ITEM, 8, Instant.now()).synthetic()).isTrue();
             }).doesNotThrowAnyException();
+        }
+    }
+
+    @Nested
+    @DisplayName("취약 대비 — 정의는 vulnerability_weights.yaml 한 곳에 있다")
+    class VulnerabilityContrast {
+
+        @Test
+        @DisplayName("❗취약은 연령만이 아니다 — 50대 + 투자경험 없음이 취약으로 잡힌다")
+        void vulnerabilityIsNotAgeAlone() {
+            // 50대=1 · 경험없음=3 → 4 ≥ vulnerable-threshold. 연령만 보면(1) 취약이 아니다.
+            // web 의 lib/sessionAttrs.ts weighted 는 연령만 보는 근사라 여기와 다르다.
+            seedAttrs("50대", "없음", Grade.U4);
+            seedAttrs("30대", "3년이상", Grade.U1);
+
+            AggregateService.ContrastView view = orgContrast();
+
+            assertThat(row(view, "vulnerable").n()).isEqualTo(1);
+            assertThat(row(view, "other").n()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("❗두 줄은 표본이 없어도 사라지지 않는다 — 대비를 그릴 자리가 남아야 한다")
+        void bothBandsAlwaysPresent() {
+            seedAttrs("30대", "3년이상", Grade.U1);
+
+            AggregateService.ContrastView view = orgContrast();
+
+            assertThat(view.rows()).extracting(AggregateService.ContrastRow::band)
+                    .containsExactly("vulnerable", "other");
+            assertThat(row(view, "vulnerable").n()).isZero();
+        }
+
+        @Test
+        @DisplayName("❗적합성 모순 가산점이 산다 — false 로 뭉개면 이 세션이 반대편으로 간다")
+        void mismatchBonusCounts() {
+            // MOBILE(1) + 5천만원대(1) = 2 로 threshold(4) 아래다. 모순 가산점(+2)이 있어야
+            // 4 가 되어 취약으로 간다. coaching.score(session, false) 로 뭉개면 2 에 머물러
+            // other 로 떨어지고, 그러면 같은 세션이 코칭 경로와 집계 경로에서 다르게 분류된다.
+            Session session = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.MOBILE, "30대", "3년이상", "5천만원대", null,
+                    "s02-survey-v1", Map.of(), "seller-m", "BR-1"));
+            session.recordSuitability(SuitabilityStatus.MISMATCH);
+            session.recordJudgment(judgment(ITEM, Grade.U4));
+            em.persist(session);
+
+            AggregateService.ContrastView view = orgContrast();
+
+            assertThat(row(view, "vulnerable").n()).isEqualTo(1);
+            assertThat(row(view, "other").n()).isZero();
+        }
+
+        @Test
+        @DisplayName("소표본은 히트맵과 같은 규칙으로 가려진다 — misrate 는 null 이고 n 은 남는다")
+        void smallSamplesAreMaskedTheSameWay() {
+            for (int i = 0; i < AggregateService.MIN_CELL_SAMPLE - 1; i++) {
+                seedAttrs("70대", null, Grade.U4);
+            }
+
+            AggregateService.ContrastRow masked = row(orgContrast(), "vulnerable");
+
+            assertThat(masked.masked()).isTrue();
+            assertThat(masked.misrate()).isNull();
+            assertThat(masked.n()).isEqualTo(AggregateService.MIN_CELL_SAMPLE - 1);
+        }
+
+        @Test
+        @DisplayName("표본이 임계 이상이면 취약 쪽 오해율이 그대로 나온다")
+        void contrastShowsTheGapOnceSamplesSuffice() {
+            for (int i = 0; i < AggregateService.MIN_CELL_SAMPLE; i++) {
+                seedAttrs("70대", null, i < 15 ? Grade.U4 : Grade.U1);
+            }
+
+            AggregateService.ContrastRow vulnerable = row(orgContrast(), "vulnerable");
+
+            assertThat(vulnerable.masked()).isFalse();
+            assertThat(vulnerable.misrate()).isEqualByComparingTo(new BigDecimal("0.5"));
+        }
+
+        private AggregateService.ContrastRow row(AggregateService.ContrastView view, String band) {
+            return view.rows().stream().filter(r -> r.band().equals(band)).findFirst()
+                    .orElseThrow(() -> new AssertionError(band + " 줄이 없다"));
         }
     }
 }

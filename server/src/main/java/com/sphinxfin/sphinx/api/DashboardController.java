@@ -77,6 +77,29 @@ public class DashboardController {
     }
 
     /**
+     * 취약 고객 대비 (F-DSH-001 · 이슈 #321 의 1번).
+     *
+     * <p>권한은 히트맵과 같은 {@code aggregate:heatmap:read} 를 쓴다. <b>새 action 을 만들지
+     * 않는 이유</b>는 이것이 히트맵과 같은 데이터를 다른 축으로 자른 것이기 때문이다 —
+     * action 이 갈리면 <b>같은 사실에 두 개의 그랜트</b>가 생기고, 한쪽만 좁히는 실수가
+     * 나온다. 볼 수 있는 사람과 볼 수 있는 범위가 정확히 같다.
+     *
+     * <p>필터도 히트맵과 같은 셋이다. {@code ageBand} 필터를 함께 걸 수 있는 것이 이상해
+     * 보일 수 있는데, <b>취약 판정은 연령만이 아니라 네 요인의 합</b>이라 같은 연령대 안에서도
+     * 두 줄이 갈린다(예: 50대 + 투자경험 없음).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('aggregate:heatmap:read')")
+    @GetMapping("/vulnerability-contrast")
+    public ApiResponse<AggregateService.ContrastView> vulnerabilityContrast(
+            @RequestParam(required = false) String product,
+            @RequestParam(required = false) String ageBand,
+            @RequestParam(required = false) String channel) {
+        return ApiResponse.ok(aggregateService.vulnerabilityContrast(
+                scopeOf("aggregate:heatmap:read"), currentActor.branchId(),
+                new AggregateService.Filters(product, ageBand, channel)));
+    }
+
+    /**
      * 정책이 허용한 범위. 비면 던진다 — {@code null} 로 넘기면 서비스가 전체를 훑는다.
      *
      * <p>{@code @PreAuthorize} 가 먼저 걸러 주므로 여기 오는 것은 <b>정책과 어노테이션이
