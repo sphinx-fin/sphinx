@@ -199,28 +199,46 @@ def main() -> int:
     # ❗상한은 두 라벨러가 서로 독립일 때만 상한이다. 그 조건은 회차마다 다르고 코드가
     # 알 수 없으므로(이름을 여기 박지 않는다) 문서를 가리킨다 — 조건을 안 적고 숫자만
     # 내면 그게 "표기가 거짓" 이다(PR #343).
+    #
+    # ❗**레포에 있는 문서만 가리킨다.** 처음엔 `eval/ai-reference-diff.md` 도 같이 걸었는데
+    # 그 파일은 #343 에 있고 아직 머지되지 않았다 — 리포트가 **없는 파일을 근거로 드는**
+    # 상태가 된다(오준서·윤지석이 각각 독립으로 짚었다). 그건 이 PR 이 잡으려던 결함과
+    # 같은 종류다: 근거처럼 생겼는데 그 자리에 없는 것.
     lines.append("❗이 수치가 **상한 구실을 하려면 두 라벨러가 서로 독립**이어야 한다.")
-    lines.append("이 회차의 독립 조건은 `eval/labeling/guideline.md` §5 와")
-    lines.append("`eval/ai-reference-diff.md` 에 있다 — **조건과 함께 인용한다.**")
+    lines.append("이 회차의 독립 조건은 `eval/labeling/guideline.md` §5 에 있다 —")
+    lines.append("**조건과 함께 인용한다.**")
     lines.append("")
-    a, b = names[0], names[1]
-    keys_ab = aligned(labelers[a], labelers[b])
+    a, b_name = names[0], names[1]
+    keys_ab = aligned(labelers[a], labelers[b_name])
     gold_a = [labelers[a][k] for k in keys_ab]
-    gold_b = [labelers[b][k] for k in keys_ab]
-    ceiling = fmt_kappa(gold_a, gold_b, f"{a} ↔ {b}", lines)
+    gold_b = [labelers[b_name][k] for k in keys_ab]
+    ceiling = fmt_kappa(gold_a, gold_b, f"{a} ↔ {b_name}", lines)
     lines += render_confusion(gold_a, gold_b)
 
     # ── 2. 모델 vs 각 라벨러 ─────────────────────────────────────────────────
-    lines += ["", "## 2. 모델 vs 각 라벨러", ""]
+    lines += ["", "## 2. 모델 vs 각 라벨러 — 상한과 **같은 표본**이다", ""]
+    lines.append("1절의 상한과 이 값들만 직접 비교할 수 있다. 3절은 표본이 다르다(그쪽 설명 참조).")
+    lines.append("")
+    # ❗5절이 쓴다. 예전에는 여기서 값을 버리고 3절(합의 부분집합) 값만 상한과 비교해서,
+    # **표본이 다른 두 값을 나란히 놓고** "상한을 넘었다" 경고를 찍었다.
+    same_sample: dict[str, float] = {}
     for name in names:
         keys = aligned(labelers[name], model)
-        fmt_kappa([labelers[name][k] for k in keys], [model[k] for k in keys], f"모델 ↔ {name}", lines)
+        q = fmt_kappa([labelers[name][k] for k in keys], [model[k] for k in keys], f"모델 ↔ {name}", lines)
+        if q is not None:
+            same_sample[name] = q
 
     # ── 3. 모델 vs 합의 ─────────────────────────────────────────────────────
     lines += ["", "## 3. 모델 vs 합의 — 두 사람이 같은 등급을 준 항목만", ""]
-    consensus_keys = [k for k in aligned(labelers[a], labelers[b], model) if labelers[a][k] == labelers[b][k]]
-    disputed = len(aligned(labelers[a], labelers[b], model)) - len(consensus_keys)
+    consensus_keys = [k for k in aligned(labelers[a], labelers[b_name], model)
+                      if labelers[a][k] == labelers[b_name][k]]
+    disputed = len(aligned(labelers[a], labelers[b_name], model)) - len(consensus_keys)
     lines.append(f"  합의 {len(consensus_keys)}건 · 불일치 제외 {disputed}건")
+    lines.append("")
+    lines.append("  ❗**이 값을 1절 상한과 직접 비교하지 않는다.** 두 사람이 갈린 항목이 빠진")
+    lines.append("  집합이라 남은 것은 사람도 쉽게 합의한 문제들이고, 모델은 그만큼 쉬운 시험을")
+    lines.append("  본 것이 된다. 상한과 나란히 놓을 값은 2절이다(같은 표본).")
+    lines.append("")
     gold = [labelers[a][k] for k in consensus_keys]
     pred = [model[k] for k in consensus_keys]
     model_q = fmt_kappa(gold, pred, "모델 ↔ 합의", lines) if consensus_keys else None
@@ -245,12 +263,12 @@ def main() -> int:
             lines.append("  ❗표본이 오해 케이스를 안 담고 있다는 뜻이라, 이 회차로는 게이트의")
             lines.append("  핵심 실패 모드를 아예 재지 못한다. 표본 구성을 먼저 고친다.")
         else:
-            b = miss_breakdown(gold, pred)
-            lines.append(f"  미탐 {missed}/{total} = {rate:.1%}   (U4 를 U4 로 읽은 것 {b['caught']}건)")
+            brk = miss_breakdown(gold, pred)
+            lines.append(f"  미탐 {missed}/{total} = {rate:.1%}   (U4 를 U4 로 읽은 것 {brk['caught']}건)")
             lines.append("")
             lines.append("  게이트 결과로 가른다 — 둘 다 오해를 못 잡은 것이지만 대가가 다르다.")
-            lines.append(f"    U4 → U1     {b['passes']:>3}건   게이트가 GREEN 까지 갈 수 있다 (R-06)")
-            lines.append(f"    U4 → U2·U3  {b['downgrades']:>3}건   RED 가 YELLOW 로 내려앉는다 (R-04)")
+            lines.append(f"    U4 → U1     {brk['passes']:>3}건   게이트가 GREEN 까지 갈 수 있다 (R-06)")
+            lines.append(f"    U4 → U2·U3  {brk['downgrades']:>3}건   RED 가 YELLOW 로 내려앉는다 (R-04)")
     lines += ["", f"  정답 분포 {distribution(gold)}", f"  모델 분포 {distribution(pred)}"]
 
     # ── 5. 목표선 ───────────────────────────────────────────────────────────
@@ -259,9 +277,30 @@ def main() -> int:
         lines.append(f"  QWK 를 못 냈다 — 위 사유 참조. 목표선(≥{TARGET_QWK}) 판정 보류.")
     else:
         verdict = "달성" if model_q >= TARGET_QWK else "미달"
-        lines.append(f"  모델 QWK {model_q:+.3f} vs 목표 {TARGET_QWK:+.3f} → **{verdict}**")
-        if ceiling is not None:
-            lines.append(f"  상한(평가자 간) {ceiling:+.3f} — 모델이 상한을 넘으면 표본·라벨을 먼저 의심한다")
+        lines.append(f"  모델 QWK {model_q:+.3f} vs 목표 {TARGET_QWK:+.3f} → **{verdict}**"
+                     f"   (3절 · 합의 {len(consensus_keys)}건 기준)")
+
+    # ❗상한과의 비교는 **2절 값으로만** 한다.
+    #
+    # 예전에는 3절(합의 부분집합)의 값을 상한(전체)과 나란히 놓고 "넘으면 의심한다" 를
+    # 찍었다. 두 값은 표본이 달라서 비교가 성립하지 않는다 — 합의 집합은 사람이 갈린
+    # 항목이 빠진 쪽이라 모델에게 더 쉽고, 그래서 **라벨이 멀쩡해도 상한을 넘는다.**
+    # 그러면 읽는 사람이 있지도 않은 라벨 누출을 찾으러 간다(실측으로 그렇게 났다:
+    # 3절 0.795 > 상한 0.769 인데 같은 70건에서는 0.706·0.682 로 상한 아래였다).
+    if ceiling is not None and same_sample:
+        lines += ["", "  ### 상한과의 거리 — 같은 표본(2절)으로만 잰다", ""]
+        lines.append(f"    상한  {a} ↔ {b_name}   {ceiling:+.3f}")
+        for name, q in same_sample.items():
+            pct = f"  (상한의 {q / ceiling:.0%})" if ceiling > 0 else ""
+            lines.append(f"    모델 ↔ {name}   {q:+.3f}{pct}")
+        lines.append("")
+        over = [n for n, q in same_sample.items() if q > ceiling]
+        if over:
+            lines.append(f"  ❗모델이 상한을 넘었다 ({', '.join(over)} 기준) — **표본·라벨을 먼저 의심한다.**")
+            lines.append("  라벨이 샜거나(guideline.md 0절) 표본이 쉬운 것만 담았다는 신호다.")
+        else:
+            lines.append("  모델이 상한 아래다 — 정상이다. 상한을 올리려면 모델이 아니라")
+            lines.append("  가이드라인을 고쳐야 한다(사람끼리 갈리는 자리가 곧 천장이다).")
 
     report = "\n".join(lines)
     print(report)

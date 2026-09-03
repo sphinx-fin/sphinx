@@ -206,3 +206,87 @@ def test_the_docstring_does_not_name_a_stale_path() -> None:
     assert "로 옮긴다" not in doc or "--submit" in doc, \
         "손으로 옮기라는 안내가 남아 있다 — 제출은 --submit 이 한다"
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `worksheet.html` — 구워 둔 작업지
+#
+# 이 파일은 표본을 **안에 박아** 들고 다닌다(레포를 안 여는 라벨러에게 파일 하나로 보내는
+# 것이 목적이라 그렇다). 대가가 낡음이고, 낡아도 **열리기는 열려서** 옛 발화를 보여준다.
+# 아래가 그 낡음을 소리나게 만드는 자리다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+SHEET = ROOT / "labeling" / "worksheet.html"
+
+
+def _baked() -> list[dict]:
+    """`worksheet.html` 에 구워진 표본 배열."""
+    import re
+
+    text = SHEET.read_text(encoding="utf-8")
+    m = re.search(r"^const DATA = (\[.*?\]);$", text, re.S | re.M)
+    assert m, "worksheet.html 에서 const DATA 를 못 찾았다 — build_worksheet.py 의 마커를 본다"
+    return json.loads(m.group(1))
+
+
+def test_the_baked_sheet_matches_the_corpus():
+    """❗구운 것과 코퍼스가 갈리면 라벨러는 **없는 표본에 라벨을 붙인다.**
+
+    파일이 스스로 *"그 둘이 바뀌면 이 파일은 조용히 낡는다"* 라고 적어 둔 자리이고,
+    적어 두는 것만으로는 아무도 안 본다. 순서까지 대조하는 이유는 **순서가 정답을 흘리던
+    것이 이 표본의 실제 결함**이었기 때문이다 — 섞지 않고 다시 구우면 여기서 걸린다.
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    import build_worksheet
+
+    fresh = build_worksheet.build()
+    baked = _baked()
+    shape = lambda d: [(i["id"], [(s["sid"], s["no"]) for s in i["samples"]]) for i in d]  # noqa: E731
+    assert shape(baked) == shape(fresh), (
+        "worksheet.html 이 낡았다 — `python eval/tools/build_worksheet.py` 로 다시 굽는다"
+    )
+
+
+def test_the_baked_sheet_carries_no_grade():
+    """표본마다 등급이 실리면 작업지가 정답표가 된다."""
+    offenders = [
+        s.get("sid")
+        for item in _baked()
+        for s in item["samples"]
+        if {"grade", "gold", "label", "expected"} & set(s)
+    ]
+    assert offenders == [], f"구운 표본에 등급이 실려 있다: {offenders}"
+
+
+def test_display_numbers_hide_the_corpus_position():
+    """화면 번호는 **표시 순서대로** 다시 매긴 것이어야 한다.
+
+    `els-0007` 을 그대로 보여주면 번호가 원래 자리를 말한다 — 예전 표본은 항목마다
+    `U1 → U2 → U3 → U4` 순서였으므로 그 번호가 곧 등급이었다.
+    """
+    baked = _baked()
+    for idx, item in enumerate(baked):
+        letter = chr(ord("A") + idx)
+        assert [s["no"] for s in item["samples"]] == \
+            [f"{letter}{i}" for i in range(1, len(item["samples"]) + 1)], \
+            f"{item['id']} 의 화면 번호가 {letter}1..{letter}N 이 아니다"
+    sids = [s["sid"] for item in baked for s in item["samples"]]
+    assert sids != sorted(sids), "표시 순서가 sample_id 순서 그대로다 — 섞이지 않았다"
+
+
+def test_display_numbers_cannot_be_mistaken_for_a_sample_id():
+    """❗화면 번호가 `sample_id` 처럼 생기면 안 된다.
+
+    처음엔 `01`~`70` 으로 매겼는데 `els-0001`~`els-0067` 과 자릿수가 같았고, 하필
+    앞 두 줄이 `01 → els-0002` · `02 → els-0003` 으로 +1 씩 겹쳐서 라벨링을 마친
+    라벨러가 **"라벨이 하나씩 밀렸다"** 고 신고했다. 데이터는 멀쩡했다 — 화면·저장값·
+    파일이 70/70 같았고, 대조하는 데만 한참 걸렸다(#324).
+
+    번호가 숫자로만 되어 있으면 이 착시는 반드시 다시 난다.
+    """
+    for item in _baked():
+        for s in item["samples"]:
+            assert not s["no"].isdigit(), (
+                f"화면 번호 {s['no']!r} 가 숫자뿐이라 sample_id 와 헷갈린다 "
+                "— 항목 글자를 붙인다(A1·C4)"
+            )
