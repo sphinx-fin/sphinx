@@ -101,10 +101,15 @@ public class ReportService {
                     byItem.computeIfAbsent(String.valueOf(judgment.get("itemId")), k -> new ArrayList<>())
                             .add(judgmentHistoryEntry(judgment, payload));
                 }
+                // 신호·사유와 **그 판정을 만든 입력**을 같이 낸다. 기록에만 담고 리포트가 안
+                // 내면 감사에서 스트림을 직접 열어야 한다 — 이슈 #280 이 "게이트만이 아니라
+                // 리포트도 분모를 모른다" 로 든 나머지 절반이다.
                 case "gate" -> gateHistory.add(ordered(
                         "at", payload.get("at"),
                         "signal", payload.get("signal"),
-                        "ruleTrace", payload.get("ruleTrace")));
+                        "ruleTrace", payload.get("ruleTrace"),
+                        "unmeasured", payload.get("unmeasured"),
+                        "rulesVersion", payload.get("rulesVersion")));
                 case "override" -> overrides.add(ordered(
                         "at", payload.get("at"),
                         "approver", payload.get("approver"),

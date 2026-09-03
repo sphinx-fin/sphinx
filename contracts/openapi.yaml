@@ -600,7 +600,7 @@ components:
             - UNAUTHORIZED             # 401 인증되지 않은 요청 — 로그인하면 해소된다
             - FORBIDDEN                # 403 권한 없음(F-CMN-002) — 로그인해도 해소되지 않는다
             - EVIDENCE_REQUIRED        # 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
-            - MEASUREMENT_INVALID      # 502 신뢰도 누락·범위(0~1) 이탈 — 상류 ai-service 계약 위반
+            - MEASUREMENT_INVALID      # 502 모델이 낸 측정값이 검증을 통과 못 함 — ① 인용이 실제 발화에 없음(지어냄) ② 루브릭 밖 조항 인용 ③ 신뢰도 누락·범위(0~1) 이탈. 상류 ai-service 계약 위반이고 EVIDENCE_REQUIRED(근거가 비었다)와 다르다
             - AI_SERVICE_UNAVAILABLE   # 502 ai-service 호출 실패(non-2xx·연결 오류·미구현) — 상류 의존성 문제
             - INTERNAL_ERROR           # 500 서버 내부 오류
         message:   {type: string}
@@ -1152,10 +1152,22 @@ components:
 
     GateResult:
       type: object
-      required: [signal, ruleTrace]
+      required: [signal, ruleTrace, unmeasured, rulesVersion]
       properties:
         signal:    {type: string, enum: [GREEN, YELLOW, RED]}
-        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01)"}
+        ruleTrace: {type: array, items: {type: string}, description: "발화한 룰 ID(예: R-01). 그 신호를 낸 사유 전부 — 하나가 아닐 수 있다"}
+        unmeasured:
+          type: integer
+          minimum: 0
+          description: >-
+            판정 시점의 미측정 항목 수 — 질문을 보냈는데 판정이 안 돌아온 항목.
+            1 이상이면 R-00 이 RED 를 낸다. 판정 뒤에 그 항목이 마저 채점돼도
+            이 값은 안 바뀐다(재계산값이 아니라 그때의 기록값).
+        rulesVersion:
+          type: integer
+          description: >-
+            판정에 쓴 gate_rules.yaml 의 version. 임계값이 바뀐 뒤의 판정과
+            그 전의 판정을 감사 시점에 가르는 값이다.
     GateApiResponse:
       type: object
       required: [success, data]

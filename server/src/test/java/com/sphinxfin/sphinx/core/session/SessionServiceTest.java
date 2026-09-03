@@ -499,6 +499,29 @@ class SessionServiceTest {
                         + "이 경로를 안 지나가면 계산이 0 을 돌려줘도 아무도 모른다")
                 .isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).contains("R-00");
+        assertThat(r.unmeasured())
+                .as("신호만 재면 'R-00 이 물었다' 까지만 남는다. 몇 개를 못 쟀는지가 결과에 "
+                        + "실려야 계산이 0 을 돌려주는 변이가 **숫자로** 잡힌다 (#294 ①)")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗판정 뒤에 마저 채점해도 기록된 미측정 수는 그때의 값이다 — 재계산값이 아니다")
+    void theRecordedGateKeepsTheNumberItWasJudgedWith() {
+        Session s = service.create(cmd(null));
+        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.judge(s.id());
+
+        // 판정 뒤에 B 가 마저 채점된다. 이제 다시 세면 미측정은 0 이다.
+        service.recordJudgment(s.id(), j("B", Grade.U1));
+
+        assertThat(service.get(s.id()).gateUnmeasured())
+                .as("감사 기준점은 기록값이지 재계산값이 아니다. 안 남기면 나중에 이 판정을 "
+                        + "되짚을 때 '왜 RED 였나' 가 설명되지 않는다 — evidence 는 append-only 라 "
+                        + "그때 못 채운다")
+                .isEqualTo(1);
     }
 
     @Test
