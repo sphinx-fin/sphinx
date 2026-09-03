@@ -184,3 +184,25 @@ def test_the_generator_actually_calls_the_guard(tmp_path, monkeypatch) -> None:
     assert "U4" in str(exc.value)
     assert not out.exists(), "가드가 걸렸는데 파일을 남기면 라벨러가 그걸 본다"
 
+
+def test_the_docstring_does_not_name_a_stale_path() -> None:
+    """❗머리말이 코드와 같은 경로를 말한다.
+
+    실제로 낡았다 — `OUT_DIR` 을 `eval/labeling/` 로 옮기면서 머리말의 `eval/data/worksheet/`
+    를 안 고쳤다(리뷰에서 사람이 읽고 잡았다). **하필 이 도구가 없애려는 그 디렉토리를
+    가리키고 있어서**, 머리말만 읽은 사람이 없는 자리를 찾다가 `eval/data/` 를 `ls` 한다.
+
+    코드는 맞고 문서가 틀린 경우라 어떤 실행에서도 안 드러난다 — 그래서 여기서 본다.
+    """
+    sys.path.insert(0, str(ROOT))
+    import make_worksheet
+
+    doc = make_worksheet.__doc__ or ""
+    out_rel = make_worksheet.OUT_DIR.relative_to(ROOT.parent).as_posix()
+
+    assert out_rel in doc, f"머리말이 실제 출력 경로({out_rel})를 안 말한다"
+    assert "eval/data/worksheet" not in doc, \
+        "머리말이 옛 경로를 말한다 — 이 도구가 없애려는 디렉토리다"
+    assert "로 옮긴다" not in doc or "--submit" in doc, \
+        "손으로 옮기라는 안내가 남아 있다 — 제출은 --submit 이 한다"
+

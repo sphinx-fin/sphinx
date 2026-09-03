@@ -28,11 +28,16 @@
 ## 쓰기
 
     python3 eval/make_worksheet.py --name 강희진
-      → eval/data/worksheet/강희진.md      사람이 읽고 판단하는 것
-      → eval/data/worksheet/강희진.jsonl   grade 만 채우면 되는 골격
+      → eval/labeling/worksheet/강희진.md      사람이 읽고 판단하는 것
+      → eval/labeling/worksheet/강희진.jsonl   grade 만 채우면 되는 골격
 
-`.jsonl` 은 **제출물이 아니다.** 다 채운 뒤 `eval/data/labels/<이름>.jsonl` 로 옮긴다 —
-그 자리에 두면 `run_eval.py` 가 빈 등급을 라벨로 세려다 죽는다.
+    python3 eval/make_worksheet.py --submit --name 강희진
+      → 빈 등급·범위 밖 등급·중복·누락을 세고, 통과해야 eval/data/labels/ 로 옮긴다
+
+❗**`eval/data/` 는 라벨러가 지나지 않는다.** 작업지도 거기 없고(`eval/labeling/` 이다),
+제출도 손으로 옮기지 않는다 — 그 디렉토리에 `model.jsonl` 과 **다른 라벨러의 파일**이 있고,
+둘 다 닻이다. 경로를 여기 옛것으로 적어 두면 그것만 읽은 사람이 없는 자리를 찾다가
+`eval/data/` 를 `ls` 한다.
 """
 from __future__ import annotations
 
