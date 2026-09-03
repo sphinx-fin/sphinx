@@ -62,7 +62,11 @@ bad()  { printf '   ❗%s\n' "$*" >&2; }
 # 안내가 `uvicorn` 을 띄우라고 한다. 떠 있는데 띄우라고 하는 것이고, 정작 아래
 # 「키 갈래」 안내에는 도달하지 못한다 — **이 스크립트가 고치려는 그 모양이다.**
 reachable() {
-    curl -sS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null && return 0
+    # ❗`-f` 가 필요하다. `curl` 은 404·500 에도 **종료코드 0** 이고, alpha 의 `/docs` 는
+    # nginx SPA 폴백이 200(text/html)을 준다 — ai-service 가 죽어도 **프론트가 살아 있으면
+    # "떠 있다"** 가 된다. 그러면 안내가 키 갈래로 내려가고 사람은 멀쩡한 키를 의심한다
+    # (#338 리뷰 3차 실측: AI_BASE=alpha → REACHABLE=true).
+    curl -sfS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null && return 0
     # 호스트에서 안 보여도 컨테이너 안에서 보이면 떠 있는 것이다 (alpha 의 정상 상태).
     docker compose exec -T ai-service sh -c \
         'curl -sf --max-time 5 -o /dev/null localhost:8100/docs' 2>/dev/null
@@ -74,10 +78,16 @@ diagnose_502() {
 
    ai-service 가 응답하지 않는다. 서버는 그걸 502 로 옮길 뿐이다.
      로컬   cd ai-service && uvicorn app.main:app --port 8100
-     alpha  docker compose ps ai-service · docker compose logs --tail=50 ai-service
+     alpha  ssh 로 EC2 에 들어가 cd ~/sphinx 뒤에 친다 —
+            docker compose ps ai-service · docker compose logs --tail=50 ai-service
 
    ❗alpha 에서 호스트의 :8100 이 안 열리는 것은 정상이다(ports: 가 없다). 위 판정은
    컨테이너 안에서도 안 보이는 경우만 여기로 온다.
+
+   ❗**이 판정은 이 스크립트가 도는 기계에 대한 것이다** — `BASE` 가 가리키는 기계가
+   아니다. 노트북에서 `BASE=alpha` 로 돌리면 :8100 도 `docker compose` 도 노트북 것이라
+   둘 다 없어서 여기로 온다. 위 alpha 줄을 노트북에서 그대로 치면 compose 가 환경변수를
+   못 찾고 죽는다(#338 리뷰 3차 실측).
 DOWN
         return
     }
@@ -129,7 +139,10 @@ DOWN
    gemini-3.5-flash-lite 였으므로 .env 나 SSM 에 옛 Gemini 키가 남아 있으면 이 모양이 된다.
 
    값을 안 보고 프로바이더를 가른다 — 길이가 자릿수로 다르다.
-     awk -F= '/^LLM_API_KEY/{print length($2)}' ai-service/.env
+     sed -n 's/^LLM_API_KEY=//p' ai-service/.env | awk '{print length}'
+     # ❗`awk -F=` 를 쓰지 않는다 — 값 안의 `==` 에서 잘려 42 를 40 으로 세고,
+     # `/^LLM_API_KEY/` 가 `LLM_API_KEY_OLD` 까지 물어 **두 줄**이 나온다. 하필 두 줄이
+     # 나오는 상황이 이 안내가 전제한 상황이다 — 옛 키가 남아 있는 그 상황(#338 리뷰 3차).
        세 자리 → OpenAI(sk-proj-…)      두 자리 → Gemini(AQ.…)
    배포 쪽은 deploy_ec2.sh 가 같은 줄을 /var/log/sphinx-deploy.log 에 찍는다.
 
