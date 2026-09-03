@@ -23,11 +23,15 @@ def _doc(name: str) -> dict:
 # ── 청킹 — P6 항등식이 이 모듈의 계약이다 ─────────────────────────────────────
 @pytest.mark.parametrize("name", CASES)
 def test_chunks_keep_the_source_offsets(name: str) -> None:
-    """★ **`pages[page].text[start:end] == chunk.text`** (P6 · 1절 F-EXT-002).
+    """★ 항등식이 **조각별로** 성립한다 (P6 · 1절 F-EXT-002).
 
-    이것이 *"문서에 이렇게 적혀 있다"* 의 증명이다. 청크를 정규화하거나 재조립하면 이
-    항등식이 깨지고, 그러면 추출이 낸 `source_span` 이 원문을 안 가리킨다 — **추출이
-    통째로 무의미해진다.** 이 모듈에서 제일 먼저 깨지기 쉬운 자리라 전건으로 잰다.
+        "".join(pages[s.page].text[s.start:s.end] for s in spans) == chunk.text
+
+    이것이 *"문서에 이렇게 적혀 있다"* 의 증명이다. 청크를 정규화하거나 재조립하면 깨지고,
+    그러면 추출이 낸 `source_span` 이 원문을 안 가리킨다 — **추출이 통째로 무의미해진다.**
+
+    스팬을 목록으로 바꾼 이유가 페이지 경계인데(모듈 docstring), **목록으로 바꾸면서
+    항등식이 약해지지 않았다는 것**을 여기서 잰다.
     """
     doc = _doc(name)
     by_page = {p["page"]: p["text"] for p in doc["pages"]}
@@ -35,10 +39,26 @@ def test_chunks_keep_the_source_offsets(name: str) -> None:
     assert chunks, "청크가 하나도 안 나왔다 — 경계 정규식이 아무것도 못 잡았나"
 
     broken = [
-        (c.page, c.start, c.end) for c in chunks
-        if by_page[c.page][c.start:c.end] != c.text
+        [(s.page, s.start, s.end) for s in c.spans] for c in chunks
+        if "".join(s.slice_of(by_page) for s in c.spans) != c.text
     ]
-    assert not broken, f"오프셋이 원문과 안 맞는 청크: {broken[:5]}"
+    assert not broken, f"조각을 이어붙인 것이 text 와 다르다: {broken[:3]}"
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_some_chunks_cross_a_page_boundary(name: str) -> None:
+    """★ 페이지 경계에서 갈린 문장이 **실제로 이어진다.**
+
+    이 단정이 없으면 `_join_split_sentences` 가 아무것도 안 해도 전건 초록이다 —
+    스팬 목록만 만들고 병합이 안 도는 상태가 그 모양이고, 그러면 이 변경이 무의미하다.
+
+    계약 샘플 실측: 페이지 첫 청크 15개 중 10개가 문장 중간에서 시작했다.
+    """
+    chunks = retrieval.chunk_document(_doc(name))
+    crossed = [c for c in chunks if c.crosses_pages]
+    assert crossed, "페이지를 걸친 청크가 하나도 없다 — 병합이 안 돌았다"
+    for c in crossed:
+        assert len({s.page for s in c.spans}) == 2, "세 페이지를 걸치는 것은 지금 안 만든다"
 
 
 @pytest.mark.parametrize("name", CASES)
@@ -49,9 +69,10 @@ def test_chunks_cover_the_document_without_gaps_in_between(name: str) -> None:
     넣어서 그 위험이 없는데, 검색으로 바꾸는 순간 구멍이 곧 미검출이 된다.
     """
     doc = _doc(name)
+    chunks = retrieval.chunk_document(doc)
     for page in doc["pages"]:
-        spans = sorted((c.start, c.end) for c in retrieval.chunk_document(doc)
-                       if c.page == page["page"])
+        spans = sorted((s.start, s.end) for c in chunks for s in c.spans
+                       if s.page == page["page"])
         if not spans:
             continue
         covered = 0
@@ -104,7 +125,7 @@ def test_dense_embeds_raw_text_not_the_normalized_copy() -> None:
 
 def test_norm_is_the_same_normalization_as_textsim() -> None:
     """BM25·containment 가 `textsim` 과 다른 정규화를 쓰면 점수를 서로 비교할 수 없다."""
-    c = retrieval.Chunk(page=1, start=0, end=5, text="가 나, 다.")
+    c = retrieval._chunk(1, 0, 5, "가 나, 다.")
     assert c.norm == textsim.normalize(c.text)
 
 
@@ -201,7 +222,7 @@ class _StubClient:
 
 
 def _many_chunks(n: int = 6) -> list[retrieval.Chunk]:
-    return [retrieval.Chunk(page=1, start=i * 60, end=i * 60 + 60, text=f"조각{i} " + "가" * 50)
+    return [retrieval._chunk(1, i * 60, i * 60 + 60, f"조각{i} " + "가" * 50)
             for i in range(n)]
 
 

@@ -86,17 +86,66 @@ _SENTENCE_END = re.compile(r"(?<=[.。!?])\s+")
 
 
 @dataclass(frozen=True)
-class Chunk:
-    """문서 한 조각. **원문 오프셋을 들고 다닌다** (P6 · 1절 F-EXT-002).
-
-    항등식: `pages[page].text[start:end] == text`. 모듈 docstring 참고.
-    """
+class Span:
+    """원문 한 조각의 위치. **항등식의 단위다.**"""
 
     page: int
     start: int
     end: int
-    text: str                       # 원문에서 잘라낸 그대로. 정규화하지 않는다
+
+    def slice_of(self, by_page: dict[int, str]) -> str:
+        return by_page[self.page][self.start:self.end]
+
+
+@dataclass(frozen=True)
+class Chunk:
+    """문서 한 조각. **원문 오프셋을 들고 다닌다** (P6 · 1절 F-EXT-002).
+
+    ## 항등식이 조각별로 성립한다
+
+        "".join(pages[s.page].text[s.start:s.end] for s in spans) == text
+
+    ❗**처음에는 `(page, start, end)` 하나였고 그것이 페이지 경계를 못 넘었다.** 공시문서는
+    문장이 페이지를 걸치는데(계약 샘플: 페이지 첫 청크 15개 중 **10개가 문장 중간에서
+    시작**), 그러면 어느 청크에도 조건이 온전히 없어서 **검색을 어떻게 고쳐도 못 찾는다** —
+    `ELS-ISSUER-CREDIT-RISK` 가 그 실물이었다(정답 청크가 `"따른 위험 파생상품적 성격을…"`
+    로 시작하고, 그 문장은 앞 페이지에서 시작했다).
+
+    이웃 포함(`with_neighbors`)으로는 안 됐다 — 그 정답은 적중과 **거리 39** 였다.
+    반경으로 덮으려면 문서 전체를 넣는 것과 같아진다.
+
+    그래서 스팬을 **목록**으로 든다. 항등식은 조각별로 그대로 성립하므로 P6 · 1절 F-EXT-002 근거가 안
+    약해지고, 페이지를 걸친 조건이 한 청크에 온전히 들어온다.
+
+    `page`·`start`·`end` 는 **첫 조각**을 가리키는 유도 속성이다. 대부분의 청크가 조각
+    하나라 호출부가 그대로 쓸 수 있고, 여러 조각인 경우 `spans` 를 봐야 한다.
+    """
+
+    spans: tuple[Span, ...]
+    text: str                       # 조각들을 이어붙인 것. 정규화하지 않는다
     kind: str = "prose"             # prose | table
+
+    @property
+    def page(self) -> int:
+        """첫 조각의 페이지. 여러 페이지를 걸치면 `spans` 를 봐야 한다."""
+        return self.spans[0].page
+
+    @property
+    def start(self) -> int:
+        return self.spans[0].start
+
+    @property
+    def end(self) -> int:
+        """**첫 조각의** 끝이다 — 마지막 조각이 아니다.
+
+        여러 조각인 청크에서 `text[start:end]` 를 쓰면 첫 조각만 나온다. 그것이 의도다:
+        단일 조각 호출부가 안 깨지고, 여러 조각을 다루려면 `spans` 를 명시적으로 봐야 한다.
+        """
+        return self.spans[0].end
+
+    @property
+    def crosses_pages(self) -> bool:
+        return len({s.page for s in self.spans}) > 1
 
     @property
     def norm(self) -> str:
@@ -104,8 +153,34 @@ class Chunk:
         return textsim.normalize(self.text)
 
 
+def _chunk(page: int, start: int, end: int, text: str, kind: str = "prose") -> Chunk:
+    """단일 조각 청크. 기존 호출부·테스트가 쓰는 모양."""
+    return Chunk(spans=(Span(page, start, end),), text=text, kind=kind)
+
+
+#: 페이지 경계가 문장 중간인지 판정한다. 앞 페이지가 문장 종결로 끝나지 않고, 뒤 페이지가
+#: 조항머리로 시작하지 않으면 **한 문장이 갈린 것**으로 본다.
+#:
+#: 조항머리를 함께 보는 이유: 앞 페이지가 제목으로 끝나면(마침표가 없다) 종결 검사만으로는
+#: 늘 "갈렸다" 가 된다. 실측으로 그 오탐이 9건이었다.
+_SENTENCE_FINAL = ".。!?:"
+
+
+def _page_boundary_splits_a_sentence(prev_text: str, next_text: str) -> bool:
+    prev = prev_text.rstrip()
+    nxt = next_text.lstrip()
+    if not prev or not nxt:
+        return False
+    if prev[-1] in _SENTENCE_FINAL:
+        return False
+    return not _CLAUSE_HEAD.match(nxt)
+
+
 def chunk_document(doc: dict) -> list[Chunk]:
-    """파싱된 문서 → 청크. 조항·표 경계를 먼저 보고 넘치면 문장 경계로 슬라이딩한다."""
+    """파싱된 문서 → 청크. 조항·표 경계를 먼저 보고 넘치면 문장 경계로 슬라이딩한다.
+
+    마지막에 **페이지 경계에서 갈린 문장을 이어붙인다** — 그 청크만 조각이 둘이 된다.
+    """
     out: list[Chunk] = []
     for page in doc["pages"]:
         text: str = page["text"]
@@ -113,11 +188,47 @@ def chunk_document(doc: dict) -> list[Chunk]:
             piece = text[start:end]
             if len(piece.strip()) < MIN_CHUNK_CHARS:
                 continue
-            out.append(Chunk(
-                page=page["page"], start=start, end=end, text=piece,
-                kind="table" if _TABLE_HEAD.search(piece) else "prose",
+            out.append(_chunk(
+                page["page"], start, end, piece,
+                "table" if _TABLE_HEAD.search(piece) else "prose",
             ))
-    return out
+    return _join_split_sentences(out, doc)
+
+
+def _join_split_sentences(chunks: list[Chunk], doc: dict) -> list[Chunk]:
+    """페이지 경계에서 갈린 문장을 한 청크로 잇는다.
+
+    앞 페이지의 **끝** 청크와 뒤 페이지의 **첫** 청크를 합친다. 둘 다 그 경계에 닿아
+    있어야 한다 — 중간 청크를 합치면 조건이 아닌 것까지 끌어온다.
+    """
+    by_page = {p["page"]: p["text"] for p in doc["pages"]}
+    pages = [p["page"] for p in doc["pages"]]
+    order = {pg: i for i, pg in enumerate(pages)}
+
+    merged: list[Chunk] = []
+    skip = set()
+    for i, c in enumerate(chunks):
+        if i in skip:
+            continue
+        nxt = chunks[i + 1] if i + 1 < len(chunks) else None
+        joinable = (
+            nxt is not None
+            and not c.crosses_pages and not nxt.crosses_pages
+            and order.get(nxt.page, -1) == order.get(c.page, -2) + 1
+            and c.end >= len(by_page[c.page].rstrip())      # 앞 페이지의 끝 청크
+            and nxt.start == 0                               # 뒤 페이지의 첫 청크
+            and _page_boundary_splits_a_sentence(c.text, nxt.text)
+        )
+        if joinable:
+            merged.append(Chunk(
+                spans=c.spans + nxt.spans,
+                text=c.text + nxt.text,
+                kind="table" if "table" in (c.kind, nxt.kind) else "prose",
+            ))
+            skip.add(i + 1)
+        else:
+            merged.append(c)
+    return merged
 
 
 def _segments(text: str) -> list[tuple[int, int]]:
