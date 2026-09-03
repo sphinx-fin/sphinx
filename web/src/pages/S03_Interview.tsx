@@ -406,10 +406,13 @@ export default function S03Interview() {
               </p>
             )}
 
+            {/* 시간 기반 안내만 여기 남는다. 건너뛰기 **버튼**은 아래에서 상시 노출이라
+                이 문면은 "이제야 건너뛸 수 있다" 가 아니라 재촉하지 않는다는 말이다. */}
             {idlePrompt && (
               <p className="iv__alert iv__alert--info" role="status">
                 <b>천천히 하셔도 됩니다.</b>
-                답변이 어려우시면 이 항목은 건너뛰고, 담당자가 다시 설명해 드립니다.
+                답변이 어려우시면 아래 <b>이 항목 건너뛰기</b>를 눌러 주세요. 담당자가 다시
+                설명해 드립니다.
               </p>
             )}
 
@@ -429,16 +432,23 @@ export default function S03Interview() {
               >
                 {phase === "submitting" ? "제출 중…" : "답변 제출"}
               </button>
-              {idlePrompt && (
-                <button
-                  type="button"
-                  className="iv__btn iv__btn--ghost"
-                  onClick={skip}
-                  disabled={busy}
-                >
-                  이 항목 건너뛰기
-                </button>
-              )}
+              {/* ❗**항상 보인다.** 예전에는 `idlePrompt` 에 달려 있었는데, 고령자 모드는
+                  타이머를 아예 안 걸므로(명세 10절 "입력 시간 제한 없음") 그 플래그가
+                  영원히 false 였다 — **도움이 가장 필요한 사람에게만 도움 경로가 없었다**
+                  (이슈 #315). 타이머를 끈 것 자체는 옳고, 문제는 시간 기반 안내와
+                  건너뛰기 가능 여부라는 **두 관심사가 한 플래그에 묶여** 있던 것이다.
+                  남는 선택지가 빈칸 제출(버튼이 잠긴다)과 아무 말이나 적기뿐이었는데,
+                  후자는 U3(미이해)로 갈 것이 U4(오해)로 채점될 수 있다.
+                  크기는 따로 안 만진다 — 고령자 모드는 `<html data-elderly>` 의 토큰
+                  배율이라 이 버튼도 같이 커진다(useElderlyMode 주석). */}
+              <button
+                type="button"
+                className="iv__btn iv__btn--ghost"
+                onClick={skip}
+                disabled={busy}
+              >
+                이 항목 건너뛰기
+              </button>
             </div>
           </section>
         )}
