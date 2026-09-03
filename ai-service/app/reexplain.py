@@ -10,7 +10,11 @@
 
 F-INT-002 는 질문에서 수치를 **금지**한다(정답 노출). F-INT-004 는 수치를 **써야** 하지만
 **원문에서 온 것만** 써야 한다. 그래서 검사 방향이 뒤집힌다 — 생성된 설명의 모든 수치가
-`risk_item.condition.value_text` 에 있는지 대조한다(P6).
+`risk_item.condition.value_text` 에 있는지 대조한다(P6 · **0.2절**).
+
+명세의 P6 은 두 자리에 있고 **이 파일은 0.2절 쪽이다** — 그 조항이 *"재설명 생성 시"* 로
+한정돼 있어 재설명이 정확히 그 범위다. 추출(`extraction.py`)은 1절 F-EXT-002 통제를
+근거로 삼는다(`#305` 가 원본을 넣으면서 갈렸다).
 
 환각 수치가 고객에게 노출되면 이 시스템의 존재 이유가 무너진다. 오해를 잡겠다면서 새로운
 오해를 만드는 것이다. 그래서 검사에 걸리면 재시도하고, 끝내 안 되면 **원문 조건을 그대로
@@ -51,7 +55,7 @@ def reexplain(
         # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 여기만 거부하지
         # 않는 이유는 `_minimal()` 이 **이 경우를 위해 이미 설계돼 있기** 때문이다 — 인용
         # 형식을 쓰지 않고 cited_spans 를 비운다(#60 리뷰). 강희진의 재검증 루프가 진행할
-        # 것을 주는 쪽이 낫고, 그 문면은 P4·P6 을 어기지 않는다.
+        # 것을 주는 쪽이 낫고, 그 문면은 P4·P6(0.2절) 을 어기지 않는다.
         return _minimal(risk_item)
 
     allowed = source_numerics(risk_item)
@@ -79,7 +83,7 @@ def reexplain(
     return _minimal(risk_item)
 
 
-# ── P6: 수치 대조 ─────────────────────────────────────────────────────────────
+# ── P6(0.2절): 수치 대조 ─────────────────────────────────────────────────────────────
 def source_numerics(risk_item: RiskItem) -> frozenset[tuple[str, str | None]]:
     """조건 원문에 있는 수치. 설명에서 쓸 수 있는 것의 전부다."""
     return numerics.source_values(risk_item.require_condition().value_text)
@@ -136,7 +140,7 @@ def _minimal(risk_item: RiskItem) -> ReexplainResponse:
     **`extraction_failed` 항목은 원문 인용 형식을 쓰지 않는다** (PR #60 리뷰 ②).
     그 항목의 `condition.value_text` 는 실패 사유 문면이고 문서에 없는 문장이다. 그것을
     "설명서에는 이렇게 적혀 있습니다" 로 인용하면
-      - P6 — 상품설명서에 없는 문장을 원문 인용으로 고객 화면에 낸다
+      - P6(0.2절) — 상품설명서에 없는 문장을 원문 인용으로 고객 화면에 낸다
       - P4 — `text[0:0]` 인 빈 슬라이스를 가리키는 근거가 리포트에 남는다
     `cited_spans` 도 비운다. 이 파일이 *"근거 없는 설명에 스팬을 붙이면 리포트가 거짓 근거를
     갖는다"* 고 쓰고 있는데 폴백이 그 예외가 되어 있었다.
