@@ -177,7 +177,7 @@ class OverrideServiceTest {
         public void appendJudgment(String sessionId, com.sphinxfin.sphinx.domain.Judgment judgment,
                                    int reverifyCount,
                                    String askedQuestion, QuestionSource questionSource,
-                                   Instant at) { }
+                                   com.sphinxfin.sphinx.domain.InputMeta inputMeta, Instant at) { }
 
         @Override
         public void appendMismatch(String sessionId,

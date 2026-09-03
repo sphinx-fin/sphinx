@@ -77,7 +77,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("판정 → 게이트 → 오버라이드 순서가 기록에 남는다")
         void keepsCrossKindOrder() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U2, "0.8"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             recorder.appendGate(SID, new GateResult(Signal.YELLOW, List.of(new RuleRef("R-04", "테스트 문면"), new RuleRef("R-05", "테스트 문면")), 0, 3), T0.plusSeconds(1));
             recorder.appendOverride(SID, "고객이 충분히 이해했다고 판단하여 진행합니다", "mgr-01", T0.plusSeconds(2));
 
@@ -117,8 +117,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("같은 항목의 재검증이 두 건으로 남는다 — 덮어쓰기가 아니다")
         void reverificationIsAppendedNotOverwritten() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(60));
+            recorder.appendJudgment(SID, judgment("A", Grade.U3, "0.7"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 1, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(60));
 
             List<Map<String, Object>> stored = payloads();
             assertThat(stored).hasSize(2);
@@ -127,6 +127,36 @@ class StoredEvidenceRecorderTest {
                     .containsExactly("U3", "U1");
             assertThat(stored).extracting(p -> String.valueOf(p.get("reverifyCount")))
                     .containsExactly("0", "1");
+        }
+
+        @Test
+        @DisplayName("❗판정 기록이 입력 메타데이터를 든다 — 붙여넣기는 발화로는 안 보인다 (이슈 #325)")
+        void judgmentEntryCarriesHowItWasTyped() {
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 0, "질문",
+                    EvidenceRecorder.QuestionSource.DISPLAYED,
+                    new com.sphinxfin.sphinx.domain.InputMeta(120, 400, true, 0, 42, false), T0);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meta = (Map<String, Object>) payloads().get(0).get("inputMeta");
+            assertThat(meta)
+                    .as("붙여넣기로 채운 되말하기는 발화 내용만 보면 완벽한 U1 이다 — "
+                            + "이 값이 없으면 그 행동을 구분할 방법이 아예 없다")
+                    .isNotNull();
+            assertThat(meta.get("pasteDetected")).isEqualTo(true);
+            assertThat(meta.get("charCount")).isEqualTo(42);
+        }
+
+        @Test
+        @DisplayName("❗안 보낸 것을 생략하지 않는다 — 없음과 미기재를 가른다")
+        void anAbsentInputMetaIsRecordedAsNull() {
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.9"), 0, "질문",
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+
+            assertThat(payloads().get(0))
+                    .as("키가 없으면 '화면이 안 보냈다' 와 '이 필드가 생기기 전 기록' 이 "
+                            + "같아 보인다 — askedQuestion·misconceptionType 과 같은 규약이다(#136)")
+                    .containsKey("inputMeta");
+            assertThat(payloads().get(0).get("inputMeta")).isNull();
         }
 
         @Test
@@ -183,7 +213,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("grade 원값과 근거가 들어간다. 색은 안 들어간다 (ADR-004 §5)")
         void storesGradeAndEvidenceButNoColor() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Map<String, Object> item = child(payloads().get(0), "judgment");
             assertThat(item.get("grade")).isEqualTo("U4");
@@ -196,7 +226,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("misconceptionType 이 null 이어도 키를 남긴다 — 생략하면 '없음' 과 '미기재' 가 같아진다")
         void keepsNullMisconceptionType() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             assertThat(child(payloads().get(0), "judgment").keySet())
                     .contains("misconceptionType");
@@ -214,7 +244,7 @@ class StoredEvidenceRecorderTest {
                     "꺾기 정황", null, "F-SCR-001_v2", true);
 
             recorder.appendJudgment(SID, escalating, 0, "질문 문면",
-                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Map<String, Object> item = child(payloads().get(0), "judgment");
             assertThat(item.get("escalate"))
@@ -239,7 +269,7 @@ class StoredEvidenceRecorderTest {
             Set<String> deliberatelyOmitted = Set.of();
 
             recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면",
-                    EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+                    EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
             Set<String> recorded = child(payloads().get(0), "judgment").keySet();
 
             List<String> components = Arrays.stream(Judgment.class.getRecordComponents())
@@ -256,8 +286,8 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("적재한 뒤에도 사슬이 검증된다 — 왕복이 성립한다")
         void chainStaysVerifiableAfterReplay() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
-            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0.plusSeconds(30));
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
+            recorder.appendJudgment(SID, judgment("B", Grade.U1, "0.95"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0.plusSeconds(30));
             em.flush();
 
             assertThat(store.verify(StoredEvidenceRecorder.streamOf(SID)).ok()).isTrue();
@@ -282,7 +312,7 @@ class StoredEvidenceRecorderTest {
         @Test
         @DisplayName("문자열이나 Double 이 아니라 BigDecimal 값으로 왕복한다")
         void roundTripsAsNumber() {
-            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, T0);
+            recorder.appendJudgment(SID, judgment("A", Grade.U4, "0.91"), 0, "질문 문면", EvidenceRecorder.QuestionSource.DISPLAYED, null, T0);
 
             Object confidence = child(payloads().get(0), "judgment").get("confidence");
             assertThat(confidence)

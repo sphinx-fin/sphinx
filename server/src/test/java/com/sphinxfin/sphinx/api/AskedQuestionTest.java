@@ -60,6 +60,7 @@ class AskedQuestionTest {
                 @Override public void appendJudgment(String sid, Judgment j, int r,
                                                      String askedQuestion,
                                                      QuestionSource questionSource,
+                                                     com.sphinxfin.sphinx.domain.InputMeta inputMeta,
                                                      java.time.Instant at) {
                     RECORDED.add(askedQuestion);
                     SOURCES.add(questionSource);

@@ -359,7 +359,7 @@ class SessionServiceTest {
         @Override
         public void appendJudgment(String sessionId, Judgment judgment, int reverifyCount,
                                    String askedQuestion, QuestionSource questionSource,
-                                   Instant at) {
+                                   com.sphinxfin.sphinx.domain.InputMeta inputMeta, Instant at) {
             judgments.add(judgment.itemId() + ":" + judgment.grade() + ":" + reverifyCount);
             askedQuestions.add(askedQuestion);
             questionSources.add(questionSource);

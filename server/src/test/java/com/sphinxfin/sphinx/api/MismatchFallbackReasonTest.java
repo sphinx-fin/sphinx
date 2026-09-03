@@ -57,7 +57,7 @@ class MismatchFallbackReasonTest {
         com.sphinxfin.sphinx.core.EvidenceRecorder recordingEvidence() {
             return new com.sphinxfin.sphinx.core.EvidenceRecorder() {
                 @Override public void appendJudgment(String sid, Judgment j, int r,
-                        String q, QuestionSource s, java.time.Instant at) { }
+                        String q, QuestionSource s, com.sphinxfin.sphinx.domain.InputMeta inputMeta, java.time.Instant at) { }
                 @Override public void appendMismatch(String sid, SuitabilityMismatch m,
                         String v, java.util.Map<String, Object> r, java.time.Instant at) {
                     RECORDED.add(m);
