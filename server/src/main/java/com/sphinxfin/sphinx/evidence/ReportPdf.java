@@ -89,6 +89,26 @@ public class ReportPdf {
     private static final float MARGIN = 50f;
     private static final float SIZE_TITLE = 16f;
     private static final float SIZE_HEAD = 11f;
+
+    /**
+     * 절이 비었을 때 찍는 표식. <b>절마다 다른 문면인 것이 요건이다.</b>
+     *
+     * <p>세 절이 같은 문면을 쓰면 지면을 읽는 쪽이 <b>어느 절이 비었는지 구별할 수 없다</b>.
+     * 실제로 그랬다 — {@code scripts/walk_demo_session.sh} 가 {@code "기록 없음"} 하나로
+     * <i>"판정 이력이 비었나"</i> 를 판정했는데 그 표식은 <b>게이트 절 것</b>이었고, 판정
+     * 이력 절에는 표식이 아예 없었다. 그래서 <b>판정 이력이 통째로 빈 리포트를
+     * "교부 문서 시연에 쓸 수 있다" 로 판정했다</b>(PR #302 리뷰 3번, 지면 위에서 실측).
+     *
+     * <p>불릿 개수로 세는 쪽은 답이 아니다. {@code "· "} 는 <b>지면 모양</b>이라 바뀔 수
+     * 있고, 그러면 <i>"항목이 있는데 글리프가 바뀌었다"</i> 와 <i>"항목이 정말 0이다"</i> 가
+     * <b>같은 관측</b>이 된다. 표식은 렌더러가 <b>빈 경우에만</b> 찍으므로 그 둘을 가른다.
+     *
+     * <p>기존 두 문면을 지우지 않고 앞에 절 이름을 붙였다 — {@code "기록 없음"}·
+     * {@code "없음"} 을 부분문자열로 품으므로 <b>그것을 grep 하던 쪽이 안 깨진다.</b>
+     */
+    private static final String EMPTY_ITEMS = "판정 이력 없음";
+    private static final String EMPTY_GATE = "게이트 기록 없음";
+    private static final String EMPTY_OVERRIDES = "오버라이드 승인 없음";
     private static final float SIZE_BODY = 9.5f;
     private static final float LEADING = 1.5f;
 
@@ -115,7 +135,11 @@ public class ReportPdf {
             p.rule();
 
             p.text(SIZE_HEAD, "이해항목별 판정 이력");
-            for (Map<String, Object> item : list(content.get("items"))) {
+            List<Map<String, Object>> items = list(content.get("items"));
+            if (items.isEmpty()) {
+                p.indented(SIZE_BODY, EMPTY_ITEMS);
+            }
+            for (Map<String, Object> item : items) {
                 p.gap(4);
                 p.text(SIZE_BODY, "· " + str(item.get("itemId")));
                 for (Map<String, Object> h : list(item.get("history"))) {
@@ -127,7 +151,7 @@ public class ReportPdf {
             p.text(SIZE_HEAD, "게이트 판정 변천");
             List<Map<String, Object>> gate = list(content.get("gateHistory"));
             if (gate.isEmpty()) {
-                p.indented(SIZE_BODY, "기록 없음");
+                p.indented(SIZE_BODY, EMPTY_GATE);
             }
             for (Map<String, Object> g : gate) {
                 p.indented(SIZE_BODY, gateLine(g));
@@ -137,7 +161,7 @@ public class ReportPdf {
             p.text(SIZE_HEAD, "오버라이드 승인");
             List<Map<String, Object>> overrides = list(content.get("overrides"));
             if (overrides.isEmpty()) {
-                p.indented(SIZE_BODY, "없음");
+                p.indented(SIZE_BODY, EMPTY_OVERRIDES);
             }
             for (Map<String, Object> o : overrides) {
                 p.indented(SIZE_BODY, str(o.get("at")) + "  승인자 " + str(o.get("approver"))
