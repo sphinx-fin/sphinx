@@ -553,6 +553,39 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /dashboard/decisions:
+    get:
+      summary: 게이트가 무엇을 결정했는가 (F-DSH-001 · 이슈 #321)
+      description: >
+        지금 대시보드가 내는 것은 전부 **오해율**이다 — "고객이 무엇을 모르는가".
+        이 제품이 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가), 화면에 그
+        답이 없었다. 이 뷰가 그 넷을 낸다.
+        ★ **`reexplain` 이 본체다** — 재설명을 거친 항목 중 최종 이해(U1)에 도달한 비율.
+        오해율은 문제 제기이고 이것은 성과다. "이 제품이 실제로 이해를 올렸다" 의 유일한
+        정량 근거라 심사에서 가장 세다.
+        권한은 히트맵과 **같은** `aggregate:heatmap:read` 다 — 같은 데이터를 다른 축으로
+        자른 것이라 action 을 가르면 같은 사실에 그랜트가 둘이 된다.
+        마스킹은 히트맵과 같다(표본 30 미만이면 masked=true · 비율은 null). ❗**비율이
+        0 이 아니라 null 인 이유**는 "한 번도 없었다" 와 "셀 수 없다" 를 가르기 위해서다.
+        세션 테이블만으로 계산된다 — `evidence/` 가 인메모리라 거기 기대면 재기동마다
+        사라진다(이슈 #327).
+      parameters:
+        - {name: product, in: query, required: false, schema: {type: string}}
+        - {name: ageBand, in: query, required: false, schema: {type: string}}
+        - {name: channel, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: 신호 분포 · 오버라이드 · 재설명 효과 · 미측정
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DecisionApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. SELLER·CUST·ADMIN 은 집계에 접근할 수 없다(ADR-001 · 기획서 7-4).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /dashboard/leading-indicators:
     get:
       summary: 선행지표 뷰 (F-DSH-002)
@@ -1259,6 +1292,70 @@ components:
       properties:
         id:    {type: string, description: "룰 ID (예: R-00). 감사·심사에서 이것 자체가 근거다"}
         label: {type: string, description: "사람이 읽는 문면 (예: 채점되지 않은 항목이 있습니다)"}
+
+    DecisionView:
+      type: object
+      required: [synthetic, scope, gate, override, reexplain, unmeasured]
+      properties:
+        synthetic: {type: boolean, description: "합성 데이터 표기 — 항상 true (기획서)"}
+        scope:     {type: string, enum: [org, branch]}
+        gate:
+          type: array
+          items: {$ref: '#/components/schemas/SignalCount'}
+          description: "게이트 신호 분포. 판정된 세션만 센다 — 진행 중 세션은 결정이 없다"
+        override:  {$ref: '#/components/schemas/OverrideCount'}
+        reexplain: {$ref: '#/components/schemas/ReexplainEffect'}
+        unmeasured: {$ref: '#/components/schemas/UnmeasuredCount'}
+
+    SignalCount:
+      type: object
+      required: [signal, n, share]
+      properties:
+        signal: {type: string, enum: [GREEN, YELLOW, RED]}
+        n:      {type: integer, minimum: 0}
+        share:  {type: number, nullable: true, description: "판정된 세션 대비. 표본 부족이면 null"}
+
+    OverrideCount:
+      type: object
+      required: [requested, approved, sessions, masked]
+      description: >-
+        적색 오버라이드. **요청과 승인을 가른다** — 요청만 하고 승인 안 된 건수가
+        그 자체로 신호다(ADR-002: 요청자 ≠ 승인자).
+      properties:
+        requested: {type: integer, minimum: 0}
+        approved:  {type: integer, minimum: 0}
+        sessions:  {type: integer, minimum: 0}
+        masked:    {type: boolean}
+
+    ReexplainEffect:
+      type: object
+      required: [items, resolved, rate, masked]
+      description: >-
+        ★ 재설명을 거친 항목 중 최종 이해(U1)에 도달한 비율. 이 제품이 실제로 이해를
+        올렸다는 유일한 정량 근거다.
+      properties:
+        items:    {type: integer, minimum: 0, description: "재설명을 거친 (세션, 항목) 수"}
+        resolved: {type: integer, minimum: 0, description: "그중 최종 U1"}
+        rate:     {type: number, nullable: true, description: "표본 부족이면 null — 0 과 다르다"}
+        masked:   {type: boolean}
+
+    UnmeasuredCount:
+      type: object
+      required: [sessions, judged, share, masked]
+      description: "못 잰 항목이 있는 채로 판정된 세션 — gate_rules R-00 이 무는 자리다."
+      properties:
+        sessions: {type: integer, minimum: 0}
+        judged:   {type: integer, minimum: 0}
+        share:    {type: number, nullable: true}
+        masked:   {type: boolean}
+
+    DecisionApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/DecisionView'}
+        error:   {type: object, nullable: true}
 
     GateResult:
       type: object

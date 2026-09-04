@@ -3,8 +3,10 @@ package com.sphinxfin.sphinx.aggregate;
 import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionRepository;
+import com.sphinxfin.sphinx.domain.OverrideStatus;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.Signal;
 import com.sphinxfin.sphinx.security.AccessPolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -116,6 +118,27 @@ public class AggregateService {
 
     public record HeatmapView(boolean synthetic, String scope, List<Cell> cells) {}
 
+    /** 게이트 신호 하나의 건수와 비율. {@code share} 는 판정된 세션 대비다. */
+    public record SignalCount(String signal, long n, BigDecimal share) {}
+
+    /** 오버라이드 — 요청과 승인을 가른다. 요청만 하고 승인 안 된 것이 그 자체로 신호다. */
+    public record OverrideCount(long requested, long approved, long sessions, boolean masked) {}
+
+    /**
+     * ★ 재설명 효과 — <b>재설명을 거친 항목 중 최종 이해에 도달한 비율.</b>
+     *
+     * <p>이 제품이 실제로 이해를 올렸다는 유일한 정량 근거다. 오해율은 문제 제기이고
+     * 이건 성과다.
+     */
+    public record ReexplainEffect(long items, long resolved, BigDecimal rate, boolean masked) {}
+
+    /** 못 잰 항목이 있는 채로 판정된 세션 — R-00 이 무는 자리다. */
+    public record UnmeasuredCount(long sessions, long judged, BigDecimal share, boolean masked) {}
+
+    public record DecisionView(boolean synthetic, String scope, List<SignalCount> gate,
+                               OverrideCount override, ReexplainEffect reexplain,
+                               UnmeasuredCount unmeasured) {}
+
     public record Point(String period, BigDecimal misrate, long n, boolean masked) {}
 
     public record Series(String groupBy, String key, List<Point> points) {}
@@ -166,6 +189,98 @@ public class AggregateService {
                 key.product(), key.item(), tally.misrateOrNull(), tally.n(), tally.masked(),
                 tally.gradesOrNull())));
         return new HeatmapView(SYNTHETIC, label(scope), cells);
+    }
+
+    /**
+     * 게이트가 <b>무엇을 결정했는가</b> (F-DSH-001 · 이슈 #321 2·3·4).
+     *
+     * <h2>왜 필요한가 — 지금 대시보드는 「측정」만 낸다</h2>
+     *
+     * <p>히트맵·추이·취약 대비가 전부 <b>오해율</b>이다. 그건 <i>"고객이 무엇을 모르는가"</i>
+     * 이고, 이 제품이 하는 일은 그다음이다 — <b>막았는가 · 되돌렸는가 · 예외를 뒀는가.</b>
+     * 심사에서 물을 수 있는 것이 *"그래서 이 게이트가 실제로 무엇을 했나요"* 인데 지금은
+     * 화면에 답이 없다.
+     *
+     * <h2>★ 재설명 효과가 이 뷰의 본체다</h2>
+     *
+     * <p>지금까지 낼 수 있던 숫자는 <i>"오해가 29% 였다"</i> 뿐이고 <b>그건 문제 제기이지
+     * 성과가 아니다.</b> 재설명을 거친 항목 중 최종 이해(U1)에 도달한 비율은 <b>이 제품이
+     * 실제로 이해를 올렸다</b>는 유일한 정량 근거다.
+     *
+     * <p>❗<b>세션 테이블만으로 계산된다.</b> {@code reverifyCounts} 가 그 항목이 재설명을
+     * 거쳤는지 알고, {@code judgmentsByItem} 이 최종 등급을 안다 — 불변 기록을 안 열어도
+     * 된다. {@code evidence/} 가 인메모리라({@code #327}) 거기 기대면 재기동마다 사라진다.
+     *
+     * <h2>마스킹</h2>
+     *
+     * <p>히트맵과 같은 규칙({@link #MIN_CELL_SAMPLE})을 블록마다 따로 적용한다. 표본이
+     * 적으면 값을 가리되 <b>줄을 지우지 않는다</b> — 가려졌다는 사실 자체가 마스킹이
+     * 동작한 증거다.
+     */
+    public DecisionView decisions(AccessPolicy.Scope scope, String branchId, Filters filters) {
+        Map<String, Long> bySignal = new TreeMap<>();
+        long judged = 0;
+        long overrideRequested = 0;
+        long overrideApproved = 0;
+        long unmeasuredSessions = 0;
+        long sessions = 0;
+        long reexplained = 0;
+        long resolved = 0;
+
+        for (Session session : visible(scope, branchId)) {
+            if (!matches(session, filters)) {
+                continue;
+            }
+            sessions++;
+            if (session.gateSignal() != null) {
+                judged++;
+                bySignal.merge(session.gateSignal().name(), 1L, Long::sum);
+                if (session.gateUnmeasured() > 0) {
+                    unmeasuredSessions++;
+                }
+            }
+            if (session.overrideStatus() != OverrideStatus.NONE) {
+                overrideRequested++;
+                if (session.overrideStatus() == OverrideStatus.APPROVED) {
+                    overrideApproved++;
+                }
+            }
+            for (var entry : session.judgmentsByItem().entrySet()) {
+                if (session.reverifyCount(entry.getKey()) > 0) {
+                    reexplained++;
+                    if (entry.getValue().grade() == Grade.U1) {
+                        resolved++;
+                    }
+                }
+            }
+        }
+
+        List<SignalCount> signals = new ArrayList<>();
+        for (Signal signal : Signal.values()) {
+            long n = bySignal.getOrDefault(signal.name(), 0L);
+            signals.add(new SignalCount(signal.name(), n, share(n, judged, judged)));
+        }
+        return new DecisionView(
+                SYNTHETIC, label(scope), signals,
+                new OverrideCount(overrideRequested, overrideApproved, sessions,
+                        judged < MIN_CELL_SAMPLE),
+                new ReexplainEffect(reexplained, resolved, share(resolved, reexplained, reexplained),
+                        reexplained < MIN_CELL_SAMPLE),
+                new UnmeasuredCount(unmeasuredSessions, judged,
+                        share(unmeasuredSessions, judged, judged), judged < MIN_CELL_SAMPLE));
+    }
+
+    /**
+     * 비율. <b>표본이 적으면 {@code null}</b> 이고 분모가 0 이어도 {@code null} 이다.
+     *
+     * <p>❗0 을 돌려주면 <i>"한 번도 없었다"</i> 와 <i>"셀 수 없다"</i> 가 같아진다 —
+     * 히트맵이 {@code misrateOrNull} 로 세운 규칙과 같다.
+     */
+    private static BigDecimal share(long part, long total, long sample) {
+        if (total == 0 || sample < MIN_CELL_SAMPLE) {
+            return null;
+        }
+        return BigDecimal.valueOf(part).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
     }
 
     /**
