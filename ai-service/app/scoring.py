@@ -277,6 +277,8 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
         item_id=rubric.item_id,
         item_name=rubric.name,
         required_elements="\n".join(f"- {e}" for e in rubric.required_elements),
+        element_count=len(rubric.required_elements),
+        u1_requires=rubric.u1_requires,
         misconception_conditions="\n".join(f"- {c}" for c in rubric.misconception_conditions)
         or "- (없음)",
         question=question,

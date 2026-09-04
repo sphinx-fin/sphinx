@@ -88,7 +88,8 @@ def test_the_gap_reports_the_conditions_not_just_the_item() -> None:
 
     synthetic = Rubric(
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=("전액 보호된다", "둘"),
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다", "둘"),
         related_misconceptions=(),
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
@@ -193,7 +194,8 @@ def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
 
     synthetic = Rubric(
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=("전액 보호된다",),
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다",),
         related_misconceptions=(),
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
@@ -258,7 +260,8 @@ def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
 
     bare = Rubric(
         item_id="SYNTH-NO-CONDITIONS", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=(), related_misconceptions=(),
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=(), related_misconceptions=(),
     )
     monkeypatch.setattr(rubrics, "_all", lambda: {"SYNTH-NO-CONDITIONS": bare})
 
