@@ -140,9 +140,6 @@ public class SessionService {
                                    EvidenceRecorder.QuestionSource questionSource,
                                    InputMeta inputMeta) {
         Session session = get(sessionId);
-        if (maskedAnswer != null) {
-            session.recordUtterance(judgment.itemId(), maskedAnswer);
-        }
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.START)) {
             session.fire(SessionFsm.Event.START);
         }
@@ -151,7 +148,9 @@ public class SessionService {
             session.recordReverify(judgment.itemId());
             session.fire(SessionFsm.Event.REVERIFY);
         }
-        session.recordJudgment(judgment);
+        // ❗발화와 판정을 **한 번에** 넘긴다 (이슈 #268 (d)). 따로 부르면 직전 발화가 먼저
+        // 지워져서, 같은 답을 되풀이했는데 등급만 올라간 경우를 볼 수 없다.
+        session.recordAnswer(judgment.itemId(), maskedAnswer, judgment);
         if (reverifying && judgment.grade() == Grade.U1) {
             session.fire(SessionFsm.Event.RESUME);
         }
@@ -382,7 +381,8 @@ public class SessionService {
 
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount(), session.unmeasuredItemCount());
+                session.failedReverifyCount(), session.unmeasuredItemCount(),
+                session.repeatedAnswerUpgradedCount());
         Instant judgedAt = Instant.now();
         session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
         if (SessionFsm.canFire(session.state(), SessionFsm.Event.JUDGE)) {
@@ -420,7 +420,8 @@ public class SessionService {
         // 루프를 건너뛰는데 /judge 는 R-00 으로 RED 를 낸다.
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount(), session.unmeasuredItemCount());
+                session.failedReverifyCount(), session.unmeasuredItemCount(),
+                session.repeatedAnswerUpgradedCount());
         // 미리보기는 모순 판정을 부르지 않는다 — GET 이 상태를 바꾸면 안 되고 LLM 호출 비용도
         // 든다. 대신 아직 평가 전이라는 사실을 실어 보낸다. 안 실으면 signal=GREEN 만 오는데,
         // /judge 는 모순을 평가하므로 같은 세션이 YELLOW·RED 로 갈릴 수 있다 — 미리보기가

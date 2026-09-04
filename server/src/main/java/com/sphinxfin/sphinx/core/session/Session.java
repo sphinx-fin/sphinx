@@ -198,6 +198,23 @@ public class Session extends BaseEntity {
     private Map<String, Judgment> judgmentsByItem = new HashMap<>();
 
     /**
+     * 재검증에서 <b>직전과 사실상 같은 답을 냈는데 등급이 올라간</b> 항목 (이슈 #268 (d)).
+     *
+     * <p>❗<b>이 상태가 없으면 게이트가 GREEN 을 낸다.</b> 최종 등급만 남으므로 전 항목이
+     * U1 이 되고 {@code R-06} 이 문다 — 재설명이 이해를 올린 것이 아니라 <b>채점이 흔들린
+     * 것</b>인데 통과한다. 그리고 판정이 서면 {@code JUDGED} 에서 나가는 전이가
+     * {@code CLOSE} 뿐이라 되돌릴 수 없다.
+     *
+     * <p><b>등급을 고치지 않는다</b>(P1). 측정은 그대로 두고 <b>게이트에 입력을 하나 더
+     * 준다</b> — 판정은 룰이 한다. 항목 ID 를 담는 이유는 건수만으로는 <i>"어느 항목이
+     * 그랬나"</i> 에 답할 수 없어서다.
+     */
+    @Convert(converter = StringListConverter.class)
+    @Column(name = "repeated_answer_items", columnDefinition = "TEXT")
+    @Builder.Default
+    private List<String> repeatedAnswerUpgradedItems = new ArrayList<>();
+
+    /**
      * 적합성 설문 vs 발화 모순 판정 상태(F-DET-002).
      *
      * 불리언이 아닌 이유는 SuitabilityStatus 주석에 있다 — "모순 없음" 과 "판정하지 못함" 이
@@ -287,9 +304,53 @@ public class Session extends BaseEntity {
         return reverifyCount(itemId) >= max;
     }
 
-    /** 항목별 최신 판정을 기록(재검증 시 덮어씀). */
+    /** 항목별 최신 판정을 기록(재검증 시 덮어씀). 발화가 없는 경로용. */
     public void recordJudgment(Judgment judgment) {
+        recordAnswer(judgment.itemId(), null, judgment);
+    }
+
+    /**
+     * 발화와 판정을 <b>한 자리에서</b> 기록한다.
+     *
+     * <p>❗둘을 따로 부르면 이 메서드가 재려는 것을 잴 수 없다. <b>직전 발화와 직전 등급이
+     * 둘 다 아직 남아 있는 순간은 여기 한 번뿐</b>이고, 어느 한쪽을 먼저 덮어쓰면 비교
+     * 대상이 사라진다. 실제로 예전에는 {@code recordUtterance} 가 먼저 불려서 직전 발화가
+     * 이미 지워진 뒤에 판정이 들어왔다.
+     */
+    public void recordAnswer(String itemId, String maskedAnswer, Judgment judgment) {
+        Judgment prior = judgmentsByItem.get(itemId);
+        String priorAnswer = maskedUtterancesByItem.get(itemId);
+        // 등급이 **올라간** 경우만 본다(U1 이 제일 좋다 = ordinal 이 작다). 같거나 내려간
+        // 것은 이미 R-04·R-03 이 받는다 — 여기서 잡으려는 것은 **통과로 새는 방향**이다.
+        if (prior != null && maskedAnswer != null
+                && judgment.grade().ordinal() < prior.grade().ordinal()
+                && AnswerRepetition.essentiallySame(priorAnswer, maskedAnswer)
+                && !repeatedItems().contains(itemId)) {
+            repeatedItems().add(itemId);
+        }
+        if (maskedAnswer != null) {
+            maskedUtterancesByItem.put(itemId, maskedAnswer);
+        }
         judgmentsByItem.put(judgment.itemId(), judgment);
+    }
+
+    /**
+     * 게이트 입력용 — 같은 답을 되풀이했는데 등급이 올라간 항목 수 (이슈 #268 (d)).
+     */
+    public int repeatedAnswerUpgradedCount() {
+        return repeatedItems().size();
+    }
+
+    /**
+     * ❗{@link StringListConverter} 는 빈 목록을 {@code null} 로 되돌린다 — 판정 전 세션의
+     * 룰 트레이스를 빈 목록과 구분하려는 규약이다. 그 규약을 이 필드가 그대로 물려받으므로
+     * <b>DB 를 한 번 다녀온 세션에서는 여기가 null</b> 이다. 초기화를 미룬다.
+     */
+    private List<String> repeatedItems() {
+        if (repeatedAnswerUpgradedItems == null) {
+            repeatedAnswerUpgradedItems = new ArrayList<>();
+        }
+        return repeatedAnswerUpgradedItems;
     }
 
     /** 고객에게 보여준 질문을 항목별로 기록(재질문 시 덮어씀 — 마지막에 보여준 것이 답의 맥락이다). */
