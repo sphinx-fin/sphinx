@@ -98,6 +98,53 @@ class TestRefusesRatherThanFaking:
         assert r.returncode != 0 and "enum" in r.stderr
 
 
+class TestProvenance:
+    """❗리포트가 **어느 프롬프트로 잰 숫자인지** 말해야 한다.
+
+    채점 프롬프트는 산출물이라 버전이 올라간다(`ai-service/app/prompts/README.md` —
+    *"어떤 버전으로 측정한 결과인지 추적 가능해야 한다"*). 리포트에 그 값이 없으면
+    같은 문서가 **어느 판의 성능인지 말하지 않는다** — `#366` 이 프롬프트 문면을 고치면서
+    드러난 자리다.
+    """
+
+    def test_the_report_names_the_prompt_version(self, tmp_path):
+        model, gold = corpus(40)
+        stamped = [{**r, "prompt_version": "F-SCR-001_v2", "model": "gpt-5-mini"} for r in model]
+        write_jsonl(tmp_path / "data" / "model.jsonl", stamped)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "F-SCR-001_v2" in out, "어느 프롬프트로 잰 숫자인지 리포트가 말해야 한다"
+        assert "gpt-5-mini" in out
+
+    def test_a_mixed_round_shows_both(self, tmp_path):
+        """❗한 회차에 두 버전이 섞였으면 **감추지 않는다.**
+
+        섞였다는 사실 자체가 그 수치를 조건부로 만든다. 한 줄로 접으면 그게 사라진다.
+        """
+        model, gold = corpus(40)
+        half = len(model) // 2
+        stamped = ([{**r, "prompt_version": "F-SCR-001_v2"} for r in model[:half]]
+                   + [{**r, "prompt_version": "F-SCR-001_v3"} for r in model[half:]])
+        write_jsonl(tmp_path / "data" / "model.jsonl", stamped)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "F-SCR-001_v2" in out and "F-SCR-001_v3" in out
+
+    def test_an_unstamped_round_says_so_instead_of_going_quiet(self, tmp_path):
+        """★ 값이 없으면 **없다고 적는다.** 줄을 지우면 «옛 판인가 새 판인가» 를 못 묻는다."""
+        model, gold = corpus(40)
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)   # prompt_version 없음
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "미상" in out, "안 적힌 것과 적을 것이 없는 것을 문면으로 갈라야 한다"
+
+
 class TestReport:
     def test_perfect_model_reports_target_met(self, tmp_path):
         gold, model = corpus(40)
@@ -160,5 +207,39 @@ class TestReport:
         write_jsonl(tmp_path / "data" / "labels" / "오준서.jsonl", disagreeing)
         r = run(tmp_path)
         assert r.returncode == 0, r.stderr
-        assert "상한(평가자 간)" in r.stdout
+        assert "상한과의 거리" in r.stdout
         assert "불일치 제외 10건" in r.stdout
+
+    def test_the_ceiling_is_compared_on_the_same_sample(self, tmp_path):
+        """❗상한과 나란히 놓는 값은 **2절**(전체 표본)이지 3절(합의 부분집합)이 아니다.
+
+        합의 집합은 두 사람이 갈린 항목이 빠진 쪽이라 모델에게 더 쉽다. 그래서 라벨이
+        멀쩡해도 3절 값이 상한을 넘을 수 있고, 예전 문면은 그때 *"표본·라벨을 먼저
+        의심한다"* 를 찍었다 — 읽는 사람이 있지도 않은 누출을 찾으러 간다.
+
+        실측으로 그렇게 났다(70건 회차): 3절 0.795 > 상한 0.769 인데 같은 표본에서는
+        0.706·0.682 로 상한 아래였다.
+        """
+        gold, model = corpus(40)
+        disagreeing = [{**g, "grade": "U3" if g["grade"] == "U4" else g["grade"]} for g in gold]
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        write_jsonl(tmp_path / "data" / "labels" / "강희진.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "오준서.jsonl", disagreeing)
+        r = run(tmp_path)
+        assert r.returncode == 0, r.stderr
+
+        block = r.stdout.split("상한과의 거리", 1)[1]
+        assert "모델 ↔ 강희진" in block and "모델 ↔ 오준서" in block, \
+            "상한 비교 블록이 2절의 라벨러별 값을 싣지 않는다"
+        # ❗3절(합의 부분집합) 값이 이 블록에 섞이면 안 된다 — 표본이 다르다.
+        assert "합의" not in block, "상한 비교에 합의 부분집합 값이 섞였다"
+
+    def test_section_three_warns_it_is_a_subset(self, tmp_path):
+        """3절 값을 상한과 직접 비교하지 말라는 경고가 문면에 있어야 한다."""
+        gold, model = corpus(40)
+        disagreeing = [{**g, "grade": "U3" if g["grade"] == "U4" else g["grade"]} for g in gold]
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", disagreeing)
+        r = run(tmp_path)
+        assert "1절 상한과 직접 비교하지 않는다" in r.stdout

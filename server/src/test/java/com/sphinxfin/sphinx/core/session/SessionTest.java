@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.session;
 
+import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.SessionState;
 import org.junit.jupiter.api.DisplayName;
@@ -64,6 +65,47 @@ class SessionTest {
         assertThat(s.reverifyExhausted("A", 2)).isFalse();
         s.recordReverify("A");
         assertThat(s.reverifyExhausted("A", 2)).isTrue();
+    }
+
+    @Test
+    @DisplayName("❗쓴 질문 유형은 항목별로 쌓이고 순서를 지킨다 — 물어본 순서가 정보다")
+    void askedTypesAccumulatePerItem() {
+        Session s = newSession();
+        assertThat(s.askedTypes("A")).isEmpty();
+
+        s.recordAskedQuestion("A", "1회차", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        s.recordAskedQuestion("A", "2회차", "amount", EvidenceRecorder.QuestionSource.REVERIFY);
+        s.recordAskedQuestion("B", "다른 항목", "condition",
+                EvidenceRecorder.QuestionSource.DISPLAYED);
+
+        assertThat(s.askedTypes("A")).containsExactly("situation", "amount");
+        assertThat(s.askedTypes("B"))
+                .as("유형은 항목의 성격을 따라간다 — 세션 단위로 배제하면 뒤 항목이 자기에게 "
+                        + "맞는 유형을 못 쓴다")
+                .containsExactly("condition");
+    }
+
+    @Test
+    @DisplayName("같은 유형을 두 번 적지 않는다 — 목록은 '무엇을 썼나' 이지 몇 번이 아니다")
+    void theSameTypeIsNotRecordedTwice() {
+        Session s = newSession();
+        s.recordAskedQuestion("A", "1회차", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        s.recordAskedQuestion("A", "2회차", "situation", EvidenceRecorder.QuestionSource.REVERIFY);
+
+        assertThat(s.askedTypes("A")).containsExactly("situation");
+    }
+
+    @Test
+    @DisplayName("유형을 모르면 안 적는다 — 빈 값을 넣으면 생성기가 없는 유형을 배제한다")
+    void anUnknownTypeIsNotRecorded() {
+        Session s = newSession();
+        s.recordAskedQuestion("A", "문면", null, EvidenceRecorder.QuestionSource.DISPLAYED);
+        s.recordAskedQuestion("A", "문면", "  ", EvidenceRecorder.QuestionSource.DISPLAYED);
+
+        assertThat(s.askedTypes("A")).isEmpty();
+        assertThat(s.askedQuestion("A"))
+                .as("유형이 없다고 문면까지 잃으면 채점이 다른 질문으로 채점한다")
+                .isEqualTo("문면");
     }
 
     @Test

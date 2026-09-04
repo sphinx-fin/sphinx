@@ -22,7 +22,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from . import misconception, rubrics, textsim
+from . import misconception, rubrics, shadow, textsim, thresholds
 from .config import settings
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
@@ -65,7 +65,7 @@ class MeasurementInvalid(LlmError):
 #:
 #: **재현성이 확보되는 것은 아니다** — 실측에서 같은 seed 로 3회가 3가지였다. seed 는
 #: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
-MAX_SCORING_ATTEMPTS = 2
+MAX_SCORING_ATTEMPTS = thresholds.get("max_scoring_attempts")
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
 PROMPT_VERSION = "F-SCR-001_v2"
@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 #:
 #: 0.6 은 실측 최대의 2.3배이고 부분 복창(0.80) 아래다. 처음 0.85 로 뒀더니 어미가 바뀐
 #: 부분 복창을 놓쳤다 — 복창은 보통 어미를 자기 말로 바꿔 온다.
-ECHO_THRESHOLD = 0.6
+ECHO_THRESHOLD = thresholds.get("echo_match")
 
 #: 복창 판정을 건너뛰는 발화 길이 하한(정규화 후 문자 바이그램 개수). **상수가 아니라
 #: 루브릭에서 유도한다** — `min(조항 바이그램) - 1`.
@@ -146,11 +146,11 @@ def min_echo_bigrams() -> int:
 #: 실측 최대는 `VAR-DEPOSIT-FULL`(0.368)이다 — 예금자보호 항목은 발화와 조항이 **같은 법률
 #: 용어**를 쓰므로 구조적으로 높다. 복창이 아니라 어휘가 겹치는 것이고, 이 항목군에서는
 #: 여유가 늘 좁을 것이다. 상수로 드러내 두면 발화를 추가할 때 어디까지 좁혀졌는지 보인다.
-ECHO_MARGIN_MIN = 0.15
+ECHO_MARGIN_MIN = thresholds.get("echo_margin_min")
 
 #: 복창일 때 씌우는 confidence 상한. 게이트 R-05(`anyConfidenceBelow 0.7`)가 이걸 받는다.
 #: **임계값 자체는 게이트 소유다**(ADR-005) — 여기 있는 건 측정값의 상한이지 판정 정책이 아니다.
-ECHO_CONFIDENCE_CAP = 0.3
+ECHO_CONFIDENCE_CAP = thresholds.get("echo_confidence_cap")
 
 # 신뢰도 기반 황색 강등은 **여기서 하지 않는다.**
 # 강희진 결정(PR #10 리뷰): P1 경계상 게이트 정책이 채점에 섞이지 않아야 하므로
@@ -216,7 +216,22 @@ def score(
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = apply_misconception_floor(judgment, matched, rubric)
-        return _pin_escalation(judgment, matched, rubric)
+        judgment = _pin_escalation(judgment, matched, rubric)
+        # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
+        # 걸렸는지 세기만 한다 — 등급을 안 바꾼다(이슈 #284 (b) 의 결정 근거).
+        # floor 뒤인 이유: "켰으면 등급이 달라졌을 것인가" 는 최종 등급을 알아야 답한다.
+        try:
+            shadow.observe(answer_text, rubric, judgment.grade.value)
+        except Exception:  # noqa: BLE001 — 관측자가 채점을 죽이면 안 된다
+            # ❗**못 잰 것을 요약에 남긴다.** 여기서 안 세면 실패가 집계에서 빠지고,
+            # "10건 중 1건 걸림" 과 "5건만 재고 1건 걸림" 이 같아 보인다 (#364 리뷰).
+            shadow.METER.record_failure()
+            # ❗판정은 이미 위에서 끝났다. 그림자는 "(b) 를 켤지 정할 근거" 를 모으는
+            # 관측자일 뿐이라, 여기서 던지면 **아무것도 안 하는 코드가 채점을 502 로
+            # 만든다.** "판정을 안 바꾼다" 는 등급 값만이 아니라 **판정이 나온다는
+            # 사실**까지다 (#364 리뷰).
+            log.warning("F-DET-001 그림자 매칭 실패 — 판정은 그대로 낸다", exc_info=True)
+        return judgment
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
     # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.

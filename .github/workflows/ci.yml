@@ -1,4 +1,4 @@
-name: 테스트 (3모듈)
+name: 테스트 (4모듈)
 
 # 이슈 #73 · 역할표 §인프라 8.9. 소유: 오준서
 #
@@ -25,6 +25,10 @@ name: 테스트 (3모듈)
 #                  web/src/lib/survey.ts   ← 교차 언어 검사(test_survey_contract.py)
 #      web        ← web/**
 #                  data/timeseries/VERSION   ← 기초자산 표기표(이슈 #219)
+#      eval       ← eval/**
+#                  ai-service/app/rubrics/**              ← 표본이 루브릭 밖 항목을 쓰는지
+#                  data/misconception_library/**          ← 표본이 patterns 를 베꼈는지
+#                  contracts/judgment.schema.json         ← 등급 enum 순서
 #
 #    특히 마지막 줄이 조용하다. `web/src/lib/survey.ts` 의 문항 문면이 바뀌면 ai-service 의
 #    `AXIS_BY_QUESTION` 과 어긋나 **에러 없이 틀린 축으로 판정**될 수 있고, 그걸 잡는
@@ -42,6 +46,18 @@ name: 테스트 (3모듈)
 #    지금 하나 남아 있고(`INDEX_LABEL`), 여기서 `VERSION` 과 대조한다. 필터에
 #    `data/timeseries/VERSION` 을 넣은 이유가 이것이다 — 기초자산이 늘어나는 PR 은
 #    `web/` 을 안 건드리므로, 안 넣으면 **정작 갈리는 그 PR 에서 이 검사가 안 돈다.**
+# ④ **eval 은 잡이 아니라 스텝으로 붙는다** (이슈 #344).
+#    `eval/tests` 는 **제출 수치의 정합성**을 지킨다 — 표본이 라벨을 들고 다니지 않는 것,
+#    표본이 오해 라이브러리 `patterns` 를 베끼지 않는 것. 깨지면 `run_eval.py` 의 QWK 가
+#    *틀린 값*이 아니라 **다른 것을 잰 값**이 되고, 리포트 어디에도 그 사실이 안 뜬다.
+#    그런데 워크플로 셋 중 어디도 `eval` 을 몰라서 **한 번도 안 돌았다.**
+#
+#    잡을 새로 만들지 않는 이유는 위 `jobs:` 머리말 그대로다(#276 올림 과금). 파이썬
+#    설치도 새로 하지 않는다 — `ai-service` 가 이미 3.11 을 고정하고 `requirements-dev.txt`
+#    로 pytest 를 **핀**해 두었고, eval 이 필요한 것은 그 안의 `pytest`·`pyyaml` 뿐이다.
+#    여기서 따로 `pip install pytest==…` 를 적으면 **핀이 두 벌**이 되고, 갈리는 날
+#    두 러너가 다른 pytest 로 다른 답을 낸다. 그래서 파이썬 블록은 `ai-service` 와
+#    `eval` 중 **하나라도 선택되면** 돈다.
 # ────────────────────────────────────────────────────────────────────────────
 #
 # 린터는 넣지 않는다 — 역할표 §인프라 가 3주 타임박스에서 범위 밖으로 정했고 뒤집을 근거가
@@ -94,7 +110,7 @@ jobs:
   # (정세현 #130 리뷰). YAML 은 정상이라 로컬 파서로는 안 잡힌다. `name:` 과 스텝 이름은
   # 제약이 없어서 이 레포의 다른 워크플로 셋이 한글로 돌고 있다 — id 만 규칙이 다르다.
   test:
-    name: 테스트 (3모듈)
+    name: 테스트 (4모듈)
     runs-on: ubuntu-latest
     steps:
       - name: 체크아웃
@@ -113,8 +129,8 @@ jobs:
 
           # push(main)·수동 실행은 판별 대상이 없다 — 전부 돈다.
           if [ -z "${PR:-}" ]; then
-            echo "PR 이 아니다 — 3모듈 전부 실행"
-            { echo "server=true"; echo "ai_service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            echo "PR 이 아니다 — 4모듈 전부 실행"
+            { echo "server=true"; echo "ai_service=true"; echo "web=true"; echo "eval=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -125,8 +141,8 @@ jobs:
 
           # 워크플로 자신이 바뀌면 판별을 믿을 수 없다 — 전부 돈다.
           if printf '%s\n' "$files" | grep -qE '^\.github/workflows/ci\.yml$'; then
-            echo "워크플로 변경 — 3모듈 전부 실행"
-            { echo "server=true"; echo "ai_service=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"
+            echo "워크플로 변경 — 4모듈 전부 실행"
+            { echo "server=true"; echo "ai_service=true"; echo "web=true"; echo "eval=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -140,7 +156,7 @@ jobs:
           #   web/src/api/types.ts                     ErrorCodeContractTest
           #   web/src/lib/survey.ts                    SurveyIsOptionOnlyTest
           #   web/docker-entrypoint.d/15-demo-mode.sh  DemoModeAccountMapTest
-          #   ai-service/app/scoring.py                EchoCapBelowR05Test
+          #   ai-service/app/scoring_thresholds.yaml   EchoCapBelowR05Test (#368)
           #   docs/functional-spec-v1.1.md             SpecEnforcementIndexTest
           #
           # 두 목록이 막는 것이 다르다. `inputs.file` 은 **Gradle 이 UP-TO-DATE 로 건너뛰는
@@ -156,15 +172,28 @@ jobs:
           # 개수에 비례하는 올림 과금)이 도로 는다. `survey.ts` 가 `ai-service` 필터에
           # 이름으로 박혀 있는 것은 이 단정과 무관하다 — 그 파일을 지키는 것은 JUnit 이다.
           # `docs/` 도 통짜로 넓히지 않는다 — decision-log.md 만 고치는 PR 이 대부분이다.
-          server_extra='web/src/api/types\.ts$|web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring\.py$|docs/functional-spec-v1\.1\.md$'
+          server_extra='web/src/api/types\.ts$|web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring_thresholds\.yaml$|docs/functional-spec-v1\.1\.md$'
           server=false;    hit '^(server/|contracts/|data/timeseries/|CLAUDE\.md$|'"$server_extra"')' && server=true
           ai=false;        hit '^(ai-service/|contracts/|data/|web/src/lib/survey\.ts$)' && ai=true
           # `data/timeseries/VERSION` 이 여기 있는 이유는 상단 ③ 이다. 기초자산이 늘거나
           # label 이 바뀌는 PR 은 web/ 을 안 건드린다 — 빼면 그 PR 에서 표기표 대조가 안 돈다.
           web=false;       hit '^(web/|data/timeseries/VERSION$)' && web=true
+          # ❗`^(eval/|data/)` 로 넓히지 않는다 — 이슈 #344 가 제안한 모양인데, 그러면
+          # `data/timeseries/` 만 고치는 PR(기초자산 갱신)에 eval 이 따라 붙는다. eval 이
+          # 실제로 읽는 것은 `data/` 중 오해 라이브러리 하나뿐이다(머리말 ② 표).
+          # 반대로 `^eval/` 만 두면 **루브릭·오해 라이브러리를 고치는 PR 에서 정작 그
+          # 대조가 안 돈다** — `#270`·`#285` 가 두 번 낸 그 결함이다.
+          #
+          # README 둘은 `#350` 이 붙인 `TestLabelerNamingDoesNotDrift.NAMED` 가 읽는다.
+          # 변조해서 재봤다 — 둘 다 `eval/tests` 를 `1 failed` 로 만드는데, 넣기 전에는
+          # 루트 `README.md` 는 어느 모듈도 안 떴고 `ai-service/tests/fixtures/README.md`
+          # 는 **ai-service 만 뜨고 정작 무는 eval 이 안 떴다.** 세 번째 같은 결함이다.
+          # `README\.md$` 는 `^` 앵커라 **루트만** 문다 — `web/README.md`·`server/README.md`
+          # 는 안 걸린다(재봤다). 라벨러 표기가 바뀌면 이 목록도 같이 는다.
+          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$)' && ev=true
 
-          echo "── 판별 ── server=$server ai-service=$ai web=$web"
-          { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
+          echo "── 판별 ── server=$server ai-service=$ai web=$web eval=$ev"
+          { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; echo "eval=$ev"; } >> "$GITHUB_OUTPUT"
 
       # ── server ──────────────────────────────────────────────────────────────
       - name: server · JDK 17 고정
@@ -256,9 +285,13 @@ jobs:
             server/bootrun.log
           retention-days: 7
 
-      # ── ai-service ──────────────────────────────────────────────────────────
-      - name: ai-service · Python 3.11 고정
-        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' }}
+      # ── python (ai-service · eval 공용) ──────────────────────────────────────
+      # ❗**설치는 한 벌이다.** eval 이 필요한 것은 `pytest`·`pyyaml` 뿐이라 따로 깔고 싶어
+      # 지는데, 그러면 pytest 핀이 두 벌이 된다 — `requirements-dev.txt` 가 버전을 정확히
+      # 박아 둔 이유(#182: 캡처 분기가 pytest 버전에 달렸다)가 eval 에도 그대로 걸린다.
+      # 둘 중 하나만 선택돼도 이 블록이 돈다.
+      - name: python · 3.11 고정
+        if: ${{ !cancelled() && (steps.filter.outputs.ai_service == 'true' || steps.filter.outputs.eval == 'true') }}
         uses: actions/setup-python@v5
         with:
           # 로컬 실측 기준이다(3.11 에서 244건 통과). requirements 에 상한이 없어서
@@ -269,43 +302,27 @@ jobs:
           cache-dependency-path: |
             ai-service/requirements.txt
             ai-service/requirements-dev.txt
-      - name: ai-service · 의존성 설치
-        id: ai_deps
-        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' }}
+      - name: python · 의존성 설치
+        id: py_deps
+        if: ${{ !cancelled() && (steps.filter.outputs.ai_service == 'true' || steps.filter.outputs.eval == 'true') }}
         working-directory: ai-service
         # requirements-dev.txt 가 첫 줄에서 requirements.txt 를 당긴다. 테스트 전용
         # 의존성(jsonschema·reportlab)을 런타임과 섞지 않으려는 분리다.
         run: pip install -r requirements-dev.txt
       - name: ai-service · 테스트
         id: ai_test
-        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.ai_deps.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.py_deps.outcome == 'success' }}
         working-directory: ai-service
         # LLM 키 없이 돌아야 한다 — 외부 호출이 있는 테스트는 그 자체로 결함이다.
         run: pytest -q --junitxml=pytest-results.xml
+      # 검사 자체는 `.github/scripts/no_skip.py` 한 벌이다 — eval 이 같은 검사를 쓰면서
+      # 인라인 20줄을 한 벌 더 적을 뻔했다(#344). 판정을 두 곳에 복사하지 않는다.
       - name: ai-service · skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
         id: ai_skip
-        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.ai_deps.outcome == 'success' }}
-        working-directory: ai-service
+        if: ${{ !cancelled() && steps.filter.outputs.ai_service == 'true' && steps.py_deps.outcome == 'success' }}
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import sys, xml.etree.ElementTree as ET, pathlib
-          p = pathlib.Path("pytest-results.xml")
-          if not p.exists():
-              print("::error::pytest 결과 파일이 없다 — 수집 단계에서 죽었는지 확인한다.")
-              sys.exit(1)
-          r = ET.parse(p).getroot()
-          s = r if r.tag == "testsuite" else r.find("testsuite")
-          total = int(s.get("tests", 0)); skipped = int(s.get("skipped", 0))
-          print(f"총 {total}건 · skip {skipped}")
-          if skipped:
-              print("::error::건너뛴 테스트가 있다. data/documents/ 는 커밋돼 있으므로 "
-                    "러너에서 실문서 테스트가 skip 될 이유가 없다(#37 코멘트 ②).")
-              for tc in s.iter("testcase"):
-                  if tc.find("skipped") is not None:
-                      print(f"::error::skip → {tc.get('classname')}::{tc.get('name')}")
-              sys.exit(1)
-          PY
+          python3 .github/scripts/no_skip.py ai-service/pytest-results.xml \
+            "data/documents/ 는 커밋돼 있으므로 러너에서 실문서 테스트가 skip 될 이유가 없다(#37 코멘트 ②)."
       - name: ai-service · 실패 시 리포트 보존
         if: ${{ !cancelled() && (steps.ai_test.outcome == 'failure' || steps.ai_skip.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
@@ -411,6 +428,33 @@ jobs:
           print("표기표 일치")
           PY
 
+      # ── eval ────────────────────────────────────────────────────────────────
+      # 이 60건(#344 를 적을 때는 41건, 이 PR 을 열 때는 57건이었다 — `#350` 이 라벨러 표기
+      # 대조 셋을 더했다)이 지키는 것은 **제출 수치의 정합성**이다
+      # (머리말 ④). 표본이 라벨을 들고 다니면, 오해 라이브러리 `patterns` 를 베끼면 —
+      # QWK 는 올라가고 **다른 것을 잰 값**이 된다. 리포트에는 그 사실이 안 뜬다.
+      #
+      # 러너에서 0.5초다(로컬 실측 60건 0.70초). `working-directory` 를 안 준다 — 테스트가
+      # `parents[2]` 로 레포 루트를 잡고 `ai-service/app/rubrics/` 를 읽으므로 루트에서
+      # 도는 것이 맞다.
+      - name: eval · 테스트
+        id: eval_test
+        if: ${{ !cancelled() && steps.filter.outputs.eval == 'true' && steps.py_deps.outcome == 'success' }}
+        run: python -m pytest eval/tests -q --junitxml=eval/pytest-results.xml
+      - name: eval · skip 검사 — 건너뛴 테스트가 있으면 실패로 본다
+        id: eval_skip
+        if: ${{ !cancelled() && steps.filter.outputs.eval == 'true' && steps.py_deps.outcome == 'success' }}
+        run: |
+          python3 .github/scripts/no_skip.py eval/pytest-results.xml \
+            "표본(eval/corpus)·라벨(eval/data/labels)·루브릭·오해 라이브러리는 전부 커밋돼 있으므로 러너에서 skip 될 이유가 없다. 라벨 디렉토리가 비면 대조 둘이 skip 된다."
+      - name: eval · 실패 시 리포트 보존
+        if: ${{ !cancelled() && (steps.eval_test.outcome == 'failure' || steps.eval_skip.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-test-results
+          path: eval/pytest-results.xml
+          retention-days: 7
+
       # ── 어느 모듈이 돌았는지 남긴다 ──────────────────────────────────────────
       - name: 실행 요약
         # ❗잡이 갈려 있을 때는 체크 목록에 `server · JUnit  skipping` 이 떠서 **어느 모듈이
@@ -424,6 +468,7 @@ jobs:
           SERVER: ${{ steps.filter.outputs.server }}
           AI: ${{ steps.filter.outputs.ai_service }}
           WEB: ${{ steps.filter.outputs.web }}
+          EVAL: ${{ steps.filter.outputs.eval }}
           SERVER_TEST: ${{ steps.server_test.outcome }}
           SERVER_SKIP: ${{ steps.server_skip.outcome }}
           SERVER_SMOKE: ${{ steps.server_smoke.outcome }}
@@ -431,6 +476,8 @@ jobs:
           AI_SKIP: ${{ steps.ai_skip.outcome }}
           WEB_BUILD: ${{ steps.web_build.outcome }}
           WEB_TABLE: ${{ steps.web_table.outcome }}
+          EVAL_TEST: ${{ steps.eval_test.outcome }}
+          EVAL_SKIP: ${{ steps.eval_skip.outcome }}
         run: |
           set -euo pipefail
           # 선택되지 않은 모듈과 실패한 모듈이 문면으로 갈려야 한다. `skipped` 를 그냥
@@ -454,6 +501,7 @@ jobs:
             echo "| server · JUnit + 스모크 | $(mark "$SERVER" "$SERVER_TEST" "$SERVER_SKIP" "$SERVER_SMOKE") |"
             echo "| ai-service · pytest | $(mark "$AI" "$AI_TEST" "$AI_SKIP") |"
             echo "| web · tsc + build + 표기표 | $(mark "$WEB" "$WEB_BUILD" "$WEB_TABLE") |"
+            echo "| eval · pytest | $(mark "$EVAL" "$EVAL_TEST" "$EVAL_SKIP") |"
             echo
             echo "경로 필터 근거는 \`.github/workflows/ci.yml\` 머리말 ② 다 — 파일 위치가 아니라"
             echo "**각 모듈이 실제로 읽는 경로**로 정한다."
