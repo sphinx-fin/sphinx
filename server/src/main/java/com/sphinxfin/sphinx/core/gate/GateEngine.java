@@ -123,10 +123,29 @@ public class GateEngine {
      */
     public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch,
                            boolean suitabilityUnknown, int reverifyFailed, int unmeasured) {
+        return judge(judgments, suitabilityMismatch, suitabilityUnknown, reverifyFailed,
+                unmeasured, 0);
+    }
+
+    /**
+     * {@code repeatedAnswerUpgraded} 는 <b>재검증에서 직전과 사실상 같은 답을 냈는데 등급이
+     * 올라간 항목 수</b>다 (이슈 #268 (d)).
+     *
+     * <p>❗<b>이 값이 없으면 그 세션이 GREEN 이다.</b> 게이트가 보는 것은 최종 등급뿐이라
+     * 전 항목이 U1 이 되고 {@code R-06} 이 문다. 재설명이 이해를 올린 것이 아니라 채점이
+     * 흔들린 것인데 통과하고, 판정이 서면 되돌릴 수 없다(P5 가 말하는 방향).
+     *
+     * <p><b>등급을 고치지 않는다</b>(P1). 측정은 그대로 두고 판정만 룰이 바꾼다 —
+     * {@code R-07} 이 YELLOW 를 내서 재확인으로 보낸다. RED 가 아닌 이유는 비례다:
+     * 표현을 다듬지 않고 같은 말을 다시 한 것이 곧 오해는 아니다.
+     */
+    public GateResult judge(List<Judgment> judgments, boolean suitabilityMismatch,
+                           boolean suitabilityUnknown, int reverifyFailed, int unmeasured,
+                           int repeatedAnswerUpgraded) {
         List<Grade> grades = judgments.stream().map(Judgment::grade).toList();
         List<BigDecimal> confidences = judgments.stream().map(Judgment::confidence).toList();
         Context ctx = new Context(grades, confidences, suitabilityMismatch,
-                suitabilityUnknown, reverifyFailed, unmeasured);
+                suitabilityUnknown, reverifyFailed, unmeasured, repeatedAnswerUpgraded);
 
         // 신호는 first-match-wins(파일 순서 = 우선순위). 트레이스는 그 신호를 낸 발화 룰을 전부
         // 남긴다 — 감사 시점에 "왜 이 신호였나"를 모든 사유로 설명하기 위함(예: YELLOW가
@@ -221,6 +240,11 @@ public class GateEngine {
             Grade g = parseSingleGrade(e);
             return ctx -> ctx.grades().contains(g);
         }
+        Matcher repeated = Pattern.compile("repeatedAnswerUpgraded\\s*>\\s*(\\d+)").matcher(e);
+        if (repeated.matches()) {
+            int limit = Integer.parseInt(repeated.group(1));
+            return ctx -> ctx.repeatedAnswerUpgraded() > limit;
+        }
         Matcher unmeasured = Pattern.compile("unmeasured\\s*>\\s*(\\d+)").matcher(e);
         if (unmeasured.matches()) {
             int limit = Integer.parseInt(unmeasured.group(1));
@@ -258,7 +282,7 @@ public class GateEngine {
     /** 평가 컨텍스트: 룰이 참조하는 값의 전부. */
     record Context(List<Grade> grades, List<BigDecimal> confidences,
                    boolean suitabilityMismatch, boolean suitabilityUnknown,
-                   int reverifyFailed, int unmeasured) {}
+                   int reverifyFailed, int unmeasured, int repeatedAnswerUpgraded) {}
 
     /** 컴파일된 룰. */
     /**

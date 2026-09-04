@@ -55,15 +55,73 @@ public final class PiiGateway {
         // TODO(강희진): 성명·주소는 사전/NER 기반(정규식 오탐 큼) — 사전 리소스 확보 후 추가
     }
 
+    /**
+     * 마스킹 결과와 <b>무엇이 몇 번 지워졌는지</b>. (이슈 #326)
+     *
+     * @param text 마스킹된 문면
+     * @param hits 패턴 종류 → 건수. 안 걸린 종류는 <b>키가 없다</b>
+     *
+     * <p>❗<b>원문 조각은 여기 없다.</b> 무엇이 걸렸는지를 남기면 그게 곧 PII 저장이고,
+     * <b>지우려고 만든 경로가 새는 자리</b>가 된다. 종류와 개수까지만이다.
+     */
+    public record Masked(String text, Map<String, Integer> hits) {
+
+        public Masked {
+            hits = Map.copyOf(hits);
+        }
+
+        /** 이번 호출에서 지워진 총 건수. */
+        public int total() {
+            return hits.values().stream().mapToInt(Integer::intValue).sum();
+        }
+    }
+
+    /**
+     * P3 경계 — 고객 텍스트에서 PII 를 지운다.
+     *
+     * <p>{@link #maskWithHits(String)} 와 같은 일을 하고 <b>문면만</b> 돌려준다. 건수를
+     *안 쓰는 호출부가 계량기를 몰라도 되게 남긴다 — 마스킹 호출 지점이 늘어나는 것보다
+     * 낫다(이 클래스 javadoc 참고).
+     */
     public static String mask(String text) {
+        return maskWithHits(text).text();
+    }
+
+    /**
+     * 마스킹하고 <b>종류별 건수</b>를 같이 낸다 (이슈 #326).
+     *
+     * <h2>왜 건수가 필요한가</h2>
+     *
+     * <p>P3 가 <i>"고객 텍스트가 ai-service 로 나가는 유일한 경로"</i> 로 이 함수를
+     * 지목하는데, <b>그 경로를 몇 건이 지나갔고 무엇이 몇 번 지워졌는지는 어디에도 안
+     * 남았다.</b> 마스킹이 동작했다는 증거가 코드를 읽는 것 말고 없었다.
+     *
+     * <p>❗<b>순서가 결과를 바꾼다.</b> 뒤 패턴은 앞이 이미 지운 문면을 본다 —
+     * {@code CARD}·{@code PHONE} 이 먼저 걸러진 뒤에야 {@code ACCOUNT} 가 남은 것을 본다.
+     * 그래서 건수도 <b>선언 순서대로</b> 센다. 각 패턴을 원문에 따로 돌려 세면 같은 숫자가
+     * 두 종류로 중복 계상된다.
+     */
+    public static Masked maskWithHits(String text) {
         if (text == null) {
-            return null;
+            return new Masked(null, Map.of());
         }
         String out = text;
+        Map<String, Integer> hits = new LinkedHashMap<>();
         for (var e : PATTERNS.entrySet()) {
-            out = e.getValue().matcher(out).replaceAll("[" + e.getKey() + "]");
+            java.util.regex.Matcher m = e.getValue().matcher(out);
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+            while (m.find()) {
+                m.appendReplacement(sb, "[" + e.getKey() + "]");
+                count++;
+            }
+            m.appendTail(sb);
+            out = sb.toString();
+            if (count > 0) {
+                hits.put(e.getKey(), count);
+            }
         }
-        return out;
+        return new Masked(out, hits);
     }
 
     private PiiGateway() {}

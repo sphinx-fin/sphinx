@@ -32,6 +32,7 @@ import lombok.experimental.Accessors;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +41,7 @@ import com.sphinxfin.sphinx.core.persistence.JsonMapConverter;
 import com.sphinxfin.sphinx.core.persistence.JudgmentMapConverter;
 import com.sphinxfin.sphinx.core.persistence.RuleRefListConverter;
 import com.sphinxfin.sphinx.core.persistence.StringListConverter;
+import com.sphinxfin.sphinx.core.persistence.StringListMapConverter;
 
 /**
  * F-INT-001 세션 집합체(JPA 엔티티). 소유: 강희진
@@ -168,11 +170,49 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, EvidenceRecorder.QuestionSource> askedQuestionSourceByItem = new HashMap<>();
 
+    /**
+     * 항목별로 <b>이미 쓴 질문 유형</b>(situation·amount·condition). 물어본 순서를 지킨다.
+     *
+     * <p>❗<b>같은 항목을 두 번 물어보는 자리가 있다</b> — 재검증이다(F-INT-004). 그때
+     * 유형까지 같으면 <b>같은 모양의 질문을 한 번 더 하는 것</b>이 되고, 그건 두 가지를
+     * 동시에 깬다. 측정으로는 <i>같은 각도로 두 번 재는 것</i>이라 재검증이 새로 아는 것이
+     * 없고, 기획서 7-4 로는 <b>판매자가 준비시킬 문항이 사실상 하나로 줄어든다</b> —
+     * 문면이 매번 생성돼도 유형이 고정이면 대비할 수 있다.
+     *
+     * <p>ai-service 는 이 목록을 받아 <b>남은 유형에서 고른다</b>. 셋을 다 썼으면 전체로
+     * 되돌린다(굶기지 않는다) — 인터뷰가 멈추는 것이 반복보다 나쁘다.
+     *
+     * <p><b>세션 단위가 아니라 항목 단위</b>다. 유형은 항목의 성격을 따라간다 —
+     * {@code amount} 는 금액 조건이 있는 항목에서만 성립한다. 세션 전체로 배제하면
+     * 뒤쪽 항목이 자기에게 맞는 유형을 못 쓴다.
+     */
+    @Convert(converter = StringListMapConverter.class)
+    @Column(name = "asked_types", columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, List<String>> askedTypesByItem = new LinkedHashMap<>();
+
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
     @Column(columnDefinition = "TEXT")
     @Builder.Default
     private Map<String, Judgment> judgmentsByItem = new HashMap<>();
+
+    /**
+     * 재검증에서 <b>직전과 사실상 같은 답을 냈는데 등급이 올라간</b> 항목 (이슈 #268 (d)).
+     *
+     * <p>❗<b>이 상태가 없으면 게이트가 GREEN 을 낸다.</b> 최종 등급만 남으므로 전 항목이
+     * U1 이 되고 {@code R-06} 이 문다 — 재설명이 이해를 올린 것이 아니라 <b>채점이 흔들린
+     * 것</b>인데 통과한다. 그리고 판정이 서면 {@code JUDGED} 에서 나가는 전이가
+     * {@code CLOSE} 뿐이라 되돌릴 수 없다.
+     *
+     * <p><b>등급을 고치지 않는다</b>(P1). 측정은 그대로 두고 <b>게이트에 입력을 하나 더
+     * 준다</b> — 판정은 룰이 한다. 항목 ID 를 담는 이유는 건수만으로는 <i>"어느 항목이
+     * 그랬나"</i> 에 답할 수 없어서다.
+     */
+    @Convert(converter = StringListConverter.class)
+    @Column(name = "repeated_answer_items", columnDefinition = "TEXT")
+    @Builder.Default
+    private List<String> repeatedAnswerUpgradedItems = new ArrayList<>();
 
     /**
      * 적합성 설문 vs 발화 모순 판정 상태(F-DET-002).
@@ -264,9 +304,53 @@ public class Session extends BaseEntity {
         return reverifyCount(itemId) >= max;
     }
 
-    /** 항목별 최신 판정을 기록(재검증 시 덮어씀). */
+    /** 항목별 최신 판정을 기록(재검증 시 덮어씀). 발화가 없는 경로용. */
     public void recordJudgment(Judgment judgment) {
+        recordAnswer(judgment.itemId(), null, judgment);
+    }
+
+    /**
+     * 발화와 판정을 <b>한 자리에서</b> 기록한다.
+     *
+     * <p>❗둘을 따로 부르면 이 메서드가 재려는 것을 잴 수 없다. <b>직전 발화와 직전 등급이
+     * 둘 다 아직 남아 있는 순간은 여기 한 번뿐</b>이고, 어느 한쪽을 먼저 덮어쓰면 비교
+     * 대상이 사라진다. 실제로 예전에는 {@code recordUtterance} 가 먼저 불려서 직전 발화가
+     * 이미 지워진 뒤에 판정이 들어왔다.
+     */
+    public void recordAnswer(String itemId, String maskedAnswer, Judgment judgment) {
+        Judgment prior = judgmentsByItem.get(itemId);
+        String priorAnswer = maskedUtterancesByItem.get(itemId);
+        // 등급이 **올라간** 경우만 본다(U1 이 제일 좋다 = ordinal 이 작다). 같거나 내려간
+        // 것은 이미 R-04·R-03 이 받는다 — 여기서 잡으려는 것은 **통과로 새는 방향**이다.
+        if (prior != null && maskedAnswer != null
+                && judgment.grade().ordinal() < prior.grade().ordinal()
+                && AnswerRepetition.essentiallySame(priorAnswer, maskedAnswer)
+                && !repeatedItems().contains(itemId)) {
+            repeatedItems().add(itemId);
+        }
+        if (maskedAnswer != null) {
+            maskedUtterancesByItem.put(itemId, maskedAnswer);
+        }
         judgmentsByItem.put(judgment.itemId(), judgment);
+    }
+
+    /**
+     * 게이트 입력용 — 같은 답을 되풀이했는데 등급이 올라간 항목 수 (이슈 #268 (d)).
+     */
+    public int repeatedAnswerUpgradedCount() {
+        return repeatedItems().size();
+    }
+
+    /**
+     * ❗{@link StringListConverter} 는 빈 목록을 {@code null} 로 되돌린다 — 판정 전 세션의
+     * 룰 트레이스를 빈 목록과 구분하려는 규약이다. 그 규약을 이 필드가 그대로 물려받으므로
+     * <b>DB 를 한 번 다녀온 세션에서는 여기가 null</b> 이다. 초기화를 미룬다.
+     */
+    private List<String> repeatedItems() {
+        if (repeatedAnswerUpgradedItems == null) {
+            repeatedAnswerUpgradedItems = new ArrayList<>();
+        }
+        return repeatedAnswerUpgradedItems;
     }
 
     /** 고객에게 보여준 질문을 항목별로 기록(재질문 시 덮어씀 — 마지막에 보여준 것이 답의 맥락이다). */
@@ -276,10 +360,24 @@ public class Session extends BaseEntity {
      * <p>둘을 한 메서드로 묶어 두는 이유는 <b>따로 쓰는 경로를 안 만들려는 것</b>이다 —
      * 문면은 새것인데 출처가 옛것으로 남으면 아예 안 남기는 것보다 나쁘다.
      */
-    public void recordAskedQuestion(String itemId, String question,
+    public void recordAskedQuestion(String itemId, String question, String questionType,
                                     EvidenceRecorder.QuestionSource source) {
         askedQuestionsByItem.put(itemId, question);
         askedQuestionSourceByItem.put(itemId, source);
+        if (questionType != null && !questionType.isBlank()) {
+            // ❗**같은 유형을 두 번 적지 않는다.** 목록은 "무엇을 이미 썼나" 이지 몇 번
+            // 썼나가 아니고, 중복이 쌓이면 ai-service 의 배제 계산은 그대로인데 프롬프트에
+            // 실리는 문면만 길어진다. 순서는 유지한다.
+            List<String> used = askedTypesByItem.computeIfAbsent(itemId, k -> new ArrayList<>());
+            if (!used.contains(questionType)) {
+                used.add(questionType);
+            }
+        }
+    }
+
+    /** 그 항목에 이미 쓴 질문 유형(물어본 순서). 없으면 빈 목록. */
+    public List<String> askedTypes(String itemId) {
+        return List.copyOf(askedTypesByItem.getOrDefault(itemId, List.of()));
     }
 
     /**
@@ -291,6 +389,34 @@ public class Session extends BaseEntity {
      * <p>둘 다 <b>판정할 수 없는 상태</b>다 — 게이트가 그 둘을 가릴 필요는 없다. 가려야 하는
      * 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00} 이 한다.
      */
+    /**
+     * 질문 생성에 넘길 면담 맥락 (F-INT-002).
+     *
+     * <p>❗<b>정답이 될 값을 안 담는다.</b> 등급과 오해 유형 ID 뿐이고 발화·루브릭·조건
+     * 원문은 안 간다 — 그건 질문에서 걸러내는 바로 그 값이라, 맥락으로 넣으면 다음 질문에
+     * 옮겨 쓰인다.
+     *
+     * <p>{@code exceptItem} 은 <b>지금 물으려는 항목</b>이다. 그 항목의 앞선 판정은 빼고
+     * 넘긴다 — 재검증에서 자기 직전 등급을 맥락으로 주면 <i>"방금 U3 였다"</i> 가 질문에
+     * 실려 <b>고객이 자기 점수를 알게 된다.</b>
+     */
+    public java.util.List<Grade> priorGrades(String exceptItem) {
+        return judgmentsByItem.entrySet().stream()
+                .filter(e -> !e.getKey().equals(exceptItem))
+                .map(e -> e.getValue().grade())
+                .toList();
+    }
+
+    /** 이 면담에서 이미 걸린 오해 유형 ID. 중복은 접는다 — 몇 번인지는 질문이 안 쓴다. */
+    public java.util.List<String> matchedMisconceptions(String exceptItem) {
+        return judgmentsByItem.entrySet().stream()
+                .filter(e -> !e.getKey().equals(exceptItem))
+                .map(e -> e.getValue().misconceptionType())
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
     public int unmeasuredItemCount() {
         java.util.Set<String> judged = judgments().stream()
                 .map(Judgment::itemId).collect(java.util.stream.Collectors.toSet());

@@ -249,10 +249,38 @@ class ExtractionDraft(Strict):
     candidates: list[ExtractedCandidate]
 
 
+class InterviewContext(Strict):
+    """면담이 지금까지 알아낸 것 — 질문 생성이 이걸 보고 다음 질문을 정한다.
+
+    ## 왜 필요한가
+
+    지금까지 질문 생성이 받는 것은 `risk_item` 과 `product_type` 뿐이었다. **이 고객이
+    60대인지, 방금 무엇을 틀렸는지, 어떤 오해가 이미 걸렸는지 모른 채** 매번 첫 질문처럼
+    만든다. 되말하기가 재려는 것은 *"이 사람이 이 문장을 만들어 낼 수 있었나"* 인데,
+    같은 문장이라도 요구되는 난이도가 사람마다 다르다.
+
+    ## ❗정답을 싣지 않는다
+
+    여기 오는 것은 **등급과 오해 유형 ID** 뿐이다. 직전 발화도, 루브릭 조항도, 조건
+    원문도 안 온다 — 그건 `answer_fragments` 가 질문에서 걸러내는 바로 그 값이고,
+    맥락으로 넣으면 모델이 다음 질문에 옮겨 쓴다(유도심문).
+    """
+
+    vulnerable: bool = Field(default=False, description="코칭 정황 스코어가 임계 이상 — 눈높이를 낮춘다")
+    prior_grades: list[Grade] = Field(default_factory=list, description="이 세션에서 이미 나온 등급")
+    matched_misconceptions: list[str] = Field(
+        default_factory=list, description="이미 걸린 오해 유형 ID — 다음 질문이 그 자리를 짚는다")
+
+
 class QuestionRequest(Strict):
     risk_item: RiskItem
     asked_types: list[str] = Field(default_factory=list, description="이미 쓴 유형 — 반복 방지")
     product_type: ProductType = "ELS"
+    variant: Literal["initial", "reverify"] = Field(
+        default="initial",
+        description="reverify 는 재설명 뒤 다시 묻는 질문 — 같은 것을 다시 묻지 않는다")
+    context: InterviewContext | None = Field(
+        default=None, description="면담 맥락. 없으면 첫 질문처럼 만든다")
 
 
 class QuestionDraft(Strict):
