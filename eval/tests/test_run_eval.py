@@ -98,6 +98,53 @@ class TestRefusesRatherThanFaking:
         assert r.returncode != 0 and "enum" in r.stderr
 
 
+class TestProvenance:
+    """❗리포트가 **어느 프롬프트로 잰 숫자인지** 말해야 한다.
+
+    채점 프롬프트는 산출물이라 버전이 올라간다(`ai-service/app/prompts/README.md` —
+    *"어떤 버전으로 측정한 결과인지 추적 가능해야 한다"*). 리포트에 그 값이 없으면
+    같은 문서가 **어느 판의 성능인지 말하지 않는다** — `#366` 이 프롬프트 문면을 고치면서
+    드러난 자리다.
+    """
+
+    def test_the_report_names_the_prompt_version(self, tmp_path):
+        model, gold = corpus(40)
+        stamped = [{**r, "prompt_version": "F-SCR-001_v2", "model": "gpt-5-mini"} for r in model]
+        write_jsonl(tmp_path / "data" / "model.jsonl", stamped)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "F-SCR-001_v2" in out, "어느 프롬프트로 잰 숫자인지 리포트가 말해야 한다"
+        assert "gpt-5-mini" in out
+
+    def test_a_mixed_round_shows_both(self, tmp_path):
+        """❗한 회차에 두 버전이 섞였으면 **감추지 않는다.**
+
+        섞였다는 사실 자체가 그 수치를 조건부로 만든다. 한 줄로 접으면 그게 사라진다.
+        """
+        model, gold = corpus(40)
+        half = len(model) // 2
+        stamped = ([{**r, "prompt_version": "F-SCR-001_v2"} for r in model[:half]]
+                   + [{**r, "prompt_version": "F-SCR-001_v3"} for r in model[half:]])
+        write_jsonl(tmp_path / "data" / "model.jsonl", stamped)
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "F-SCR-001_v2" in out and "F-SCR-001_v3" in out
+
+    def test_an_unstamped_round_says_so_instead_of_going_quiet(self, tmp_path):
+        """★ 값이 없으면 **없다고 적는다.** 줄을 지우면 «옛 판인가 새 판인가» 를 못 묻는다."""
+        model, gold = corpus(40)
+        write_jsonl(tmp_path / "data" / "model.jsonl", model)   # prompt_version 없음
+        write_jsonl(tmp_path / "data" / "labels" / "a.jsonl", gold)
+        write_jsonl(tmp_path / "data" / "labels" / "b.jsonl", gold)
+
+        out = run(tmp_path).stdout
+        assert "미상" in out, "안 적힌 것과 적을 것이 없는 것을 문면으로 갈라야 한다"
+
+
 class TestReport:
     def test_perfect_model_reports_target_met(self, tmp_path):
         gold, model = corpus(40)
