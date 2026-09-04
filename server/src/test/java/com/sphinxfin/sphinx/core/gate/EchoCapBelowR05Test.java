@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -48,32 +50,72 @@ class EchoCapBelowR05Test {
     private static final Path RULES = Path.of("src/main/resources/gate_rules.yaml");
 
     /**
-     * ❗<b>필드 순서에 안 걸리게 둔다</b>({@code #368} 리뷰, 강희진). 규약(파일 머리)은 네 필드를
-     * 필수로 두지만 <b>순서는 안 정한다</b> — {@code value} 를 둘째 줄로 옮기면 인접 정규식은
-     * <i>"못 읽었다"</i> 로 빨개진다. 안전한 쪽으로 깨지긴 하나 <b>실패 문면이 원인을 안 가리킨다.</b>
-     * 비탐욕 건너뛰기로 그 결합을 없앤다.
+     * ❗<b>캡을 하나씩 적지 않는다</b> — 선언 파일의 {@code *_confidence_cap} 을 <b>전부</b> 훑는다.
+     *
+     * <p>예전에는 캡마다 정규식을 하나 더 달았다. 그러면 <b>다음 캡을 만드는 사람이 이 파일을
+     * 모른 채 지나간다</b> — 실제로 그렇게 캡이 셋이 되는 동안 이 파일은 하나만 보고 있었다.
+     * 지금은 이름 규칙만 지키면 새 캡이 자동으로 들어온다.
+     *
+     * <p>❗<b>필드 순서에 안 걸리게 둔다</b>({@code #368} 리뷰). 규약(파일 머리)은 네 필드를
+     * 필수로 두지만 <b>순서는 안 정한다</b> — {@code value} 를 둘째 줄로 옮겨도 읽어야 한다.
      */
-    private static final Pattern CAP = Pattern.compile("^\\s+echo_confidence_cap:[\\s\\S]*?^\\s+value:\\s*([0-9.]+)", Pattern.MULTILINE);
+    private static final Pattern CAPS = Pattern.compile(
+            "^\\s+([a-z0-9_]*confidence_cap):[\\s\\S]*?^\\s+value:\\s*([0-9.]+)",
+            Pattern.MULTILINE);
+
     private static final Pattern R05 = Pattern.compile("anyConfidenceBelow\\s+([0-9.]+)");
 
     @Test
-    @DisplayName("❗복창으로 깎은 값이 R-05 를 발동시킨다 — 캡이 임계값 이상이면 룰이 죽는다")
-    void theEchoCapStillTripsR05() throws Exception {
-        BigDecimal cap = read(SCORING, CAP, "ai-service 의 ECHO_CONFIDENCE_CAP");
+    @DisplayName("❗확신도 캡이 전부 R-05 아래다 — 위면 깎아도 게이트가 아무 일도 안 한다")
+    void everyCapStillTripsR05() throws Exception {
         BigDecimal threshold = read(RULES, R05, "gate_rules.yaml 의 R-05 임계값");
+        Map<String, BigDecimal> caps = allCaps();
 
-        assertThat(cap)
-                .as("복창 캡(%s)이 R-05 임계값(%s) 이상이면, 복창을 잡아 깎아도 게이트가 "
-                        + "황색으로 안 내린다. 모델 자기보고는 이 룰을 발동시킨 적이 없으므로"
-                        + "(#268 실측) 그때 R-05 는 **아무것도 안 잡는 룰**이 된다 — "
-                        + "둘 중 하나를 고칠 때 다른 하나를 같이 본다", cap, threshold)
-                .isLessThan(threshold);
+        Map<String, BigDecimal> above = new TreeMap<>();
+        caps.forEach((name, value) -> {
+            if (value.compareTo(threshold) >= 0) {
+                above.put(name, value);
+            }
+        });
+
+        assertThat(above)
+                .as("캡이 R-05 임계값(%s) 이상이면, 잡아서 깎아도 게이트가 황색으로 안 내린다. "
+                        + "모델 자기보고는 이 룰을 발동시킨 적이 없으므로(#268 · #339 실측) "
+                        + "그때 R-05 는 **아무것도 안 잡는 룰**이 된다", threshold)
+                .isEmpty();
     }
 
-    /**
-     * 못 읽으면 <b>실패시킨다.</b> 정규식이 낡아 값을 못 뽑으면 위 단정이 무엇을 비교하든
-     * 통과하게 되고, 그건 대조가 없는 것과 같다.
-     */
+    @Test
+    @DisplayName("❗캡 값이 서로 다르다 — 같으면 어느 이유로 깎였는지 숫자로 안 갈린다")
+    void theCapsAreDistinguishable() throws Exception {
+        Map<String, BigDecimal> caps = allCaps();
+
+        assertThat(caps.values().stream().map(BigDecimal::stripTrailingZeros).distinct().count())
+                .as("확신도만 보고 어느 후처리가 깎았는지 알 수 있어야 한다 — 감사 시점에 "
+                        + "기록에 남는 것이 그 숫자다. 지금 캡: %s", caps)
+                .isEqualTo(caps.size());
+    }
+
+    @Test
+    @DisplayName("★ 캡을 하나도 못 찾으면 실패한다 — 0건을 검사하고 통과하면 대조가 없는 것이다")
+    void theScanItselfIsMeasured() throws Exception {
+        assertThat(allCaps())
+                .as("선언 파일에서 *_confidence_cap 을 하나도 못 읽었다 — 이름 규칙이나 "
+                        + "파일이 바뀌었으면 이 정규식도 같이 고친다. 안 그러면 위 두 단정이 "
+                        + "빈 집합을 검사하고 조용히 통과한다")
+                .hasSizeGreaterThanOrEqualTo(2);
+    }
+
+    /** 선언 파일의 {@code *_confidence_cap} 전부. 이름 → 값. */
+    private static Map<String, BigDecimal> allCaps() throws Exception {
+        Map<String, BigDecimal> out = new TreeMap<>();
+        Matcher m = CAPS.matcher(Files.readString(SCORING));
+        while (m.find()) {
+            out.put(m.group(1), new BigDecimal(m.group(2)));
+        }
+        return out;
+    }
+
     private static BigDecimal read(Path file, Pattern pattern, String what) throws Exception {
         Matcher m = pattern.matcher(Files.readString(file));
         assertThat(m.find()).as("%s 를 못 읽었다 — 문면이 바뀌었으면 이 정규식도 같이 고친다. "

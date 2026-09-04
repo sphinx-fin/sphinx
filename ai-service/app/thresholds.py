@@ -47,6 +47,7 @@ INTEGER_IDS = frozenset({"max_scoring_attempts"})
 REQUIRED = frozenset({
     "ngram_match", "ngram_review",
     "echo_match", "echo_margin_min", "echo_confidence_cap",
+    "disagreement_confidence_cap",
     "max_scoring_attempts",
 })
 
