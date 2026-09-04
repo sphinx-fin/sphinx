@@ -67,8 +67,8 @@ class MeasurementInvalid(LlmError):
 #: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
 MAX_SCORING_ATTEMPTS = 2
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
-PROMPT_VERSION = "F-SCR-001_v2"
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v3.md"
+PROMPT_VERSION = "F-SCR-001_v3"
 
 log = logging.getLogger(__name__)
 

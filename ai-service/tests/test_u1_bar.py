@@ -151,3 +151,36 @@ def test_the_instruction_and_the_value_sit_in_their_own_sections() -> None:
     assert "U1 문턱" in system, "등급 정의가 문턱을 이름으로 가리켜야 한다"
     assert "{u1_requires}" in template, "user 템플릿이 루브릭 값을 받아야 한다"
     assert "{element_count}" in template
+
+
+# ── (라) 프롬프트 버전이 파일과 어긋나지 않는다 ─────────────────────────────
+def test_the_prompt_version_matches_the_file_it_loads() -> None:
+    """★ `PROMPT_VERSION` 과 실제로 읽는 파일 이름이 같다.
+
+    ❗둘이 갈리면 **`Judgment.prompt_version` 이 거짓말을 한다.** 그 필드는 어느 프롬프트로
+    잰 값인지를 기록하려고 `#152` 가 넣은 것이고, `model.jsonl` 을 거쳐 성능 리포트까지
+    간다 — 거기가 틀리면 리포트의 숫자가 어느 판인지 가릴 수 없다.
+    """
+    assert scoring.PROMPT_VERSION == scoring.PROMPT_PATH.stem, (
+        f"버전 {scoring.PROMPT_VERSION} ↔ 파일 {scoring.PROMPT_PATH.name}")
+    assert scoring.PROMPT_PATH.is_file()
+
+
+def test_older_prompt_versions_are_kept() -> None:
+    """★ 이전 버전을 **지우지 않는다** — `app/prompts/README.md` 의 규약이다.
+
+    프롬프트는 코드가 아니라 산출물이라, 어떤 버전으로 측정한 결과인지 추적 가능해야
+    한다. 이 PR 이 그 규약을 한 번 어겼다(v2 를 제자리에서 고쳤다 — `#366` 리뷰, 정세현).
+
+    현재 판보다 낮은 번호가 **하나라도** 남아 있어야 한다. 개수를 박지 않는 이유는
+    버전이 늘 때마다 이 테스트를 고치게 되기 때문이다.
+    """
+    here = scoring.PROMPT_PATH.parent
+    stem = scoring.PROMPT_VERSION.rsplit("_v", 1)
+    current = int(stem[1])
+    older = [p for p in here.glob(f"{stem[0]}_v*.md")
+             if p.stem.rsplit("_v", 1)[1].isdigit()
+             and int(p.stem.rsplit("_v", 1)[1]) < current]
+    assert older, (
+        f"{stem[0]} 의 이전 버전이 하나도 없다 — 버전을 올릴 때 옛 파일을 지우면 "
+        "그 버전으로 잰 리포트 숫자를 재현할 수 없다(app/prompts/README.md)")
