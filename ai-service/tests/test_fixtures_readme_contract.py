@@ -107,9 +107,39 @@ def test_roster_here_either_matches_the_source_or_defers_to_it():
 
     두 상태를 다 허용하는 이유는 docstring 에 있다 — `#350` 전후 어느 쪽에서도
     이 테스트가 방해가 되지 않게 하려는 것이다. 걸리는 것은 **조용히 갈린 상태** 하나다.
+
+    ## ❗범위가 파일 전체다 — 머리말이 아니다 (`#352` 리뷰, 정세현)
+
+    처음에는 `_head(..., 12)` 로 잘랐는데 **문서는 자란다.** 머리에 요약 여덟 줄을 넣고
+    명부를 14 줄로 밀면 낡은 명부가 살아 있는 채로 초록이었다(변조 ⓘ). 명부는 어디에
+    있든 정본과 같아야 하므로 범위를 자를 이유가 없다.
+
+    `test_my_exclusion_is_always_stated` 는 **머리말 12줄 그대로 둔다** — 그쪽은
+    *"머리말에 있어야 한다"* 가 요구사항이라 **범위가 곧 내용**이다.
     """
-    head = _head(FIXTURES_README)
-    here = _roster(head) - {"윤지석"}          # 내 제외는 명부가 아니다
+    text = FIXTURES_README.read_text(encoding="utf-8")
+    here = _roster(text) - {"윤지석"}          # 내 제외는 명부가 아니다
+
+    # ❗**명부를 못 뽑는 것과 명부가 없는 것을 가른다** (`#352` 리뷰, 정세현 · 변조 ⓖ).
+    # `_PAIR` 가 `MEMBERS` 로 이름을 열거하므로 **팀원 밖 이름이 오면 0 건**이 되고,
+    # 그러면 아래 else 로 떨어져 *"명부를 안 들었다"* 로 읽혀 초록이 된다.
+    # 하필 그 구멍이 열리는 경우가 **라벨러 구성이 또 바뀐 때** — 이 테스트가 잡으려는
+    # 바로 그 사건이다. `MEMBERS` 를 CODEOWNERS 와 같이 고치는 것을 잊어도 여기서 문다.
+    #
+    # ❗**「라벨러」가 든 줄 전부를 요구하면 안 된다.** 그러면 명부를 빼고 권위만 가리키는
+    # 정상 상태(*"이 회차 라벨러는 guideline.md §5"*)까지 문다 — 변조 ⓔ 가 빨개졌다.
+    # 조건은 **그 줄이 팀원을 이름으로 부르는데 짝이 안 잡히는 것**이다.
+    for line in text.splitlines():
+        if "라벨러" not in line:
+            continue
+        named = {m for m in MEMBERS if m in line} - {"윤지석"}   # 내 제외는 명부가 아니다
+        if not named:
+            continue                                            # 명부를 안 든 줄 — 허용
+        assert _roster(line), (
+            f"라벨러 줄이 이름을 부르는데 짝이 안 잡힌다: {line.strip()!r} — "
+            f"MEMBERS({', '.join(MEMBERS)}) 밖의 이름이면 그물이 조용해진다. "
+            ".github/CODEOWNERS 와 같이 고친다"
+        )
 
     if here:
         canonical = _canonical_roster()
@@ -122,7 +152,7 @@ def test_roster_here_either_matches_the_source_or_defers_to_it():
             "쪽이 낫다**(PR #350 이 그렇게 갔다)"
         )
     else:
-        assert any(a in head for a in AUTHORITIES), (
+        assert any(a in text for a in AUTHORITIES), (
             "명부를 안 들면 어디를 봐야 하는지는 적어야 한다 — 안 적으면 읽는 사람이 "
             f"라벨러를 알 방법이 없다. {AUTHORITIES} 중 하나를 가리킨다"
         )
