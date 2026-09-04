@@ -110,6 +110,27 @@ public class DashboardController {
      * 같은 데이터를 다른 축으로 자른 것이라 action 이 갈리면 <b>같은 사실에 그랜트가 둘</b>이
      * 되고 한쪽만 좁히는 실수가 난다({@code #335} 가 세운 판단과 같다).
      */
+    /**
+     * ★ 코칭 정황 — <b>기획서 7-4 2단계(사후 적발)</b>.
+     *
+     * <p>기획서가 세 신호를 이름으로 적어 뒀는데 <b>하나도 구현돼 있지 않았다.</b> 앞의
+     * 둘(1차 통과율 · 발화 균질도)을 낸다. 셋째(응답 지연 분포)는 {@code inputMeta} 가
+     * 세션에 안 남아서 지금은 셀 수 없다.
+     *
+     * <p>권한은 선행지표와 같은 {@code aggregate:indicator:read} 다 — <b>같은 사실</b>
+     * (판매자 단위 통계 이상치)에 그랜트를 둘로 만들지 않는다. 볼 수 있는 사람과 범위가
+     * 정확히 같고, 실제로 이 뷰는 기존 이상치가 <b>반대 방향이라 못 잡는 것</b>을 채운다.
+     *
+     * <p>❗{@code SELLER} 는 집계 그랜트가 없어 여기 못 온다(ADR-001). <b>코칭을 하는
+     * 쪽이 자기 정황을 볼 수 있으면 이 기능이 없는 것과 같다.</b>
+     */
+    @PreAuthorize("@accessGuard.canAggregate('aggregate:indicator:read')")
+    @GetMapping("/coaching-signals")
+    public ApiResponse<AggregateService.CoachingView> coachingSignals() {
+        return ApiResponse.ok(aggregateService.coachingSignals(
+                scopeOf("aggregate:indicator:read"), currentActor.branchId()));
+    }
+
     @PreAuthorize("@accessGuard.canAggregate('aggregate:heatmap:read')")
     @GetMapping("/decisions")
     public ApiResponse<AggregateService.DecisionView> decisions(
