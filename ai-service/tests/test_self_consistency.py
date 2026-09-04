@@ -57,6 +57,33 @@ class _Sequence:
 ANSWER = "제가 낸 돈보다 적게 돌려받을 수도 있다는 뜻으로 이해했습니다"
 
 
+def test_a_partial_understanding_is_not_re_asked() -> None:
+    """❗**U2 는 다시 안 묻는다 — 캡을 씌워도 게이트가 한 칸도 안 움직인다** (#370 리뷰).
+
+        R-04   anyGrade in ['U2','U3']   YELLOW   ← U2 는 여기서 이미 노랑
+        R-05   anyConfidenceBelow 0.7    YELLOW   ← 캡을 씌워도 같은 노랑
+
+    룰 순서상 R-04 가 앞이라 신호가 안 바뀐다. 재확인 비용만 70건 기준 30% → 56% 로
+    는다. 이 단정이 없으면 *"통과 쪽"* 을 넓게 읽어 U2 가 조용히 돌아온다.
+    """
+    llm = _Sequence(_judgment(Grade.U2, ANSWER))
+
+    scoring.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", ANSWER,
+                  _risk_item(), "ELS", llm=llm)
+
+    assert len(llm.seeds) == 1, "게이트를 안 바꾸는 등급에 호출을 두 배로 쓰지 않는다"
+
+
+def test_a_misconception_is_not_re_asked() -> None:
+    """U4 도 다시 안 묻는다 — R-01 이 이미 RED 로 막는다."""
+    llm = _Sequence(_judgment(Grade.U4, ANSWER))
+
+    scoring.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", ANSWER,
+                  _risk_item(), "ELS", llm=llm)
+
+    assert len(llm.seeds) == 1
+
+
 def test_a_reproduced_grade_keeps_its_confidence() -> None:
     """같게 나오면 안 깎는다 — 재현되는 판정을 깎으면 R-05 가 늘 물린다."""
     llm = _Sequence(_judgment(Grade.U1, ANSWER), _judgment(Grade.U1, ANSWER))
