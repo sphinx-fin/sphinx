@@ -67,6 +67,15 @@ class ShadowMeter:
     scored: int = 0
     utterances_with_hit: int = 0
     would_change: int = 0
+    #: ❗관측자가 죽어서 **못 잰** 건수. `observe` 가 던지면 `record` 까지 못 가서
+    #: `scored` 도 안 는다 — 실패가 요약에서 **빠지는 것이지 표시되는 것이 아니다.**
+    #: 그러면 "10건 중 1건 걸림" 과 "5건만 재고 1건 걸림" 이 같아 보인다.
+    #:
+    #: 이 PR 의 산출물이 요약 한 줄이고 `(b)` 를 켤지가 그 비율로 정해지는데,
+    #: **던지는 조건은 무작위가 아니다** — 조건 문면이 깨진 특정 루브릭에서 난다.
+    #: 하필 그것이 미강제 조건이 많은 쪽이면 비율이 **한 방향으로** 틀린다
+    #: (결정 5.40 *"못 잰 값은 0 이 아니라 「모른다」로 적는다"*, #364 리뷰).
+    failed: int = 0
     by_condition: dict[str, int] = field(default_factory=dict)
 
     def record(self, hits: list[ShadowHit]) -> None:
@@ -80,9 +89,14 @@ class ShadowMeter:
             key = f"{hit.item_id}:{hit.condition}"
             self.by_condition[key] = self.by_condition.get(key, 0) + 1
 
+    def record_failure(self) -> None:
+        """관측이 실패했다. **0 건과 「못 쟀다」를 가르는 유일한 자리.**"""
+        self.failed += 1
+
     def summary(self) -> str:
         return (f"채점 {self.scored}건 · 그림자 매칭 {self.utterances_with_hit}건 "
-                f"· 등급이 달라졌을 것 {self.would_change}건")
+                f"· 등급이 달라졌을 것 {self.would_change}건 "
+                f"· 못 잰 것 {self.failed}건")
 
 
 METER = ShadowMeter()

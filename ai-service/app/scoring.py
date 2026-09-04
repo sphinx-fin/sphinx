@@ -223,6 +223,9 @@ def score(
         try:
             shadow.observe(answer_text, rubric, judgment.grade.value)
         except Exception:  # noqa: BLE001 — 관측자가 채점을 죽이면 안 된다
+            # ❗**못 잰 것을 요약에 남긴다.** 여기서 안 세면 실패가 집계에서 빠지고,
+            # "10건 중 1건 걸림" 과 "5건만 재고 1건 걸림" 이 같아 보인다 (#364 리뷰).
+            shadow.METER.record_failure()
             # ❗판정은 이미 위에서 끝났다. 그림자는 "(b) 를 켤지 정할 근거" 를 모으는
             # 관측자일 뿐이라, 여기서 던지면 **아무것도 안 하는 코드가 채점을 502 로
             # 만든다.** "판정을 안 바꾼다" 는 등급 값만이 아니라 **판정이 나온다는

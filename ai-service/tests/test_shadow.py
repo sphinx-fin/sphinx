@@ -172,6 +172,30 @@ def test_a_broken_meter_does_not_kill_the_scoring(monkeypatch, caplog) -> None:
 
     assert result.grade == Grade.U1, "아무것도 안 하는 관측자가 채점을 죽이면 안 된다"
     assert "그림자 매칭 실패" in caplog.text, "삼킨 채로 조용하면 계량기가 죽은 줄 모른다"
+    assert shadow.METER.failed >= 1, (
+        "못 잰 것이 요약에 남아야 한다 — 로그를 아무도 안 읽으면 실패가 집계에서 "
+        "빠지고 '0 건 걸림' 과 구별이 안 된다")
+
+
+def test_a_half_broken_meter_says_so_in_the_summary(monkeypatch) -> None:
+    """❗**반만 죽으면 요약이 조용히 틀린 수를 낸다** (#364 리뷰).
+
+    `observe` 가 던지면 `record` 까지 못 가서 `scored` 도 안 는다 — 실패는 요약에서
+    **빠지는 것이지 표시되는 것이 아니다.** 이 PR 의 산출물이 그 한 줄이고 `(b)` 를
+    켤지가 그 비율로 정해지므로, 못 잰 것이 안 보이면 **결론이 계량기 고장에서 나온다.**
+    """
+    meter = shadow.ShadowMeter()
+    for i in range(10):
+        if i % 2:
+            meter.record_failure()
+        else:
+            meter.record([])
+
+    summary = meter.summary()
+
+    assert "채점 5건" in summary
+    assert "못 잰 것 5건" in summary, (
+        "요약만 읽는 사람에게 '5건 재서 0건' 과 '10건 중 5건을 못 쟀다' 가 같아 보이면 안 된다")
 
 
 def _risk_item():
