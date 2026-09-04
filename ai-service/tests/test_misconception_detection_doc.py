@@ -79,8 +79,11 @@ def test_reproduction_commands_point_at_files_that_exist() -> None:
     절 제목 인용이 조용히 끊긴 사례가 `#341` 이다. 파일명도 같은 방식으로 끊긴다.
     """
     text = DOC.read_text(encoding="utf-8")
-    named = set(re.findall(r"tools/([A-Za-z0-9_]+\.py)", text))
-    assert named, "「재현」 절에 도구 파일명이 하나도 없다"
+    # ❗`(?<![\w/])` 가 있어야 한다. 없으면 `eval/tools/measure_suffix_leak.py`(정세현
+    # 소유, 다른 모듈)의 **꼬리**를 `ai-service/tools/` 것으로 읽고 "없는 파일" 이라고
+    # 빨개진다 — 실제로 그렇게 물렸다. 그물이 실물을 물면 실물을 먼저 본다.
+    named = set(re.findall(r"(?<![\w/])tools/([A-Za-z0-9_]+\.py)", text))
+    assert named, "「재현」 절에 이 모듈의 도구 파일명이 하나도 없다"
     missing = sorted(name for name in named if not (TOOLS / name).exists())
     assert not missing, f"문서가 부르는 도구가 없다: {missing}"
 
@@ -190,4 +193,29 @@ def test_the_fallen_count_matches_the_table() -> None:
     total = re.search(r"^# 오해 탐지 — (\S+?) 방법", text, re.MULTILINE)
     assert total and _NUMERALS.get(total.group(1)) == len(rows), (
         f"제목이 {total.group(1) if total else '?'} 방법이라는데 표는 {len(rows)} 행이다"
+    )
+
+
+# ── 인용 자리: 숫자를 든 곳은 재현 경로를 같이 든다 ──────────────────────────
+#
+# `#377` 의 95% 가 문서 한 곳이 아니라 **네 곳**에 복사돼 있었다(이 문서 · 이 파일들 둘 ·
+# 이슈 제목). 한 곳을 고치면 나머지가 낡는데 **아무 검사도 그걸 안 물었다.**
+# 방어는 「숫자를 없애는 것」이 아니라 **숫자 옆에 재현 경로를 두는 것**이다 —
+# 다음 사람이 값을 의심하면 옮겨 적을 출처가 바로 있다.
+_CITING = ("tests/test_devset_contract.py", "tests/fixtures/utterances/els.yaml")
+_REPRO = "measure_suffix_leak.py"
+
+
+@pytest.mark.parametrize("relative", _CITING)
+def test_leak_citations_name_their_reproduction(relative: str) -> None:
+    """종결어미 누설을 백분율로 말하는 파일은 재현 스크립트를 이름 대야 한다."""
+    path = Path(__file__).resolve().parents[1] / relative
+    text = path.read_text(encoding="utf-8")
+    if "종결" not in text or not re.search(r"\d{1,3}%", text):
+        # ❗`pytest.skip` 을 쓰지 않는다. `ci.yml` 의 `no_skip.py` 가 skip 을 **실패로**
+        # 바꾸므로(허용 목록 없음), 인용이 사라진 정상 상태가 CI 빨강이 된다.
+        return
+    assert _REPRO in text, (
+        f"{relative} 가 누설 수치를 들면서 {_REPRO} 를 안 가리킨다 — "
+        "값을 의심하는 다음 사람이 옮겨 적을 출처가 없다"
     )
