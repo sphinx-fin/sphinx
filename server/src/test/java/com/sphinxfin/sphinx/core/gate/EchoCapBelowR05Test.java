@@ -38,10 +38,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("복창 캡 < R-05 임계값 (이슈 #268)")
 class EchoCapBelowR05Test {
 
-    private static final Path SCORING = Path.of("../ai-service/app/scoring.py");
+    /**
+     * ❗<b>읽는 자리가 옮겨졌다</b> — 임계값이 파이썬 상수에서 선언 파일로 나왔다(PR 이 함께 낸 변경).
+     * 소스를 정규식으로 긁는 것보다 이쪽이 낡을 여지가 적다: 이 파일은 값과 함께
+     * <i>무엇에 반응하는가 · 왜 이 값인가</i>를 들고 있어서, 값을 옮기려는 사람이
+     * 여기 적힌 <b>"올리기 전에 그 테스트와 gate_rules.yaml 을 같이 본다"</b>를 먼저 읽는다.
+     */
+    private static final Path SCORING = Path.of("../ai-service/app/scoring_thresholds.yaml");
     private static final Path RULES = Path.of("src/main/resources/gate_rules.yaml");
 
-    private static final Pattern CAP = Pattern.compile("^ECHO_CONFIDENCE_CAP\\s*=\\s*([0-9.]+)", Pattern.MULTILINE);
+    private static final Pattern CAP = Pattern.compile("^\\s+echo_confidence_cap:\\s*$\\s*^\\s+value:\\s*([0-9.]+)", Pattern.MULTILINE);
     private static final Pattern R05 = Pattern.compile("anyConfidenceBelow\\s+([0-9.]+)");
 
     @Test
