@@ -67,6 +67,18 @@ class MeasurementInvalid(LlmError):
 #: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
 MAX_SCORING_ATTEMPTS = 2
 
+#: 자기일관성 재확인을 거는 등급. **통과 쪽만 본다.**
+#:
+#: P5 가 *"미탐(놓침)을 과탐보다 비싸게 다룬다"* 이므로, 다시 물어야 하는 것은
+#: **"이해했다" 판정**이다. U4 를 한 번 더 확인해 봐야 얻는 것이 적고(이미 막힌다)
+#: 호출만 두 배가 된다.
+CONSISTENCY_GRADES = ("U1", "U2")
+
+#: 두 번 채점이 갈렸을 때 씌우는 상한. **R-05(`anyConfidenceBelow 0.7`) 아래여야**
+#: 게이트가 실제로 받는다 — 위면 숫자만 내려가고 아무 일도 안 일어난다.
+#: 복창 캡(0.3)과 값을 달리 둔다: 감사 시점에 **어느 이유로 깎였는지**가 숫자로도 갈린다.
+DISAGREEMENT_CONFIDENCE_CAP = 0.5
+
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
 PROMPT_VERSION = "F-SCR-001_v2"
 
@@ -216,7 +228,8 @@ def score(
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = apply_misconception_floor(judgment, matched, rubric)
-        return _pin_escalation(judgment, matched, rubric)
+        judgment = _pin_escalation(judgment, matched, rubric)
+        return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt)
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
     # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
@@ -348,6 +361,76 @@ def cap_confidence_if_echoed(
         "confidence": ECHO_CONFIDENCE_CAP,
         "reason": f"{judgment.reason} (문서 문면 복창 포함도 {echo:.2f} ≥ "
                   f"{ECHO_THRESHOLD} — 자기 말인지 가릴 수 없어 확신도 상한 적용)",
+    })
+
+
+def cap_confidence_if_inconsistent(
+    judgment: Judgment, client, prompt: str, attempt: int
+) -> Judgment:
+    """**같은 발화를 한 번 더 채점해서 등급이 갈리면 확신도를 깎는다.**
+
+    ## 왜 필요한가 — 자기보고 신뢰도가 죽어 있다
+
+    프롬프트 v2 가 `confidence` 를 *"다른 채점자에게도 같게 나올 것인가"* 로 정의해 놓고
+    **모델에게 그걸 물어본다.** 실측이 그 결과다.
+
+        ADR-005 (dev 24건)   [0.7, 0.9, 1.0]
+        라이브 (#339, 6건)    고유값 1개 — 1.0
+
+    즉 `R-05`(`anyConfidenceBelow 0.7`)가 **모델 자기보고로는 한 번도 안 돈다.** 지금 그
+    룰을 발동시키는 것은 복창 캡뿐이다.
+
+    여기서 하는 것은 **그 정의를 직접 재는 것**이다 — 다시 물어서 같게 나오는지.
+
+    ## ❗등급을 안 바꾼다
+
+    두 번째 답이 U4 라도 **등급은 첫 판정 그대로**다. 바꾸면 그건 측정이 아니라 판정이고
+    (P1), *"두 번 중 나쁜 쪽"* 이라는 룰을 코드가 몰래 갖게 된다. 갈렸다는 사실을
+    **확신도로 보고하고 판정은 게이트가 한다** — 복창 캡과 같은 자리다.
+
+    ## 통과 쪽만 다시 묻는다
+
+    P5 가 *"미탐을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은 **"이해했다"**
+    판정이다. U4 를 재확인해 봐야 이미 막혀 있고 호출만 두 배가 된다. 그래서 비용은
+    <b>통과 판정 비율만큼</b>이지 전체 두 배가 아니다.
+
+    ## 두 번째 호출이 죽으면 그냥 넘어간다
+
+    확신도를 못 깎을 뿐 판정은 유효하다. 여기서 502 를 올리면 **재확인하려다 인터뷰를
+    멈추는 것**이고, 그 손해가 실패에 비례하지 않는다. 대신 로그에 남긴다 — 이 검사가
+    조용히 안 도는 것과 도는데 일치하는 것은 다르다.
+    """
+    if judgment.grade.value not in CONSISTENCY_GRADES:
+        return judgment
+    if judgment.confidence <= DISAGREEMENT_CONFIDENCE_CAP:
+        return judgment          # 이미 더 낮다 — 복창 캡이 걸린 경우
+    try:
+        second = client.complete_json(
+            prompt=prompt,
+            model_cls=Judgment,
+            schema_name="Judgment",
+            system=load_system_prompt(),
+            seed=_attempt_seed(attempt + MAX_SCORING_ATTEMPTS),
+        )
+    except LlmError as exc:
+        log.info(
+            "F-SCR-001 자기일관성 확인 실패: item_id=%s — %s. 확신도를 안 깎는다 "
+            "(판정은 유효하다)", judgment.item_id, type(exc).__name__,
+        )
+        return judgment
+
+    if second.grade == judgment.grade:
+        return judgment
+    log.info(
+        "F-SCR-001 자기일관성 불일치: item_id=%s %s vs %s — 확신도 상한 %s 적용. "
+        "등급은 안 바꾼다(P1)",
+        judgment.item_id, judgment.grade.value, second.grade.value,
+        DISAGREEMENT_CONFIDENCE_CAP,
+    )
+    return judgment.model_copy(update={
+        "confidence": DISAGREEMENT_CONFIDENCE_CAP,
+        "reason": f"{judgment.reason} (같은 발화를 다시 채점하니 "
+                  f"{second.grade.value} — 재현되지 않아 확신도 상한 적용)",
     })
 
 

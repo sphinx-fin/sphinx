@@ -44,6 +44,16 @@ class EchoCapBelowR05Test {
     private static final Pattern CAP = Pattern.compile("^ECHO_CONFIDENCE_CAP\\s*=\\s*([0-9.]+)", Pattern.MULTILINE);
     private static final Pattern R05 = Pattern.compile("anyConfidenceBelow\\s+([0-9.]+)");
 
+    /**
+     * 자기일관성 불일치 캡 (F-SCR-001). 같은 발화를 다시 채점해 등급이 갈리면 씌운다.
+     *
+     * <p>❗복창 캡과 <b>같은 이유로 R-05 아래여야 한다</b> — 위면 숫자만 내려가고 게이트가
+     * 아무 일도 안 한다. 그리고 라이브 confidence 가 6/6 전부 1.0 이라({@code #339})
+     * <b>지금 R-05 를 실제로 물리는 경로가 이 둘뿐</b>이다.
+     */
+    private static final Pattern DISAGREE =
+            Pattern.compile("^DISAGREEMENT_CONFIDENCE_CAP\\s*=\\s*([0-9.]+)", Pattern.MULTILINE);
+
     @Test
     @DisplayName("❗복창으로 깎은 값이 R-05 를 발동시킨다 — 캡이 임계값 이상이면 룰이 죽는다")
     void theEchoCapStillTripsR05() throws Exception {
@@ -62,6 +72,26 @@ class EchoCapBelowR05Test {
      * 못 읽으면 <b>실패시킨다.</b> 정규식이 낡아 값을 못 뽑으면 위 단정이 무엇을 비교하든
      * 통과하게 되고, 그건 대조가 없는 것과 같다.
      */
+    @Test
+    @DisplayName("❗자기일관성 캡 < R-05 임계값 — 위면 게이트가 안 받는다 (F-SCR-001)")
+    void theDisagreementCapAlsoTripsTheRule() throws Exception {
+        BigDecimal cap = read(SCORING, DISAGREE, "ai-service 의 DISAGREEMENT_CONFIDENCE_CAP");
+        BigDecimal threshold = read(RULES, R05, "gate_rules.yaml 의 R-05 임계값");
+
+        assertThat(cap)
+                .as("두 번 채점이 갈렸는데 확신도가 임계값 위면 R-05 가 안 물고, 그러면 "
+                        + "이 검사가 도는데 결과가 없다. 라이브 자기보고가 전부 1.0 이라"
+                        + "(#339) 지금 그 룰을 물리는 경로는 캡 둘뿐이다")
+                .isLessThan(threshold);
+    }
+
+    @Test
+    @DisplayName("❗두 캡이 서로 다른 값이다 — 같으면 어느 이유로 깎였는지 숫자로 안 갈린다")
+    void theTwoCapsAreDistinguishable() throws Exception {
+        assertThat(read(SCORING, DISAGREE, "자기일관성 캡"))
+                .isNotEqualByComparingTo(read(SCORING, CAP, "복창 캡"));
+    }
+
     private static BigDecimal read(Path file, Pattern pattern, String what) throws Exception {
         Matcher m = pattern.matcher(Files.readString(file));
         assertThat(m.find()).as("%s 를 못 읽었다 — 문면이 바뀌었으면 이 정규식도 같이 고친다. "
