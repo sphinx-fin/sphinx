@@ -105,6 +105,21 @@ public class AggregateService {
      */
     static final BigDecimal HOMOGENEITY_MIN = new BigDecimal("0.30");
 
+    /**
+     * 입력 시간 중앙값이 전체의 이 비율 이하이면 이상치 (기획 7-4 2단계 ③).
+     *
+     * <p>❗<b>빠른 쪽만 본다.</b> 조항은 <i>"분포가 다른 곳과 다르면"</i> 이라 방향을 안
+     * 정하는데, 절대값 차로 양쪽을 다 물면 <b>느린 지점이 걸린다.</b> 느린 이유는 대개
+     * 취약 고객이 많은 것이고 그건 이상이 아니라 <b>정상이며 오히려 잘 하고 있는 것</b>이다
+     * — 그 지점을 컴플라이언스로 이관하면 이 기능이 보호하려던 사람을 겨눈다.
+     *
+     * <p>❗<b>실측이 아니다.</b> 합성 세션에는 코칭이 없어 <i>"코칭된 답변은 얼마나 빠른가"</i>
+     * 를 잴 표본이 없다. 절대 시간(ms)이 아니라 <b>전체 중앙값과의 비율</b>로 두는 이유가
+     * 이것이다 — 기준선이 데이터에서 나오므로 상품·문항 길이가 바뀌어도 따라간다.
+     * 실세션이 쌓이면 분포를 보고 다시 잡는다({@code #327}).
+     */
+    static final BigDecimal FAST_INPUT_RATIO_MAX = new BigDecimal("0.5");
+
 
     /** 기획서 4절 — 실데이터는 쓰지 않는다. 클래스 주석 참고. */
     private static final boolean SYNTHETIC = true;
@@ -179,8 +194,8 @@ public class AggregateService {
      * <b>문장 유사도가 지나치게 균질하거나</b>, 응답 지연시간 분포가 다른 곳과 다르면
      * 이상치로 표시해 컴플라이언스 부서에 이관한다.</blockquote>
      *
-     * <p>앞의 둘을 낸다. 셋째(지연 분포)는 {@code inputMeta} 가 불변 기록으로만 가고
-     * <b>세션에 안 남아서</b> 지금은 셀 수 없다 — 별건이다.
+     * <p><b>셋 다 낸다.</b> 셋째(지연 분포)는 {@code inputMeta} 가 불변 기록으로만 가고
+     * 세션에 안 남아 한동안 못 셌는데, 총 입력 시간만 세션에 남겨 이었다.
      *
      * <p>❗<b>개인을 지목하지 않는다.</b> {@code key} 는 가명이고 발화는 한 글자도 안 나간다.
      * 기획서가 <i>"개인 세션 단위 판정이 아닌 통계적 이상 탐지"</i> 라고 못박은 이유가
@@ -195,7 +210,9 @@ public class AggregateService {
      */
     public record CoachingSignal(String groupBy, String key, long sessions,
                                  BigDecimal firstPassRate, BigDecimal homogeneity,
+                                 Long medianInputMs,
                                  BigDecimal orgFirstPassRate, BigDecimal orgHomogeneity,
+                                 Long orgMedianInputMs,
                                  List<String> reasons, boolean masked) {}
 
     public record CoachingView(boolean synthetic, String scope, List<CoachingSignal> rows) {}
@@ -376,6 +393,7 @@ public class AggregateService {
 
         BigDecimal orgPass = firstPassRate(pool);
         BigDecimal orgHomogeneity = homogeneity(pool);
+        Long orgMedianMs = medianInputMs(pool);
 
         List<CoachingSignal> rows = new ArrayList<>();
         for (var entry : bySeller.entrySet()) {
@@ -383,6 +401,7 @@ public class AggregateService {
             boolean masked = mine.size() < MIN_CELL_SAMPLE;
             BigDecimal pass = masked ? null : firstPassRate(mine);
             BigDecimal homo = masked ? null : homogeneity(mine);
+            Long medianMs = masked ? null : medianInputMs(mine);
 
             List<String> reasons = new ArrayList<>();
             if (pass != null && orgPass != null
@@ -393,8 +412,16 @@ public class AggregateService {
             if (homo != null && homo.compareTo(HOMOGENEITY_MIN) >= 0) {
                 reasons.add("서로 다른 고객의 답변이 %s%% 겹칩니다".formatted(percent(homo)));
             }
+            if (medianMs != null && orgMedianMs != null && orgMedianMs > 0
+                    && BigDecimal.valueOf(medianMs)
+                            .divide(BigDecimal.valueOf(orgMedianMs), 4, RoundingMode.HALF_UP)
+                            .compareTo(FAST_INPUT_RATIO_MAX) <= 0) {
+                reasons.add("답변 입력이 전체 중앙값(%d초)의 절반 이하입니다 (%d초)"
+                        .formatted(orgMedianMs / 1000, medianMs / 1000));
+            }
             rows.add(new CoachingSignal("seller", entry.getKey(), mine.size(),
-                    pass, homo, orgPass, orgHomogeneity, List.copyOf(reasons), masked));
+                    pass, homo, medianMs, orgPass, orgHomogeneity, orgMedianMs,
+                    List.copyOf(reasons), masked));
         }
         return new CoachingView(SYNTHETIC, label(scope), List.copyOf(rows));
     }
@@ -457,6 +484,30 @@ public class AggregateService {
         }
         double mean = perItem.stream().mapToDouble(Double::doubleValue).sum() / perItem.size();
         return BigDecimal.valueOf(mean).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 답변 입력 시간의 <b>중앙값</b>(ms). 값이 하나도 없으면 {@code null}.
+     *
+     * <p>평균이 아니라 중앙값인 이유: 한 사람이 화면을 켜 두고 자리를 비우면 평균이 통째로
+     * 끌려간다. 이 신호가 보려는 것은 <b>대체로 얼마나 빨리 답하는가</b>다.
+     *
+     * <p>❗값이 <b>없는 답변은 안 센다</b> — 0 으로 채우면 화면이 안 보낸 세션이 전부
+     * "즉답" 이 되어 그 판매자가 이상치로 뜬다.
+     */
+    private static Long medianInputMs(List<Session> pool) {
+        List<Long> values = new ArrayList<>();
+        for (Session session : pool) {
+            values.addAll(session.inputMsByItem().values());
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        java.util.Collections.sort(values);
+        int mid = values.size() / 2;
+        return values.size() % 2 == 1
+                ? values.get(mid)
+                : (values.get(mid - 1) + values.get(mid)) / 2;
     }
 
     private static String percent(BigDecimal ratio) {

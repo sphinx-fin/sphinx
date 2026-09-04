@@ -11,6 +11,7 @@ import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.core.session.SessionFsm;
 import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.security.AccessPolicy;
@@ -608,6 +609,67 @@ class AggregateServiceTest {
         assertThat(normal.get(0).homogeneity())
                 .as("라벨 코퍼스 212쌍 실측 평균이 0.055 다 — 정상 발화는 그 근처에 있다")
                 .isLessThan(AggregateService.HOMOGENEITY_MIN);
+    }
+
+    /** 입력 시간을 실어 세션을 심는다. {@code ms=null} 이면 화면이 안 보낸 경우다. */
+    private void seedWithInputMs(String seller, int count, Long ms) {
+        for (int i = 0; i < count; i++) {
+            Session s = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
+                    "s02-survey-v1", Map.of(), seller, "BR-1"));
+            InputMeta meta = ms == null ? null
+                    : new InputMeta(300, ms, false, 2, 60, false);
+            s.recordAnswer(ITEM, VARIED[i % VARIED.length], judgment(ITEM, Grade.U2), meta);
+            em.persist(s);
+        }
+    }
+
+    @Test
+    @DisplayName("★ 답변이 유독 빠른 판매자가 뜬다 — 기획 7-4 2단계 ③ 응답 지연 분포")
+    void anUnusuallyFastSellerShowsUp() {
+        seedWithInputMs("seller-fast", 30, 4_000L);      // 4초
+        seedWithInputMs("seller-usual", 30, 40_000L);    // 40초
+
+        var flagged = orgCoaching().rows().stream()
+                .filter(r -> r.reasons().stream().anyMatch(x -> x.contains("입력이"))).toList();
+
+        assertThat(flagged).hasSize(1);
+        assertThat(flagged.get(0).medianInputMs()).isEqualTo(4_000L);
+        assertThat(flagged.get(0).orgMedianInputMs())
+                .as("전체 중앙값이 기준이다 — 절대 시간으로 재면 문항 길이가 바뀔 때 같이 틀린다")
+                .isNotNull();
+    }
+
+    @Test
+    @DisplayName("❗느린 판매자는 안 문다 — 취약 고객이 많은 지점을 컴플라이언스로 넘기면 안 된다")
+    void aSlowSellerIsNeverFlagged() {
+        seedWithInputMs("seller-slow", 30, 120_000L);    // 2분 — 고령자 응대
+        seedWithInputMs("seller-usual", 30, 40_000L);
+
+        var slow = orgCoaching().rows().stream()
+                .filter(r -> "S-" .equals(r.key().substring(0, 2)))
+                .filter(r -> Long.valueOf(120_000L).equals(r.medianInputMs()))
+                .findFirst().orElseThrow();
+
+        assertThat(slow.reasons())
+                .as("조항은 '분포가 다르면' 이라 방향을 안 정하지만, 양쪽을 다 물면 "
+                        + "이 기능이 보호하려던 지점을 이관하게 된다")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗값을 안 보낸 답변은 0 이 아니라 없는 것이다 — 0 으로 채우면 전부 즉답이 된다")
+    void answersWithoutTimingAreNotCountedAsZero() {
+        seedWithInputMs("seller-notiming", 30, null);
+        seedWithInputMs("seller-usual", 30, 40_000L);
+
+        var noTiming = orgCoaching().rows().stream()
+                .filter(r -> r.medianInputMs() == null).toList();
+
+        assertThat(noTiming)
+                .as("화면이 옛 버전인 판매자가 전부 '즉답' 으로 뜨면 안 된다")
+                .hasSize(1);
+        assertThat(noTiming.get(0).reasons()).isEmpty();
     }
 
     @Test
