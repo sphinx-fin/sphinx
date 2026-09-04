@@ -52,7 +52,7 @@ def _rubric(item_id: str, product_type: str, related: tuple[str, ...]):
     return rubrics.Rubric(
         item_id=item_id, product_type=product_type, name="시험용", status="draft",
         required_elements=("무언가",), u1_requires=1, misconception_conditions=("조건",),
-        related_misconceptions=related,
+        related_misconceptions=related, unlinked_until=None,
     )
 
 

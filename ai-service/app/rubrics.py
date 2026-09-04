@@ -30,6 +30,7 @@ class Rubric:
     u1_requires: int                      # 그중 **몇 개**를 충족해야 U1 인가 (아래 참조)
     misconception_conditions: tuple[str, ...]  # 언급되면 오해(U4)로 보는 것
     related_misconceptions: tuple[str, ...]    # 오해 라이브러리 유형ID
+    unlinked_until: tuple[str, str] | None     # (근거, 빼는 조건) — 링크가 빈 이유
 
     @property
     def is_draft(self) -> bool:
@@ -89,6 +90,27 @@ def _parse(path: Path) -> Rubric:
             "적는다. 안 적으면 U1↔U2 가 다시 홀리스틱 판단이 된다(F-CMN-003 실측: "
             "사람 불일치 19건 중 9건이 그 경계)"
         )
+    related = tuple(raw.get("related_misconceptions") or ())
+
+    # ❗**양방향으로 대조한다.** 한쪽만 보면 둘 중 하나가 조용하다.
+    #
+    #   링크가 있는데 unlinked_until 도 있다   → 모순. 어느 쪽이 참인지 알 수 없다 → 터진다
+    #   링크가 없는데 unlinked_until 이 없다    → enforcement_gaps() 가 기동 경고로 받는다
+    #                                            (여기서 안 던진다 — 그 함수의 이유 참고)
+    block = raw.get("unlinked_until")
+    unlinked: tuple[str, str] | None = None
+    if block is not None:
+        if related:
+            raise ValueError(
+                f"{path.name}: related_misconceptions 가 있는데 unlinked_until 도 있다 — "
+                "그건 링크가 **빈** 이유를 적는 자리다. 둘 다 두면 어느 쪽이 참인지 모른다"
+            )
+        if not isinstance(block, dict) or not block.get("reason") or not block.get("until"):
+            raise ValueError(
+                f"{path.name}: unlinked_until 은 reason·until 두 키가 다 있어야 한다 — "
+                f"받은 값 {block!r}. `until` 이 없으면 **지우는 사건이 안 온다**(결정 10.67)"
+            )
+        unlinked = (str(block["reason"]).strip(), str(block["until"]).strip())
 
     return Rubric(
         item_id=raw["item_id"],
@@ -98,7 +120,8 @@ def _parse(path: Path) -> Rubric:
         required_elements=elements,
         u1_requires=bar,
         misconception_conditions=tuple(raw.get("misconception_conditions") or ()),
-        related_misconceptions=tuple(raw.get("related_misconceptions") or ()),
+        related_misconceptions=related,
+        unlinked_until=unlinked,
     )
 
 
@@ -122,32 +145,20 @@ def all_rubrics() -> dict[str, Rubric]:
     return dict(_all())
 
 
-#: 링크가 없는 것이 **지금은 옳지만 영구는 아닌** 루브릭 → (근거, 빼는 조건).
+#: ❗**링크가 빈 이유는 루브릭 파일이 말한다** (이슈 #284 (c)).
+#:
+#: 전에는 여기 `_UNLINKED_UNTIL` 하드코딩 dict 가 있었고 **같은 내용이 그 루브릭 YAML
+#: 주석에도** 있었다 — 두 벌이면 갈린다. 정세현이 `#284` 에서 그 자리를 짚었다:
+#: *"루브릭에 명시하고 로딩 시점에 대조하면 빈 목록이 「빠뜨림」이 아니라 「의도」라고
+#: 파일이 스스로 말한다."*
 #:
 #: ## 왜 "의도" 가 아니라 "아직" 인가 (`#298` 리뷰)
 #:
-#: 처음에는 이 목록 없이 냈고 `VAR-PARTIAL-DEPOSIT-INSURANCE` 를 *"누가 봐도 M02 자리인데
-#: 링크가 비어 있다 — 단순 누락으로 보인다"* 고 적었다. **틀렸다.** 그 파일 머리말이 이유를
-#: 이미 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고, 변액에서 *"예금자보호 되는 줄"*
-#: 은 **부분적으로 참**이라 결정론 상향이 **오판**이었다.
+#: 「의도적으로 안 걸었다」로 적으면 **영구히 그렇다고 읽히고 지우는 사건이 안 온다**
+#: (결정 10.67). 그래서 파일이 `reason`(왜 지금 없는 게 옳은가)과 `until`(무엇이 생기면
+#: 빼는가)을 **둘 다** 적게 하고, `_parse` 가 한쪽만 있으면 터진다.
 #:
-#: 그 다음에 `_INTENTIONALLY_UNLINKED` 로 고쳤는데 그것도 한 칸 틀렸다. **"의도적으로 링크
-#: 없음" 은 영구히 그렇다고 읽힌다.** 결정 10.24 가 답까지 적어 뒀다 —
-#:
-#:     (a)를 고르면 변액용 **신규 유형(부분 보호 범위 오인)** 이 필요하고,
-#:     그 유형은 **인용 가능한 근거가 있어야 한다**(3.3·3.17)
-#:
-#: 즉 지금 상태는 *"링크가 없기로 정했다"* 가 아니라 **"그 유형이 아직 없다"** 다. 앞엣것으로
-#: 적으면 **지우는 사건이 안 온다** — 결정 10.67(OIDC 이름 표기)에서 정리한 그 모양이다.
-#:
-#: 그래서 **조건을 기계가 볼 수 있게** 적는다. `test_unlinked_until_has_not_expired` 가
-#: 라이브러리에 변액을 덮는 예금자보호 유형이 열리는 순간 실패하고, 그때 이 항목을 뺀다.
-_UNLINKED_UNTIL: dict[str, tuple[str, str]] = {
-    "VAR-PARTIAL-DEPOSIT-INSURANCE": (
-        "PR #57",
-        "오해 라이브러리에 VARIABLE_INSURANCE 를 덮는 예금자보호 유형이 생길 때 (결정 10.24)",
-    ),
-}
+#: `test_unlinked_until_has_not_expired` 가 그 조건이 충족되는 순간 실패한다.
 
 
 def enforcement_gaps() -> dict[str, tuple[str, ...]]:
@@ -187,16 +198,16 @@ def enforcement_gaps() -> dict[str, tuple[str, ...]]:
     """
     gaps: dict[str, tuple[str, ...]] = {}
     for item_id, rubric in _all().items():
-        if item_id in _UNLINKED_UNTIL:
-            continue                    # 아직 그 유형이 없다 — 위 주석 참고
+        if rubric.unlinked_until is not None:
+            continue                    # 파일이 이유·빼는 조건을 적었다 — 위 주석 참고
         if rubric.misconception_conditions and not rubric.related_misconceptions:
             gaps[item_id] = rubric.misconception_conditions
     return gaps
 
 
 def unlinked_until() -> dict[str, tuple[str, str]]:
-    """링크가 아직 없는 루브릭 → (근거, 빼는 조건). 공개 진입점."""
-    return dict(_UNLINKED_UNTIL)
+    """링크가 아직 없는 루브릭 → (근거, 빼는 조건). **루브릭 파일에서 읽는다.**"""
+    return {i: r.unlinked_until for i, r in _all().items() if r.unlinked_until is not None}
 
 
 def enforcement_coverage() -> tuple[int, int, int]:
@@ -209,6 +220,43 @@ def enforcement_coverage() -> tuple[int, int, int]:
     declared = sum(len(r.misconception_conditions) for r in rs)
     linked = sum(1 for r in rs if r.related_misconceptions)
     return declared, linked, len(rs)
+
+
+def condition_enforcement() -> tuple[int, int, int]:
+    """**조건 단위**로 (강제 가능, 권고만, 이유가 적힌 것).
+
+    ❗`enforcement_coverage()` 는 *루브릭* 단위라 *"46개 중 무엇이 강제되고 무엇이
+    권고인지"* 에 답하지 못한다 — 정세현이 `#284` 에서 물은 것이 그 질문이다.
+
+    ## 조건 하나하나를 유형에 대응시키지는 못한다
+
+        `"증권사가 망할 리 없다"` 가 어느 유형인지 **코드가 알 방법이 없다.**
+        그걸 알아내려는 것이 `(b)`(유사도 매칭)이고, 그건 채점 동작을 바꾸는 일이라 별건이다.
+        (그리고 `#364`·임베딩 실측이 그 방향의 한계를 이미 보여 줬다 — 닮음으로는 안 된다.)
+
+    ## 그래서 **확실한 쪽만** 조건 단위로 센다
+
+        링크가 있는 루브릭의 조건    → 강제될 **수** 있다 (어느 것이 강제되는지는 못 가른다)
+        링크가 없는 루브릭의 조건    → 하나도 강제될 수 없다. **이건 계산이 아니라 사실이다**
+
+    두 번째가 정세현이 원한 답이다 — 그 조건들은 **프롬프트 문면일 뿐**이고, 모델이
+    놓치면 아무 일도 안 일어난다(`els-0028` 이 실물).
+
+    세 번째 값(`explained`)은 **그중 이유가 파일에 적힌 것**이다. `advisory` 와 같아야
+    한다 — 다르면 어딘가 `unlinked_until` 이 없는 채로 조건만 선언돼 있다.
+    """
+    enforced = advisory = explained = 0
+    for rubric in _all().values():
+        n = len(rubric.misconception_conditions)
+        if not n:
+            continue
+        if rubric.related_misconceptions:
+            enforced += n
+        else:
+            advisory += n
+            if rubric.unlinked_until is not None:
+                explained += n
+    return enforced, advisory, explained
 
 
 def assert_related_misconceptions_exist() -> None:
