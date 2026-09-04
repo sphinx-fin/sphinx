@@ -48,6 +48,7 @@ REQUIRED = frozenset({
     "ngram_match", "ngram_review",
     "echo_match", "echo_margin_min", "echo_confidence_cap",
     "disagreement_confidence_cap",
+    "pasted_confidence_cap", "no_typing_ms", "no_typing_min_chars",
     "max_scoring_attempts",
 })
 
