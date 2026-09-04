@@ -463,6 +463,27 @@ export interface ProductSummary {
   status: "parsed" | "parse_failed";
 }
 
+/**
+ * 등급별 **건수**(비율이 아니다 — 이슈 #177).
+ *
+ * 건수로 받으면 화면이 비율·합계를 다 만들 수 있고 `u1+u2+u3+u4 === n` 검산이 성립한다.
+ * 비율로 받으면 반올림 때문에 그 검산이 사라진다.
+ *
+ * ❗**`misrate` 하나로는 「이해했는가」를 말할 수 없다.** 41% 만 보이면 *"59% 는 이해했다"*
+ * 로 읽히는데 그 안에 부분이해·미이해가 섞여 있고, **U1 이 0 건이어도 같은 값이 나온다.**
+ * 계약이 이 필드를 둔 이유가 그것이다.
+ */
+export interface GradeDistribution {
+  /** 이해 */
+  u1: number;
+  /** 부분이해 */
+  u2: number;
+  /** 미이해 */
+  u3: number;
+  /** 오해 */
+  u4: number;
+}
+
 export interface HeatmapCell {
   product: string;
   item: string;
@@ -480,6 +501,14 @@ export interface HeatmapCell {
    * 사라진다** — 그게 데모에서 보여야 하는 것인데.
    */
   masked: boolean;
+  /**
+   * 등급별 건수. 소표본이면 계약상 {@code null} 이다.
+   *
+   * 계약(`HeatmapCell.grades`)과 서버(`AggregateService.Cell`)에 있는데 **이 타입에만
+   * 없었다** — 화면이 등급 분포를 아예 모르고 있었다는 뜻이다(#365 리뷰에서 대조 테스트를
+   * 만들다 드러났다).
+   */
+  grades: GradeDistribution | null;
 }
 
 export interface HeatmapResponse {
