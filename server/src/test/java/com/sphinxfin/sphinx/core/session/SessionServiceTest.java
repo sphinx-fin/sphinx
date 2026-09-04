@@ -503,8 +503,8 @@ class SessionServiceTest {
         //
         // 여기서는 askedQuestionsByItem 과 judgments 를 실제로 갈라 놓고 judge() 를 부른다.
         Session s = service.create(cmd(null));
-        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
-        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordJudgment(s.id(), j("A", Grade.U1));   // B 는 채점이 실패했다고 본다
 
         GateResult r = service.judge(s.id());
@@ -524,8 +524,8 @@ class SessionServiceTest {
     @DisplayName("❗판정 뒤에 마저 채점해도 기록된 미측정 수는 그때의 값이다 — 재계산값이 아니다")
     void theRecordedGateKeepsTheNumberItWasJudgedWith() {
         Session s = service.create(cmd(null));
-        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
-        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordJudgment(s.id(), j("A", Grade.U1));
         service.judge(s.id());
 
@@ -543,8 +543,8 @@ class SessionServiceTest {
     @DisplayName("❗미리보기도 같은 답을 낸다 — 미리보기가 더 낙관적이면 재설명 루프를 건너뛴다")
     void thePreviewAgreesWithTheVerdict() {
         Session s = service.create(cmd(null));
-        service.recordAskedQuestion(s.id(), "A", "A 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
-        service.recordAskedQuestion(s.id(), "B", "B 질문", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordJudgment(s.id(), j("A", Grade.U1));
 
         assertThat(service.previewGate(s.id()).signal())

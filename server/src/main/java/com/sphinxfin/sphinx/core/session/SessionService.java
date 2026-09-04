@@ -248,9 +248,10 @@ public class SessionService {
      */
     @Transactional
     public Session recordAskedQuestion(String sessionId, String itemId, String question,
+                                       String questionType,
                                        EvidenceRecorder.QuestionSource source) {
         Session session = get(sessionId);
-        session.recordAskedQuestion(itemId, question, source);
+        session.recordAskedQuestion(itemId, question, questionType, source);
         return repository.save(session);
     }
 
@@ -294,14 +295,15 @@ public class SessionService {
                 .content();
         session.fire(SessionFsm.Event.REQUEST_REEXPLAIN);
         repository.save(session);
-        String reverify = reverifyQuestion(session, itemId, riskItem, productType);
+        var reverify = reverifyQuestion(session, itemId, riskItem, productType);
         // ❗**보여줄 문면을 여기서 기록한다** (이슈 #274). 화면은 계약대로 이 문장을 띄우고
         // 고객은 그것에 답하는데, 안 남기면 /answers 가 **원 질문 문면**으로 채점하고
         // 기록한다 — 필드가 비는 것보다 나쁘다. 기록이 다른 질문을 가리키니 감사 시점에
         // 아무도 의심하지 않는다.
-        session.recordAskedQuestion(itemId, reverify, EvidenceRecorder.QuestionSource.REVERIFY);
+        session.recordAskedQuestion(itemId, reverify.question(), reverify.questionType(),
+                EvidenceRecorder.QuestionSource.REVERIFY);
         repository.save(session);
-        return new ReExplanation(itemId, content, session.vulnerable(), reverify);
+        return new ReExplanation(itemId, content, session.vulnerable(), reverify.question());
     }
 
     /**
@@ -343,12 +345,15 @@ public class SessionService {
                 session.matchedMisconceptions(exceptItem));
     }
 
-    private String reverifyQuestion(Session session, String itemId, RiskItem riskItem,
-                                    String productType) {
+    private AiServiceClient.Question reverifyQuestion(Session session, String itemId,
+                                                     RiskItem riskItem, String productType) {
         var context = interviewContext(session, itemId);
-        return aiServiceClient
-                .question(riskItem, List.of(), productType, "reverify", context)
-                .question();
+        // ❗**이 항목에 이미 쓴 유형을 넘긴다** — 재검증이 첫 질문과 같은 모양이면 같은
+        // 각도로 두 번 재는 것이고, 유형이 고정이면 문면이 매번 생성돼도 대비할 수 있다
+        // (기획서 7-4 1단계). 여기서 읽고 아래에서 기록하는 순서라야 이번 유형이 자기
+        // 자신을 배제하지 않는다.
+        return aiServiceClient.question(
+                riskItem, session.askedTypes(itemId), productType, "reverify", context);
     }
 
     /**

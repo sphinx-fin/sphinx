@@ -145,13 +145,17 @@ public class SessionController {
         //
         // 지금 물으려는 항목(next)의 앞선 판정은 뺀다 — 자기 직전 등급이 맥락으로 가면
         // 그것이 질문에 실려 고객이 자기 점수를 알게 된다.
-        var generated = aiServiceClient.question(next, List.of(), productTypeOf(session),
+        //
+        // ❗**이 항목에 이미 쓴 질문 유형도 넘긴다**(이슈 #325). 재설명 뒤 재검증이 같은
+        // 항목을 다시 물어보는데, 유형까지 같으면 같은 각도로 두 번 재는 것이 된다.
+        var generated = aiServiceClient.question(next, session.askedTypes(next.itemId()),
+                productTypeOf(session),
                 "initial", sessionService.interviewContext(session, next.itemId()));
         String question = generated.question();
         // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
         // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
         // 출처를 **여기서** 정한다 — 질문을 만든 자리가 그것을 아는 유일한 곳이다.
-        sessionService.recordAskedQuestion(sid, next.itemId(), question,
+        sessionService.recordAskedQuestion(sid, next.itemId(), question, generated.questionType(),
                 generated.fallbackUsed()
                         ? EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK
                         : EvidenceRecorder.QuestionSource.DISPLAYED);

@@ -32,6 +32,7 @@ import lombok.experimental.Accessors;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +41,7 @@ import com.sphinxfin.sphinx.core.persistence.JsonMapConverter;
 import com.sphinxfin.sphinx.core.persistence.JudgmentMapConverter;
 import com.sphinxfin.sphinx.core.persistence.RuleRefListConverter;
 import com.sphinxfin.sphinx.core.persistence.StringListConverter;
+import com.sphinxfin.sphinx.core.persistence.StringListMapConverter;
 
 /**
  * F-INT-001 세션 집합체(JPA 엔티티). 소유: 강희진
@@ -167,6 +169,27 @@ public class Session extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private Map<String, EvidenceRecorder.QuestionSource> askedQuestionSourceByItem = new HashMap<>();
+
+    /**
+     * 항목별로 <b>이미 쓴 질문 유형</b>(situation·amount·condition). 물어본 순서를 지킨다.
+     *
+     * <p>❗<b>같은 항목을 두 번 물어보는 자리가 있다</b> — 재검증이다(F-INT-004). 그때
+     * 유형까지 같으면 <b>같은 모양의 질문을 한 번 더 하는 것</b>이 되고, 그건 두 가지를
+     * 동시에 깬다. 측정으로는 <i>같은 각도로 두 번 재는 것</i>이라 재검증이 새로 아는 것이
+     * 없고, 기획서 7-4 로는 <b>판매자가 준비시킬 문항이 사실상 하나로 줄어든다</b> —
+     * 문면이 매번 생성돼도 유형이 고정이면 대비할 수 있다.
+     *
+     * <p>ai-service 는 이 목록을 받아 <b>남은 유형에서 고른다</b>. 셋을 다 썼으면 전체로
+     * 되돌린다(굶기지 않는다) — 인터뷰가 멈추는 것이 반복보다 나쁘다.
+     *
+     * <p><b>세션 단위가 아니라 항목 단위</b>다. 유형은 항목의 성격을 따라간다 —
+     * {@code amount} 는 금액 조건이 있는 항목에서만 성립한다. 세션 전체로 배제하면
+     * 뒤쪽 항목이 자기에게 맞는 유형을 못 쓴다.
+     */
+    @Convert(converter = StringListMapConverter.class)
+    @Column(name = "asked_types", columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, List<String>> askedTypesByItem = new LinkedHashMap<>();
 
     // 항목별 최신 판정(AI 측정값). 게이트 판정 입력으로 쓰인다. JSON 저장.
     @Convert(converter = JudgmentMapConverter.class)
@@ -337,10 +360,24 @@ public class Session extends BaseEntity {
      * <p>둘을 한 메서드로 묶어 두는 이유는 <b>따로 쓰는 경로를 안 만들려는 것</b>이다 —
      * 문면은 새것인데 출처가 옛것으로 남으면 아예 안 남기는 것보다 나쁘다.
      */
-    public void recordAskedQuestion(String itemId, String question,
+    public void recordAskedQuestion(String itemId, String question, String questionType,
                                     EvidenceRecorder.QuestionSource source) {
         askedQuestionsByItem.put(itemId, question);
         askedQuestionSourceByItem.put(itemId, source);
+        if (questionType != null && !questionType.isBlank()) {
+            // ❗**같은 유형을 두 번 적지 않는다.** 목록은 "무엇을 이미 썼나" 이지 몇 번
+            // 썼나가 아니고, 중복이 쌓이면 ai-service 의 배제 계산은 그대로인데 프롬프트에
+            // 실리는 문면만 길어진다. 순서는 유지한다.
+            List<String> used = askedTypesByItem.computeIfAbsent(itemId, k -> new ArrayList<>());
+            if (!used.contains(questionType)) {
+                used.add(questionType);
+            }
+        }
+    }
+
+    /** 그 항목에 이미 쓴 질문 유형(물어본 순서). 없으면 빈 목록. */
+    public List<String> askedTypes(String itemId) {
+        return List.copyOf(askedTypesByItem.getOrDefault(itemId, List.of()));
     }
 
     /**
