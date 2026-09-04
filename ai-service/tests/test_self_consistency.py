@@ -105,6 +105,10 @@ def test_a_grade_that_does_not_reproduce_loses_confidence() -> None:
     assert result.confidence == scoring.DISAGREEMENT_CONFIDENCE_CAP
     assert "재현되지 않아" in result.reason, (
         "조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다")
+    assert "U3" not in result.reason, (
+        "❗두 번째 등급이 새면 판매자가 '이 항목은 경계에 걸려 있다' 를 읽는다 — "
+        "게이트를 GREEN 으로 넘기려면 어디를 다시 물어야 하는지 지목하는 것이다"
+        "(기획 7-4 · #160 ②). reason 은 JudgmentView 로 화면에 그대로 나간다")
 
 
 def test_the_grade_itself_never_changes() -> None:

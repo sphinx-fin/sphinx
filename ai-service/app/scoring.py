@@ -86,6 +86,10 @@ MAX_SCORING_ATTEMPTS = 2
 #:     U1 만   21/70 = 30.0%
 #:
 #: `U4` 를 안 보는 이유는 같은 계산이다 — 이미 R-01 이 RED 로 막는다.
+#:
+#: ❗이 값은 `scoring_thresholds.yaml`(`#368`)로 안 옮긴다. **임계값이 아니라 목록**이고,
+#: 무엇을 담을지가 위의 **게이트 룰 순서 대조**에서 나온다 — 룰이 바뀌면 같이 봐야 하는
+#: 값이라 숫자 튜닝과 성격이 다르다.
 CONSISTENCY_GRADES = ("U1",)
 
 #: 두 번 채점이 갈렸을 때 씌우는 상한. **R-05(`anyConfidenceBelow 0.7`) 아래여야**
@@ -443,8 +447,15 @@ def cap_confidence_if_inconsistent(
     )
     return judgment.model_copy(update={
         "confidence": DISAGREEMENT_CONFIDENCE_CAP,
-        "reason": f"{judgment.reason} (같은 발화를 다시 채점하니 "
-                  f"{second.grade.value} — 재현되지 않아 확신도 상한 적용)",
+        # ❗**두 번째 등급을 안 적는다** (#370 리뷰). 이 문자열은 `JudgmentView.reason`
+        # 으로 **판매자 화면에 그대로 나간다**. 두 번째 등급이 새면 판매자가 *"이 항목은
+        # U1/U2 경계에 정확히 걸려 있다"* 를 읽고, 그건 게이트를 GREEN 으로 넘기려면
+        # 어디를 다시 물어야 하는지를 지목한다(기획 7-4). `apply_misconception_floor`
+        # 가 유형ID 를 여기 안 적는 것과 같은 자리다(#160 ②).
+        #
+        # 복창 캡은 이 선을 안 넘는다 — 포함도는 **측정값**이라 다음 행동을 지정하지
+        # 않는다. 두 번째 등급은 로그에 남고, 감사 경로는 불변 기록이다.
+        "reason": f"{judgment.reason} (재채점에서 등급이 재현되지 않아 확신도 상한 적용)",
     })
 
 
