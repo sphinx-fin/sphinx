@@ -63,7 +63,7 @@ import java.util.Set;
  * 쓴다. 미탐 쪽으로 잃는 것이 <b>전부 U1 이 아닌 짧은 답</b>이라 이 방향의 대가가 싸다.
  * 재검증 쌍이 쌓이면({@code #327}) 그 분포로 다시 본다.
  */
-final class AnswerRepetition {
+public final class AnswerRepetition {
 
     /**
      * 이 이상 겹치면 <b>같은 말</b>로 본다. 위 표에서 잰 값이다
@@ -80,27 +80,42 @@ final class AnswerRepetition {
 
     /** 두 발화가 사실상 같은 말인가. 어느 한쪽이 없으면 {@code false}. */
     static boolean essentiallySame(String a, String b) {
+        return similarity(a, b) >= THRESHOLD;
+    }
+
+    /**
+     * 두 발화의 겹침 {@code 0.0 ~ 1.0}. 어느 한쪽이 없거나 비면 {@code 0.0}.
+     *
+     * <p>❗<b>이 계산을 두 벌 만들지 않는다.</b> 코칭 정황 집계(기획 7-4 2단계)가
+     * <i>"답변의 문장 유사도가 지나치게 균질한가"</i> 를 재는 데 같은 값을 쓴다. 각자
+     * 정규화하면 <b>미묘하게 다른 두 정규화</b>가 생기고, 그러면 되풀이 판정과 균질도가
+     * 서로를 설명하지 못한다({@code CanonicalJson} 을 한 벌만 두는 것과 같은 이유).
+     *
+     * <p>돌려주는 것이 불리언이 아니라 <b>값</b>인 것도 그래서다 — 집계는 임계값이 아니라
+     * <b>분포</b>를 봐야 한다.
+     */
+    public static double similarity(String a, String b) {
         if (a == null || b == null) {
-            return false;
+            return 0.0;
         }
         String na = normalize(a);
         String nb = normalize(b);
         if (na.isEmpty() || nb.isEmpty()) {
-            return false;
+            return 0.0;
         }
         if (na.equals(nb)) {
-            return true;   // 짧은 답("네")은 바이그램이 안 나온다 — 같음은 여기서 답한다
+            return 1.0;   // 짧은 답("네")은 바이그램이 안 나온다 — 같음은 여기서 답한다
         }
         Set<String> ba = bigrams(na);
         Set<String> bb = bigrams(nb);
         if (ba.isEmpty() || bb.isEmpty()) {
-            return false;
+            return 0.0;
         }
         Set<String> intersection = new HashSet<>(ba);
         intersection.retainAll(bb);
         Set<String> union = new HashSet<>(ba);
         union.addAll(bb);
-        return (double) intersection.size() / union.size() >= THRESHOLD;
+        return (double) intersection.size() / union.size();
     }
 
     /**

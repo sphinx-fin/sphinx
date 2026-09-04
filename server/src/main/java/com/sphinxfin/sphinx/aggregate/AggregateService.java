@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.aggregate;
 
+import com.sphinxfin.sphinx.core.session.AnswerRepetition;
 import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.core.session.SessionRepository;
@@ -77,6 +78,49 @@ public class AggregateService {
     /** 직전 몇 구간의 평균과 비교하는가. 기획서 예시의 "직전 4주" 를 따른다. */
     static final int OUTLIER_BASELINE_PERIODS = 4;
 
+    /**
+     * 통과율이 전체 평균보다 이만큼 높으면 이상치 (기획 7-4 2단계 ①).
+     *
+     * <p>❗<b>실측이 아니다.</b> 합성 세션에는 코칭이 없으므로 <i>"코칭된 판매자는 통과율이
+     * 얼마나 높은가"</i> 를 잴 표본이 지금 없다. 절대값이 아니라 <b>같은 범위 전체와의 차</b>
+     * 로 재는 이유가 이것이다 — 기준선이 데이터에서 나오므로 상품·시기가 바뀌어도 따라간다.
+     * 실세션이 쌓이면 분포를 보고 다시 잡는다({@code #327}).
+     */
+    static final BigDecimal FIRST_PASS_DELTA_MIN = new BigDecimal("0.25");
+
+    /**
+     * 발화 균질도가 이 값을 넘으면 이상치 (기획 7-4 2단계 ②).
+     *
+     * <p>❗<b>이쪽은 쟀다.</b> 라벨 코퍼스 70건에서 <b>같은 항목에 대한 서로 다른 발화
+     * 212쌍</b>의 겹침을 재면 이렇다({@code eval/tools/measure_repetition.py}).
+     *
+     * <pre>
+     * 최대 0.444 · 중앙 0.029 · 평균 0.055
+     * </pre>
+     *
+     * <p>즉 <b>코칭이 없는 상태의 균질도는 0.05 근처</b>다. {@code 0.30} 은 그 평균의 여섯
+     * 배이고 관측 최대(0.444)보다도 아래라, <i>"우연히 비슷한 답"</i> 과 <i>"같은 대본"</i>
+     * 사이에 있다. 전체 평균과의 차도 같이 내서 <b>사람이 두 값을 보고 판단</b>하게 한다 —
+     * 이 화면은 판정이 아니라 이관 대상 표시다.
+     */
+    static final BigDecimal HOMOGENEITY_MIN = new BigDecimal("0.30");
+
+    /**
+     * 입력 시간 중앙값이 전체의 이 비율 이하이면 이상치 (기획 7-4 2단계 ③).
+     *
+     * <p>❗<b>빠른 쪽만 본다.</b> 조항은 <i>"분포가 다른 곳과 다르면"</i> 이라 방향을 안
+     * 정하는데, 절대값 차로 양쪽을 다 물면 <b>느린 지점이 걸린다.</b> 느린 이유는 대개
+     * 취약 고객이 많은 것이고 그건 이상이 아니라 <b>정상이며 오히려 잘 하고 있는 것</b>이다
+     * — 그 지점을 컴플라이언스로 이관하면 이 기능이 보호하려던 사람을 겨눈다.
+     *
+     * <p>❗<b>실측이 아니다.</b> 합성 세션에는 코칭이 없어 <i>"코칭된 답변은 얼마나 빠른가"</i>
+     * 를 잴 표본이 없다. 절대 시간(ms)이 아니라 <b>전체 중앙값과의 비율</b>로 두는 이유가
+     * 이것이다 — 기준선이 데이터에서 나오므로 상품·문항 길이가 바뀌어도 따라간다.
+     * 실세션이 쌓이면 분포를 보고 다시 잡는다({@code #327}).
+     */
+    static final BigDecimal FAST_INPUT_RATIO_MAX = new BigDecimal("0.5");
+
+
     /** 기획서 4절 — 실데이터는 쓰지 않는다. 클래스 주석 참고. */
     private static final boolean SYNTHETIC = true;
 
@@ -140,6 +184,38 @@ public class AggregateService {
 
     /** 못 잰 항목이 있는 채로 판정된 세션 — R-00 이 무는 자리다. */
     public record UnmeasuredCount(long sessions, long judged, BigDecimal share, boolean masked) {}
+
+    /**
+     * ★ 코칭 정황 한 줄 — <b>기획서 7-4 2단계(사후 적발)</b>. 판매자 단위 통계 이상치.
+     *
+     * <p>기획서가 <b>세 신호를 이름으로 적어 뒀다.</b>
+     *
+     * <blockquote>특정 지점·판매자에서 <b>1차 응답 통과율이 비정상적으로 높거나</b>, 답변의
+     * <b>문장 유사도가 지나치게 균질하거나</b>, 응답 지연시간 분포가 다른 곳과 다르면
+     * 이상치로 표시해 컴플라이언스 부서에 이관한다.</blockquote>
+     *
+     * <p><b>셋 다 낸다.</b> 셋째(지연 분포)는 {@code inputMeta} 가 불변 기록으로만 가고
+     * 세션에 안 남아 한동안 못 셌는데, 총 입력 시간만 세션에 남겨 이었다.
+     *
+     * <p>❗<b>개인을 지목하지 않는다.</b> {@code key} 는 가명이고 발화는 한 글자도 안 나간다.
+     * 기획서가 <i>"개인 세션 단위 판정이 아닌 통계적 이상 탐지"</i> 라고 못박은 이유가
+     * 그것이다 — 세션 하나로 코칭을 판별할 수는 없고, 그렇게 쓰면 이 화면이 ADR-001 이
+     * 막으려던 것이 된다.
+     *
+     * @param firstPassRate     재검증 없이 첫 답에 U1 이 된 비율. 표본 부족이면 {@code null}
+     * @param homogeneity       같은 항목에 대한 <b>다른 세션</b> 발화들의 평균 겹침
+     * @param orgFirstPassRate  같은 범위 전체의 통과율 — <b>"다른 곳과 다르다"</b> 의 기준
+     * @param orgHomogeneity    같은 범위 전체의 균질도
+     * @param reasons           이상치로 본 사유. 비어 있으면 이상치가 아니다
+     */
+    public record CoachingSignal(String groupBy, String key, long sessions,
+                                 BigDecimal firstPassRate, BigDecimal homogeneity,
+                                 Long medianInputMs,
+                                 BigDecimal orgFirstPassRate, BigDecimal orgHomogeneity,
+                                 Long orgMedianInputMs,
+                                 List<String> reasons, boolean masked) {}
+
+    public record CoachingView(boolean synthetic, String scope, List<CoachingSignal> rows) {}
 
     public record DecisionView(boolean synthetic, String scope, List<SignalCount> gate,
                                OverrideCount override, ReexplainEffect reexplain,
@@ -279,6 +355,164 @@ public class AggregateService {
                         reexplained < MIN_CELL_SAMPLE),
                 new UnmeasuredCount(unmeasuredSessions, judged,
                         share(unmeasuredSessions, judged, judged), judged < MIN_CELL_SAMPLE));
+    }
+
+    /**
+     * ★ 코칭 정황 — <b>기획서 7-4 2단계</b>. 판매자 단위로 두 신호를 내고 이상치를 표시한다.
+     *
+     * <h3>왜 이 화면이 따로 있나</h3>
+     *
+     * <p>기존 이상치({@link #outlier})는 <b>오해율이 올라간 것만</b> 본다
+     * ({@code delta >= +0.15}). 코칭은 반대 방향이다 — <b>통과율이 올라가고 오해율이
+     * 내려간다.</b> 그래서 지금 있는 이상치로는 <b>구조적으로 못 잡는다.</b>
+     *
+     * <h3>❗개인 판정이 아니다</h3>
+     *
+     * <p>기획서가 <i>"개별 세션 단위로 코칭을 판별하기는 어려우나 집계 단위에서는 확인이
+     * 가능하다"</i> 로 범위를 정해 뒀다. 그래서 <b>가명 + 건수 + 두 값</b>만 낸다. 발화도
+     * 세션 ID 도 안 나간다. <b>이 뷰가 개인을 지목하기 시작하면 ADR-001 이 막으려던 것이
+     * 된다</b> — 이해도 데이터가 사람을 겨누는 도구가 되는 자리.
+     *
+     * <p>{@code aggregate:indicator:read} 를 쓴다 — 같은 사실(판매자 단위 이상치)에 그랜트를
+     * 둘로 만들지 않는다.
+     */
+    @Transactional(readOnly = true)
+    public CoachingView coachingSignals(AccessPolicy.Scope scope, String branchId) {
+        List<Session> pool = visible(scope, branchId);
+
+        Map<String, List<Session>> bySeller = new TreeMap<>();
+        for (Session session : pool) {
+            // 판매자를 모르는 세션은 축에 못 올린다. 담고 나서 지우면 안 된다 —
+            // TreeMap 은 null 키를 아예 못 받는다(자연 순서 비교에서 터진다).
+            String key = pseudonym(session.sellerId());
+            if (key == null) {
+                continue;
+            }
+            bySeller.computeIfAbsent(key, k -> new ArrayList<>()).add(session);
+        }
+
+        BigDecimal orgPass = firstPassRate(pool);
+        BigDecimal orgHomogeneity = homogeneity(pool);
+        Long orgMedianMs = medianInputMs(pool);
+
+        List<CoachingSignal> rows = new ArrayList<>();
+        for (var entry : bySeller.entrySet()) {
+            List<Session> mine = entry.getValue();
+            boolean masked = mine.size() < MIN_CELL_SAMPLE;
+            BigDecimal pass = masked ? null : firstPassRate(mine);
+            BigDecimal homo = masked ? null : homogeneity(mine);
+            Long medianMs = masked ? null : medianInputMs(mine);
+
+            List<String> reasons = new ArrayList<>();
+            if (pass != null && orgPass != null
+                    && pass.subtract(orgPass).compareTo(FIRST_PASS_DELTA_MIN) >= 0) {
+                reasons.add("1차 통과율이 전체 평균보다 %s%%p 높습니다"
+                        .formatted(percent(pass.subtract(orgPass))));
+            }
+            if (homo != null && homo.compareTo(HOMOGENEITY_MIN) >= 0) {
+                reasons.add("서로 다른 고객의 답변이 %s%% 겹칩니다".formatted(percent(homo)));
+            }
+            if (medianMs != null && orgMedianMs != null && orgMedianMs > 0
+                    && BigDecimal.valueOf(medianMs)
+                            .divide(BigDecimal.valueOf(orgMedianMs), 4, RoundingMode.HALF_UP)
+                            .compareTo(FAST_INPUT_RATIO_MAX) <= 0) {
+                reasons.add("답변 입력이 전체 중앙값(%d초)의 절반 이하입니다 (%d초)"
+                        .formatted(orgMedianMs / 1000, medianMs / 1000));
+            }
+            rows.add(new CoachingSignal("seller", entry.getKey(), mine.size(),
+                    pass, homo, medianMs, orgPass, orgHomogeneity, orgMedianMs,
+                    List.copyOf(reasons), masked));
+        }
+        return new CoachingView(SYNTHETIC, label(scope), List.copyOf(rows));
+    }
+
+    /**
+     * 재검증 없이 <b>첫 답에 U1</b> 이 된 비율. 판정이 없으면 {@code null}.
+     *
+     * <p>재검증을 거친 U1 은 <b>안 센다</b> — 그건 재설명이 일한 것이고, 코칭이 겨누는 것은
+     * <i>"처음부터 통과시키는 것"</i> 이다. 둘을 합치면 재설명이 잘 도는 지점과 코칭하는
+     * 지점이 같은 숫자를 낸다.
+     */
+    private static BigDecimal firstPassRate(List<Session> pool) {
+        long judged = 0;
+        long firstPass = 0;
+        for (Session session : pool) {
+            for (var entry : session.judgmentsByItem().entrySet()) {
+                judged++;
+                if (session.reverifyCount(entry.getKey()) == 0
+                        && entry.getValue().grade() == Grade.U1) {
+                    firstPass++;
+                }
+            }
+        }
+        return judged == 0 ? null
+                : BigDecimal.valueOf(firstPass).divide(BigDecimal.valueOf(judged), 4,
+                        RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 같은 항목에 대한 <b>서로 다른 세션</b> 발화들의 평균 겹침. 쌍이 없으면 {@code null}.
+     *
+     * <p>항목별로 평균을 내고 그 평균을 다시 평균한다 — 발화가 많은 항목 하나가 값을
+     * 끌고 가지 않게 한다.
+     *
+     * <p>겹침 계산은 {@link AnswerRepetition#similarity}를 그대로 쓴다. <b>두 벌 만들지
+     * 않는 이유</b>는 되풀이 판정과 균질도가 같은 척도 위에 있어야 서로를 설명하기 때문이다.
+     */
+    private static BigDecimal homogeneity(List<Session> pool) {
+        Map<String, List<String>> byItem = new TreeMap<>();
+        for (Session session : pool) {
+            session.maskedUtterances().forEach((item, text) ->
+                    byItem.computeIfAbsent(item, k -> new ArrayList<>()).add(text));
+        }
+        List<Double> perItem = new ArrayList<>();
+        for (List<String> texts : byItem.values()) {
+            double sum = 0;
+            int pairs = 0;
+            for (int i = 0; i < texts.size(); i++) {
+                for (int j = i + 1; j < texts.size(); j++) {
+                    sum += AnswerRepetition.similarity(texts.get(i), texts.get(j));
+                    pairs++;
+                }
+            }
+            if (pairs > 0) {
+                perItem.add(sum / pairs);
+            }
+        }
+        if (perItem.isEmpty()) {
+            return null;
+        }
+        double mean = perItem.stream().mapToDouble(Double::doubleValue).sum() / perItem.size();
+        return BigDecimal.valueOf(mean).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 답변 입력 시간의 <b>중앙값</b>(ms). 값이 하나도 없으면 {@code null}.
+     *
+     * <p>평균이 아니라 중앙값인 이유: 한 사람이 화면을 켜 두고 자리를 비우면 평균이 통째로
+     * 끌려간다. 이 신호가 보려는 것은 <b>대체로 얼마나 빨리 답하는가</b>다.
+     *
+     * <p>❗값이 <b>없는 답변은 안 센다</b> — 0 으로 채우면 화면이 안 보낸 세션이 전부
+     * "즉답" 이 되어 그 판매자가 이상치로 뜬다.
+     */
+    private static Long medianInputMs(List<Session> pool) {
+        List<Long> values = new ArrayList<>();
+        for (Session session : pool) {
+            values.addAll(session.inputMsByItem().values());
+        }
+        if (values.isEmpty()) {
+            return null;
+        }
+        java.util.Collections.sort(values);
+        int mid = values.size() / 2;
+        return values.size() % 2 == 1
+                ? values.get(mid)
+                : (values.get(mid - 1) + values.get(mid)) / 2;
+    }
+
+    private static String percent(BigDecimal ratio) {
+        return ratio.multiply(BigDecimal.valueOf(100)).setScale(1, RoundingMode.HALF_UP)
+                .toPlainString();
     }
 
     /**
