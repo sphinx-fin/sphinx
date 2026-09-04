@@ -53,21 +53,106 @@ step() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 ok()   { printf '   ✅ %s\n' "$*"; }
 bad()  { printf '   ❗%s\n' "$*" >&2; }
 
-# ai-service 가 막혔을 때 **무엇이 없어서인지**를 가른다. 둘은 같은 502 로 나오는데
-# 고치는 자리가 다르다 — 하나는 프로세스, 하나는 키다.
+# ai-service 가 막혔을 때 **무엇이 없어서인지**를 가른다. 같은 502 로 나오는데 고치는
+# 자리가 다르다 — 프로세스냐 키냐.
+#
+# ❗**도달 검사가 상태를 셋으로 갈라야 한다** (#338 리뷰 2차). 호스트에서 :8100 이
+# 안 열리는 것은 alpha 에서 **설계**다 — `docker-compose.yml` 의 ai-service 에 `ports:`
+# 가 없다. 그래서 호스트 curl 하나로 판정하면 alpha 에서 **늘 "안 떠 있다"** 가 되고,
+# 안내가 `uvicorn` 을 띄우라고 한다. 떠 있는데 띄우라고 하는 것이고, 정작 아래
+# 「키 갈래」 안내에는 도달하지 못한다 — **이 스크립트가 고치려는 그 모양이다.**
+reachable() {
+    # ❗**상태코드로는 못 가른다.** alpha 의 nginx 는 없는 경로에도 SPA 를 200 으로 준다
+    # (`/docs`·`/healthz`·아무 경로나 전부 `200 text/html`). `-f` 는 400 이상에서만
+    # 실패하므로 그 폴백을 못 잡는다 — 그래서 **ai-service 만 낼 수 있는 본문**을 본다
+    # (#338 리뷰 4차 실측: `-f` 만으로는 alpha 가 여전히 REACHABLE 이었다).
+    #
+    # `/healthz` 는 `GUARDED_PREFIX = "/internal/"` 밖이라 토큰이 필요 없다
+    # (`ai-service/app/main.py:38-42`). 본문은 `{"status":"ok", …}` 다.
+    curl -sfS --max-time 5 "${AI_BASE:-http://localhost:8100}/healthz" 2>/dev/null \
+        | grep -q '"status"' && return 0
+    # 호스트에서 안 보여도 컨테이너 안에서 보이면 떠 있는 것이다 (alpha 의 정상 상태).
+    docker compose exec -T ai-service sh -c \
+        'curl -sf --max-time 5 -o /dev/null localhost:8100/docs' 2>/dev/null
+}
+
 diagnose_502() {
-    curl -sS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null || {
+    reachable || {
         cat >&2 <<'DOWN'
 
    ai-service 가 응답하지 않는다. 서버는 그걸 502 로 옮길 뿐이다.
-     cd ai-service && uvicorn app.main:app --port 8100
+     로컬   cd ai-service && uvicorn app.main:app --port 8100
+     alpha  ssh 로 EC2 에 들어가 cd ~/sphinx 뒤에 친다 —
+            docker compose ps ai-service · docker compose logs --tail=50 ai-service
+
+   ❗alpha 에서 호스트의 :8100 이 안 열리는 것은 정상이다(ports: 가 없다). 위 판정은
+   컨테이너 안에서도 안 보이는 경우만 여기로 온다.
+
+   ❗**이 판정은 이 스크립트가 도는 기계에 대한 것이다** — `BASE` 가 가리키는 기계가
+   아니다. 노트북에서 `BASE=alpha` 로 돌리면 :8100 도 `docker compose` 도 노트북 것이라
+   둘 다 없어서 여기로 온다. 위 alpha 줄을 노트북에서 그대로 치면 compose 가 환경변수를
+   못 찾고 죽는다(#338 리뷰 3차 실측).
 DOWN
         return
     }
     cat >&2 <<'NOKEY'
 
-   ai-service 는 떠 있다. 그러면 남는 것은 LLM 키다.
-   ai-service 로그에 `llm_error(LlmNotConfigured)` 가 있으면 키가 그 프로세스에 없다.
+   ai-service 는 떠 있다. 그러면 남는 것은 LLM 키인데 **갈래가 둘이다.**
+
+   ❗**로그가 아니라 응답 본문을 본다.** `app.llm_client` 는 아무것도 안 찍고
+   (`grep -c 'log\.' app/llm_client.py` → 0), `llm_error(...)` 문자열은 **질문 폴백
+   경로에만** 있다(`question_gen`). 그런데 질문 폴백은 502 를 안 낸다 — 조용히 템플릿으로
+   내려간다. 즉 여기까지 온 502 는 사실상 **채점**이고 그 경로엔 그 문자열이 없다.
+
+   ❗**서버 응답으로도 못 가른다.** `GlobalExceptionHandler` 가 고정 문면
+   ("채점 서비스에 연결할 수 없습니다")만 내고, ai-service 의 원문은 `AiServiceException`
+   메시지에 갇혀 서버 로그까지만 간다. 그래서 **ai-service 를 직접 찔러 본다** — 그쪽
+   `detail` 에는 SDK 원문이 그대로 있다.
+
+   ❗**alpha 는 밖에서 못 닿는다.** `docker-compose.yml` 의 `ai-service` 에 `ports:` 가
+   없어서 EC2 호스트에서도 :8100 이 안 보인다. 그리고 `/internal/*` 이 공유 시크릿을
+   요구하고(결정 10.4) alpha 는 `SPHINX_REQUIRE_INTERNAL_AUTH=1` 로 **꺼질 수가 없다.**
+   그래서 alpha 는 컨테이너 안에서 치고, 토큰은 **컨테이너 자기 환경변수에서 꺼낸다** —
+   사람이 SSM 을 열 필요도, 값을 화면에 띄울 필요도 없다.
+
+   # alpha
+   docker compose exec -T ai-service sh -c \
+     'curl -s -X POST localhost:8100/internal/score \
+        -H "Content-Type: application/json" \
+        -H "x-sphinx-internal-token: $SPHINX_INTERNAL_TOKEN" -d @-' <<'PROBE' | head -c 300
+   {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
+    "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
+    "name":"probe","importance":"required","status":"extracted",
+    "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
+   PROBE
+
+   # 로컬 — 토큰이 비어 있으면 인증이 꺼지므로 헤더 없이 그대로 된다
+   curl -s -X POST "${AI_BASE:-http://localhost:8100}/internal/score" \
+     -H 'Content-Type: application/json' -d @- <<'PROBE' | head -c 300
+   {"item_id":"ELS-PRINCIPAL-LOSS-WARNING","question":"확인","answer_text":"확인",
+    "risk_item":{"item_id":"ELS-PRINCIPAL-LOSS-WARNING","product_id":"probe",
+    "name":"probe","importance":"required","status":"extracted",
+    "condition":{"value_text":"확인","source_span":{"page":1,"start":0,"end":2}}}}
+   PROBE
+
+     401 "x-sphinx-internal-token …"            토큰이 안 맞는다 — 키 문제가 아니다
+     503 "LLM_API_KEY 미설정"                    키가 그 프로세스에 없다
+     502 "Error code: 401" / "Incorrect API key" 키가 있는데 틀렸다  ← #266 뒤 옛 Gemini 키
+
+   ❗뒤엣것이 지금 제일 나올 만하다. 정책 모델은 gpt-5-mini 다(#266) — 그 전 정책이
+   gemini-3.5-flash-lite 였으므로 .env 나 SSM 에 옛 Gemini 키가 남아 있으면 이 모양이 된다.
+
+   값을 안 보고 프로바이더를 가른다 — 길이가 자릿수로 다르다.
+     sed -n 's/^LLM_API_KEY=//p' ai-service/.env | awk '{print length}'
+     # 값은 따옴표 없이 적는다 — 두르면 이 줄만 2 가 늘어 아래 셋이 갈린다.
+     # ❗`awk -F=` 를 쓰지 않는다 — 값 안의 `==` 에서 잘려 42 를 40 으로 세고,
+     # `/^LLM_API_KEY/` 가 `LLM_API_KEY_OLD` 까지 물어 **두 줄**이 나온다. 하필 두 줄이
+     # 나오는 상황이 이 안내가 전제한 상황이다 — 옛 키가 남아 있는 그 상황(#338 리뷰 3차).
+       세 자리 → OpenAI(sk-proj-…)      두 자리 → Gemini(AQ.…)
+   배포 쪽은 deploy_ec2.sh 가 **같은 수**를 /var/log/sphinx-deploy.log 에 찍는다
+   (`LLM_API_KEY  <n>자` — 줄 모양은 다르고 숫자가 같다). `#349` 의 기동 경고도 같은
+   수를 낸다. **셋이 어긋나면 안 된다** — 어긋나면 운영자가 맞는 쪽을 의심하게 되고,
+   위 `awk -F=` 가 정확히 그랬다(40 vs 42).
 
    ❗채점에는 폴백이 없다(P1) — 측정에 폴백을 두면 AI 가 재지 않은 값이 판정에 들어간다.
    질문은 템플릿으로 조용히 내려가지만 채점은 여기서 막힌다. 이슈 #278 ② 가 그것이다.
