@@ -151,3 +151,83 @@ cases:
     expected_misconception: null
     expected_confidence_max: 0.3   # scoring.ECHO_CONFIDENCE_CAP
     deterministic: true            # 포함도 계산이라 LLM 과 무관하게 재현된다
+
+  # ── 화법 폭 (이슈 #377) ─────────────────────────────────────────────────────
+  # 여기까지의 24건이 **23건 존댓말**이었다. 화법이 한 종류면 종결어미의 변이 폭이
+  # 좁아지고, 좁은 폭 안에서 형태가 라벨과 붙는다 — eval 표본에서 실제로 그랬다
+  # (내용을 안 보고 끝 6자만으로 95% 적중, 기준선 63%).
+  #
+  # 반말이 되는 것은 확인했다(라이브러리 pattern·ngram·LLM 전부 정상). 문제는
+  # **표본에 한 건도 없었다**는 것이다. 아래는 그 사각을 메운다.
+  #
+  # ❗반말을 존댓말 케이스의 번역으로 넣지 않는다. 짝을 만들면 건수만 늘고 같은
+  # 발화를 두 번 세게 된다 — `#266` 에서 dev set 이 모델 차이에 둔감했던 이유와 같다.
+
+  - id: SPEECH-PLAIN-PRINCIPAL
+    source: 화법 폭 (이슈 #377) — 반말. 오해 조건 「원금이 보장된다」
+    item_id: ELS-PRINCIPAL-LOSS-WARNING
+    question: 이 상품에서 원금 손실이 나는 상황을 본인 말씀으로 설명해 주시겠어요?
+    answer: 은행에서 파니까 원금 까먹을 일은 없잖아
+    expected_grade: U4
+    expected_misconception: M01-PRINCIPAL-GUARANTEE
+    deterministic: true   # ngram 0.73 — 낱말이 달라도 잡힌다
+
+  - id: SPEECH-PLAIN-KNOCKIN-U1
+    source: 화법 폭 (이슈 #377) — 반말. 요소 둘을 다 말한다
+    item_id: ELS-KNOCKIN-BARRIER
+    question: 낙인 조건이 어떻게 성립하는지 말씀해 주시겠어요?
+    answer: 세 개 중 하나라도 기간 중에 그 선 밑으로 내려간 적 있으면 걸리는 거지
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false
+
+  - id: SPEECH-FORMAL-MATURITY-U1
+    source: 화법 폭 (이슈 #377) — 평서체(-습니다). 요소 둘
+    item_id: ELS-MATURITY-LOSS-CONDITION
+    question: 만기에 손실이 나는 조건을 설명해 주시겠어요?
+    answer: 만기평가일에 기준가격 비율 밑이면 손실이 나고, 그 크기는 얼마나 떨어졌는지에 따라 달라집니다
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false
+
+  # ── 등급 폭 — U2·U3 가 거의 없었다 ─────────────────────────────────────────
+  # 24건 중 U2 1건 · U3 0건이었다. 그런데 F-CMN-003 실측에서 **사람 불일치 19건 중
+  # 9건(47%)이 U1↔U2** 다 — 제일 갈리는 경계에 표본이 없었다.
+  #
+  # U2 는 `u1_requires` 문턱으로 근거를 댄다(`#366`) — 요소 2개 중 1개만 충족.
+
+  - id: PARTIAL-KNOCKIN-U2
+    source: 화법 폭 (이슈 #377) — 요소 2개 중 앞만. u1_requires=2 라 U2
+    item_id: ELS-KNOCKIN-BARRIER
+    question: 낙인 조건이 어떻게 성립하는지 말씀해 주시겠어요?
+    answer: 기간 중에 그 선 밑으로 한 번이라도 내려갔는지를 본다고 하셨죠
+    expected_grade: U2
+    expected_misconception: null
+    deterministic: false   # ❗worst-of(어느 하나라도)가 빠졌다 — 오해는 아니다
+
+  - id: PARTIAL-NO-LISTING-U2
+    source: 화법 폭 (이슈 #377) — 반말 + 요소 2개 중 앞만
+    item_id: ELS-NO-LISTING
+    question: 만기 전에 현금이 필요하면 어떻게 되는지 말씀해 주시겠어요?
+    answer: 거래소에 안 올라가 있어서 시장에서는 못 파는 거지
+    expected_grade: U2
+    expected_misconception: null
+    deterministic: false   # 중도상환 요청뿐이라는 뒤 요소가 없다
+
+  - id: DONT-KNOW-MIDWAY-U3
+    source: 화법 폭 (이슈 #377) — U3. "모른다" 는 U4 가 아니다
+    item_id: ELS-MIDWAY-REDEMPTION-COST
+    question: 중도상환을 하면 얼마를 받는지 말씀해 주시겠어요?
+    answer: 그건 잘 모르겠어요. 설명을 들었는데 기억이 안 나요
+    expected_grade: U3
+    expected_misconception: null
+    deterministic: false   # ❗U3↔U4 를 가르는 자리 — 프롬프트가 명시로 구분한다
+
+  - id: OFF-TOPIC-ISSUER-U3
+    source: 화법 폭 (이슈 #377) — 반말 U3. 답이 항목과 무관하다
+    item_id: ELS-ISSUER-CREDIT-RISK
+    question: 발행사 신용위험이 무엇인지 말씀해 주시겠어요?
+    answer: 수수료는 얼마나 떼는 거야?
+    expected_grade: U3
+    expected_misconception: null
+    deterministic: false

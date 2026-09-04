@@ -109,3 +109,42 @@ cases:
     expected_grade: U4
     expected_misconception: null
     deterministic: false  # ★ M05 패턴 미매칭 실측 — "그냥 저축인 줄"만 걸린다
+
+  # ── 화법 폭 (이슈 #377) ─────────────────────────────────────────────────────
+  # 변액 10건도 전부 존댓말이었다. ELS 쪽 같은 주석 참조.
+
+  - id: SPEECH-PLAIN-SURRENDER
+    source: 화법 폭 (이슈 #377) — 반말. 오해 조건 「낸 돈은 다 돌려받는다」
+    item_id: VAR-SURRENDER-BELOW-PREMIUM
+    question: 중도에 해지하면 얼마를 돌려받는지 말씀해 주시겠어요?
+    answer: 중간에 깨도 넣은 돈은 그대로 나오는 거 아냐?
+    expected_grade: U4
+    expected_misconception: M06-SURRENDER-VALUE
+    deterministic: false
+
+  - id: SPEECH-FORMAL-FEE-U1
+    source: 화법 폭 (이슈 #377) — 평서체. 차감이 둘이라는 것을 다 말한다
+    item_id: VAR-FEE-DEDUCTION
+    question: 낸 보험료가 어떻게 쓰이는지 말씀해 주시겠어요?
+    answer: 매달 위험보험료와 사업비가 먼저 빠지고, 중도해지하면 미상각신계약비도 추가로 차감됩니다
+    expected_grade: U1
+    expected_misconception: null
+    deterministic: false
+
+  - id: PARTIAL-FEE-U2
+    source: 화법 폭 (이슈 #377) — 반말 + 요소 2개 중 앞만. u1_requires=2 라 U2
+    item_id: VAR-FEE-DEDUCTION
+    question: 낸 보험료가 어떻게 쓰이는지 말씀해 주시겠어요?
+    answer: 매달 얼마씩 사업비로 빠진다는 건 알겠어
+    expected_grade: U2
+    expected_misconception: null
+    deterministic: false   # 미상각신계약비(해약공제액)가 빠졌다 — 오해는 아니다
+
+  - id: DONT-KNOW-PERFORMANCE-U3
+    source: 화법 폭 (이슈 #377) — U3. 모른다
+    item_id: VAR-PERFORMANCE-LINKED
+    question: 해약환급금이 어떻게 정해지는지 말씀해 주시겠어요?
+    answer: 글쎄요, 그건 설명을 못 들은 것 같은데요
+    expected_grade: U3
+    expected_misconception: null
+    deterministic: false
