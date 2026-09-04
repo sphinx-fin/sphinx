@@ -78,7 +78,7 @@ class MismatchFallbackReasonTest {
     @BeforeEach
     void stub() {
         RECORDED.clear();
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED", false));
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Scored(

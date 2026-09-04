@@ -30,6 +30,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -61,6 +63,8 @@ class SessionServiceTest {
     /** 발행된 사건을 모은다 — F-GTE-003 신호가 실제로 나가는지 본다. */
     private final List<Object> published = new ArrayList<>();
     private final org.springframework.context.ApplicationEventPublisher events = published::add;
+    private static final String AI_REVERIFY = "그 부분을 본인 말씀으로 한 번만 더 말씀해 주시겠어요?";
+
     private AiServiceClient aiClient;
 
     /** ai-service 재설명 콘텐츠 기본값 — 테스트별로 필요하면 재스텁한다. */
@@ -76,6 +80,11 @@ class SessionServiceTest {
         when(aiClient.reExplain(any(RiskItem.class), any(Judgment.class),
                 nullable(String.class), nullable(String.class)))
                 .thenReturn(new AiServiceClient.ReExplanation(AI_REEXPLAIN, List.of()));
+        // 재검증 질문도 ai-service 가 만든다 (F-INT-002 · 7-4 1단계). 고정 문항을 서버에
+        // 두면 사전에 확보돼 게이트가 뚫린다 — 그 목을 걷어내면서 이 스텁이 필요해졌다.
+        when(aiClient.question(any(RiskItem.class), anyList(), anyString(), anyString(),
+                        nullable(AiServiceClient.InterviewContext.class)))
+                .thenReturn(new AiServiceClient.Question(AI_REVERIFY, "situation", false));
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
                 Optional.of(evidence), aiClient, events);
     }

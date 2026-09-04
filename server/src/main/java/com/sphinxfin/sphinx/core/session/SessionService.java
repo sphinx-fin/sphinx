@@ -269,6 +269,18 @@ public class SessionService {
      * 않아 재시도가 깔끔하다(부수효과 없이 실패).
      */
     public ReExplanation reExplain(String sessionId, String itemId, RiskItem riskItem) {
+        return reExplain(sessionId, itemId, riskItem, "ELS");
+    }
+
+    /**
+     * 재설명 + 재검증 질문 (F-INT-004 · F-INT-002).
+     *
+     * <p>{@code productType} 을 호출자가 준다 — 상품 목록이 {@code api/MockData} 에 있어
+     * 여기서 찾으면 {@code core} 가 {@code api} 에 의존하게 된다.
+     */
+    @Transactional
+    public ReExplanation reExplain(String sessionId, String itemId, RiskItem riskItem,
+                                   String productType) {
         Session session = get(sessionId);
         Judgment judgment = session.judgmentFor(itemId);
         if (judgment == null || judgment.grade() == Grade.U1) {
@@ -283,7 +295,7 @@ public class SessionService {
                 .content();
         session.fire(SessionFsm.Event.REQUEST_REEXPLAIN);
         repository.save(session);
-        String reverify = reverifyQuestion(itemId, session.vulnerable());
+        String reverify = reverifyQuestion(session, itemId, riskItem, productType);
         // ❗**보여줄 문면을 여기서 기록한다** (이슈 #274). 화면은 계약대로 이 문장을 띄우고
         // 고객은 그것에 답하는데, 안 남기면 /answers 가 **원 질문 문면**으로 채점하고
         // 기록한다 — 필드가 비는 것보다 나쁘다. 기록이 다른 질문을 가리키니 감사 시점에
@@ -294,33 +306,50 @@ public class SessionService {
     }
 
     /**
-     * 재검증용 변형 질문(F-INT-002). 재설명 응답에 실어 프론트가 직전 질문을 그대로 다시
-     * 띄우지 않게 한다.
+     * 재검증용 질문 — <b>ai-service 가 만든다</b> (F-INT-002).
      *
-     * 주의 — 이 목은 기획서 7-4 1단계(우회 비용 상향)를 만족하지 않는다. 그 조항이 요구하는
-     * 것은 "질문이 상품 문서에서 자동 생성되므로 고정 문항을 사전에 확보하는 것이 불가능"한
-     * 상태인데, 아래는 항목별로 갈리기만 할 뿐 고정 문항이다. 사전에 확보하면 그대로 뚫린다.
-     * 우회 비용이 실제로 올라가는 것은 F-INT-002가 문서에서 질문을 생성한 뒤부터다.
-     * TODO: ai-service /internal/question?variant=reverify 연결(F-INT-002, 윤지석).
+     * <h2>왜 고정 문항을 걷어냈나 — 기획서 7-4 1단계</h2>
+     *
+     * <p>여기 있던 목이 항목별 고정 문장이었고, 그 자리 주석이 스스로 적어 뒀다.
+     *
+     * <blockquote>이 목은 기획서 7-4 1단계(우회 비용 상향)를 만족하지 않는다. … 항목별로
+     * 갈리기만 할 뿐 고정 문항이다. <b>사전에 확보하면 그대로 뚫린다.</b></blockquote>
+     *
+     * <p>7-4 가 요구하는 것은 <i>"질문이 상품 문서에서 자동 생성되므로 고정 문항을 사전에
+     * 확보하는 것이 불가능"</i> 한 상태다. <b>재검증이야말로 판매자가 미리 답을 준비시킬
+     * 동기가 가장 큰 자리</b>다 — 첫 질문에서 이미 한 번 막혔으므로. 거기가 고정이면
+     * 게이트의 두 번째 관문이 열린 채로 있다.
+     *
+     * <h2>❗실패해도 인터뷰를 멈추지 않는다</h2>
+     *
+     * <p>생성이 죽으면 ai-service 의 재검증 폴백이 온다 — 그것도 <b>항목을 안 담는</b>
+     * 한 문장이라 미리 확보해도 답이 되지 않는다. 여기서 502 를 올리면 재설명을 눌렀는데
+     * 아무 일도 안 일어나고, 그 손해가 실패에 비례하지 않는다.
      */
-    private String reverifyQuestion(String itemId, boolean vulnerable) {
-        // 데모 항목 2종(api/MockData.RISK_ITEMS와 같은 ID). ai-service 연결 시 함께 사라진다.
-        // 질문도 재설명 문면과 같은 눈높이여야 한다 — 쉬운 말로 설명해 놓고 곧바로 "기초자산"을
-        // 되물으면 고령자 모드가 한 응답 안에서 깨진다(기획서 175행: 비유 중심·짧은 문장).
-        return switch (itemId) {
-            case "ELS-PRINCIPAL-LOSS-WARNING" -> vulnerable
-                    ? "그러면 어떤 경우에 맡기신 돈이 줄어드는지, 편하게 말씀해 주시겠어요?"
-                    : "그러면 기초자산이 어디까지 떨어졌을 때 손실이 나는지, 방금 설명을"
-                      + " 기준으로 본인 말씀으로 한 번만 더 말씀해 주시겠어요?";
-            case "ELS-NO-DEPOSIT-INSURANCE" -> vulnerable
-                    ? "이 상품에 넣으신 돈이 은행 예금처럼 보호받지 못한다는 게 어떤 뜻일까요?"
-                    : "이 상품에 넣은 돈이 예금자보호를 받지 못한다는 게 어떤 뜻인지,"
-                      + " 본인 말씀으로 다시 설명해 주시겠어요?";
-            default -> vulnerable
-                    ? "방금 설명드린 것 중에 가장 중요한 게 뭐라고 이해하셨는지 말씀해 주시겠어요?"
-                    : "방금 설명드린 내용 중 가장 중요한 조건이 무엇인지, 그리고 그 조건에"
-                      + " 해당하면 어떻게 되는지 본인 말씀으로 다시 설명해 주시겠어요?";
-        };
+    /**
+     * 질문 생성에 넘길 면담 맥락 (F-INT-002).
+     *
+     * <p>❗<b>만드는 자리가 하나여야 한다.</b> 처음에 컨트롤러와 여기 두 곳에서 만들었더니
+     * <b>한쪽만 고치는 변이가 안 잡혔다</b> — 두 경로가 서로 다른 맥락을 넘기게 되는데
+     * 어느 쪽도 그것을 모른다.
+     *
+     * <p>{@code exceptItem} 은 <b>지금 물으려는 항목</b>이다. 그 항목의 앞선 판정은 뺀다 —
+     * 재검증에서 자기 직전 등급이 맥락으로 가면 <i>"방금 U4 였다"</i> 가 질문에 실려
+     * <b>고객이 자기 점수를 알게 된다.</b>
+     */
+    public AiServiceClient.InterviewContext interviewContext(Session session, String exceptItem) {
+        return new AiServiceClient.InterviewContext(
+                session.vulnerable(),
+                session.priorGrades(exceptItem).stream().map(Enum::name).toList(),
+                session.matchedMisconceptions(exceptItem));
+    }
+
+    private String reverifyQuestion(Session session, String itemId, RiskItem riskItem,
+                                    String productType) {
+        var context = interviewContext(session, itemId);
+        return aiServiceClient
+                .question(riskItem, List.of(), productType, "reverify", context)
+                .question();
     }
 
     /**
