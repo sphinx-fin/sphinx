@@ -183,7 +183,14 @@ jobs:
           # 실제로 읽는 것은 `data/` 중 오해 라이브러리 하나뿐이다(머리말 ② 표).
           # 반대로 `^eval/` 만 두면 **루브릭·오해 라이브러리를 고치는 PR 에서 정작 그
           # 대조가 안 돈다** — `#270`·`#285` 가 두 번 낸 그 결함이다.
-          ev=false;        hit '^(eval/|ai-service/app/rubrics/|data/misconception_library/|contracts/judgment\.schema\.json$)' && ev=true
+          #
+          # README 둘은 `#350` 이 붙인 `TestLabelerNamingDoesNotDrift.NAMED` 가 읽는다.
+          # 변조해서 재봤다 — 둘 다 `eval/tests` 를 `1 failed` 로 만드는데, 넣기 전에는
+          # 루트 `README.md` 는 어느 모듈도 안 떴고 `ai-service/tests/fixtures/README.md`
+          # 는 **ai-service 만 뜨고 정작 무는 eval 이 안 떴다.** 세 번째 같은 결함이다.
+          # `README\.md$` 는 `^` 앵커라 **루트만** 문다 — `web/README.md`·`server/README.md`
+          # 는 안 걸린다(재봤다). 라벨러 표기가 바뀌면 이 목록도 같이 는다.
+          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$)' && ev=true
 
           echo "── 판별 ── server=$server ai-service=$ai web=$web eval=$ev"
           { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; echo "eval=$ev"; } >> "$GITHUB_OUTPUT"
@@ -422,11 +429,12 @@ jobs:
           PY
 
       # ── eval ────────────────────────────────────────────────────────────────
-      # 이 57건(#344 를 적을 때는 41건이었다)이 지키는 것은 **제출 수치의 정합성**이다
+      # 이 60건(#344 를 적을 때는 41건, 이 PR 을 열 때는 57건이었다 — `#350` 이 라벨러 표기
+      # 대조 셋을 더했다)이 지키는 것은 **제출 수치의 정합성**이다
       # (머리말 ④). 표본이 라벨을 들고 다니면, 오해 라이브러리 `patterns` 를 베끼면 —
       # QWK 는 올라가고 **다른 것을 잰 값**이 된다. 리포트에는 그 사실이 안 뜬다.
       #
-      # 러너에서 0.5초다(로컬 실측 57건 0.48초). `working-directory` 를 안 준다 — 테스트가
+      # 러너에서 0.5초다(로컬 실측 60건 0.70초). `working-directory` 를 안 준다 — 테스트가
       # `parents[2]` 로 레포 루트를 잡고 `ai-service/app/rubrics/` 를 읽으므로 루트에서
       # 도는 것이 맞다.
       - name: eval · 테스트
@@ -438,7 +446,7 @@ jobs:
         if: ${{ !cancelled() && steps.filter.outputs.eval == 'true' && steps.py_deps.outcome == 'success' }}
         run: |
           python3 .github/scripts/no_skip.py eval/pytest-results.xml \
-            "표본(eval/corpus)·루브릭·오해 라이브러리는 전부 커밋돼 있으므로 러너에서 skip 될 이유가 없다."
+            "표본(eval/corpus)·라벨(eval/data/labels)·루브릭·오해 라이브러리는 전부 커밋돼 있으므로 러너에서 skip 될 이유가 없다. 라벨 디렉토리가 비면 대조 둘이 skip 된다."
       - name: eval · 실패 시 리포트 보존
         if: ${{ !cancelled() && (steps.eval_test.outcome == 'failure' || steps.eval_skip.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
