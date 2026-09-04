@@ -34,9 +34,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from app import misconception, rubrics
+
+RUBRIC_DIR = Path(rubrics.__file__).resolve().parent / "rubrics"
 
 # ❗**모듈 수준에서 임포트한다.** `app.main` 을 테스트 함수 안에서 임포트하면
 # `configure_logging()` 이 conftest 의 `_caplog_reaches_app_logger` **뒤에** 돌아서,
@@ -52,7 +57,8 @@ from app.main import _log_enforcement_gap
 #: 이유를 이미 적어 두고 있었다 — `#57` 로 M02 가 ELS 전용이 됐고 변액에서 *"예금자보호 되는
 #: 줄"* 은 **부분적으로 참**이라 결정론 상향이 **오판**이었다.
 #:
-#: 그래서 그 항목은 `rubrics._UNLINKED_UNTIL` 로 갔다. **빈 집합이 정상 상태다** —
+#: 그래서 그 항목은 **자기 루브릭 파일의 `unlinked_until`** 이 설명한다(`#284` (c)).
+#: **빈 집합이 정상 상태다** —
 #: 여기 뭐가 생기면 그건 진짜 사각이고, 의도라면 근거와 함께 그쪽 목록에 넣어야 한다.
 _NO_ENFORCEMENT_PATH: set[str] = set()
 
@@ -90,7 +96,7 @@ def test_the_gap_reports_the_conditions_not_just_the_item() -> None:
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
         required_elements=("가",), u1_requires=1,
         misconception_conditions=("전액 보호된다", "둘"),
-        related_misconceptions=(),
+        related_misconceptions=(), unlinked_until=None,
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
         gaps = rubrics.enforcement_gaps()
@@ -196,7 +202,7 @@ def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
         required_elements=("가",), u1_requires=1,
         misconception_conditions=("전액 보호된다",),
-        related_misconceptions=(),
+        related_misconceptions=(), unlinked_until=None,
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
         with caplog.at_level(logging.INFO, logger="app.main"):
@@ -206,8 +212,15 @@ def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
     text = caplog.text
     assert "SYNTH-NO-LINK" in text
     assert "전액 보호된다" in text, "조건 문면이 없으면 사람이 다시 찾아야 한다"
-    assert "_UNLINKED_UNTIL" in text, (
-        "의도라면 어디에 넣어야 하는지 문면이 알려줘야 한다"
+    # ❗**의도라면 어디에 적어야 하는지** 문면이 알려줘야 한다. 그 자리가 `#284` (c) 로
+    # 옮겨졌다 — 전에는 `rubrics._UNLINKED_UNTIL`(파이썬 하드코딩)이었고 지금은 **루브릭
+    # 파일의 `unlinked_until`** 이다. 안내가 옛 자리를 가리키면 사람이 그 dict 를 찾다가
+    # 없는 것을 발견한다.
+    assert "unlinked_until" in text, (
+        "의도라면 어디에 적어야 하는지 문면이 알려줘야 한다 — 루브릭 파일의 unlinked_until"
+    )
+    assert "_UNLINKED_UNTIL" not in text, (
+        "옛 자리(파이썬 하드코딩)를 가리킨다 — #284 (c) 로 루브릭 파일로 옮겼다"
     )
 
 
@@ -261,7 +274,7 @@ def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
     bare = Rubric(
         item_id="SYNTH-NO-CONDITIONS", product_type="ELS", name="합성", status="draft",
         required_elements=("가",), u1_requires=1,
-        misconception_conditions=(), related_misconceptions=(),
+        misconception_conditions=(), related_misconceptions=(), unlinked_until=None,
     )
     monkeypatch.setattr(rubrics, "_all", lambda: {"SYNTH-NO-CONDITIONS": bare})
 
@@ -273,7 +286,7 @@ def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
 def test_unlinked_until_has_not_expired() -> None:
     """★ 만료 조건을 기계가 본다 (`#298` 리뷰 2번).
 
-    `_UNLINKED_UNTIL` 이 *"의도적으로 링크 없음"* 이면 **영구히 그렇다고 읽히고 지우는
+    `unlinked_until` 이 *"의도적으로 링크 없음"* 이면 **영구히 그렇다고 읽히고 지우는
     사건이 안 온다.** 결정 10.67(OIDC 이름 표기)에서 정리한 그 모양이다.
 
     `VAR-PARTIAL-DEPOSIT-INSURANCE` 의 조건은 *"변액을 덮는 예금자보호 유형이 생길 때"*
@@ -287,6 +300,84 @@ def test_unlinked_until_has_not_expired() -> None:
     ]
     assert not covering, (
         f"{covering} 가 변액을 덮는다 — 결정 10.24 의 조건이 충족됐다. "
-        "rubrics._UNLINKED_UNTIL 에서 VAR-PARTIAL-DEPOSIT-INSURANCE 를 빼고, "
+        "VAR-PARTIAL-DEPOSIT-INSURANCE.yaml 의 unlinked_until 을 빼고, "
         "그 루브릭에 related_misconceptions 를 걸고, 이 테스트를 지운다"
     )
+
+
+# ── `#284` (c) — 의도가 루브릭 파일에 있다 ───────────────────────────────────
+def test_the_intent_lives_in_the_rubric_file_not_in_code() -> None:
+    """★ 링크가 빈 이유가 **파일**에서 온다. 파이썬 하드코딩이 없다.
+
+    ❗전에는 같은 내용이 두 곳에 있었다 — `rubrics._UNLINKED_UNTIL`(기계가 읽는 dict)과
+    그 루브릭 YAML 의 **주석**(사람이 읽는 문면). **두 벌이면 갈린다.**
+
+    정세현이 `#284` 에서 그 자리를 짚었다: *"루브릭에 명시하고 로딩 시점에 대조하면
+    빈 목록이 「빠뜨림」이 아니라 「의도」라고 파일이 스스로 말한다."*
+    """
+    assert not hasattr(rubrics, "_UNLINKED_UNTIL"), (
+        "파이썬 하드코딩이 남아 있다 — 의도는 루브릭 파일이 말한다(#284 (c))")
+    got = rubrics.unlinked_until()
+    assert got, "unlinked_until 을 하나도 못 읽었다 — 파일에서 읽는지 확인한다"
+    for item_id, (reason, until) in got.items():
+        text = (RUBRIC_DIR / f"{item_id}.yaml").read_text(encoding="utf-8")
+        assert "unlinked_until:" in text, f"{item_id}: 값이 파일에 없다"
+        assert reason and until, f"{item_id}: reason·until 이 비었다"
+
+
+def test_a_rubric_cannot_claim_both(tmp_path, monkeypatch) -> None:
+    """★ 링크가 **있는데** `unlinked_until` 도 있으면 로딩 시점에 터진다.
+
+    둘 다 두면 **어느 쪽이 참인지 알 수 없다.** 한쪽만 보는 검사로는 이 상태가 조용하다.
+    """
+    (tmp_path / "X.yaml").write_text(
+        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\nu1_requires: 1\n"
+        "misconception_conditions:\n  - 나\n"
+        "related_misconceptions:\n  - M01-PRINCIPAL-GUARANTEE\n"
+        "unlinked_until:\n  reason: 왜\n  until: 언제\n", encoding="utf-8")
+    monkeypatch.setattr(rubrics, "RUBRIC_DIR", tmp_path)
+    rubrics._all.cache_clear()
+    with pytest.raises(ValueError, match="unlinked_until"):
+        rubrics.all_rubrics()
+    rubrics._all.cache_clear()
+
+
+@pytest.mark.parametrize("missing", ["reason", "until"])
+def test_a_half_written_unlinked_until_is_refused(tmp_path, monkeypatch, missing) -> None:
+    """★ `until` 이 없으면 **지우는 사건이 안 온다**(결정 10.67). 둘 다 요구한다."""
+    keys = {"reason": "왜", "until": "언제"}
+    del keys[missing]
+    body = "\n".join(f"  {k}: {v}" for k, v in keys.items())
+    (tmp_path / "X.yaml").write_text(
+        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\nu1_requires: 1\n"
+        f"misconception_conditions:\n  - 나\nunlinked_until:\n{body}\n", encoding="utf-8")
+    monkeypatch.setattr(rubrics, "RUBRIC_DIR", tmp_path)
+    rubrics._all.cache_clear()
+    with pytest.raises(ValueError, match="unlinked_until"):
+        rubrics.all_rubrics()
+    rubrics._all.cache_clear()
+
+
+def test_the_condition_counts_add_up() -> None:
+    """★ 조건 단위 셈이 선언 총수와 맞는다 — `#284` 가 물은 *"46개 중 무엇이"*.
+
+    ❗`enforcement_coverage()` 는 **루브릭** 단위라 그 질문에 답하지 못한다. 링크가
+    하나라도 있으면 그 루브릭의 조건 전부가 「링크 있음」으로 세어진다.
+    """
+    declared, _, _ = rubrics.enforcement_coverage()
+    enforced, advisory, explained = rubrics.condition_enforcement()
+    assert enforced + advisory == declared, (
+        f"조건 단위 합 {enforced}+{advisory} ≠ 선언 {declared} — 세는 자리가 갈렸다")
+    assert explained == advisory, (
+        f"권고만 {advisory}개 중 이유가 적힌 것이 {explained}개 — 나머지는 "
+        "unlinked_until 이 없는 채로 조건만 선언돼 있다")
+
+
+def test_the_startup_log_reports_condition_level(caplog) -> None:
+    """★ 기동 로그가 **조건 단위**를 찍는다. 루브릭 단위만 찍으면 그 질문에 답이 없다."""
+    import logging
+    from app.main import _log_enforcement_gap
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        _log_enforcement_gap()
+    assert "조건 단위" in caplog.text
+    assert "권고만" in caplog.text, "「권고만」이 몇 개인지가 이 로그의 요점이다"

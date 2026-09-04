@@ -147,7 +147,8 @@ def score(body: ScoreRequest) -> Judgment:
     assert_clean(body.answer_text, "score.answer_text")
     try:
         return scoring.score(
-            body.item_id, body.question, body.answer_text, body.risk_item, body.product_type
+            body.item_id, body.question, body.answer_text, body.risk_item, body.product_type,
+            input_meta=body.input_meta,
         )
     except ConditionNotExtracted as exc:
         # 계약이 허용하는 값이다(status=extraction_failed → condition: null). 500 이 아니라

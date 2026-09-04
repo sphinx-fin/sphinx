@@ -61,7 +61,7 @@ class SessionControllerTest {
     @BeforeEach
     void stubScoring() {
         // 어떤 항목이든 U4로 채점 — 넘어온 itemId를 그대로 판정에 싣는다.
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.91"),
                                 new Judgment.Evidence("은행에서 파는 거니까 원금은 지켜지는 거죠",
@@ -85,7 +85,7 @@ class SessionControllerTest {
     void mismatchFailureBecomesYellowNotGreen() throws Exception {
         // U1(이해)만 있는 세션이라 원래는 R-06 GREEN 이다. 모순 판정이 실패하면
         // "확인 못 함"이므로 통과가 아니라 재확인(R-02b YELLOW)이어야 한다.
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS")))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), eq("ELS"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.95"),
                                 new Judgment.Evidence("낙인 하회하면 원금 손실 난다고 들었어요",
@@ -144,7 +144,7 @@ class SessionControllerTest {
         // 이해→오해 오판이었는데, 호출부가 변액 세션에도 "ELS"를 보내면 라이브러리에서 닫은
         // 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀리는 종류다.
         when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
-                eq("VARIABLE_INSURANCE")))
+                eq("VARIABLE_INSURANCE"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("최저사망지급금까지만 보호된다고 들었어요",
@@ -166,7 +166,7 @@ class SessionControllerTest {
 
         // 하드코딩이면 "ELS" 스텁이 잡혀 U4가 나온다 — 넘어간 값을 직접 확인한다.
         verify(aiServiceClient).score(anyString(), anyString(), anyString(), any(RiskItem.class),
-                eq("VARIABLE_INSURANCE"));
+                eq("VARIABLE_INSURANCE"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class));
     }
 
     @Test
