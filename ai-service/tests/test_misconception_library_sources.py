@@ -141,3 +141,36 @@ def test_the_scope_type_does_not_catch_true_enough_speech(utterance: str) -> Non
 def test_the_scope_type_catches_totality_claims(utterance: str) -> None:
     """전체성("전액")을 주장하는 발화는 잡는다 — 원문이 「한하여」로 정면 반박한다."""
     assert _scope_match(utterance) is not None, f"정면 거짓을 {_SCOPE} 가 놓쳤다"
+
+
+#: ❗**지금 잘못 걸리는 것.** 맞는 말인데 M11 이 문다 (`#395` 리뷰 · 윤지석).
+#:
+#: 한국어에서 부정이 어미에 붙어서(`대상이라고` ↔ `대상은 아니라고`) 바이그램이 거의 다
+#: 겹친다. 패턴 문면으로는 못 닫는다 — 줄여도 0.625 고, 더하면 점수가 최댓값이라 오탐만
+#: 올라간다. **이것이 링크를 보류하는 이유이므로 없어지는 순간을 알아야 한다.**
+_KNOWN_FALSE_POSITIVES = (
+    "보험료 전액이 예금자보호 대상은 아니라고 하셨죠",
+    "낸 보험료 전액이 예금자보호 대상은 아니라고 하셨죠",
+)
+
+
+@pytest.mark.parametrize("utterance", _KNOWN_FALSE_POSITIVES)
+def test_the_scope_type_still_catches_negation(utterance: str) -> None:
+    """★ **한계가 사라지는 순간을 잡는다.** 지금은 잘못 걸리는 것이 맞다.
+
+    결함을 단정하는 테스트라 모양이 뒤집혀 있다. 그렇게 두는 이유는 이 결함이
+    `VAR-PARTIAL-DEPOSIT-INSURANCE` 에 **링크를 안 거는 근거**이기 때문이다 —
+    근거가 조용히 사라지면 보류가 이유 없는 보류로 남고, 반대로 근거가 사라진 줄 모르면
+    열 수 있는 문을 계속 닫아 둔다.
+
+    ❗여기가 빨개지면 **고쳐진 것이다.** 그때 할 일은 이 테스트를 지우고,
+    라이브러리 주석의 「지금 링크하면 안 된다」 절을 걷고, 링크를 다시 논의하는 것이다
+    (`#284` (a) · `#395` 리뷰).
+
+    `pytest.xfail` 을 쓰지 않는다 — `ci.yml` 의 `no_skip.py` 가 skip 을 실패로 바꾼다.
+    """
+    hit = _scope_match(utterance)
+    assert hit is not None, (
+        f"{utterance!r} 가 더 이상 안 걸린다 — 부정문 오탐이 닫혔다. "
+        "이 테스트를 지우고 라이브러리 주석의 보류 근거를 걷은 뒤 링크를 다시 본다"
+    )
