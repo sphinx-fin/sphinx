@@ -22,7 +22,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from . import misconception, rubrics, textsim
+from . import misconception, rubrics, shadow, textsim
 from .config import settings
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
@@ -69,7 +69,7 @@ MAX_SCORING_ATTEMPTS = 2
 
 #: 자기일관성 재확인을 거는 등급. **게이트를 실제로 바꾸는 등급만 본다.**
 #:
-#: P5 가 *"미탐(놓침)을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은
+#: P5(0.2절) 가 *"미탐(놓침)을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은
 #: **통과 판정**이다. 그런데 "통과" 는 `U1` 하나다 — 처음에 `U2` 를 같이 넣었다가
 #: 게이트를 대조하고 걷어냈다(#370 리뷰).
 #:
@@ -247,6 +247,23 @@ def score(
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = apply_misconception_floor(judgment, matched, rubric)
         judgment = _pin_escalation(judgment, matched, rubric)
+        # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
+        # 걸렸는지 세기만 한다 — 등급을 안 바꾼다(이슈 #284 (b) 의 결정 근거).
+        # floor 뒤인 이유: "켰으면 등급이 달라졌을 것인가" 는 최종 등급을 알아야 답한다.
+        try:
+            shadow.observe(answer_text, rubric, judgment.grade.value)
+        except Exception:  # noqa: BLE001 — 관측자가 채점을 죽이면 안 된다
+            # ❗**못 잰 것을 요약에 남긴다.** 여기서 안 세면 실패가 집계에서 빠지고,
+            # "10건 중 1건 걸림" 과 "5건만 재고 1건 걸림" 이 같아 보인다 (#364 리뷰).
+            shadow.METER.record_failure()
+            # ❗판정은 이미 위에서 끝났다. 그림자는 "(b) 를 켤지 정할 근거" 를 모으는
+            # 관측자일 뿐이라, 여기서 던지면 **아무것도 안 하는 코드가 채점을 502 로
+            # 만든다.** "판정을 안 바꾼다" 는 등급 값만이 아니라 **판정이 나온다는
+            # 사실**까지다 (#364 리뷰).
+            log.warning("F-DET-001 그림자 매칭 실패 — 판정은 그대로 낸다", exc_info=True)
+        # 그림자 관측 **뒤**에 캡을 씌운다. 관측은 최종 **등급**을 보고(위 주석),
+        # 캡은 **확신도**만 바꾼다 — 서로 읽는 값이 달라 순서가 답을 안 바꾼다.
+        # 캡을 마지막에 두는 것은 이것이 판정을 실제로 고치는 유일한 단계여서다.
         return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt)
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
@@ -408,7 +425,7 @@ def cap_confidence_if_inconsistent(
 
     ## 통과 쪽만 다시 묻는다
 
-    P5 가 *"미탐을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은 **"이해했다"**
+    P5(0.2절) 가 *"미탐을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은 **"이해했다"**
     판정이다. U4 를 재확인해 봐야 이미 막혀 있고 호출만 두 배가 된다. 그래서 비용은
     <b>통과 판정 비율만큼</b>이지 전체 두 배가 아니다.
 

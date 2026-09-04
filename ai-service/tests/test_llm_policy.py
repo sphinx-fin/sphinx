@@ -9,6 +9,9 @@
 2. **사고 예산이 요청에서 빠진다.** `reasoning_effort` 를 안 보내면 gpt-5-mini 가
    호출당 사고토큰 1,024개를 태운다(실측 20.3초 → minimal 은 0개 · 2.4초, 등급 동일).
    빠져도 결과가 맞게 나오므로 **테스트로는 안 보이고 요금으로만 보인다.**
+3. **키가 프로바이더 교체를 안 따라온다.** `#266` 이 base_url 을 갈았지만 키는 SSM 에
+   그대로 있다. 옛 Gemini 키가 남아 있으면 기동은 성공하고 화면도 뜨고 **채점을 누르는
+   순간에야** 401 → 502 가 된다 — 그 자리가 데모 중간이다.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ def _clear_settings_cache():
 
 
 def _settings(monkeypatch, **env: str) -> config.Settings:
-    for key in ("LLM_MODEL", config.REASONING_EFFORT_ENV):
+    for key in ("LLM_MODEL", config.REASONING_EFFORT_ENV, "LLM_API_KEY", "LLM_API_BASE"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -241,3 +244,90 @@ def test_empty_response_that_is_not_truncation_stays_distinct(monkeypatch):
         client.send(prompt="안녕하세요")
     assert not isinstance(exc.value, llm_client.LlmTruncated)
     assert "finish_reason='stop'" in str(exc.value)
+
+
+# ── 키가 그 엔드포인트의 것인지 ──────────────────────────────────────────────
+# ❗**이 경고는 `configure_logging()` 보다 먼저 나간다** — `settings()` 안이고 그 함수를
+# `configure_logging()` 이 첫 줄에서 부른다. 우리 핸들러가 아직 없다는 뜻인데, 실측하면
+# uvicorn 아래에서는 root 핸들러로 propagate 돼 **포맷을 갖춰 보인다**:
+#
+#     ROOT|WARNING|app.config| LLM 키가 이 엔드포인트의 것으로 안 보인다: …
+#
+# `#121` 이 막은 것은 *"관측을 켜는 함수가 자기 경고를 관측 밖으로 내보내는 것"* 이고
+# 이건 그 경우가 아니다. 형제인 모델 정책 경고와 같은 자리에 둔다 — 갈라 두면 둘 중
+# 어느 쪽이 규약인지 다음 사람이 알 수 없다.
+_LONG = "k" * config.OPENAI_KEY_MIN_LEN
+_SHORT = "k" * (config.OPENAI_KEY_MIN_LEN - 1)
+_OPENAI = "https://api.openai.com/v1"
+_GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def test_a_key_too_short_for_this_endpoint_warns(monkeypatch, caplog) -> None:
+    """★ 옛 프로바이더 키가 남아 있으면 **기동 때** 말한다."""
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY=_SHORT, LLM_API_BASE=_OPENAI)
+    assert "이 엔드포인트의 것으로 안 보인다" in caplog.text
+
+
+def test_the_warning_does_not_leak_the_key(monkeypatch, caplog) -> None:
+    """★ 문면에 **키 값이 없다** — 길이만 있다.
+
+    이 경고는 비밀을 손에 들고 있다. 진단을 위해 값을 찍으면 그 줄이 CloudWatch 에
+    영구히 남는다. `scripts/walk_demo_session.sh` 가 *"값을 안 보고 프로바이더를
+    가른다"* 로 간 것과 같은 이유다.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY=_SHORT, LLM_API_BASE=_OPENAI)
+    assert _SHORT not in caplog.text
+    assert str(len(_SHORT)) in caplog.text
+
+
+def test_a_full_length_key_is_silent(monkeypatch, caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY=_LONG, LLM_API_BASE=_OPENAI)
+    assert "이 엔드포인트의 것으로 안 보인다" not in caplog.text
+
+
+def test_an_empty_key_is_silent(monkeypatch, caplog) -> None:
+    """★ 빈 키는 이 경고의 몫이 아니다 — **고치는 자리가 다르다.**
+
+    없는 것은 SSM 에 넣는 일이고, 남의 키가 있는 것은 SSM 의 값을 바꾸는 일이다.
+    그리고 빈 키는 이미 `LLM_API_KEY 미설정` 으로 503 이 된다 — 여기서 또 말하면
+    같은 사실을 두 번 말하면서 **갈래가 셋인 것을 둘로 보이게** 한다.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY="", LLM_API_BASE=_OPENAI)
+    assert "이 엔드포인트의 것으로 안 보인다" not in caplog.text
+
+
+def test_a_short_key_on_another_endpoint_is_silent(monkeypatch, caplog) -> None:
+    """★ Gemini 호환 엔드포인트로 **되돌린** 경우를 오탐하지 않는다.
+
+    `config.py` 가 그 되돌리기를 문서화해 뒀다(코드는 안 고치고 `LLM_API_BASE` 만 갈면
+    된다). 길이 판별자는 OpenAI 엔드포인트에서만 뜻이 있으므로 거기서만 잰다.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY=_SHORT, LLM_API_BASE=_GEMINI)
+    assert "이 엔드포인트의 것으로 안 보인다" not in caplog.text
+
+
+def test_the_warning_names_the_bound_it_read(monkeypatch, caplog) -> None:
+    """★ 경고가 **상수에서** 경계를 읽는다 — 하드코딩하면 상수를 바꿔도 옛말을 한다.
+
+    형제 경고(`test_the_warning_names_the_policy_it_read`)와 같은 검사다.
+    """
+    monkeypatch.setattr(config, "OPENAI_KEY_MIN_LEN", 500)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        _settings(monkeypatch, LLM_API_KEY=_LONG, LLM_API_BASE=_OPENAI)
+    assert "500 자 이상" in caplog.text, caplog.text
+
+
+def test_the_default_endpoint_is_the_one_we_measure(monkeypatch) -> None:
+    """★ 공회전 방지 — 기본 base_url 이 그 호스트가 아니면 위 전부가 조용해진다.
+
+    `LLM_API_BASE` 를 안 주는 것이 alpha 의 실제 모양이다(`docker-compose.yml` 이
+    `${LLM_API_BASE:-}` 로 **빈 값**을 넣고, 빈 값은 기본값으로 되살아난다).
+    """
+    assert config.OPENAI_HOST in config.DEFAULT_BASE_URL
+    s = _settings(monkeypatch, LLM_API_KEY=_LONG)
+    assert config.OPENAI_HOST in s.llm_base_url

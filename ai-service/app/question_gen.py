@@ -33,7 +33,7 @@ from pathlib import Path
 
 from . import numerics, rubrics, templates
 from .llm_client import LlmClient, LlmError, client as default_client
-from .schemas import QuestionDraft, QuestionResponse, RiskItem
+from .schemas import InterviewContext, QuestionDraft, QuestionResponse, RiskItem
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-INT-002_v1.md"
 PROMPT_VERSION = "F-INT-002_v1"
@@ -58,8 +58,31 @@ def generate(
     asked_types: list[str] | None = None,
     product_type: str = "ELS",
     llm: LlmClient | None = None,
+    *,
+    variant: str = "initial",
+    context: InterviewContext | None = None,
 ) -> QuestionResponse:
-    """이해항목 → 되말하기 질문."""
+    """이해항목 → 되말하기 질문.
+
+    ## `variant="reverify"` 가 왜 있나 — 7-4 1단계
+
+    재설명 뒤 다시 묻는 질문이 서버에 **고정 문항으로 하드코딩**돼 있었고, 그 자리 주석이
+    스스로 이렇게 적어 뒀다.
+
+        이 목은 기획서 7-4 1단계(우회 비용 상향)를 만족하지 않는다. … 항목별로 갈리기만
+        할 뿐 고정 문항이다. **사전에 확보하면 그대로 뚫린다.**
+
+    7-4 가 요구하는 것은 *"질문이 상품 문서에서 자동 생성되므로 고정 문항을 사전에 확보하는
+    것이 불가능"* 한 상태다. 재검증이야말로 **판매자가 미리 답을 준비시킬 동기가 가장 큰
+    자리**라 — 첫 질문에서 이미 한 번 막혔으므로 — 여기가 고정이면 게이트가 뚫린다.
+
+    ## 맥락은 무엇을 바꾸나
+
+        vulnerable=True          한 번에 한 요소만 · 짧은 문장 (기획서 175행)
+        matched_misconceptions   이미 걸린 오해를 정면으로 확인하는 쪽으로
+        prior_grades             앞에서 계속 U3 면 더 쉬운 진입을 고른다
+        variant="reverify"       "다시" 를 명시하고 같은 유형을 피한다
+    """
     template_item = _template_item(risk_item.item_id, product_type)
     forbidden = answer_fragments(risk_item)
     allowed = [t for t in QUESTION_TYPES if t not in set(asked_types or ())] or list(QUESTION_TYPES)
@@ -69,7 +92,8 @@ def generate(
     for _ in range(MAX_ATTEMPTS):
         try:
             draft = client_.complete_json(
-                prompt=build_prompt(risk_item, template_item, forbidden, asked_types, allowed),
+                prompt=build_prompt(risk_item, template_item, forbidden, asked_types, allowed,
+                                    variant=variant, context=context),
                 model_cls=QuestionDraft,
                 schema_name="QuestionDraft",
                 system=load_system_prompt(),
@@ -90,7 +114,7 @@ def generate(
         )
 
     _log_fallback(risk_item.item_id, attempts, allowed)
-    return _fallback(risk_item, template_item)
+    return _fallback(risk_item, template_item, variant=variant, context=context)
 
 
 def _log_fallback(item_id: str, attempts: list[str], allowed: list[str]) -> None:
@@ -236,9 +260,30 @@ def _shares_long_run(fragment: str, question: str) -> bool:
 
 
 # ── 폴백 ──────────────────────────────────────────────────────────────────────
+#: 재검증 폴백 — 항목 문면을 안 쓴다. 항목별 고정 문장을 두면 **사전에 확보 가능한 문항**이
+#: 다시 생기고, 그게 7-4 1단계가 막으려는 것이다(서버에 있던 하드코딩이 정확히 그 모양이었다).
+#: 그래서 여기 있는 것은 **무엇을 물어야 하는지 항목이 안 정하는** 문장 하나뿐이고,
+#: 눈높이만 갈린다. 항목이 안 실리므로 미리 준비해도 답이 안 되고, `fallback_used=True` 가
+#: LLM 이 만든 것이 아님을 알린다.
+REVERIFY_FALLBACK = "방금 설명드린 내용 중에서 가장 중요하다고 이해하신 것을 본인 말씀으로 다시 말씀해 주시겠어요?"
+REVERIFY_FALLBACK_PLAIN = "방금 설명드린 것 중에 가장 중요한 게 뭐라고 이해하셨는지 편하게 말씀해 주시겠어요?"
+
+
 def _fallback(
-    risk_item: RiskItem, template_item: templates.TemplateItem
+    risk_item: RiskItem,
+    template_item: templates.TemplateItem,
+    *,
+    variant: str = "initial",
+    context: InterviewContext | None = None,
 ) -> QuestionResponse:
+    if variant == "reverify":
+        plain = context is not None and context.vulnerable
+        return QuestionResponse(
+            item_id=risk_item.item_id,
+            question=REVERIFY_FALLBACK_PLAIN if plain else REVERIFY_FALLBACK,
+            question_type=FALLBACK_QUESTION_TYPE,
+            fallback_used=True,
+        )
     if not template_item.fallback_question:
         raise LlmError(
             f"{risk_item.item_id}: 생성 실패에 쓸 fallback_question 이 템플릿에 없다 — "
@@ -280,6 +325,9 @@ def build_prompt(
     forbidden: tuple[str, ...],
     asked_types: list[str] | None,
     allowed: list[str],
+    *,
+    variant: str = "initial",
+    context: InterviewContext | None = None,
 ) -> str:
     """조건 원문을 프롬프트에 넣지 않는다.
 
@@ -287,9 +335,49 @@ def build_prompt(
     올라간다. 모델이 알아야 하는 것은 *무엇을 묻는지*이고 *답이 무엇인지*가 아니다.
     """
     _, user = _prompt_sections()
-    return user.format(
+    base = user.format(
         item_name=f"{risk_item.item_id} — {template_item.name}",
         answer_elements="\n".join(f"- {f}" for f in forbidden) or "- (없음)",
         asked_types=", ".join(asked_types or []) or "(없음)",
         allowed_types=", ".join(allowed),
     )
+    extra = context_section(variant, context)
+    return f"{base}\n{extra}" if extra else base
+
+
+def context_section(variant: str, context: InterviewContext | None) -> str:
+    """맥락을 프롬프트에 붙이는 절. 없으면 빈 문자열 — 옛 동작 그대로다.
+
+    ❗**템플릿 파일을 안 고친다.** `F-INT-002_v1.md` 는 프롬프트 자산이고 버전이 판정
+    기록에 실린다(`prompt_version`). 맥락은 요청마다 달라지는 값이라 자산이 아니라
+    **조립**이다 — 템플릿에 넣으면 같은 버전이 서로 다른 프롬프트를 뜻하게 된다.
+
+    ❗**정답이 들어갈 자리가 없다.** 등급과 유형 ID 만 온다(`InterviewContext` 참고).
+    `leaked_fragments` 가 생성된 질문을 다시 검사하므로 여기서 새어도 질문에서 걸리지만,
+    애초에 안 넣는 것이 맞다 — 검사는 최종 방어선이지 설계가 아니다.
+    """
+    lines: list[str] = []
+    if variant == "reverify":
+        lines.append(
+            "- 이 질문은 **재설명 뒤 다시 묻는 것**이다. 고객이 앞서 같은 항목에 답했고 "
+            "설명을 한 번 더 들었다. **같은 문장을 다시 쓰지 말고** 다른 각도로 묻는다.")
+    if context is None:
+        return "\n".join(lines) and "\n## 면담 맥락\n" + "\n".join(lines)
+
+    if context.vulnerable:
+        lines.append(
+            "- 이 고객은 **눈높이를 낮춰야 한다**(연령·투자경험·금액대 정황). 한 번에 한 "
+            "가지만 묻고, 문장을 짧게, 전문용어 대신 일상어로 쓴다.")
+    if context.matched_misconceptions:
+        lines.append(
+            "- 이 면담에서 이미 확인된 오해가 있다: "
+            + ", ".join(context.matched_misconceptions)
+            + ". 그 오해가 이 항목에도 걸리는지 **정면으로 확인하는 쪽**으로 묻는다. "
+              "다만 오해 문장을 질문에 옮겨 쓰지 않는다 — 그건 오답을 심는 것이다.")
+    if context.prior_grades:
+        low = sum(1 for g in context.prior_grades if getattr(g, "value", g) in ("U3", "U4"))
+        if low >= 2:
+            lines.append(
+                f"- 앞선 {len(context.prior_grades)}개 항목 중 {low}개가 이해되지 않았다. "
+                "**더 쉬운 진입**으로 시작한다 — 상황을 먼저 그려 주고 그다음에 묻는다.")
+    return "\n".join(lines) and "\n## 면담 맥락\n" + "\n".join(lines)

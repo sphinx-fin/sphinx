@@ -5,6 +5,11 @@ import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
 import com.sphinxfin.sphinx.core.session.Session;
 import com.sphinxfin.sphinx.domain.Channel;
+import com.sphinxfin.sphinx.domain.Signal;
+import com.sphinxfin.sphinx.domain.OverrideStatus;
+import com.sphinxfin.sphinx.domain.GateResult;
+import com.sphinxfin.sphinx.domain.RuleRef;
+import com.sphinxfin.sphinx.core.session.SessionFsm;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
@@ -485,5 +490,162 @@ class AggregateServiceTest {
             return view.rows().stream().filter(r -> r.band().equals(band)).findFirst()
                     .orElseThrow(() -> new AssertionError(band + " 줄이 없다"));
         }
+    }
+
+    // ── 결정 뷰 (이슈 #321 2·3·4) ─────────────────────────────────────────────
+    //
+    // 지금 대시보드가 내는 것은 전부 **오해율**이다 — "고객이 무엇을 모르는가".
+    // 이 제품이 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가), 화면에
+    // 그 답이 없었다.
+
+    /** 판정까지 간 세션 하나. 재설명을 거쳤는지와 최종 등급을 따로 준다. */
+    private void seedDecided(Signal signal, Grade finalGrade, boolean reexplained,
+                             OverrideStatus override, int unmeasured) {
+        Session session = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
+                "s02-survey-v1", Map.of(), "seller-d", "BR-1"));
+        if (reexplained) {
+            // 재설명을 거친 항목은 재검증 횟수가 오른다 — SessionService 가 RE_EXPLAIN
+            // 상태에서 recordReverify 를 부른다. 여기서는 그 결과 상태를 직접 만든다.
+            session.recordJudgment(judgment(ITEM, Grade.U3));
+            session.recordReverify(ITEM);
+        }
+        session.recordJudgment(judgment(ITEM, finalGrade));
+        session.recordGate(new GateResult(signal, List.of(new RuleRef("R-01", "문면")),
+                unmeasured, 4), Instant.parse("2026-09-04T00:00:00Z"));
+        if (override != OverrideStatus.NONE) {
+            session.requestOverride("사유");
+            if (override == OverrideStatus.APPROVED) {
+                session.approveOverride("mgr-01", Instant.parse("2026-09-04T01:00:00Z"));
+            }
+        }
+        em.persist(session);
+    }
+
+    private AggregateService.DecisionView orgDecisions() {
+        em.flush();
+        em.clear();
+        return aggregate.decisions(AccessPolicy.Scope.ORG, null, AggregateService.Filters.none());
+    }
+
+    @Test
+    @DisplayName("❗게이트 신호 분포를 낸다 — 지금까지 화면이 「막았는가」를 못 말했다")
+    void itCountsGateSignals() {
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.NONE, 0);
+        seedDecided(Signal.YELLOW, Grade.U2, false, OverrideStatus.NONE, 0);
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.NONE, 0);
+
+        var gate = orgDecisions().gate();
+
+        assertThat(gate).extracting(AggregateService.SignalCount::signal)
+                .as("신호 셋을 항상 낸다 — 0 인 신호를 빼면 화면이 분포를 못 그린다")
+                .containsExactly("GREEN", "YELLOW", "RED");
+        assertThat(gate).filteredOn(c -> c.signal().equals("RED"))
+                .singleElement().extracting(AggregateService.SignalCount::n).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("★ 재설명 효과 — 재설명을 거친 항목 중 최종 이해에 도달한 비율")
+    void itMeasuresWhetherReexplainingWorked() {
+        seedDecided(Signal.GREEN, Grade.U1, true, OverrideStatus.NONE, 0);   // 되돌아왔다
+        seedDecided(Signal.RED, Grade.U4, true, OverrideStatus.NONE, 0);     // 안 됐다
+        seedDecided(Signal.GREEN, Grade.U1, false, OverrideStatus.NONE, 0);  // 재설명 없음
+
+        var effect = orgDecisions().reexplain();
+
+        assertThat(effect.items())
+                .as("재설명을 안 거친 항목이 분모에 들어가면 효과가 희석된다")
+                .isEqualTo(2);
+        assertThat(effect.resolved()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗오버라이드는 요청과 승인을 가른다 — 요청만 하고 안 된 것이 그 자체로 신호다")
+    void itSeparatesRequestedFromApproved() {
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.PENDING_APPROVAL, 0);
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.APPROVED, 0);
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.NONE, 0);
+
+        var override = orgDecisions().override();
+
+        assertThat(override.requested()).isEqualTo(2);
+        assertThat(override.approved())
+                .as("합치면 ADR-002(요청자 ≠ 승인자)가 실제로 작동했는지 안 보인다")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗못 잰 항목이 있는 채로 판정된 세션을 센다 — R-00 이 무는 자리다")
+    void itCountsSessionsJudgedWithUnmeasuredItems() {
+        seedDecided(Signal.RED, Grade.U1, false, OverrideStatus.NONE, 2);
+        seedDecided(Signal.GREEN, Grade.U1, false, OverrideStatus.NONE, 0);
+
+        assertThat(orgDecisions().unmeasured().sessions()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗표본이 적으면 비율이 null 이다 — 0 이면 「없었다」와 「셀 수 없다」가 같아진다")
+    void smallSamplesMaskTheRateInsteadOfReportingZero() {
+        seedDecided(Signal.RED, Grade.U4, true, OverrideStatus.NONE, 0);
+
+        var view = orgDecisions();
+
+        assertThat(view.reexplain().rate()).isNull();
+        assertThat(view.reexplain().masked()).isTrue();
+        assertThat(view.reexplain().items())
+                .as("가려도 줄을 지우지 않는다 — 가려졌다는 사실이 마스킹이 동작한 증거다")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗판정 전 세션은 네 지표 어디에도 안 들어간다 — 진행 중인 것은 결정이 아니다")
+    void sessionsWithoutAVerdictAreNotCounted() {
+        seed(PRODUCT, "BR-1", "seller-a", "60대", Channel.FACE_TO_FACE, ITEM, Grade.U2);
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.NONE, 0);
+
+        var view = orgDecisions();
+        assertThat(view.gate().stream()
+                .mapToLong(AggregateService.SignalCount::n).sum()).isEqualTo(1);
+        assertThat(view.override().judged())
+                .as("분모가 매칭 전체면 가림 판단에 쓴 표본과 비율의 분모가 다른 값이 된다")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★ 재설명 직후(재채점 전) 항목은 실패로 안 센다 — 진행할수록 성과가 내려가면 안 된다")
+    void anItemAwaitingRescoringIsNotCountedAsAFailure() {
+        // 결정된 세션 하나: 재설명 → U1. 여기만 보면 1/1 이다.
+        seedDecided(Signal.GREEN, Grade.U1, true, OverrideStatus.NONE, 0);
+        // 진행 중 세션: 재설명은 했고 **아직 재채점 전이라 U3 인 채**다. 판정이 없다.
+        Session inflight = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
+                "s02-survey-v1", Map.of(), "seller-e", "BR-1"));
+        inflight.recordJudgment(judgment(ITEM, Grade.U3));
+        inflight.recordReverify(ITEM);
+        em.persist(inflight);
+
+        var reexplain = orgDecisions().reexplain();
+
+        assertThat(reexplain.items())
+                .as("판정 전 세션이 분모에 들어가면 재채점 전 항목이 전부 실패로 계상된다")
+                .isEqualTo(1);
+        assertThat(reexplain.resolved()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗오버라이드도 판정된 세션만 센다 — 요청은 RED 판정 뒤에만 생긴다")
+    void overridesOnUndecidedSessionsAreNotCounted() {
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.PENDING_APPROVAL, 0);
+        Session inflight = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
+                "s02-survey-v1", Map.of(), "seller-f", "BR-1"));
+        inflight.recordJudgment(judgment(ITEM, Grade.U4));
+        inflight.requestOverride("판정 전 요청");
+        em.persist(inflight);
+
+        var override = orgDecisions().override();
+
+        assertThat(override.requested()).isEqualTo(1);
+        assertThat(override.judged()).isEqualTo(1);
     }
 }

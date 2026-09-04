@@ -72,7 +72,7 @@ class SessionControllerTest {
         when(aiServiceClient.detectMismatch(anyString(), anyMap(), anyMap(), nullable(String.class)))
                 .thenReturn(new SuitabilityMismatch(SuitabilityStatus.NO_MISMATCH, "테스트", null, java.util.List.of()));
         // 질문 생성(F-INT-002) 기본 스텁 — nextQuestion 이 이제 ai-service 문면을 쓴다.
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenReturn(new AiServiceClient.Question("이 조건이 어떤 뜻인지 설명해 주시겠어요?", "condition", false));
         // 재설명(F-INT-004) 기본 스텁 — re-explain 콘텐츠가 이제 ai-service 에서 온다.
         when(aiServiceClient.reExplain(any(RiskItem.class), any(Judgment.class),
@@ -413,7 +413,7 @@ class SessionControllerTest {
     @DisplayName("다음 질문 문면은 ai-service 가 만든 질문에서 온다 (F-INT-002 배선)")
     void nextQuestionUsesAiServiceQuestion() throws Exception {
         // 목 문면("… 본인 말씀으로 설명해 주시겠어요?")이 아니라 ai-service 응답이 실려야 한다.
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), eq("ELS")))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), eq("ELS"), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenReturn(new AiServiceClient.Question("낙인 아래로 떨어지면 어떻게 되나요?", "condition", false));
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -425,7 +425,7 @@ class SessionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.question").value("낙인 아래로 떨어지면 어떻게 되나요?"));
         // 상품유형은 세션에서 온다(하드코딩 아님) — ELS 로 넘어갔는지 직접 확인한다.
-        verify(aiServiceClient).question(any(RiskItem.class), anyList(), eq("ELS"));
+        verify(aiServiceClient).question(any(RiskItem.class), anyList(), eq("ELS"), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class));
     }
 
     @Test

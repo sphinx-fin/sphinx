@@ -60,6 +60,20 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-5-mini"
 MODEL_POLICY_SUBSTRING = "gpt-5-mini"
 
+# ── 키가 그 엔드포인트의 것인지 ──────────────────────────────────────────────
+# `#266` 이 프로바이더를 갈았는데 **키는 SSM 에 그대로 있다.** 옛 키가 남아 있으면
+# base_url 은 OpenAI 인데 키는 Gemini 것이라 첫 호출에서 401 → 502 가 된다.
+#
+# ❗**그 502 가 나는 자리가 데모 중간이다.** 기동은 성공하고, 화면도 뜨고, 채점을
+# 누르는 순간에야 드러난다 — 조용한 실패를 로딩 시점으로 끌어올린다.
+#
+# **값을 보지 않고 길이로 가른다**(`scripts/walk_demo_session.sh` 와 같은 판별자).
+# 키를 읽지 않으므로 로그·화면에 값이 새지 않고, 프리픽스(`sk-`·`AIza`)를 박는 것과
+# 달리 프로바이더가 표기를 바꿔도 안 낡는다. 실측: OpenAI 164자 · Gemini 두 자리.
+OPENAI_HOST = "api.openai.com"
+#: 이 미만이면 OpenAI 키가 아니다. 두 프로바이더가 자릿수로 갈리므로 경계는 100 이다.
+OPENAI_KEY_MIN_LEN = 100
+
 #: 사고 예산. **비우면 안 보낸다** — 프로바이더 중립을 깨지 않으려는 것이다.
 #:
 #: gpt-5-mini 는 기본값이면 호출당 **사고토큰 1,024개**를 태우고 20.3초가 걸렸다.
@@ -307,9 +321,12 @@ def settings() -> Settings:
             "모델 정책 위반: LLM_MODEL=%s — 팀 결정은 %s 다. "
             "이 실행의 결과를 성능 수치로 인용하지 말 것.", model, MODEL_POLICY_SUBSTRING,
         )
+    base_url = os.getenv("LLM_API_BASE") or DEFAULT_BASE_URL
+    api_key = os.getenv("LLM_API_KEY", "")
+    _warn_if_key_is_not_for_this_endpoint(base_url, api_key)
     return Settings(
-        llm_base_url=os.getenv("LLM_API_BASE") or DEFAULT_BASE_URL,
-        llm_api_key=os.getenv("LLM_API_KEY", ""),
+        llm_base_url=base_url,
+        llm_api_key=api_key,
         llm_model=model,
         llm_reasoning_effort=_reasoning_effort(),
         llm_seed=_seed(),
@@ -365,3 +382,23 @@ def configure_logging() -> str:
         )
         requested = DEFAULT_LOG_LEVEL
     return requested
+
+
+def _warn_if_key_is_not_for_this_endpoint(base_url: str, api_key: str) -> None:
+    """키가 그 엔드포인트의 것으로 안 보이면 기동 때 경고한다.
+
+    빈 키는 여기서 안 다룬다 — 그건 이미 `LLM_API_KEY 미설정` 으로 503 이 되고,
+    **키가 없는 것과 남의 키가 있는 것은 고치는 자리가 다르다**(전자는 SSM 에 넣는
+    일, 후자는 SSM 의 값을 바꾸는 일).
+
+    값은 읽지 않는다. 길이만 본다.
+    """
+    key = api_key.strip()
+    if not key or OPENAI_HOST not in base_url or len(key) >= OPENAI_KEY_MIN_LEN:
+        return
+    log.warning(
+        "LLM 키가 이 엔드포인트의 것으로 안 보인다: base=%s 인데 키 길이가 %d 자다"
+        "(OpenAI 키는 %d 자 이상). 첫 LLM 호출이 401 → 502 로 죽는다 — "
+        "SSM 의 LLM_API_KEY 가 프로바이더 교체(#266) 를 안 따라왔을 수 있다.",
+        base_url, len(key), OPENAI_KEY_MIN_LEN,
+    )
