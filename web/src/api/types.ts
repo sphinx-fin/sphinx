@@ -549,3 +549,59 @@ export interface LeadingIndicatorResponse {
   series: IndicatorSeries[];
   outliers: IndicatorOutlier[];
 }
+
+/**
+ * 등급별 **건수** (`GradeDistribution`. 이슈 #177).
+ *
+ * 비율이 아니라 건수인 것이 요점이다 — 건수로 받으면 화면이 비율·합계를 다 만들 수 있고
+ * `u1+u2+u3+u4 === n` 검산이 성립한다. 비율로 받으면 반올림 때문에 그 검산이 사라진다.
+ *
+ * ❗**`misrate` 하나로는 "이해했는가" 를 말할 수 없다.** 41% 만 보이면 "59% 는 이해했다"
+ * 로 읽히는데 그 안에 부분이해(U2)·미이해(U3)가 섞여 있고, U1 이 0 건이어도 같은 값이
+ * 나온다. 그래서 취약 대비는 두 줄 다 분포를 같이 그린다.
+ */
+export interface GradeDistribution {
+  /** 이해 */
+  u1: number;
+  /** 부분이해 */
+  u2: number;
+  /** 미이해 */
+  u3: number;
+  /** 오해 — 이 건수가 `misrate` 의 분자다. */
+  u4: number;
+}
+
+/**
+ * 취약 고객 대비의 한 줄 (`GET /dashboard/vulnerability-contrast`. F-DSH-001 · 이슈 #321).
+ *
+ * ❗**`band` 는 서버가 정한다.** 판정 근거는 `vulnerability_weights.yaml` 이고 연령·가입
+ * 금액대·투자경험·채널 **네 요인의 합**이 임계값을 넘는지다 — 연령대만 보는 근사가 아니다.
+ * 화면이 자기 기준으로 다시 가르면 코칭 스코어와 갈리고, 갈려도 아무것도 안 말한다
+ * (`lib/sessionAttrs` 의 `weighted` 가 "취약" 이 아니라 "YAML 에 키가 있다" 인 것과 같은
+ * 종류의 착각이다 — 이슈 #319 에서 실제로 그렇게 틀렸다).
+ */
+export interface ContrastRow {
+  band: "vulnerable" | "other";
+  /** 오해율 0~1. `masked` 면 null. */
+  misrate: number | null;
+  /** 표본 수. 마스킹돼도 내려준다. */
+  n: number;
+  /** 소표본(n<30) 마스킹 여부. 히트맵 셀과 같은 규칙이다. */
+  masked: boolean;
+  /** 등급 분포. **`masked` 면 null** — 분포만 남으면 u4/n 으로 `misrate` 가 복원된다. */
+  grades: GradeDistribution | null;
+}
+
+/**
+ * 취약 고객 대비 (`ContrastResponse`).
+ *
+ * ❗**`rows` 는 언제나 두 줄이다**(계약 `minItems: 2 / maxItems: 2`). 표본이 0 이어도
+ * 자리를 지우지 않는다 — 없는 줄을 빼면 화면이 대비를 못 그리고, 무엇보다 **가려졌다는
+ * 사실이 증거**인데 그게 사라진다. 마스킹을 셀 제거로 하지 않는 것과 같은 이유다.
+ * 순서도 계약이 정한다 — `vulnerable` 이 먼저, `other` 가 뒤.
+ */
+export interface ContrastResponse {
+  synthetic: boolean;
+  scope: "branch" | "org";
+  rows: ContrastRow[];
+}
