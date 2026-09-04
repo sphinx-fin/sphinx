@@ -107,9 +107,13 @@ tasks.named('test') {
     // — 정작 갈리는 그 PR 에서 검사가 빠진다(이슈 #263).
     inputs.file('../web/docker-entrypoint.d/15-demo-mode.sh')
             .withPropertyName('demoModeAccountMap')
-    // ai-service 의 복창 캡도 같은 이유다. EchoCapBelowR05Test 가 그 상수를 읽어 R-05
-    // 임계값과 부등호를 대조하는데, 안 걸면 **scoring.py 만 고친 PR 에서 안 돈다**(이슈 #268).
-    inputs.file('../ai-service/app/scoring.py')
+    // ai-service 의 복창 캡도 같은 이유다. EchoCapBelowR05Test 가 그 값을 읽어 R-05
+    // 임계값과 부등호를 대조하는데, 안 걸면 **그 파일만 고친 PR 에서 안 돈다**(이슈 #268).
+    //
+    // ❗값이 scoring.py 에서 scoring_thresholds.yaml 로 옮겨졌다(#368). 이 줄이 안
+    // 따라오면 **"값만 조정" PR 에서 가드가 통째로 꺼진다** — 튜닝을 코드 변경이 아니게
+    // 만드는 것이 그 PR 의 목적이라, 정확히 그때부터 안 돈다.
+    inputs.file('../ai-service/app/scoring_thresholds.yaml')
             .withPropertyName('echoConfidenceCap')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 }
