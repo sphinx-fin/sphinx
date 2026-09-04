@@ -215,8 +215,24 @@ public class AiServiceClient {
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
     public Question question(RiskItem riskItem, List<String> askedTypes, String productType) {
+        return question(riskItem, askedTypes, productType, "initial", null);
+    }
+
+    /**
+     * 면담 맥락을 실어 질문을 만든다 (F-INT-002).
+     *
+     * <p>{@code variant="reverify"} 는 재설명 뒤 다시 묻는 질문이다. 그 문면이 <b>서버에
+     * 항목별 고정 문항으로</b> 있었는데, 그 자리 주석이 스스로 <i>"사전에 확보하면 그대로
+     * 뚫린다"</i> 고 적어 두고 있었다 — 기획서 7-4 1단계(우회 비용 상향)가 요구하는 것은
+     * <b>고정 문항을 사전에 확보하는 것이 불가능한 상태</b>다. 재검증은 판매자가 미리 답을
+     * 준비시킬 동기가 가장 큰 자리라(첫 질문에서 이미 한 번 막혔으므로) 여기가 고정이면
+     * 게이트가 뚫린다.
+     */
+    public Question question(RiskItem riskItem, List<String> askedTypes, String productType,
+                             String variant, InterviewContext context) {
         List<String> asked = askedTypes == null ? List.of() : askedTypes;
-        QuestionRequest request = new QuestionRequest(riskItem, asked, productType);
+        QuestionRequest request = new QuestionRequest(riskItem, asked, productType,
+                variant, context);
         QuestionResponse response;
         try {
             response = restClient.post()
@@ -414,7 +430,22 @@ public class AiServiceClient {
      * /internal/question 요청 본문. snake_case로 ai-service QuestionRequest
      * (risk_item, asked_types, product_type)와 1:1 (PR #60).
      */
-    record QuestionRequest(RiskItem riskItem, List<String> askedTypes, String productType) {}
+    record QuestionRequest(RiskItem riskItem, List<String> askedTypes, String productType,
+                           String variant, InterviewContext context) {}
+
+    /**
+     * 면담이 지금까지 알아낸 것 — 질문 생성이 이걸 보고 다음 질문을 정한다.
+     *
+     * <p>❗<b>정답을 싣지 않는다.</b> 등급과 오해 유형 ID 뿐이다 — 발화도 루브릭 조항도
+     * 조건 원문도 안 간다. 그건 {@code answer_fragments} 가 질문에서 걸러내는 바로 그
+     * 값이고, 맥락으로 넣으면 모델이 다음 질문에 옮겨 쓴다(유도심문).
+     *
+     * @param vulnerable            코칭 정황 스코어가 임계 이상 — 눈높이를 낮춘다
+     * @param priorGrades           이 세션에서 이미 나온 등급
+     * @param matchedMisconceptions 이미 걸린 오해 유형 ID
+     */
+    public record InterviewContext(boolean vulnerable, List<String> priorGrades,
+                                   List<String> matchedMisconceptions) {}
 
     /**
      * /internal/question 응답. ai-service QuestionResponse(item_id, question, question_type,

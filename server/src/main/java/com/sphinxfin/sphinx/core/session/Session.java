@@ -291,6 +291,34 @@ public class Session extends BaseEntity {
      * <p>둘 다 <b>판정할 수 없는 상태</b>다 — 게이트가 그 둘을 가릴 필요는 없다. 가려야 하는
      * 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00} 이 한다.
      */
+    /**
+     * 질문 생성에 넘길 면담 맥락 (F-INT-002).
+     *
+     * <p>❗<b>정답이 될 값을 안 담는다.</b> 등급과 오해 유형 ID 뿐이고 발화·루브릭·조건
+     * 원문은 안 간다 — 그건 질문에서 걸러내는 바로 그 값이라, 맥락으로 넣으면 다음 질문에
+     * 옮겨 쓰인다.
+     *
+     * <p>{@code exceptItem} 은 <b>지금 물으려는 항목</b>이다. 그 항목의 앞선 판정은 빼고
+     * 넘긴다 — 재검증에서 자기 직전 등급을 맥락으로 주면 <i>"방금 U3 였다"</i> 가 질문에
+     * 실려 <b>고객이 자기 점수를 알게 된다.</b>
+     */
+    public java.util.List<Grade> priorGrades(String exceptItem) {
+        return judgmentsByItem.entrySet().stream()
+                .filter(e -> !e.getKey().equals(exceptItem))
+                .map(e -> e.getValue().grade())
+                .toList();
+    }
+
+    /** 이 면담에서 이미 걸린 오해 유형 ID. 중복은 접는다 — 몇 번인지는 질문이 안 쓴다. */
+    public java.util.List<String> matchedMisconceptions(String exceptItem) {
+        return judgmentsByItem.entrySet().stream()
+                .filter(e -> !e.getKey().equals(exceptItem))
+                .map(e -> e.getValue().misconceptionType())
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
     public int unmeasuredItemCount() {
         java.util.Set<String> judged = judgments().stream()
                 .map(Judgment::itemId).collect(java.util.stream.Collectors.toSet());
