@@ -65,7 +65,7 @@ import { ApiRequestError, get } from "../api/client";
 import type {
   ContrastResponse, ContrastRow, DecisionResponse, GradeDistribution, HeatmapCell,
   HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse, OverrideCount,
-  ProductSummary, ReexplainEffect, RiskItem, Signal, SignalCount, UnmeasuredCount,
+  ProductSummary, ReexplainEffect, Signal, SignalCount, UnmeasuredCount,
 } from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
@@ -192,16 +192,6 @@ export default function S08Dashboard() {
   /** 상품ID → 상품명. `GET /products` 가 준다. */
   const [names, setNames] = useState<Record<string, string>>({});
   /**
-   * 이해항목ID → 항목명. **`names` 와 섞지 않는다**(이슈 #317).
-   *
-   * 한 맵에 담으면 상품과 항목의 키 공간이 한 곳에 뭉쳐서, 폴백(`?? id`)이 어느 축의
-   * 것인지 문면으로 구분이 안 된다. 실제로 그래서 항목 축이 `names` 로 그려지고 있었고
-   * — `names` 는 `productId → name` 이라 항목ID 는 언제나 폴백으로 떨어졌다 —
-   * `ELS-MATURITY-LOSS-CONDITION` 이 심사위원 화면에 스무 줄 깔렸다. 에러가 아니라
-   * 폴백이라 아무것도 안 말한다.
-   */
-  const [itemNames, setItemNames] = useState<Record<string, string>>({});
-  /**
    * 툴팁 하나를 화면 좌표로 띄운다.
    *
    * ❗카드 안에 `position:absolute` 로 두면 **가려진다.** 두 가지가 겹쳐서다 —
@@ -307,7 +297,7 @@ export default function S08Dashboard() {
   /* ── 표 축 ──────────────────────────────────────────────────────────────
    * 셀 목록에서 축을 뽑는다. 서버가 축을 따로 주지 않고, 축을 화면에 하드코딩하면
    * 상품·항목이 늘 때 조용히 빠진다.                                              */
-  const { products, items, byKey, stats, ranked } = useMemo(() => {
+  const { products, items, byKey, itemNames, cellProductNames, stats, ranked } = useMemo(() => {
     const cells = data?.cells ?? [];
     const ps: string[] = [];
     const its: string[] = [];
@@ -315,9 +305,23 @@ export default function S08Dashboard() {
     // `"a"+"b c"` 가 같은 키가 되는 충돌이 원천적으로 없다. **이스케이프로 적는다** —
     // 원시 NUL 을 소스에 넣으면 git 이 파일을 바이너리로 보고 diff 를 안 낸다(실측).
     const map = new Map<string, HeatmapCell>();
+    /* ── 축 표시명은 **응답이 준다** (이슈 #346) ──────────────────────────
+     * 예전에는 축에 뜬 상품마다 `GET /products/{id}/risk-items` 를 긁어 이름을 모았는데,
+     * 그 라우트가 주는 것은 **카탈로그 2건**이라 축 17개 중 15개가 ID 원문으로 남았다.
+     * 이름이 없어서가 아니라 **그 라우트가 아는 항목이 둘뿐**이어서다.
+     *
+     * ❗web 에 표를 두는 안은 두 번 기각됐다 — 두 벌이 되고(결정 10.59) 무엇보다 **교부
+     * PDF 를 안 고친다.** 같은 ID 원문이 심사위원이 손에 받는 종이에도 찍힌다. 그래서
+     * 서버가 이름을 싣고(결정 10.76 · 5.42) 화면과 종이가 한 번에 낫는다.
+     *
+     * 이름이 없는 항목(`null`)은 키를 그대로 그린다 — 라벨이 없다고 표를 멈추지 않는다. */
+    const itemNames: Record<string, string> = {};
+    const cellProductNames: Record<string, string> = {};
     for (const c of cells) {
       if (!ps.includes(c.product)) ps.push(c.product);
       if (!its.includes(c.item)) its.push(c.item);
+      if (c.itemName) itemNames[c.item] = c.itemName;
+      if (c.productName) cellProductNames[c.product] = c.productName;
       map.set(`${c.product}\u0000${c.item}`, c);
     }
     /* ── 요약 지표 ────────────────────────────────────────────────────────
@@ -373,46 +377,24 @@ export default function S08Dashboard() {
     const ranked = sorted.map((r) => ({ ...r, focus: focused.has(r.item) }));
 
     return {
-      products: ps, items: its, byKey: map,
+      products: ps, items: its, byKey: map, itemNames, cellProductNames,
       stats: { weighted, nAll, nShown, maskedCells: cells.filter((c) => c.masked).length,
                cellCount: cells.length },
       ranked,
     };
   }, [data]);
 
-  /* ── 이해항목 표시명 (이슈 #317) ─────────────────────────────────────────
-   * 히트맵 응답에는 항목명이 없다. `GET /products/{id}/risk-items` 가 주는 `name` 이
-   * 유일한 출처이고, S-02·S-03 이 "원금손실 조건" 을 그리는 것도 그 값이다.
+  /**
+   * 상품 축 한 칸의 표시명. **응답 → `GET /products` → 키** 순서다.
    *
-   * ❗**web 에 항목명 표를 두지 않는다.** 그러면 `INDEX_LABEL`(결정 10.59)처럼 표가 두
-   * 벌이 되고, web 에는 러너가 없어 갈려도 아무것도 안 말한다 — 그때는 CI 대조 스텝을
-   * 따로 붙여야 했다. 항목은 상품보다 자주 늘어서 그쪽이 더 나쁘다.
-   *
-   * 계약에 표시명을 싣는 쪽이 방향으로는 맞지만(같은 이슈에 적었다) 그건 강희진 승인이
-   * 필요하다. 그때까지는 화면이 긁는다 — 축에 **실제로 뜬 상품만** 부르므로 요청 수가
-   * 표의 행 수를 안 넘는다.
-   *
-   * 실패해도 화면은 뜬다. 상품명(`names`)과 같은 규칙으로 id 폴백이다.                */
-  const productKey = products.join("\u0000");
-  useEffect(() => {
-    if (products.length === 0) return;
-    let alive = true;
-    (async () => {
-      const entries = await Promise.all(products.map(async (pid) => {
-        try {
-          const res = await get<{ items: RiskItem[] }>(`/products/${pid}/risk-items`);
-          return (res.items ?? []).map((i) => [i.itemId, i.name] as const);
-        } catch {
-          return [];
-        }
-      }));
-      if (!alive) return;
-      setItemNames((prev) => ({ ...prev, ...Object.fromEntries(entries.flat()) }));
-    })();
-    return () => { alive = false; };
-    // products 는 매 렌더 새 배열이라 내용으로 비교한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productKey]);
+   * 히트맵 상품 축에는 합성 세션의 **유형**(`ELS`)과 실제 **상품ID**(`doc-els-…`)가 둘 다
+   * 올 수 있고, 이름의 출처가 각각 다르다 — 유형은 서버 카탈로그, 상품ID 는 `/products`.
+   * 서버가 유형 축에서만 `productName` 을 채우므로 **겹치는 자리가 없다**(계약 참조).
+   * 둘 다 없으면 키를 그대로 그린다.
+   */
+  const productLabel = (p: string) => cellProductNames[p] ?? names[p] ?? p;
+
+
 
   /* ── 선행지표 축 ────────────────────────────────────────────────────────
    * 계열 순서를 서버 순서(키 사전순)로 두지 않는다 — 8주 × N행 표에서 **먼저 봐야 하는
@@ -525,7 +507,7 @@ export default function S08Dashboard() {
             {/* 고른 상품에 셀이 하나도 없으면 그 값이 목록에서 사라져 필터가 풀린 것처럼
                 보인다 — 실제로는 걸려 있다. 선택값은 목록에 없어도 남긴다. */}
             {(products.includes(product) || !product ? products : [product, ...products]).map((id) => (
-              <option key={id} value={id}>{names[id] ?? id}</option>
+              <option key={id} value={id}>{productLabel(id)}</option>
             ))}
           </select>
         </label>
@@ -715,8 +697,8 @@ export default function S08Dashboard() {
               {products.map((p) => (
                 <tr key={p}>
                   <th scope="row">
-                    {names[p] ?? p}
-                    {names[p] && <span className="s08__row-id">{p}</span>}
+                    {productLabel(p)}
+                    {productLabel(p) !== p && <span className="s08__row-id">{p}</span>}
                   </th>
                   {items.map((it) => {
                     const c = byKey.get(`${p}\u0000${it}`);
@@ -733,7 +715,7 @@ export default function S08Dashboard() {
                           tabIndex={0}
                           onMouseEnter={(e) => showTip(e.currentTarget, (
                             <>
-                              <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
+                              <b>{productLabel(p)}</b>{itemNames[it] ?? it}
                               <span className="s08__tip-val">
                                 표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
                               </span>
@@ -742,7 +724,7 @@ export default function S08Dashboard() {
                           onMouseLeave={hideTip}
                           onFocus={(e) => showTip(e.currentTarget, (
                             <>
-                              <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
+                              <b>{productLabel(p)}</b>{itemNames[it] ?? it}
                               <span className="s08__tip-val">
                                 표본 {c.n}건 — 30건 미만이라 값을 가렸습니다
                               </span>
@@ -766,14 +748,14 @@ export default function S08Dashboard() {
                         tabIndex={0}
                         onMouseEnter={(e) => showTip(e.currentTarget, (
                           <>
-                            <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
+                            <b>{productLabel(p)}</b>{itemNames[it] ?? it}
                             <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
                           </>
                         ))}
                         onMouseLeave={hideTip}
                         onFocus={(e) => showTip(e.currentTarget, (
                           <>
-                            <b>{names[p] ?? p}</b>{itemNames[it] ?? it}
+                            <b>{productLabel(p)}</b>{itemNames[it] ?? it}
                             <span className="s08__tip-val">오해율 {pct}% · 표본 {c.n}건</span>
                           </>
                         ))}

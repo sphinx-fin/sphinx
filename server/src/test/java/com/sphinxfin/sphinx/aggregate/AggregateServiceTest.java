@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.aggregate;
 
+import com.sphinxfin.sphinx.catalog.RiskItemCatalog;
 import com.sphinxfin.sphinx.core.persistence.JpaAuditingConfig;
 import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.CreateSessionCommand;
@@ -43,7 +44,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 // JpaAuditingConfig 가 있어야 createdAt 이 채워진다 — 추이 집계가 그 값으로 주를 가른다.
 // @DataJpaTest 는 @EnableJpaAuditing 을 자동으로 켜지 않는다.
 // CoachingScoreService 가 취약 여부의 유일한 근거다(vulnerability_weights.yaml).
-@Import({AggregateService.class, CoachingScoreService.class, JpaAuditingConfig.class})
+@Import({AggregateService.class, CoachingScoreService.class, JpaAuditingConfig.class,
+        RiskItemCatalog.class})
 @DisplayName("AggregateService — 오해 지도 집계")
 class AggregateServiceTest {
 

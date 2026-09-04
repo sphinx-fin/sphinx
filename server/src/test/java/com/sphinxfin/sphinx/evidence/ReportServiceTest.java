@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.catalog.RiskItemCatalog;
 import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
@@ -32,7 +33,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 계약이 요약본에도 *"전문과 같은 해시"* 를 싣게 한 이유가 그것이다.
  */
 @DataJpaTest
-@Import({JpaImmutableStore.class, StoredEvidenceRecorder.class, ReportService.class, ReportPdf.class})
+@Import({JpaImmutableStore.class, StoredEvidenceRecorder.class, ReportService.class, ReportPdf.class,
+        RiskItemCatalog.class})
 @DisplayName("ReportService — 이해 기록 리포트")
 class ReportServiceTest {
 

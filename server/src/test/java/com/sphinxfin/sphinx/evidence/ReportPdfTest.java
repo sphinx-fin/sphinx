@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.evidence;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import com.sphinxfin.sphinx.catalog.RiskItemCatalog;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("F-GTE-004 리포트 PDF")
 class ReportPdfTest {
 
-    private final ReportPdf pdf = new ReportPdf();
+    private final ReportPdf pdf = new ReportPdf(new RiskItemCatalog());
     private static final Instant AT = Instant.parse("2026-09-03T10:05:00Z");
 
     private static Map<String, Object> content(String sessionId, String utterance) {
@@ -165,6 +166,40 @@ class ReportPdfTest {
                 .contains("U4")
                 .contains("낙인을 건드리면 무조건 손실이죠")
                 .contains("낙인이 무엇인지 설명해 주시겠어요?");
+    }
+
+    @Test
+    @DisplayName("★ 종이가 항목 이름을 적는다 — 심사위원이 손에 받는 문서다 (이슈 #346)")
+    void theItemLineCarriesItsDisplayName() throws Exception {
+        String text = textOf(pdf.render(content("S-42", "낙인을 건드리면 무조건 손실이죠"), "abc123", AT));
+
+        assertThat(text)
+                .as("ID 원문만 찍히던 것이 이슈 #346 이다. 대시보드와 같은 결함인데 web 표로는 "
+                        + "이쪽이 안 낫는다 — 그래서 서버가 이름을 싣는다")
+                .contains("낙인 배리어 (ELS-KNOCKIN-BARRIER)");
+    }
+
+    @Test
+    @DisplayName("❗이름을 모르는 항목이 교부를 막지 않는다 — ID 만 적고 계속 간다")
+    void anUnknownItemStillGetsIssued() throws Exception {
+        Map<String, Object> unknown = Map.of(
+                "sessionId", "S-43",
+                "items", List.of(Map.of(
+                        "itemId", "ELS-NOT-IN-CATALOG",
+                        "history", List.of(Map.of(
+                                "at", "2026-09-03T10:00:00Z", "grade", "U1",
+                                "askedQuestion", "질문", "reason", "사유")))),
+                "gateHistory", List.of(),
+                "overrides", List.of());
+
+        String text = textOf(pdf.render(unknown, "abc123", AT));
+
+        assertThat(text)
+                .as("루브릭이 늘고 카탈로그가 안 따라온 상태에서도 교부는 돼야 한다 — 라벨 "
+                        + "하나 때문에 기록이 죽으면 안 된다. 어긋남은 "
+                        + "RiskItemCatalogMirrorsRubricsTest 가 CI 에서 잡는다")
+                .contains("ELS-NOT-IN-CATALOG")
+                .doesNotContain("null");
     }
 
     @Test

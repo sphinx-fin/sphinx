@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.evidence;
 
+import com.sphinxfin.sphinx.catalog.RiskItemCatalog;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -73,6 +74,22 @@ import java.util.stream.Collectors;
 public class ReportPdf {
 
     /**
+     * 이해항목 표시명. <b>지면에만 쓴다 — {@code content} 에도 {@code contentHash} 에도
+     * 안 들어간다.</b>
+     *
+     * <p>❗이 경계가 이 클래스에서 제일 중요한 줄이다. 표시명을 해시 대상에 넣으면
+     * <b>해시가 카탈로그 파일에 매인다</b> — 이름 한 글자를 고치는 순간 <i>이미 교부된</i>
+     * 문서가 재현되지 않아 {@link ReportNotReproducibleException} 이 뜨고, 그건 무결성
+     * 실패(500)로 나간다. 이름은 <b>표시 라벨</b>이지 증거가 아니다. 증거는 {@code itemId}
+     * 이고 그건 지면에도 그대로 남는다(아래 {@link #itemLine}).
+     */
+    private final RiskItemCatalog catalog;
+
+    public ReportPdf(RiskItemCatalog catalog) {
+        this.catalog = catalog;
+    }
+
+    /**
      * 폰트에 없는 글자를 대신하는 문자. 지면에서 눈에 띄어야 하므로 공백이 아니다.
      *
      * <p>❗<b>이 문자 자신이 폰트에 있어야 대체 경로가 성립한다.</b> {@link Painter#sanitize}
@@ -113,7 +130,8 @@ public class ReportPdf {
     private static final float LEADING = 1.5f;
 
     /**
-     * 내용 → PDF 바이트. <b>부작용이 없고 입력만의 함수다.</b>
+     * 내용 → PDF 바이트. <b>부작용이 없고 입력만의 함수다</b> — 인자와, 빌드에 고정된
+     * 리소스(폰트·{@link #catalog} 의 표시명 표)만 읽는다. 같은 인자에 같은 바이트가 나온다.
      *
      * @param content     {@link ReportService#render(String)} 의 결과
      * @param contentHash 그 내용의 해시. 지면에 찍힌다
@@ -141,7 +159,7 @@ public class ReportPdf {
             }
             for (Map<String, Object> item : items) {
                 p.gap(4);
-                p.text(SIZE_BODY, "· " + str(item.get("itemId")));
+                p.text(SIZE_BODY, "· " + itemLine(str(item.get("itemId"))));
                 for (Map<String, Object> h : list(item.get("history"))) {
                     p.indented(SIZE_BODY, historyLine(h));
                 }
@@ -211,6 +229,21 @@ public class ReportPdf {
 
         COSString id = new COSString(contentHash.getBytes(StandardCharsets.UTF_8));
         doc.getDocument().setDocumentID(new COSArray(List.of(id, id)));
+    }
+
+    /**
+     * 항목 한 줄. <b>이름과 ID 를 둘 다 적는다</b> — {@code 낙인 배리어 (ELS-KNOCKIN-BARRIER)}.
+     *
+     * <p>이름만 적으면 이 종이를 불변 기록과 맞춰 볼 수 없다: 해시의 근거인 JSON 에는
+     * {@code itemId} 가 들어 있고 이름은 없다. ID 만 적던 것이 이슈 #346 이고(심사위원이
+     * 손에 받는 문서에 {@code ELS-TOTAL-LOSS-SCENARIO} 가 찍혔다), <b>한쪽을 고치려고
+     * 다른 쪽을 버리지 않는다.</b>
+     *
+     * <p>카탈로그가 모르는 항목이면 <b>ID 만</b> 적는다 — 라벨이 없다고 교부를 막지 않는다.
+     */
+    private String itemLine(String itemId) {
+        String name = catalog.itemName(itemId);
+        return name == null ? itemId : name + " (" + itemId + ")";
     }
 
     private static String historyLine(Map<String, Object> h) {

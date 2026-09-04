@@ -1,0 +1,47 @@
+# 이해항목 표시명 — 대시보드 축과 교부 문서가 ID 원문 대신 이름을 쓴다 (이슈 #346)
+#
+# ❗**정본은 여기가 아니다.** `ai-service/app/rubrics/*.yaml` 의 `name` 이고(소유: 윤지석)
+#   이 파일은 그 사본이다. `RiskItemCatalogMirrorsRubricsTest` 가 17건을 통째로 대조한다 —
+#   루브릭에서 이름을 고치거나 항목을 늘리면 그 테스트가 빨개진다.
+#
+# 사본인 이유는 **배포 경계**다. `server/Dockerfile` 의 빌드 컨텍스트가 `./server` 하나이고
+# (`docker-compose.yml:96`) `COPY` 하는 것은 래퍼·빌드 스크립트·`src` 뿐이라, 모듈 밖 파일은
+# 이미지에 들어갈 방법이 없다. 빌드 때 `../ai-service` 를 긁는 방식은 **로컬에서만 되고
+# 이미지에서 조용히 빈다** — 비면 화면이 ID 원문으로 되돌아가는데 그게 정확히 이 이슈 이전
+# 상태라 아무도 못 알아챈다. 대조 테스트는 CI 에서 도므로 이 함정을 안 밟는다.
+#
+# ❗**집계 축에는 루브릭 이름을 쓴다**(결정 5.42). 추출 이름(`낙인 배리어 45%`)은 이 회차
+#   값이라 상품을 넘어 합치는 축에 쓰면 **같은 항목이 두 줄**이 된다. 여기 있는 것은 회차를
+#   안 가리는 채점 기준 쪽 이름이다.
+#
+# 카탈로그 상품(`doc-els-kiwoom-4181` 등)의 항목을 채우는 것은 이 파일이 아니다 — `#355`
+# (결정 8.23). `MockData.RISK_ITEMS` 를 늘리면 면담이 2문항에서 17문항이 된다.
+
+items:
+  ELS-EARLY-REDEMPTION-CONDITION: { product-type: ELS,               name: "조기상환 조건" }
+  ELS-ISSUER-CREDIT-RISK:         { product-type: ELS,               name: "발행사 신용위험" }
+  ELS-KNOCKIN-BARRIER:            { product-type: ELS,               name: "낙인 배리어" }
+  ELS-LOSS-SIMULATION:            { product-type: ELS,               name: "과거 데이터 수익률 모의실험" }
+  ELS-MATURITY-LOSS-CONDITION:    { product-type: ELS,               name: "만기 손실조건" }
+  ELS-MIDWAY-REDEMPTION-COST:     { product-type: ELS,               name: "중도상환 원금손실" }
+  ELS-NO-DEPOSIT-INSURANCE:       { product-type: ELS,               name: "예금자보호 비대상" }
+  ELS-NO-LISTING:                 { product-type: ELS,               name: "환금성 제약(비상장)" }
+  ELS-PRINCIPAL-LOSS-WARNING:     { product-type: ELS,               name: "원금손실 가능성 고지" }
+  ELS-TOTAL-LOSS-SCENARIO:        { product-type: ELS,               name: "전액손실 사례" }
+  VAR-EARLY-SURRENDER-RATIO:      { product-type: VARIABLE_INSURANCE, name: "조기해지 환급률" }
+  VAR-FEE-DEDUCTION:              { product-type: VARIABLE_INSURANCE, name: "월공제액 차감 구조" }
+  VAR-NOT-BANK-SAVINGS:           { product-type: VARIABLE_INSURANCE, name: "은행 저축과 다름" }
+  VAR-PARTIAL-DEPOSIT-INSURANCE:  { product-type: VARIABLE_INSURANCE, name: "예금자보호 범위" }
+  VAR-PERFORMANCE-LINKED:         { product-type: VARIABLE_INSURANCE, name: "실적배당형 성격" }
+  VAR-PRINCIPAL-LOSS:             { product-type: VARIABLE_INSURANCE, name: "원금손실 가능성" }
+  VAR-SURRENDER-BELOW-PREMIUM:    { product-type: VARIABLE_INSURANCE, name: "해약환급금이 납입보험료보다 적을 수 있음" }
+
+# `product_type` 표시명. 히트맵 상품 축은 합성 세션에서 `productId` 자리에 상품 **유형**이
+# 들어와 있어서(`data/synth_sessions/distribution.yaml`) `GET /products` 의 상품명과 한 번도
+# 안 맞는다 — 그래서 축 머리에 `VARIABLE_INSURANCE` 가 그대로 떴다.
+#
+# 실제 상품ID 로 집계되는 축은 이 표에 없으므로 서버가 `productName` 을 비우고, 화면이
+# 지금처럼 `GET /products` 의 이름으로 그린다. 둘이 겹치는 자리가 없다.
+product-types:
+  ELS: "ELS"
+  VARIABLE_INSURANCE: "변액보험"
