@@ -1112,7 +1112,7 @@ function OverrideStat({ count }: { count: OverrideCount }) {
   return (
     <article className="s08__dstat">
       <p className="s08__dstat-label">적색 오버라이드</p>
-      {count.sessions === 0 ? (<>
+      {count.judged === 0 ? (<>
         <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
         <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
       </>) : (<>

@@ -636,8 +636,9 @@ export interface OverrideCount {
   requested: number;
   /** 그중 MGR 이 승인한 건수. */
   approved: number;
-  /** 모집단(판정된 세션 수). */
-  sessions: number;
+  /** 분모 — 판정된 세션 수. 오버라이드는 RED 판정 뒤에만 생기므로 진행 중 세션은
+      분모가 아니고, `masked` 도 이 값으로 정해진다 (#362 리뷰). */
+  judged: number;
   /** 소표본 여부. ⚠️ 이 블록에는 비율 필드가 없어 **가릴 대상이 없다** — 화면은 건수를
       그대로 적고 표본이 작다는 사실만 덧붙인다. 계약에 물어 둔 자리다. */
   masked: boolean;
