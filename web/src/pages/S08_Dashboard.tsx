@@ -63,8 +63,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
 import type {
-  ContrastResponse, ContrastRow, GradeDistribution, HeatmapCell, HeatmapResponse,
-  IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse, ProductSummary, RiskItem,
+  ContrastResponse, ContrastRow, DecisionResponse, GradeDistribution, HeatmapCell,
+  HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse, OverrideCount,
+  ProductSummary, ReexplainEffect, RiskItem, Signal, SignalCount, UnmeasuredCount,
 } from "../api/types";
 import { AGE_BANDS, CHANNELS } from "../lib/sessionAttrs";
 import "./S08_Dashboard.css";
@@ -116,6 +117,25 @@ const GRADE_LABEL: Record<keyof GradeDistribution, string> = {
   u4: "오해",
 };
 
+/**
+ * 신호등 라벨과 그리는 순서 (이슈 #321 의 2번).
+ *
+ * ❗**라벨 문면은 S-05 와 같아야 한다.** 판매자가 개별 세션에서 보는 말과 집계에서 보는 말이
+ * 다르면 같은 판정이 두 이름을 갖는다 — `S05_Judgment.tsx` 의 `SIGNAL_LABEL` 이 정본이고
+ * 여기는 그것을 옮겨 적은 것이다. **갈리면 아무것도 안 말한다**(`INDEX_LABEL` 과 같은 종류의
+ * 사본이라 결정 10.59 의 대상이다 — 계약이 표시명을 실으면 둘 다 지운다).
+ *
+ * ❗**자리는 배열 순서가 아니라 이 표가 정한다.** 서버가 정렬을 바꾸면 막대가 에러 없이
+ * 뒤바뀐다 — `lib/scenarios.ts` 가 `severity` 로 자리를 잡는 것과 같은 이유다.
+ * 통과 → 보완 → 보류 순서라 **막대의 방향 자체가 뜻을 갖는다.**
+ */
+const SIGNAL_ORDER: readonly Signal[] = ["GREEN", "YELLOW", "RED"];
+const SIGNAL_LABEL: Record<Signal, string> = {
+  GREEN: "통과",
+  YELLOW: "보완 필요",
+  RED: "보류",
+};
+
 const SCOPE_LABEL: Record<HeatmapResponse["scope"], string> = {
   branch: "자기 지점",
   org: "전사",
@@ -148,6 +168,16 @@ export default function S08Dashboard() {
   const [contrast, setContrast] = useState<ContrastResponse | null>(null);
   /** 대비만 실패했는가. 히트맵이 떴는데 이것만 없으면 침묵하지 않고 그 자리에 적는다. */
   const [contrastFailed, setContrastFailed] = useState(false);
+  /**
+   * 게이트가 무엇을 결정했는가 (이슈 #321 의 2·3·4번).
+   *
+   * 대비와 **같은 규칙**으로 다룬다 — 같은 권한·같은 필터라 같은 시점에 받고, 이것만 죽으면
+   * 조용히 사라지게 두지 않는다. 규칙을 하나 더 만들지 않는 이유는 두 패널이 갈리는 날
+   * 어느 쪽이 맞는 처리인지 알 수 없어지기 때문이다.
+   */
+  const [decisions, setDecisions] = useState<DecisionResponse | null>(null);
+  /** 결정 패널만 실패했는가. */
+  const [decisionsFailed, setDecisionsFailed] = useState(false);
   /** 집계 축. 계약 기본값과 같은 `branch` 로 연다 — 화면이 서버와 다른 기본을 갖지 않는다. */
   const [axis, setAxis] = useState<IndicatorAxis>("branch");
   const [product, setProduct] = useState("");
@@ -219,14 +249,18 @@ export default function S08Dashboard() {
            올린다 — `Promise.all` 로 묶으면 대비 하나가 죽을 때 히트맵까지 안 그려진다.
            대신 조용히 사라지게 두지도 않는다(`contrastFailed`). 권한이 같은 엔드포인트라
            히트맵이 떴는데 이쪽만 죽는 것은 정상 상태가 아니고, 그 사실이 보여야 한다. */
-        const [heat, cont] = await Promise.all([
+        const [heat, cont, dec] = await Promise.all([
           get<HeatmapResponse>(`/dashboard/heatmap${suffix}`),
           get<ContrastResponse>(`/dashboard/vulnerability-contrast${suffix}`)
+            .then((r) => r, () => null),
+          get<DecisionResponse>(`/dashboard/decisions${suffix}`)
             .then((r) => r, () => null),
         ]);
         setData(heat);
         setContrast(cont);
         setContrastFailed(cont === null);
+        setDecisions(dec);
+        setDecisionsFailed(dec === null);
       } else {
         // `periods` 는 보내지 않는다 — 계약이 기본 8주를 갖고 있고, 화면이 같은 숫자를
         // 다시 들면 두 벌이 된다. 바꿀 일이 생기면 계약이 먼저 바뀐다.
@@ -244,6 +278,8 @@ export default function S08Dashboard() {
            뒤에 직전 수치가 살아 있다가 뷰를 되돌릴 때 튀어나온다. */
         setContrast(null);
         setContrastFailed(false);
+        setDecisions(null);
+        setDecisionsFailed(false);
       } else {
         setError(describe(e));
       }
@@ -549,6 +585,43 @@ export default function S08Dashboard() {
           tip="값이 있는 칸만 놓고 항목별로 합쳤을 때 오해율이 가장 높은 항목입니다."
         />
       </section>
+
+      {/* ── 게이트가 무엇을 결정했는가 (이슈 #321 의 2·3·4번) ────────────────
+          ❗**측정보다 먼저 온다.** 이 아래는 전부 오해율이고 그건 *"고객이 무엇을 모르는가"*
+          다 — 이 제품이 하는 일은 그다음이다(막았는가 · 되돌렸는가 · 예외를 뒀는가).
+          P1 이 *"AI 는 측정, 룰은 결정"* 인데 화면에는 **결정 쪽이 통째로 없었다.**
+
+          ❗**이 패널에서만 3색을 쓴다.** `tokens.css` 규칙 1 이 채도 있는 색을 판정에만
+          허용하는데, 게이트 신호 분포는 바로 그 판정이다. 대신 규칙 3 도 같이 걸린다 —
+          **색만으로 구분하지 않고 라벨을 반드시 병기한다**(적록색약에게 말라카이트와
+          카넬리안은 명도가 1.01:1 이라 같은 회색이다). 아래 막대 조각은 전부
+          `aria-hidden` 이고 사실은 그 밑 문장에 있다. */}
+      {(decisions || decisionsFailed) && (
+        <section className="s08__decide" aria-label="게이트 결정">
+          <h2 className="s08__panel-title">게이트가 무엇을 결정했는가</h2>
+          {decisions ? (<>
+            <GateBar gate={decisions.gate} />
+            <div className="s08__dstats">
+              <ReexplainStat effect={decisions.reexplain} />
+              <OverrideStat count={decisions.override} />
+              <UnmeasuredStat count={decisions.unmeasured} />
+            </div>
+            <p className="s08__panel-note">
+              신호 분포는 <b>판정이 끝난 세션만</b> 셉니다 — 진행 중인 세션은 아직 결정이
+              아니라서 넣으면 분모가 부풀고 모든 비율이 낮아집니다. 비율이 <b>0 이 아니라
+              「가려짐」</b>인 칸은 표본이 30건에 못 미쳐 값을 감춘 것이고,
+              <b> 「데이터 없음」</b>은 해당하는 건이 아예 없는 것입니다 — 둘은 다른 사실입니다.
+            </p>
+          </>) : (
+            /* 대비 패널과 같은 규칙이다 — 권한이 같은 엔드포인트라 히트맵이 떴는데 이쪽만
+               죽는 것은 정상 상태가 아니고, 빈 자리는 "결정이 없었다" 로 읽힌다. */
+            <p className="s08__contrast-fail">
+              결정 수치를 불러오지 못했습니다. 오해 지도는 정상이므로 이 칸만 다시 받으면
+              됩니다 — 필터를 바꾸면 다시 시도합니다.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ── 항목별 순위 ───────────────────────────────────────────────────
           히트맵은 "어느 상품의 어느 항목" 을 보는 표라 항목 단위 비교가 눈으로 안 된다.
@@ -916,6 +989,172 @@ function Kpi({ label, value, sub, tip, tipId, show, hide }: {
       </p>
       <p className="s08__kpi-value">{value}</p>
       <p className="s08__kpi-sub">{sub}</p>
+    </article>
+  );
+}
+
+/**
+ * 값 한 줄의 세 상태를 **한 곳에서만** 정한다 — 값 · 가려짐 · 데이터 없음.
+ *
+ * ❗**`masked` 로는 못 가른다.** 계약이 표본 30건 미만이면 `masked` 이고 **0 도 그 안**이라
+ * 서버가 둘에 같은 값을 준다. 그래서 모집단(`n`)을 먼저 보고, 그다음 비율이 `null` 인지를
+ * 본다. 이 순서를 뒤집으면 *"해당하는 건이 없다"* 가 *"30건 미만이라 가렸다"* 로 나가고,
+ * 그건 **없는 것을 숨겼다고 말하는 것**이라 마스킹이 일하는 자리를 못 보여준다(#347 리뷰).
+ *
+ * 세 군데(`ContrastBand` · `TrendCell` · 이 패널)가 같은 규칙을 쓰는데, 앞의 둘은 그리는
+ * 모양이 서로 달라 각자 갖고 있다. 여기서 새로 만드는 두 칸은 모양이 같으므로 한 벌로 둔다.
+ */
+type StatState = "none" | "masked" | "value";
+function statState(n: number, ratio: number | null): StatState {
+  if (n === 0) return "none";
+  return ratio == null ? "masked" : "value";
+}
+
+/**
+ * 게이트 신호 분포 (이슈 #321 의 2번) — *"이 시스템이 무엇을 막았는가"*.
+ *
+ * ❗**머리 문장이 보류 건수를 든다.** 분포만 그리면 통과가 제일 큰 조각이라 화면이
+ * *"대부분 통과했습니다"* 로 읽힌다. 이 제품의 산출물은 **막은 것**이고, 기획서 4절이
+ * *"최선만 강조하는 관행의 정반대"* 로 못박은 자리가 정확히 여기다.
+ *
+ * ❗**막대는 장식이고 사실은 그 밑 문장에 있다**(`ContrastBand` 와 같은 규칙). 색만으로
+ * 구분하지 않으려면 조각마다 라벨이 붙어야 하는데, 조각 안에 글자를 넣으면 작은 조각에서
+ * 잘린다 — 그래서 막대는 `aria-hidden` 이고 라벨·건수는 아래 줄이 전부 적는다.
+ */
+function GateBar({ gate }: { gate: SignalCount[] }) {
+  /* 자리는 `SIGNAL_ORDER` 가 정한다 — 서버 배열 순서에 기대지 않는다. 계약은 셋을 항상
+     내지만, 빠진 값을 0 으로 지어내지는 않는다(없는 것과 0 건은 다른 사실이다). */
+  const rows = SIGNAL_ORDER
+    .map((s) => gate.find((g) => g.signal === s))
+    .filter((g): g is SignalCount => g != null);
+  const total = rows.reduce((a, g) => a + g.n, 0);
+  const red = rows.find((g) => g.signal === "RED") ?? null;
+
+  if (total === 0) {
+    return (
+      <div className="s08__gate">
+        <p className="s08__gate-head s08__cband-value--none">데이터 없음</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+      </div>
+    );
+  }
+
+  const redPct = red && red.share != null ? Math.round(red.share * 100) : null;
+  const breakdown = rows
+    .map((g) => `${SIGNAL_LABEL[g.signal]} ${g.n.toLocaleString()}건`)
+    .join(" · ");
+
+  return (
+    <div className="s08__gate">
+      <p className="s08__gate-head">
+        판정 <b>{total.toLocaleString()}건</b> 가운데{" "}
+        <b className="s08__gate-red">보류 {red ? red.n.toLocaleString() : "—"}건</b>
+        {/* 비율은 있을 때만 붙인다. 없는데 0% 로 적으면 "한 번도 안 막았다" 가 된다. */}
+        {redPct != null && <>{` (${redPct}%)`}</>}
+      </p>
+      <span className="s08__gbar s08__gbar--signal" aria-hidden="true">
+        {rows.map((g) => (
+          g.n === 0 ? null : (
+            <span
+              key={g.signal}
+              className={`s08__gseg s08__gseg--${g.signal.toLowerCase()}`}
+              style={{ flexGrow: g.n }}
+            />
+          )
+        ))}
+      </span>
+      <p className="s08__cband-sub">왼쪽부터 {breakdown}</p>
+    </div>
+  );
+}
+
+/**
+ * ★ 재설명 효과 (이슈 #321 의 3번) — **이 패널에서 제일 센 숫자다.**
+ *
+ * 나머지 수치는 전부 *"오해가 몇 %였다"* 이고 그건 문제 제기다. 이것만이 *"그래서 이해가
+ * 올라갔다"* 를 말한다 — 재설명을 거친 항목 중 최종 이해(U1)에 도달한 비율.
+ */
+function ReexplainStat({ effect }: { effect: ReexplainEffect }) {
+  const state = statState(effect.items, effect.rate);
+  return (
+    <article className="s08__dstat s08__dstat--lead">
+      <p className="s08__dstat-label">재설명 뒤 이해 도달</p>
+      {state === "none" ? (<>
+        <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
+        <p className="s08__cband-sub">재설명을 거친 항목이 없습니다</p>
+      </>) : state === "masked" ? (<>
+        <p className="s08__dstat-value s08__cband-value--masked">가려짐</p>
+        <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다 (재설명 {effect.items.toLocaleString()}건)</p>
+      </>) : (<>
+        <p className="s08__dstat-value">{Math.round((effect.rate ?? 0) * 100)}%</p>
+        <p className="s08__cband-sub">
+          재설명을 거친 {effect.items.toLocaleString()}건 가운데{" "}
+          <b>{effect.resolved.toLocaleString()}건</b>이 최종 이해(U1)에 도달했습니다
+        </p>
+      </>)}
+    </article>
+  );
+}
+
+/**
+ * 적색 오버라이드 (이슈 #321 의 4번) — 게이트를 사람이 뚫은 기록.
+ *
+ * ❗**요청과 승인을 한 수로 합치지 않는다.** 합치면 ADR-002(요청자 ≠ 승인자)가 실제로
+ * 작동했는지가 화면에서 사라진다 — **요청만 하고 승인 안 된 건수가 그 자체로 신호**다.
+ *
+ * ⚠️ **이 칸에는 「가려짐」 상태가 없다.** 계약 `OverrideCount` 는 비율 필드가 없고 건수 셋이
+ * 전부 non-nullable 이라 `masked` 가 **가릴 대상을 안 갖는다.** 서버가 보낸 값을 화면이
+ * 임의로 지우면 계약에 없는 규칙을 화면이 만드는 것이라, 건수는 그대로 적고 표본이 작다는
+ * 사실만 덧붙인다. 계약 쪽에 물어 둔 자리다(#362 리뷰).
+ */
+function OverrideStat({ count }: { count: OverrideCount }) {
+  const pending = count.requested - count.approved;
+  return (
+    <article className="s08__dstat">
+      <p className="s08__dstat-label">적색 오버라이드</p>
+      {count.sessions === 0 ? (<>
+        <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+      </>) : (<>
+        <p className="s08__dstat-value">
+          {count.requested.toLocaleString()}<span className="s08__dstat-unit">건 요청</span>
+        </p>
+        <p className="s08__cband-sub">
+          승인 <b>{count.approved.toLocaleString()}건</b> · 미승인{" "}
+          <b>{Math.max(pending, 0).toLocaleString()}건</b>
+          {/* 승인자는 적지 않는다 — 이 화면은 개인을 말하지 않는다(설계 판단 4). */}
+          {count.masked && " · 표본 30건 미만"}
+        </p>
+      </>)}
+    </article>
+  );
+}
+
+/**
+ * 미측정을 안은 채 판정된 세션 — `gate_rules` R-00 이 무는 자리.
+ *
+ * ❗**낮은 것이 좋다는 뜻으로 그리지 않는다.** 이 값은 성적이 아니라 **R-00 이 실재한다는
+ * 증거**다. 그래서 분모(`judged`)를 반드시 같이 적는다 — 비율만 있으면 *"몇 건 중"* 이
+ * 사라져서 0% 와 "판정 자체가 없었다" 가 같아 보인다.
+ */
+function UnmeasuredStat({ count }: { count: UnmeasuredCount }) {
+  const state = statState(count.judged, count.share);
+  return (
+    <article className="s08__dstat">
+      <p className="s08__dstat-label">미측정 항목을 안은 판정</p>
+      {state === "none" ? (<>
+        <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+      </>) : state === "masked" ? (<>
+        <p className="s08__dstat-value s08__cband-value--masked">가려짐</p>
+        <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다 (판정 {count.judged.toLocaleString()}건)</p>
+      </>) : (<>
+        <p className="s08__dstat-value">{Math.round((count.share ?? 0) * 100)}%</p>
+        <p className="s08__cband-sub">
+          판정 {count.judged.toLocaleString()}건 가운데{" "}
+          <b>{count.sessions.toLocaleString()}건</b>에 못 잰 항목이 있었습니다
+        </p>
+      </>)}
     </article>
   );
 }

@@ -605,3 +605,92 @@ export interface ContrastResponse {
   scope: "branch" | "org";
   rows: ContrastRow[];
 }
+
+/**
+ * 게이트 신호 하나의 건수 (`GET /dashboard/decisions`. F-DSH-001 · 이슈 #321 의 2번).
+ *
+ * ❗**셋은 언제나 다 온다** — 계약이 *"신호 셋은 0 이어도 항상 낸다"* 로 못박았다. 빼면
+ * *"그 신호가 한 건도 없었다"* 와 *"서버가 그 칸을 안 보냈다"* 가 같아지고, 화면은 분포를
+ * 그릴 수 없다(취약 대비 두 줄을 표본 0 에도 내는 것과 같은 규칙).
+ *
+ * ❗**배열 순서에 기대지 않는다.** 자리를 정하는 것은 `signal` 이고 서버가 주는 순서가
+ * 아니다 — `lib/scenarios.ts` 가 `severity` 로 자리를 잡는 것과 같은 이유다. 순서로 그리면
+ * 서버가 정렬을 바꾸는 날 **에러 없이 막대만 뒤바뀐다.**
+ */
+export interface SignalCount {
+  signal: Signal;
+  n: number;
+  /** 판정된 세션 대비 0~1. **표본이 부족하면 `null` 이고 그건 0 과 다르다.** */
+  share: number | null;
+}
+
+/**
+ * 적색 오버라이드 현황 (이슈 #321 의 4번).
+ *
+ * ❗**요청과 승인을 가른다.** 합치면 ADR-002(요청자 ≠ 승인자)가 실제로 작동했는지가 화면에서
+ * 사라진다 — **요청만 하고 승인 안 된 건수가 그 자체로 신호**이기 때문이다. 화면도 그 차이를
+ * 직접 적는다.
+ */
+export interface OverrideCount {
+  /** 판매자가 진행 사유를 적어 올린 건수. */
+  requested: number;
+  /** 그중 MGR 이 승인한 건수. */
+  approved: number;
+  /** 모집단(판정된 세션 수). */
+  sessions: number;
+  /** 소표본 여부. ⚠️ 이 블록에는 비율 필드가 없어 **가릴 대상이 없다** — 화면은 건수를
+      그대로 적고 표본이 작다는 사실만 덧붙인다. 계약에 물어 둔 자리다. */
+  masked: boolean;
+}
+
+/**
+ * ★ 재설명 효과 (이슈 #321 의 3번) — **이 패널의 본체다.**
+ *
+ * 지금까지 이 화면이 낼 수 있던 것은 *"오해가 29% 였다"* 뿐인데 그건 **문제 제기이지 성과가
+ * 아니다.** 재설명을 거친 항목 중 최종 이해(U1)에 도달한 비율이 *"이 제품이 실제로 이해를
+ * 올렸다"* 의 유일한 정량 근거다.
+ */
+export interface ReexplainEffect {
+  /** 재설명을 거친 (세션, 항목) 수. */
+  items: number;
+  /** 그중 최종 U1. */
+  resolved: number;
+  /** `resolved / items` 0~1. 표본 부족이면 `null` — 0 과 다르다. */
+  rate: number | null;
+  masked: boolean;
+}
+
+/**
+ * 못 잰 항목이 있는 채로 판정된 세션 (`gate_rules` R-00 이 무는 자리).
+ *
+ * 이 수치가 낮은 것이 좋은 것이 아니라 **R-00 이 실재한다는 증거**다 — 측정이 빈 채로
+ * 통과한 세션이 없다는 말을 하려면 그 분모(`judged`)를 같이 봐야 한다.
+ */
+export interface UnmeasuredCount {
+  /** 미측정 항목을 안은 채 판정된 세션 수. */
+  sessions: number;
+  /** 판정된 세션 전체(분모). */
+  judged: number;
+  /** `sessions / judged` 0~1. 표본 부족이면 `null`. */
+  share: number | null;
+  masked: boolean;
+}
+
+/**
+ * 게이트가 무엇을 결정했는가 (`GET /dashboard/decisions`. 계약 이름은 `DecisionView`).
+ *
+ * 이 화면의 나머지 수치는 전부 **측정**(오해율)이다 — *"고객이 무엇을 모르는가"*. 이 제품이
+ * 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가) 화면에 그 답이 없었다.
+ * P1 이 *"AI 는 측정, 룰은 결정"* 인데 **결정 쪽이 통째로 비어 있던 것**이다.
+ *
+ * 권한·필터·마스킹 규칙은 히트맵과 **같다**(`aggregate:heatmap:read`). 같은 데이터를 다른
+ * 축으로 자른 것이라 화면도 같은 시점에 같이 받는다.
+ */
+export interface DecisionResponse {
+  synthetic: boolean;
+  scope: "branch" | "org";
+  gate: SignalCount[];
+  override: OverrideCount;
+  reexplain: ReexplainEffect;
+  unmeasured: UnmeasuredCount;
+}
