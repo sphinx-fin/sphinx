@@ -89,6 +89,13 @@ OPENAI_KEY_MIN_LEN = 100
 #: 프로바이더가 나오면 **코드가 아니라 설정으로** 끄기 위해서다.
 REASONING_EFFORT_ENV = "LLM_REASONING_EFFORT"
 
+#: 임베딩 모델. **정책 모델과 따로 둔다** — `#266` 이 채팅 모델을 gemini → gpt-5-mini 로
+#: 옮길 때 임베딩까지 같이 옮길 이유가 없었고, 폐쇄망 교체 때도 둘의 후보가 다르다
+#: (채팅은 지시 따르기, 임베딩은 다국어 문장 표현 — `bge-m3` 등).
+#: 그래서 `MODEL_POLICY_SUBSTRING` 경고 대상이 아니다.
+EMBED_MODEL_ENV = "LLM_EMBED_MODEL"
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+
 # ── 재현성 (이슈 #280) ────────────────────────────────────────────────────────
 #
 # 같은 문서·같은 모델·같은 코드로 두 번 돌렸을 때 결과가 달랐다 — 추출 11/13 ↔ 13/13,
@@ -262,6 +269,7 @@ class Settings:
     llm_api_key: str
     llm_model: str
     llm_reasoning_effort: str
+    llm_embed_model: str
     llm_seed: int | None
     llm_timeout_sec: float
     env_files: tuple[str, ...]
@@ -329,6 +337,7 @@ def settings() -> Settings:
         llm_api_key=api_key,
         llm_model=model,
         llm_reasoning_effort=_reasoning_effort(),
+        llm_embed_model=os.getenv(EMBED_MODEL_ENV) or DEFAULT_EMBED_MODEL,
         llm_seed=_seed(),
         llm_timeout_sec=float(os.getenv("LLM_TIMEOUT_SEC", "60")),
         env_files=tuple(str(p.relative_to(REPO_ROOT)) for p in loaded),

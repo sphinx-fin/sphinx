@@ -11,6 +11,9 @@ name: 원금손실 가능성 고지
 status: confirmed
 required_elements:
   - 투자원금의 손실이 발생할 수 있음
+# U1 문턱 — 필수 요소 1개 중 1개.
+# 요소가 하나. 원금 손실 가능성 자체가 항목 전부다
+u1_requires: 1
 misconception_conditions:
   - 원금이 보장된다
   - 은행 판매 = 안전하다

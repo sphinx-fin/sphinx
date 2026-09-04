@@ -97,8 +97,8 @@ CONSISTENCY_GRADES = ("U1",)
 #: 복창 캡(0.3)과 값을 달리 둔다: 감사 시점에 **어느 이유로 깎였는지**가 숫자로도 갈린다.
 DISAGREEMENT_CONFIDENCE_CAP = thresholds.get("disagreement_confidence_cap")
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
-PROMPT_VERSION = "F-SCR-001_v2"
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v3.md"
+PROMPT_VERSION = "F-SCR-001_v3"
 
 log = logging.getLogger(__name__)
 
@@ -325,6 +325,8 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
         item_id=rubric.item_id,
         item_name=rubric.name,
         required_elements="\n".join(f"- {e}" for e in rubric.required_elements),
+        element_count=len(rubric.required_elements),
+        u1_requires=rubric.u1_requires,
         misconception_conditions="\n".join(f"- {c}" for c in rubric.misconception_conditions)
         or "- (없음)",
         question=question,

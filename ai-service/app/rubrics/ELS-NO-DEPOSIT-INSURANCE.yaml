@@ -7,6 +7,9 @@ name: 예금자보호 비대상
 status: confirmed
 required_elements:
   - 예금자보호법에 따라 보호되지 않음
+# U1 문턱 — 필수 요소 1개 중 1개.
+# 요소가 하나. 예금자보호 비대상이라는 사실 하나가 항목 전부다
+u1_requires: 1
 misconception_conditions:
   - 예금자보호가 된다
   - 5천만 원까지 보호된다

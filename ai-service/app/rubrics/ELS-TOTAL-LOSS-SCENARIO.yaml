@@ -10,6 +10,9 @@ status: confirmed
 required_elements:
   - 최악의 경우 투자원금 전액을 잃을 수 있다
   - 본인이 넣는 금액으로 환산해 말한다
+# U1 문턱 — 필수 요소 2개 중 2개.
+# 「전액 손실 가능」에 더해 「본인 금액으로 환산」까지 요구한다 — 이 항목의 목적이 체감이라 표현 방식이 곧 내용이다
+u1_requires: 2
 misconception_conditions:
   - 원금의 일부만 잃는다
   - 최소한 얼마는 돌려받는다
