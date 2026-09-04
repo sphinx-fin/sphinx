@@ -1,0 +1,142 @@
+"""`tools/MISCONCEPTION-DETECTION.md` 가 실물과 갈리지 않는지 본다.
+
+이 문서는 문턱 값(`0.62`)과 재현 명령을 **본문에 박아** 놓았다. 그러면 상수나 파일명이
+바뀔 때 문서가 조용히 낡는다 — 그리고 이 문서의 값은 *숫자 옆에 조건이 있다* 는 것
+자체이므로, 낡은 조건은 없는 조건보다 나쁘다(`#385` 리뷰).
+
+`#368` 이 세운 세 층 중 **「일관성」**(두 자리가 같은 것을 말하는가)에 해당한다.
+「정확성」(그 값이 옳은가)은 `tools/tune_ngram_threshold.py` 가 재고,
+「동작」(도구가 실제로 도는가)은 그 도구를 직접 돌려서 본다.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+from app.misconception import NGRAM_THRESHOLD
+
+TOOLS = Path(__file__).resolve().parents[1] / "tools"
+DOC = TOOLS / "MISCONCEPTION-DETECTION.md"
+APP = Path(__file__).resolve().parents[1] / "app"
+
+
+def _effective_lines(markdown: str) -> str:
+    """판별에 실제로 쓰이는 줄만 남긴다.
+
+    `#368` 에서 **내가 방금 단 주석이 검사를 만족시켜** 검사가 초록인 채로 배선이 꺼져
+    있었다. 여기서는 「어디서 나왔나」를 설명하는 **인용 블록**이 낡은 숫자를 일부러
+    들고 있으므로, 그 줄이 대조를 만족시키면 정정이 되돌아가도 안 잡힌다.
+    """
+    return "\n".join(
+        line for line in markdown.splitlines() if not line.lstrip().startswith(">")
+    )
+
+
+def importers_of(needle: str, root: Path) -> list[Path]:
+    """`root` 아래에서 이름에 `needle` 이 든 모듈을 **import 하는** 파일들.
+
+    원문 grep 이 아니라 `ast` 로 import 문만 본다 — 주석에 이름을 적은 것까지 세면
+    판별에 안 쓰이는 줄이 판별을 바꾼다(`#368` 에서 밟은 결함).
+
+    ❗**함수로 빼 둔 이유가 있다.** 이 판별을 테스트 안에 두면 변이(app/ 에 import 를
+    넣기)가 **수집 단계에서** 죽어서 — 이 테스트 모듈이 `app.misconception` 을 import
+    하므로 — 단정문이 한 번도 돌지 않는다. `error` 는 `failed` 가 아니다. 아래
+    `test_the_import_scanner_*` 가 판별기를 직접 건다.
+    """
+    found: list[Path] = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""] + [alias.name for alias in node.names]
+            if any(needle in name for name in names):
+                found.append(path)
+                break
+    return found
+
+
+def test_doc_cites_the_live_threshold() -> None:
+    """문서가 인용한 문턱이 상수와 같아야 한다."""
+    text = _effective_lines(DOC.read_text(encoding="utf-8"))
+    cited = re.search(r"`NGRAM_THRESHOLD = ([0-9.]+)`", text)
+    assert cited, "문서가 `NGRAM_THRESHOLD = <값>` 을 인용하지 않는다"
+    assert float(cited.group(1)) == NGRAM_THRESHOLD, (
+        f"문서는 {cited.group(1)} 을 인용하는데 상수는 {NGRAM_THRESHOLD} 다. "
+        "문턱을 바꿨으면 tune_ngram_threshold.py 로 다시 재고 그 절을 갱신한다."
+    )
+
+
+def test_reproduction_commands_point_at_files_that_exist() -> None:
+    """「재현」 절이 부르는 도구가 실재해야 한다.
+
+    절 제목 인용이 조용히 끊긴 사례가 `#341` 이다. 파일명도 같은 방식으로 끊긴다.
+    """
+    text = DOC.read_text(encoding="utf-8")
+    named = set(re.findall(r"tools/([A-Za-z0-9_]+\.py)", text))
+    assert named, "「재현」 절에 도구 파일명이 하나도 없다"
+    missing = sorted(name for name in named if not (TOOLS / name).exists())
+    assert not missing, f"문서가 부르는 도구가 없다: {missing}"
+
+
+def test_the_measurement_tool_is_not_wired_into_scoring() -> None:
+    """측정 도구가 채점 경로에 들어가면 안 된다.
+
+    `condition_counters` 와 같은 규약이다 — 도구는 근거를 만들 뿐 판정하지 않는다(P1).
+
+    원문 grep 이 아니라 `ast` 로 **import 문만** 본다. 문면을 세면 주석에 도구 이름을 적은
+    것까지 걸려서, 판별에 안 쓰이는 줄이 판별을 바꾼다(`#368` 에서 밟은 그 결함).
+    """
+    offenders = importers_of("tune_ngram_threshold", APP)
+    assert not offenders, f"app/ 이 측정 도구를 import 한다: {offenders}"
+
+
+def test_the_corrected_row_does_not_claim_a_safety_net() -> None:
+    """정정의 요지가 되돌아가면 잡는다.
+
+    첫 판은 어휘 매칭을 *"안전망으로 유지"* 로 적었고 그 근거 숫자는 **다른 방법의
+    것**이었다(v2 프롬프트 미탐 `3/18`). 51건에서 발동이 0 이므로 안전망이 아니다.
+    """
+    text = _effective_lines(DOC.read_text(encoding="utf-8"))
+    row = next(
+        (line for line in text.splitlines() if line.startswith("| 어휘 매칭")), None
+    )
+    assert row, "결과 표에 「어휘 매칭」 행이 없다"
+    assert "안전망으로 유지" not in row, (
+        "어휘 매칭을 다시 안전망으로 적었다 — 51건 중 발동 0건이라는 실측과 어긋난다"
+    )
+
+
+@pytest.mark.parametrize("needle", ["leave-one-out", "정세현 라벨", "강희진 라벨"])
+def test_the_leak_number_carries_its_protocol(needle: str) -> None:
+    """종결어미 누설 숫자 옆에 프로토콜과 라벨러가 같이 있어야 한다.
+
+    `#385` 리뷰의 요청이 정확히 이것이다 — *"어느 쪽이든 숫자 옆에 조건이 있으면 된다."*
+    한 라벨러 값만 적으면 *"어느 라벨로 잰 건가"* 가 다시 빠진다.
+    """
+    text = _effective_lines(DOC.read_text(encoding="utf-8"))
+    assert needle in text, f"누설 절에 「{needle}」 가 없다"
+
+
+def test_the_import_scanner_catches_a_real_import(tmp_path: Path) -> None:
+    """판별기가 실제 import 를 잡는가 — 위 가드의 단정문을 직접 건다."""
+    (tmp_path / "a.py").write_text("import tools.tune_ngram_threshold\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text(
+        "from tools.tune_ngram_threshold import main\n", encoding="utf-8"
+    )
+    assert {p.name for p in importers_of("tune_ngram_threshold", tmp_path)} == {"a.py", "b.py"}
+
+
+def test_the_import_scanner_ignores_mere_mentions(tmp_path: Path) -> None:
+    """주석·문자열의 언급은 import 가 아니다 — 문서가 도구를 가리키는 것은 정상이다."""
+    (tmp_path / "c.py").write_text(
+        '# 근거: tools/tune_ngram_threshold.py\nDOC = "tune_ngram_threshold"\n',
+        encoding="utf-8",
+    )
+    assert importers_of("tune_ngram_threshold", tmp_path) == []
