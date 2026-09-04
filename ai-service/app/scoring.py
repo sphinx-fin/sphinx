@@ -67,8 +67,8 @@ class MeasurementInvalid(LlmError):
 #: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
 MAX_SCORING_ATTEMPTS = thresholds.get("max_scoring_attempts")
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
-PROMPT_VERSION = "F-SCR-001_v2"
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v3.md"
+PROMPT_VERSION = "F-SCR-001_v3"
 
 log = logging.getLogger(__name__)
 
@@ -292,6 +292,8 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
         item_id=rubric.item_id,
         item_name=rubric.name,
         required_elements="\n".join(f"- {e}" for e in rubric.required_elements),
+        element_count=len(rubric.required_elements),
+        u1_requires=rubric.u1_requires,
         misconception_conditions="\n".join(f"- {c}" for c in rubric.misconception_conditions)
         or "- (없음)",
         question=question,

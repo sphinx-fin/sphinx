@@ -27,6 +27,7 @@ class Rubric:
     name: str
     status: str                          # confirmed | draft
     required_elements: tuple[str, ...]    # 이해로 인정되려면 언급돼야 하는 것
+    u1_requires: int                      # 그중 **몇 개**를 충족해야 U1 인가 (아래 참조)
     misconception_conditions: tuple[str, ...]  # 언급되면 오해(U4)로 보는 것
     related_misconceptions: tuple[str, ...]    # 오해 라이브러리 유형ID
     unlinked_until: tuple[str, str] | None     # (근거, 빼는 조건) — 링크가 빈 이유
@@ -64,6 +65,31 @@ def _parse(path: Path) -> Rubric:
             f"받은 값 {product_type!r}. 안 적으면 기본값으로 떨어지지 않는다(PR #310 리뷰)"
         )
 
+    elements = tuple(raw["required_elements"])
+
+    # ❗**U1 의 문턱을 파일이 스스로 말한다.** `product_type` 과 같은 이유로 기본값을 안 둔다.
+    #
+    # 이 필드가 없던 동안 U1↔U2 는 *"필수 요소를 자기 말로 설명했다"* 라는 **홀리스틱
+    # 판단**이었고, 프롬프트의 *"애매하면 U2"* 는 기준이 아니라 동점 처리 규칙이었다.
+    # F-CMN-003 실측이 그 대가를 보여 준다 — **사람 둘이 같은 루브릭을 들고 27.1% 에서
+    # 갈렸고, 불일치 19건 중 9건(47%)이 U1↔U2** 였다(리포트 1절 혼동행렬).
+    #
+    # 모델이 그 천장을 못 넘는 것은 모델 탓이 아니다. **정답이 정해져 있지 않았다.**
+    #
+    #     충족 == u1_requires    → U1
+    #     1 ≤ 충족 < u1_requires → U2
+    #     충족 == 0              → U3   (오해 조건에 걸리면 U4)
+    #
+    # 기본값을 두면 *"안 적으면 전부 충족"* 이 조용히 참이 되고, 그러면 이 필드가 생기기
+    # 전과 같은 상태가 파일마다 숨는다 — `#310` 이 `product_type` 에서 잡은 그 모양이다.
+    bar = raw.get("u1_requires")
+    if not isinstance(bar, int) or isinstance(bar, bool) or not 1 <= bar <= len(elements):
+        raise ValueError(
+            f"{path.name}: u1_requires 는 1 이상 {len(elements)} 이하의 정수여야 한다 — "
+            f"받은 값 {bar!r}. 필수 요소 {len(elements)}개 중 **몇 개**를 충족해야 U1 인지 "
+            "적는다. 안 적으면 U1↔U2 가 다시 홀리스틱 판단이 된다(F-CMN-003 실측: "
+            "사람 불일치 19건 중 9건이 그 경계)"
+        )
     related = tuple(raw.get("related_misconceptions") or ())
 
     # ❗**양방향으로 대조한다.** 한쪽만 보면 둘 중 하나가 조용하다.
@@ -91,7 +117,8 @@ def _parse(path: Path) -> Rubric:
         product_type=product_type,
         name=raw.get("name", raw["item_id"]),
         status=raw.get("status", "draft"),
-        required_elements=tuple(raw["required_elements"]),
+        required_elements=elements,
+        u1_requires=bar,
         misconception_conditions=tuple(raw.get("misconception_conditions") or ()),
         related_misconceptions=related,
         unlinked_until=unlinked,

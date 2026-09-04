@@ -94,7 +94,8 @@ def test_the_gap_reports_the_conditions_not_just_the_item() -> None:
 
     synthetic = Rubric(
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=("전액 보호된다", "둘"),
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다", "둘"),
         related_misconceptions=(), unlinked_until=None,
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
@@ -199,7 +200,8 @@ def test_startup_warns_when_a_real_gap_appears(caplog) -> None:
 
     synthetic = Rubric(
         item_id="SYNTH-NO-LINK", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=("전액 보호된다",),
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다",),
         related_misconceptions=(), unlinked_until=None,
     )
     with patch.object(rubrics, "_all", lambda: {"SYNTH-NO-LINK": synthetic}):
@@ -271,7 +273,8 @@ def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
 
     bare = Rubric(
         item_id="SYNTH-NO-CONDITIONS", product_type="ELS", name="합성", status="draft",
-        required_elements=("가",), misconception_conditions=(), related_misconceptions=(), unlinked_until=None,
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=(), related_misconceptions=(), unlinked_until=None,
     )
     monkeypatch.setattr(rubrics, "_all", lambda: {"SYNTH-NO-CONDITIONS": bare})
 
@@ -328,7 +331,7 @@ def test_a_rubric_cannot_claim_both(tmp_path, monkeypatch) -> None:
     둘 다 두면 **어느 쪽이 참인지 알 수 없다.** 한쪽만 보는 검사로는 이 상태가 조용하다.
     """
     (tmp_path / "X.yaml").write_text(
-        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\n"
+        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\nu1_requires: 1\n"
         "misconception_conditions:\n  - 나\n"
         "related_misconceptions:\n  - M01-PRINCIPAL-GUARANTEE\n"
         "unlinked_until:\n  reason: 왜\n  until: 언제\n", encoding="utf-8")
@@ -346,7 +349,7 @@ def test_a_half_written_unlinked_until_is_refused(tmp_path, monkeypatch, missing
     del keys[missing]
     body = "\n".join(f"  {k}: {v}" for k, v in keys.items())
     (tmp_path / "X.yaml").write_text(
-        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\n"
+        "item_id: X\nproduct_type: ELS\nrequired_elements:\n  - 가\nu1_requires: 1\n"
         f"misconception_conditions:\n  - 나\nunlinked_until:\n{body}\n", encoding="utf-8")
     monkeypatch.setattr(rubrics, "RUBRIC_DIR", tmp_path)
     rubrics._all.cache_clear()
