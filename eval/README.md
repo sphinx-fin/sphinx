@@ -54,8 +54,13 @@ eval/data/labels/오준서.jsonl   같은 모양
 python -m pytest eval/tests -q
 ```
 
-CI 에는 아직 안 걸려 있다(`.github/workflows/ci.yml` 은 server·ai-service·web 3모듈).
-`eval` 잡을 더할지 ai-service 잡에 접을지는 워크플로 소유자(오준서) 판단이다.
+CI 에서 돈다(`.github/workflows/ci.yml` · 이슈 #344). **잡을 새로 만들지 않고 스텝으로
+붙였다** — 잡 단위 올림 과금(#276) 때문이고, 파이썬 설치도 `ai-service` 것을 같이 쓴다
+(pytest 핀이 두 벌이 되지 않게).
+
+경로 필터는 `eval/` 만이 아니다. `eval/tests` 가 `ai-service/app/rubrics/` ·
+`data/misconception_library/` · `contracts/judgment.schema.json` 을 읽으므로 **그 셋을
+고치는 PR 에서도 돈다** — 안 넣으면 정작 갈리는 PR 에서 대조가 안 돈다(#270 · #285).
 
 ## 아직 없는 것 — 사람 라벨
 
