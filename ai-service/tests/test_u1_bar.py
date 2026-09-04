@@ -143,14 +143,33 @@ def test_the_bar_line_moves_with_the_rubric() -> None:
 def test_the_instruction_and_the_value_sit_in_their_own_sections() -> None:
     """★ **지시는 system, 값은 user** — 둘 중 하나만 있으면 문턱이 작동하지 않는다.
 
-    지시(*"세어서 정한다"*)가 없으면 문턱 줄은 **떠 있는 숫자**가 되고, 값이 없으면
-    지시가 가리킬 것이 없다. 자리를 갈라 재는 이유는 한쪽만 옮겨도 잡히게 하려는 것이다.
+    지시가 없으면 문턱 줄은 **떠 있는 숫자**가 되고, 값이 없으면 지시가 가리킬 것이 없다.
+    자리를 갈라 재는 이유는 한쪽만 옮겨도 잡히게 하려는 것이다.
     """
     system, template = scoring._prompt_sections()
-    assert "세어서 정한다" in system, "등급 정의(system)에 세라는 지시가 있어야 한다"
     assert "U1 문턱" in system, "등급 정의가 문턱을 이름으로 가리켜야 한다"
     assert "{u1_requires}" in template, "user 템플릿이 루브릭 값을 받아야 한다"
     assert "{element_count}" in template
+
+
+def test_the_misconception_check_comes_before_counting() -> None:
+    """★ **오해 판정이 세기보다 앞에 온다.** 순서가 결과를 바꾼다 — 실측이다.
+
+    ❗`#356` 을 고치면서 잰 것이다. *"U4 는 세는 것보다 우선한다"* 를 **세라는 지시 뒤에**
+    한 줄로 붙였더니 모델이 먼저 세고 부분점수를 줬고, 미탐 하나가 `U2 → U1` 로 **더
+    나빠졌다**(게이트가 GREEN 까지 갈 수 있는 갈래인데 리포트에서 0건이던 자리다).
+
+    순서를 앞으로 옮기자 그 퇴행이 사라졌다. 그래서 문면이 아니라 **순서**를 잰다 —
+    문면은 다듬을 때마다 바뀌지만 순서는 규약이다.
+    """
+    system, _ = scoring._prompt_sections()
+    first, second = system.find("1단계"), system.find("2단계")
+    assert first != -1 and second != -1, "등급 판정이 두 단계로 적혀 있어야 한다"
+    assert first < second, "1단계가 2단계보다 앞에 있어야 한다"
+    assert system.find("오해", first) < second, (
+        "1단계가 오해 판정이어야 한다 — 세기 전에 본다")
+    assert system.find("U1 문턱", second) > second, (
+        "세는 지시는 2단계에 있어야 한다 — 앞에 두면 모델이 먼저 세고 부분점수를 준다")
 
 
 # ── (라) 프롬프트 버전이 파일과 어긋나지 않는다 ─────────────────────────────
