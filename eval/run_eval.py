@@ -111,6 +111,38 @@ def load_jsonl(path: Path, who: str) -> "OrderedDict[tuple[str, str], str]":
     return out
 
 
+def model_provenance(path: Path) -> str:
+    """모델 출력이 **어느 프롬프트·어느 모델**로 나온 값인지. 없으면 그렇게 적는다.
+
+    ❗**리포트가 이걸 안 찍으면 숫자의 출처를 복원할 수 없다.** 채점 프롬프트는 산출물이라
+    버전이 올라가는데(`ai-service/app/prompts/README.md` — *"어떤 버전으로 측정한 결과인지
+    추적 가능해야 한다"*), 리포트에 그 값이 없으면 **같은 문서가 어느 판의 성능인지 말하지
+    않는다.** `#366` 이 프롬프트 문면을 고치면서 드러난 자리다.
+
+    여러 값이 섞여 있으면 **전부 적는다** — 한 회차 안에서 프롬프트가 갈렸다는 사실 자체가
+    그 수치를 조건부로 만든다. 감춰서 한 줄로 만들면 그 사실이 사라진다.
+    """
+    versions: "OrderedDict[str, None]" = OrderedDict()
+    models: "OrderedDict[str, None]" = OrderedDict()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue          # 형식 오류는 load_jsonl 이 이미 정확한 줄번호로 말한다
+        if row.get("prompt_version"):
+            versions[str(row["prompt_version"])] = None
+        if row.get("model"):
+            models[str(row["model"])] = None
+    parts = [
+        "모델 " + (" · ".join(models) if models else "미상"),
+        "프롬프트 " + (" · ".join(versions) if versions else "미상(줄에 prompt_version 이 없다)"),
+    ]
+    return " / ".join(parts)
+
+
 def load_labelers() -> "OrderedDict[str, OrderedDict[tuple[str, str], str]]":
     if not LABELS_DIR.is_dir():
         raise InputError(
@@ -188,6 +220,7 @@ def main() -> int:
 
     lines: list[str] = ["# F-CMN-003 채점 성능 평가", ""]
     lines.append(f"모델 출력 {len(model)}건 · 라벨러 {len(names)}명 ({', '.join(names)})")
+    lines.append(f"채점: {model_provenance(MODEL_FILE)}")
     lines.append("")
 
     # ── 1. 평가자 간 일치도 = 상한 ────────────────────────────────────────────
