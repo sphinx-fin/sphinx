@@ -9,6 +9,9 @@ name: 해약환급금이 납입보험료보다 적을 수 있음
 status: draft
 required_elements:
   - 중도해지 시 해약환급금이 납입한 보험료보다 적거나 없을 수 있음
+# U1 문턱 — 필수 요소 1개 중 1개.
+# 요소가 하나. 해약환급금이 납입보험료보다 적을 수 있다는 사실 하나다
+u1_requires: 1
 misconception_conditions:
   - 낸 돈은 다 돌려받는다
   - 언제 해지해도 원금은 나온다

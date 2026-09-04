@@ -10,6 +10,9 @@ status: confirmed
 required_elements:
   - 중도상환 시 공정가액에서 차감된 금액을 받는다
   - 그 결과 원금에 미달할 수 있다
+# U1 문턱 — 필수 요소 2개 중 2개.
+# 「공정가액에서 차감」이 사실, 「원금에 미달할 수 있다」가 고객에게 걸리는 귀결이다
+u1_requires: 2
 misconception_conditions:
   - 언제든 넣은 돈을 그대로 뺄 수 있다
   - 원금은 보장되고 이자만 못 받는다

@@ -14,6 +14,9 @@ status: draft
 required_elements:
   - 중도해지 시 해약환급금에 최저보증이 없음
   - 원금손실이 발생할 수 있고 그 손실은 계약자에게 귀속됨
+# U1 문턱 — 필수 요소 2개 중 2개.
+# 「최저보증이 없다」가 조건, 「손실이 계약자에게 귀속」이 귀결이다
+u1_requires: 2
 misconception_conditions:
   - 원금이 보장된다
   - 저축이다

@@ -129,8 +129,8 @@ PASTED_CONFIDENCE_CAP = thresholds.get("pasted_confidence_cap")
 NO_TYPING_MS = thresholds.get("no_typing_ms")
 NO_TYPING_MIN_CHARS = thresholds.get("no_typing_min_chars")
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
-PROMPT_VERSION = "F-SCR-001_v2"
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v3.md"
+PROMPT_VERSION = "F-SCR-001_v3"
 
 log = logging.getLogger(__name__)
 
@@ -365,6 +365,8 @@ def build_prompt(rubric: rubrics.Rubric, risk_item: RiskItem, question: str,
         item_id=rubric.item_id,
         item_name=rubric.name,
         required_elements="\n".join(f"- {e}" for e in rubric.required_elements),
+        element_count=len(rubric.required_elements),
+        u1_requires=rubric.u1_requires,
         misconception_conditions="\n".join(f"- {c}" for c in rubric.misconception_conditions)
         or "- (없음)",
         question=question,
