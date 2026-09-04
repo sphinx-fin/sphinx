@@ -123,22 +123,22 @@ cases:
     deterministic: false
 
   - id: SPEECH-FORMAL-FEE-U1
-    source: 화법 폭 (이슈 #377) — 평서체. 차감이 둘이라는 것을 다 말한다
+    source: 화법 폭 (이슈 #377) — 평서체. 차감이 **셋**이라는 것을 다 말한다 (u1_requires=3)
     item_id: VAR-FEE-DEDUCTION
     question: 낸 보험료가 어떻게 쓰이는지 말씀해 주시겠어요?
-    answer: 매달 위험보험료와 사업비가 먼저 빠지고, 중도해지하면 미상각신계약비도 추가로 차감됩니다
+    answer: 매달 위험보험료와 사업비가 먼저 빠지고, 중도해지하면 미상각신계약비도 빠지고, 펀드에서도 운용보수와 거래비용이 따로 차감됩니다
     expected_grade: U1
     expected_misconception: null
     deterministic: false
 
   - id: PARTIAL-FEE-U2
-    source: 화법 폭 (이슈 #377) — 반말 + 요소 2개 중 앞만. u1_requires=2 라 U2
+    source: 화법 폭 (이슈 #377) — 반말 + 요소 3개 중 앞만. u1_requires=3 라 U2
     item_id: VAR-FEE-DEDUCTION
     question: 낸 보험료가 어떻게 쓰이는지 말씀해 주시겠어요?
     answer: 매달 얼마씩 사업비로 빠진다는 건 알겠어
     expected_grade: U2
     expected_misconception: null
-    deterministic: false   # 미상각신계약비(해약공제액)가 빠졌다 — 오해는 아니다
+    deterministic: false   # 미상각신계약비·펀드 층이 빠졌다 — 오해는 아니다
 
   - id: DONT-KNOW-PERFORMANCE-U3
     source: 화법 폭 (이슈 #377) — U3. 모른다
