@@ -62,11 +62,15 @@ bad()  { printf '   ❗%s\n' "$*" >&2; }
 # 안내가 `uvicorn` 을 띄우라고 한다. 떠 있는데 띄우라고 하는 것이고, 정작 아래
 # 「키 갈래」 안내에는 도달하지 못한다 — **이 스크립트가 고치려는 그 모양이다.**
 reachable() {
-    # ❗`-f` 가 필요하다. `curl` 은 404·500 에도 **종료코드 0** 이고, alpha 의 `/docs` 는
-    # nginx SPA 폴백이 200(text/html)을 준다 — ai-service 가 죽어도 **프론트가 살아 있으면
-    # "떠 있다"** 가 된다. 그러면 안내가 키 갈래로 내려가고 사람은 멀쩡한 키를 의심한다
-    # (#338 리뷰 3차 실측: AI_BASE=alpha → REACHABLE=true).
-    curl -sfS --max-time 5 -o /dev/null "${AI_BASE:-http://localhost:8100}/docs" 2>/dev/null && return 0
+    # ❗**상태코드로는 못 가른다.** alpha 의 nginx 는 없는 경로에도 SPA 를 200 으로 준다
+    # (`/docs`·`/healthz`·아무 경로나 전부 `200 text/html`). `-f` 는 400 이상에서만
+    # 실패하므로 그 폴백을 못 잡는다 — 그래서 **ai-service 만 낼 수 있는 본문**을 본다
+    # (#338 리뷰 4차 실측: `-f` 만으로는 alpha 가 여전히 REACHABLE 이었다).
+    #
+    # `/healthz` 는 `GUARDED_PREFIX = "/internal/"` 밖이라 토큰이 필요 없다
+    # (`ai-service/app/main.py:38-42`). 본문은 `{"status":"ok", …}` 다.
+    curl -sfS --max-time 5 "${AI_BASE:-http://localhost:8100}/healthz" 2>/dev/null \
+        | grep -q '"status"' && return 0
     # 호스트에서 안 보여도 컨테이너 안에서 보이면 떠 있는 것이다 (alpha 의 정상 상태).
     docker compose exec -T ai-service sh -c \
         'curl -sf --max-time 5 -o /dev/null localhost:8100/docs' 2>/dev/null
@@ -140,6 +144,7 @@ DOWN
 
    값을 안 보고 프로바이더를 가른다 — 길이가 자릿수로 다르다.
      sed -n 's/^LLM_API_KEY=//p' ai-service/.env | awk '{print length}'
+     # 값은 따옴표 없이 적는다 — 두르면 이 줄만 2 가 늘어 아래 셋이 갈린다.
      # ❗`awk -F=` 를 쓰지 않는다 — 값 안의 `==` 에서 잘려 42 를 40 으로 세고,
      # `/^LLM_API_KEY/` 가 `LLM_API_KEY_OLD` 까지 물어 **두 줄**이 나온다. 하필 두 줄이
      # 나오는 상황이 이 안내가 전제한 상황이다 — 옛 키가 남아 있는 그 상황(#338 리뷰 3차).
