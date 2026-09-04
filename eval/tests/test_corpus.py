@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -126,3 +127,88 @@ class TestCoverage:
             by_utt.setdefault(s["utterance"], set()).add(s["sample_id"])
         dupes = sorted(u for u, ids in by_utt.items() if len(ids) > 1)
         assert dupes == [], f"같은 발화가 여러 id 로 들어가 있다: {dupes}"
+
+
+class TestLabelerNamingDoesNotDrift:
+    """❗라벨러 이름이 **일곱 파일**에 흩어져 있다 — 하나만 고치면 두 벌이 된다.
+
+    실제로 그렇게 났다(#350). `guideline.md` 하나만 고친 줄 알았는데 재보니 일곱 벌이었고,
+    그중 하나는 **런타임 메시지**였다 — `run_eval.py` 가 라벨 디렉토리 없을 때 틀린 사람을
+    가리키고 있었다. 라벨을 붙이려는 사람이 처음 만나는 문장이다.
+
+    이번엔 손으로 전수를 맞췄지만, **다음에 라벨러가 바뀌면 또 손으로 맞춰야 한다.**
+    #350 리뷰에서 윤지석·오준서가 각각 "그물을 여기 걸 수 있다" 고 제안한 자리다.
+    """
+
+    #: 라벨링 문맥에서 이 조합이 나오면 안 되는 파일들. `role-assignment` 는 **의도적
+    #: 취소선**(배제 근거를 지우지 않는다는 규약)이 있어서 뺀다 — 거기가 정본이고,
+    #: 취소선까지 검사하려면 이 테스트가 마크업을 알아야 해서 결합이 는다.
+    NAMED = [
+        "README.md",
+        "eval/README.md",
+        "eval/corpus/README.md",
+        "eval/labeling/guideline.md",
+        "eval/run_eval.py",
+        "ai-service/tests/fixtures/README.md",
+    ]
+
+    def test_no_file_still_names_the_superseded_pair(self):
+        """옛 조합(`강희진+오준서`)이 라벨링 문맥에 남아 있으면 안 된다."""
+        stale = []
+        for rel in self.NAMED:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for token in ("강희진·오준서", "강희진+오준서"):
+                if token in text:
+                    stale.append(f"{rel}: {token!r}")
+        assert stale == [], (
+            f"라벨러 표기가 낡았다: {stale} — 바꿀 때 일곱 자리를 같이 고친다"
+            " (eval/labeling/guideline.md §5 의 목록)"
+        )
+
+    def test_documented_label_paths_name_real_labelers(self):
+        """❗`eval/data/labels/<이름>.jsonl` 로 적힌 자리도 실물과 같아야 한다.
+
+        위 블랙리스트는 **짝**(`강희진·오준서`)만 본다. 그런데 라벨러 이름은 짝이 아니라
+        **경로 한 줄씩**으로도 적히고, 그 형태는 위 그물을 그냥 통과한다 — 실제로 `#350`
+        이 일곱 자리를 맞춘 뒤에도 `eval/README.md` 와 `run_eval.py` 의 「무엇을 읽나」
+        블록이 옛 라벨러를 가리키고 있었다. 라벨을 붙이려는 사람이 그대로 따라 하면
+        리포트에 없는 이름의 파일을 만든다.
+
+        옛 값을 이름으로 들지 않고 **실물에서 유도한다** — 다음에 라벨러가 또 바뀌어도
+        고칠 것이 없다.
+        """
+        actual = sorted(p.stem for p in (ROOT / "eval" / "data" / "labels").glob("*.jsonl"))
+        if not actual:
+            pytest.skip("아직 라벨 파일이 없다 — 이 회차에서는 대조할 실물이 없다")
+        pattern = re.compile(r"eval/data/labels/([^/\s`]+)\.jsonl")
+        wrong, seen = [], 0
+        for rel in self.NAMED:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for name in pattern.findall(text):
+                seen += 1
+                if name not in actual:
+                    wrong.append(f"{rel}: eval/data/labels/{name}.jsonl")
+        # ❗공회전 방지 — 경로 표기 형식이 바뀌면 정규식이 0건이 되고, 그때 이 그물은
+        # 아무것도 안 재면서 초록이 된다. 찢어진 것을 스스로 말하게 한다(#352 ⓒ 와 같은 자리).
+        assert seen > 0, (
+            "문서 어디에도 `eval/data/labels/<이름>.jsonl` 형태가 없다 — 표기가 바뀌었다면"
+            " 이 테스트의 정규식도 같이 고친다. 지금 상태로는 대조가 늘 통과한다"
+        )
+        assert wrong == [], (
+            f"문서가 없는 라벨 파일을 가리킨다: {wrong} — 실물은 {actual} 다"
+        )
+
+    def test_the_label_files_match_the_documented_pair(self):
+        """❗문서가 말하는 라벨러와 `eval/data/labels/` 의 실물이 같아야 한다.
+
+        문서만 고치고 파일을 안 바꾸면(또는 그 반대) **리포트가 다른 사람 이름을 찍는다.**
+        라벨이 아직 없는 회차에서는 검사할 것이 없으므로 건너뛴다.
+        """
+        labels = sorted(p.stem for p in (ROOT / "eval" / "data" / "labels").glob("*.jsonl"))
+        if not labels:
+            pytest.skip("아직 라벨 파일이 없다 — 이 회차에서는 대조할 실물이 없다")
+        doc = (ROOT / "eval" / "labeling" / "guideline.md").read_text(encoding="utf-8")
+        missing = [n for n in labels if n not in doc]
+        assert missing == [], (
+            f"라벨 파일은 있는데 guideline.md 가 그 이름을 말하지 않는다: {missing}"
+        )

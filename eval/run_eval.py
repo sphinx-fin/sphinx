@@ -6,9 +6,13 @@
 
 ── ❗이 스크립트가 하지 않는 것 ────────────────────────────────────────────────
 
-**라벨을 만들지 않는다.** 라벨은 강희진·오준서가 독립으로 붙이고, 프롬프트 당사자(윤지석)와
-운영자(정세현)는 라벨링에서 빠진다(eval/README.md · 역할표 F-EXT-003 *"평가자와 피평가자를
-분리"*). 여기서 라벨을 채우면 그 분리가 무너지고, **무너진 사실이 숫자 어디에도 안 남는다.**
+**라벨을 만들지 않는다.** 라벨은 사람이 붙이고 프롬프트 당사자(윤지석)는 라벨링에서
+빠진다(eval/README.md · 역할표 F-EXT-003 *"평가자와 피평가자를 분리"*). 여기서 라벨을
+채우면 그 분리가 무너지고, **무너진 사실이 숫자 어디에도 안 남는다.**
+
+❗이 회차 라벨러는 **정세현 · 강희진**이고 정세현이 운영자다 — 분리가 완전하지 않다.
+그 조건은 `eval/labeling/guideline.md` §5 에 있고, 아래 1번 수치를 조건 없이
+「상한」으로 인용하지 않는 이유다.
 
 그래서 입력이 없으면 **비영점으로 죽는다.** 0.0 이나 빈 리포트를 내지 않는다 — 파이프라인이
 "돌긴 돌았다"로 읽히는 상태가 제일 나쁘다.
@@ -19,7 +23,7 @@ JSONL 세 종류. 한 줄이 한 (표본, 항목) 이다.
 
     eval/data/model.jsonl            {"sample_id": "...", "item_id": "...", "grade": "U4"}
     eval/data/labels/강희진.jsonl     {"sample_id": "...", "item_id": "...", "grade": "U3"}
-    eval/data/labels/오준서.jsonl     같은 모양
+    eval/data/labels/정세현.jsonl     같은 모양
 
 JSONL 인 이유는 라벨링이 이어붙이는 작업이라서다 — 한 줄씩 늘고, diff 가 사람이 읽을 수
 있는 모양으로 남는다(라벨은 감사 대상은 아니지만 심사에서 근거를 물을 수 있다).
@@ -111,7 +115,7 @@ def load_labelers() -> "OrderedDict[str, OrderedDict[tuple[str, str], str]]":
     if not LABELS_DIR.is_dir():
         raise InputError(
             f"라벨 디렉토리가 없다: {LABELS_DIR.relative_to(ROOT.parent)}\n"
-            "  라벨은 강희진·오준서가 독립으로 붙인다(eval/README.md). "
+            "  라벨은 사람이 붙인다 — 이 회차는 정세현·강희진이다(eval/README.md). "
             "가이드라인: eval/labeling/guideline.md"
         )
     files = sorted(p for p in LABELS_DIR.glob("*.jsonl"))
@@ -191,6 +195,18 @@ def main() -> int:
     lines.append("")
     lines.append("사람도 안 맞는 항목에서 모델이 사람과 맞기를 기대할 수 없다. 모델 점수는")
     lines.append("아래 값과 **나란히** 읽어야 의미가 있다.")
+    lines.append("")
+    # ❗상한은 두 라벨러가 서로 독립일 때만 상한이다. 그 조건은 회차마다 다르고 코드가
+    # 알 수 없으므로(이름을 여기 박지 않는다) 문서를 가리킨다 — 조건을 안 적고 숫자만
+    # 내면 그게 "표기가 거짓" 이다(PR #343).
+    #
+    # ❗**레포에 있는 문서만 가리킨다.** 처음엔 `eval/ai-reference-diff.md` 도 같이 걸었는데
+    # 그 파일은 #343 에 있고 아직 머지되지 않았다 — 리포트가 **없는 파일을 근거로 드는**
+    # 상태가 된다(오준서·윤지석이 각각 독립으로 짚었다). 그건 이 PR 이 잡으려던 결함과
+    # 같은 종류다: 근거처럼 생겼는데 그 자리에 없는 것.
+    lines.append("❗이 수치가 **상한 구실을 하려면 두 라벨러가 서로 독립**이어야 한다.")
+    lines.append("이 회차의 독립 조건은 `eval/labeling/guideline.md` §5 에 있다 —")
+    lines.append("**조건과 함께 인용한다.**")
     lines.append("")
     a, b_name = names[0], names[1]
     keys_ab = aligned(labelers[a], labelers[b_name])
