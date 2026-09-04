@@ -79,6 +79,7 @@ class InputMetaWiringTest {
     private static final String ITEM = "ELS-PRINCIPAL-LOSS-WARNING";
 
     @Autowired private MockMvc mvc;
+    @Autowired private com.sphinxfin.sphinx.core.session.SessionRepository sessions;
     @MockBean private AiServiceClient aiServiceClient;
 
     @BeforeEach
@@ -155,6 +156,31 @@ class InputMetaWiringTest {
                         + "발화 내용만 보면 완벽한 U1 이다")
                 .isNotNull();
         assertThat(captor.getValue().pasteDetected()).isTrue();
+    }
+
+    @Test
+    @DisplayName("❗세션에도 입력 시간이 남는다 — 집계가 evidence 를 안 열어서 여기 없으면 못 센다")
+    void theSessionKeepsTheInputTime() throws Exception {
+        String sid = JsonPath.read(mvc.perform(post("/sessions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andExpect(status().isOk()).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8), "$.data.sessionId");
+
+        mvc.perform(post("/sessions/{sid}/answers", sid)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 손실입니다",
+                                 "inputMeta":{"firstKeystrokeDelayMs":300,"totalInputMs":42000,
+                                              "pasteDetected":false,"backspaceCount":2,
+                                              "charCount":60,"elderlyMode":false}}"""))
+                .andExpect(status().isOk());
+
+        assertThat(sessions.findById(sid).orElseThrow().inputMsByItem())
+                .as("불변 기록에만 남기면 집계가 못 읽는다 — evidence 는 인메모리라 "
+                        + "재기동마다 사라진다(#327). 기획 7-4 2단계 ③ 이 그래서 못 세고 있었다")
+                .containsEntry("ELS-PRINCIPAL-LOSS-WARNING", 42_000L);
     }
 
     private String answer(String json) throws Exception {

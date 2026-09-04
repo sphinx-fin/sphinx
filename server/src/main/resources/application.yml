@@ -58,6 +58,9 @@ sphinx:
     # 인용을 지우면 P4(근거 없는 판정은 무효)가 깨지고 해시 체인도 끊긴다.
     # 근거와 한계는 evidence/RetentionService 주석.
     raw-answer-months: 6                 # 원문 응답 보존 기간 (팀 결정 후 조정)
+    # ❗스케줄이 없던 동안 정책이 **한 번도 안 돌았다**(evidence/RetentionScheduler).
+    # 매일 03:15. 값을 비우면 기동이 실패한다 — 조용히 안 도는 것보다 낫다.
+    cron: "0 15 3 * * *"
     # 되돌릴 수 없는 삭제라 기본은 꺼둔다. 꺼져 있으면 기동 로그에 남긴다 —
     # 조용히 안 돌면 "정책이 있다"고 착각하게 된다(security.enforce 와 같은 이유).
     enforce: false
