@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -73,23 +75,59 @@ class EchoCapBelowR05Test {
      * 통과하게 되고, 그건 대조가 없는 것과 같다.
      */
     @Test
-    @DisplayName("❗자기일관성 캡 < R-05 임계값 — 위면 게이트가 안 받는다 (F-SCR-001)")
-    void theDisagreementCapAlsoTripsTheRule() throws Exception {
-        BigDecimal cap = read(SCORING, DISAGREE, "ai-service 의 DISAGREEMENT_CONFIDENCE_CAP");
+    @DisplayName("❗확신도 캡이 **전부** R-05 아래다 — 하나라도 위면 그 경로가 게이트에 안 닿는다")
+    void everyConfidenceCapTripsTheRule() throws Exception {
+        Map<String, BigDecimal> caps = allCaps();
         BigDecimal threshold = read(RULES, R05, "gate_rules.yaml 의 R-05 임계값");
 
-        assertThat(cap)
-                .as("두 번 채점이 갈렸는데 확신도가 임계값 위면 R-05 가 안 물고, 그러면 "
-                        + "이 검사가 도는데 결과가 없다. 라이브 자기보고가 전부 1.0 이라"
-                        + "(#339) 지금 그 룰을 물리는 경로는 캡 둘뿐이다")
-                .isLessThan(threshold);
+        Map<String, BigDecimal> above = new TreeMap<>();
+        caps.forEach((name, value) -> {
+            if (value.compareTo(threshold) >= 0) {
+                above.put(name, value);
+            }
+        });
+
+        assertThat(above)
+                .as("R-05 임계값(%s) 위인 캡은 숫자만 내려가고 게이트가 아무 일도 안 한다. "
+                        + "라이브 자기보고가 전부 1.0 이라(#339) 그 룰을 실제로 물리는 경로는 "
+                        + "이 캡들뿐이다", threshold)
+                .isEmpty();
     }
 
     @Test
-    @DisplayName("❗두 캡이 서로 다른 값이다 — 같으면 어느 이유로 깎였는지 숫자로 안 갈린다")
-    void theTwoCapsAreDistinguishable() throws Exception {
-        assertThat(read(SCORING, DISAGREE, "자기일관성 캡"))
-                .isNotEqualByComparingTo(read(SCORING, CAP, "복창 캡"));
+    @DisplayName("❗캡 값이 서로 다르다 — 같으면 감사 시점에 어느 이유로 깎였는지 안 갈린다")
+    void theCapsAreDistinguishable() throws Exception {
+        Map<String, BigDecimal> caps = allCaps();
+
+        assertThat(caps.values().stream().map(BigDecimal::stripTrailingZeros).distinct().count())
+                .as("확신도가 0.4 인 판정을 보고 '복창인가 붙여넣기인가' 를 되짚을 수 "
+                        + "있어야 한다. 값이 겹치면 reason 문면에만 남고 숫자로는 사라진다: %s", caps)
+                .isEqualTo(caps.size());
+    }
+
+    @Test
+    @DisplayName("★ 캡을 하나도 못 찾으면 실패한다 — 위 둘이 공회전한다")
+    void theScanActuallyFindsCaps() throws Exception {
+        assertThat(allCaps())
+                .as("이름 규칙(*_CONFIDENCE_CAP)이 바뀌었으면 이 정규식도 같이 고친다. "
+                        + "안 고치면 캡이 몇 개든 검사가 통과한다")
+                .hasSizeGreaterThanOrEqualTo(2);
+    }
+
+    /**
+     * {@code scoring.py} 의 확신도 상한 <b>전부</b>.
+     *
+     * <p>❗이름으로 훑는다 — 상수를 하나씩 적으면 <b>새 캡이 생겼을 때 아무도 안 잡는다.</b>
+     * 실제로 이 파일이 복창 캡 하나만 보고 있었고, 그 뒤로 캡이 둘 더 늘었다.
+     */
+    private static Map<String, BigDecimal> allCaps() throws Exception {
+        Matcher m = Pattern.compile("(?m)^([A-Z_]*CONFIDENCE_CAP)\\s*=\\s*([0-9.]+)")
+                .matcher(Files.readString(SCORING));
+        Map<String, BigDecimal> out = new TreeMap<>();
+        while (m.find()) {
+            out.put(m.group(1), new BigDecimal(m.group(2)));
+        }
+        return out;
     }
 
     private static BigDecimal read(Path file, Pattern pattern, String what) throws Exception {

@@ -88,7 +88,7 @@ class AskedQuestionTest {
         SOURCES.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED", false));
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("낙인 하회하면 손실", "원금손실 조건 인지"),
@@ -110,7 +110,7 @@ class AskedQuestionTest {
     private String scoredQuestion() {
         ArgumentCaptor<String> q = ArgumentCaptor.forClass(String.class);
         verify(aiServiceClient).score(anyString(), q.capture(), anyString(),
-                any(RiskItem.class), anyString());
+                any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class));
         return q.getValue();
     }
 
@@ -190,7 +190,7 @@ class AskedQuestionTest {
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
 
         // 1바퀴: U2 로 떨어뜨려 재설명 대상으로 만든다.
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U2, new BigDecimal("0.9"),
                                 new Judgment.Evidence("일부만 말함", "원금손실 조건 인지"),

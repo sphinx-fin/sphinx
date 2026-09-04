@@ -168,8 +168,12 @@ public class SessionController {
         // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
         // 문면과 출처를 한 값으로 묶은 것도 같은 이유다: 둘을 따로 구하면 한쪽만 폴백이 된다.
         AskedQuestion asked = askedQuestionFor(session, item);
+        // ❗입력 메타데이터를 채점 경계까지 넘긴다 (이슈 #325 2단계). 기록만 하던 값이다 —
+        // 붙여넣기로 채운 되말하기는 **발화 내용만 보면 완벽한 U1** 이라 텍스트로는 구분이
+        // 안 된다. ai-service 는 이 값으로 **확신도만** 깎고 등급은 안 바꾼다(P1).
         var scored = aiServiceClient.score(
-                item.itemId(), asked.text(), body.text(), item, productTypeOf(session));
+                item.itemId(), asked.text(), body.text(), item, productTypeOf(session),
+                body.domainInputMeta());
         // 마스킹본을 함께 넘겨 세션에 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받는다.
         // 화면에는 JudgmentView 로 낸다 — misconceptionType 이 신호 그 자체라 판매자에게
         // 안 보낸다 (#144). 도메인 판정은 그대로 기록·재설명 경로로 간다.

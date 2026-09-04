@@ -145,7 +145,7 @@ class UnfairSignalNotExposedTest {
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED", false));
         // ❗꺾기(M08-TYING)로 채점된다 — 이 요청이 COMPL 이벤트를 실제로 발행하는 경로다.
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U4, new BigDecimal("0.9"),
                                 new Judgment.Evidence("대출받으려면 이것도 들어야 한다고 해서요",

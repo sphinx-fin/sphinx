@@ -24,6 +24,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -84,7 +85,7 @@ class InputMetaWiringTest {
     void stub() {
         RECORDED.clear();
         when(aiServiceClient.score(anyString(), anyString(), anyString(),
-                any(RiskItem.class), anyString()))
+                any(RiskItem.class), anyString(), nullable(InputMeta.class)))
                 .thenReturn(new AiServiceClient.Scored(
                         new Judgment(ITEM, Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("발화 인용", "루브릭 조항"), "사유", null),
@@ -133,6 +134,27 @@ class InputMetaWiringTest {
                         + "행동은 그대로다(#144 와 같은 결)")
                 .doesNotContain("pasteDetected")
                 .doesNotContain("inputMeta");
+    }
+
+    @Test
+    @DisplayName("❗채점 경계까지 간다 — 기록만 하고 안 넘기면 확신도가 안 깎인다 (#325 2단계)")
+    void itAlsoReachesTheScoringBoundary() throws Exception {
+        answer("""
+                {"itemId":"%s","text":"제 말로 설명하면 원금이 줄 수 있습니다",
+                 "inputMeta":{"firstKeystrokeDelayMs":10,"totalInputMs":0,
+                              "pasteDetected":true,"backspaceCount":0,"charCount":42,
+                              "elderlyMode":false}}""".formatted(ITEM));
+
+        org.mockito.ArgumentCaptor<InputMeta> captor =
+                org.mockito.ArgumentCaptor.forClass(InputMeta.class);
+        org.mockito.Mockito.verify(aiServiceClient).score(anyString(), anyString(), anyString(),
+                any(RiskItem.class), anyString(), captor.capture());
+
+        assertThat(captor.getValue())
+                .as("기록에만 담고 채점에 안 넘기면 붙여넣기가 확신도에 못 닿는다 — "
+                        + "발화 내용만 보면 완벽한 U1 이다")
+                .isNotNull();
+        assertThat(captor.getValue().pasteDetected()).isTrue();
     }
 
     private String answer(String json) throws Exception {

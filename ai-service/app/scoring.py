@@ -97,6 +97,22 @@ CONSISTENCY_GRADES = ("U1",)
 #: 복창 캡(0.3)과 값을 달리 둔다: 감사 시점에 **어느 이유로 깎였는지**가 숫자로도 갈린다.
 DISAGREEMENT_CONFIDENCE_CAP = 0.5
 
+#: 이 화면에서 타이핑되지 않은 답변에 씌우는 상한. 세 캡의 크기가 **의심의 크기 순서**다.
+#:
+#:     0.3  복창        문서 문면을 글자 그대로 옮겼다 — 가장 확실하다
+#:     0.4  입력 방식   이 화면에서 타이핑되지 않았다
+#:     0.5  재현 실패   같은 발화가 두 번 다르게 채점됐다
+#:
+#: 셋 다 R-05(0.7) 아래여야 게이트가 받는다. 값이 서로 달라야 감사 시점에 **어느 이유로
+#: 깎였는지** 숫자로도 갈린다.
+PASTED_CONFIDENCE_CAP = 0.4
+
+#: 타이핑 시간이 사실상 0 인데 글자가 있는 경우. 붙여넣기 플래그가 안 왔어도 **구조적으로**
+#: 같은 상태다 — 브라우저 이벤트가 안 잡히는 경우가 있어(IME 조합 중 붙여넣기, 일부 모바일
+#: 키보드) 신호를 둘 둔다. 한 신호에만 걸면 그 신호가 안 오는 경로에서 조용히 안 돈다.
+NO_TYPING_MS = 200
+NO_TYPING_MIN_CHARS = 20
+
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v2.md"
 PROMPT_VERSION = "F-SCR-001_v2"
 
@@ -213,8 +229,15 @@ def score(
     risk_item: RiskItem,
     product_type: str = "ELS",
     llm: LlmClient | None = None,
+    *,
+    input_meta=None,
 ) -> Judgment:
-    """고객 발화 → Judgment(측정값)."""
+    """고객 발화 → Judgment(측정값).
+
+    ❗`input_meta` 는 **프롬프트에 안 들어간다.** 모델에게 *"이 답은 붙여넣기였다"* 를
+    알려주면 등급이 그 사실에 끌리는데, 루브릭이 재는 것은 내용이지 입력 방식이 아니다.
+    후처리에서 확신도만 깎는다.
+    """
     rubric = rubrics.get(item_id)
     matched = misconception.match(answer_text, product_type)
     client_ = llm or default_client()
@@ -245,6 +268,7 @@ def score(
             last = exc
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
+        judgment = cap_confidence_if_pasted(judgment, input_meta)
         judgment = apply_misconception_floor(judgment, matched, rubric)
         judgment = _pin_escalation(judgment, matched, rubric)
         return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt)
@@ -379,6 +403,44 @@ def cap_confidence_if_echoed(
         "confidence": ECHO_CONFIDENCE_CAP,
         "reason": f"{judgment.reason} (문서 문면 복창 포함도 {echo:.2f} ≥ "
                   f"{ECHO_THRESHOLD} — 자기 말인지 가릴 수 없어 확신도 상한 적용)",
+    })
+
+
+def cap_confidence_if_pasted(judgment: Judgment, input_meta) -> Judgment:
+    """**이 화면에서 타이핑되지 않은 답변**은 확신도를 깎는다 (이슈 #325 2단계).
+
+    ## 복창 캡과 같은 질문, 다른 계기
+
+    `cap_confidence_if_echoed` 가 묻는 것은 *"이게 이 사람의 말인가"* 이고 이것도 같다.
+    복창은 **텍스트**로 재고 이건 **입력 방식**으로 잰다 — 그리고 입력 방식 쪽이 **더 굵은
+    신호**다. 판매자가 대신 입력하거나 화면 설명을 복사한 답변은 <b>발화 내용만 보면 완벽한
+    U1</b> 이라 텍스트로는 구분이 안 된다.
+
+    ## ❗등급을 안 바꾼다
+
+    붙여넣기가 곧 오해는 아니다 — 고객이 자기 메모를 붙여넣었을 수도 있다. 그래서
+    **확신도만** 깎고 판정은 게이트가 한다. R-05 가 물면 YELLOW 이고 그건 *"재설명이
+    필요하다"* 이지 *"판매 차단"* 이 아니다 — 정황의 크기에 비례한다.
+    """
+    if input_meta is None or judgment.confidence <= PASTED_CONFIDENCE_CAP:
+        return judgment
+
+    if input_meta.paste_detected:
+        why = "붙여넣기"
+    elif (input_meta.total_input_ms <= NO_TYPING_MS
+          and input_meta.char_count >= NO_TYPING_MIN_CHARS):
+        why = f"타이핑 {input_meta.total_input_ms}ms 에 {input_meta.char_count}자"
+    else:
+        return judgment
+
+    log.info(
+        "F-INT-003 입력 방식 확신도 상한: item_id=%s 사유=%s — 등급은 안 바꾼다(P1)",
+        judgment.item_id, why,
+    )
+    return judgment.model_copy(update={
+        "confidence": PASTED_CONFIDENCE_CAP,
+        "reason": f"{judgment.reason} ({why} — 이 화면에서 작성된 답변인지 "
+                  f"가릴 수 없어 확신도 상한 적용)",
     })
 
 

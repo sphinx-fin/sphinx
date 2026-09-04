@@ -80,7 +80,7 @@ class MismatchFallbackReasonTest {
         RECORDED.clear();
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
                 .thenAnswer(inv -> new AiServiceClient.Question("질문", "OPEN_ENDED", false));
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString()))
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("인용", "조항"), "사유", null, null),
