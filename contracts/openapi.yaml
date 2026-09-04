@@ -594,8 +594,8 @@ paths:
         세 신호를 이름으로 적는다 — *"1차 응답 통과율이 비정상적으로 높거나, 답변의
         문장 유사도가 지나치게 균질하거나, 응답 지연시간 분포가 다른 곳과 다르면
         이상치로 표시해 컴플라이언스 부서에 이관한다"*.
-        이 뷰가 **앞의 둘**을 낸다. 셋째(지연 분포)는 입력 메타데이터가 불변 기록으로만
-        가고 세션에 안 남아 지금은 셀 수 없다 — 별건이다.
+        이 뷰가 **셋 다** 낸다. 셋째(지연 분포)는 입력 메타데이터가 불변 기록으로만 가고
+        세션에 안 남아 한동안 못 셌는데, 총 입력 시간만 세션에 남겨 이었다.
         ❗**기존 이상치(`/leading-indicators`)로는 구조적으로 못 잡는다** — 그쪽은
         오해율이 **올라간** 것만 보는데 코칭은 반대 방향이다(통과율이 오르고 오해율이
         내려간다).
@@ -1350,7 +1350,7 @@ components:
 
     CoachingSignal:
       type: object
-      required: [groupBy, key, sessions, firstPassRate, homogeneity, orgFirstPassRate, orgHomogeneity, reasons, masked]
+      required: [groupBy, key, sessions, firstPassRate, homogeneity, medianInputMs, orgFirstPassRate, orgHomogeneity, orgMedianInputMs, reasons, masked]
       description: >-
         판매자 한 명(가명)의 코칭 정황. **판정이 아니라 이관 대상 표시**다 —
         `reasons` 가 비어 있으면 이상치가 아니고, 줄은 그대로 남는다(가려진 것과
@@ -1369,8 +1369,17 @@ components:
           description: >-
             같은 항목에 대한 **서로 다른 세션** 발화들의 평균 겹침(문자 바이그램).
             코칭이 없는 상태의 기준선은 라벨 코퍼스 212쌍 실측으로 평균 0.055 · 최대 0.444다.
+        medianInputMs:
+          type: integer
+          nullable: true
+          description: >-
+            답변 입력 시간의 중앙값(ms). 값을 안 보낸 답변은 안 센다 — 0 으로 채우면
+            화면이 옛 버전인 세션이 전부 "즉답" 이 되어 그 판매자가 이상치로 뜬다.
+            ❗**빠른 쪽만 이상치로 본다.** 느린 것은 대개 취약 고객이 많은 것이고
+            그건 이상이 아니다 — 양쪽을 다 물면 보호하려던 지점을 이관하게 된다.
         orgFirstPassRate: {type: number, nullable: true, description: "같은 범위 전체의 통과율 — 「다른 곳과 다르다」의 기준"}
         orgHomogeneity:   {type: number, nullable: true}
+        orgMedianInputMs: {type: integer, nullable: true, description: "같은 범위 전체의 입력 시간 중앙값"}
         reasons:
           type: array
           items: {type: string}

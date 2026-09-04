@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.core.session;
 import com.sphinxfin.sphinx.domain.Channel;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.OverrideStatus;
 import com.sphinxfin.sphinx.domain.SessionState;
@@ -38,6 +39,7 @@ import java.util.Map;
 import java.util.UUID;
 import com.sphinxfin.sphinx.core.persistence.BaseEntity;
 import com.sphinxfin.sphinx.core.persistence.JsonMapConverter;
+import com.sphinxfin.sphinx.core.persistence.LongMapConverter;
 import com.sphinxfin.sphinx.core.persistence.JudgmentMapConverter;
 import com.sphinxfin.sphinx.core.persistence.RuleRefListConverter;
 import com.sphinxfin.sphinx.core.persistence.StringListConverter;
@@ -215,6 +217,24 @@ public class Session extends BaseEntity {
     private List<String> repeatedAnswerUpgradedItems = new ArrayList<>();
 
     /**
+     * 항목별 <b>답변 입력에 걸린 시간(ms)</b> — 기획 7-4 2단계 ③ (응답 지연 분포).
+     *
+     * <p>❗<b>불변 기록에만 있고 세션에는 없었다.</b> {@code #340} 이 {@code inputMeta} 를
+     * evidence 로 보내는데 집계는 {@code evidence/} 를 안 연다({@code #327} — 인메모리라
+     * 재기동마다 사라진다). 그래서 기획서가 이름으로 든 세 신호 중 <b>이것만 셀 수 없었다.</b>
+     *
+     * <p>❗<b>총 입력 시간 하나만 남긴다.</b> {@code inputMeta} 전체(첫 타건 지연·백스페이스
+     * 횟수·붙여넣기 여부)를 복사하면 <b>불변 기록과 두 벌</b>이 되고, 갈리면 어느 쪽이 참인지
+     * 알 수 없다. 집계가 답해야 하는 질문 하나에 필요한 값만 든다.
+     *
+     * <p>화면에 안 나간다 — {@code JudgmentView} 에 필드가 없다(기획 7-4 · {@code #144}).
+     */
+    @Convert(converter = LongMapConverter.class)
+    @Column(name = "input_ms", columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, Long> inputMsByItem = new LinkedHashMap<>();
+
+    /**
      * 적합성 설문 vs 발화 모순 판정 상태(F-DET-002).
      *
      * 불리언이 아닌 이유는 SuitabilityStatus 주석에 있다 — "모순 없음" 과 "판정하지 못함" 이
@@ -318,6 +338,20 @@ public class Session extends BaseEntity {
      * 이미 지워진 뒤에 판정이 들어왔다.
      */
     public void recordAnswer(String itemId, String maskedAnswer, Judgment judgment) {
+        recordAnswer(itemId, maskedAnswer, judgment, null);
+    }
+
+    /**
+     * 입력 시간까지 같이 남긴다 (기획 7-4 2단계 ③).
+     *
+     * <p>{@code inputMeta} 가 없으면 <b>안 적는다</b> — 0 으로 적으면 <i>"즉답"</i> 과
+     * <i>"안 보냈다"</i> 가 같아진다. 화면이 옛 버전이거나 스크립트로 들어온 답변이 그 경우다.
+     */
+    public void recordAnswer(String itemId, String maskedAnswer, Judgment judgment,
+                             InputMeta inputMeta) {
+        if (inputMeta != null) {
+            inputMsByItem.put(itemId, inputMeta.totalInputMs());
+        }
         Judgment prior = judgmentsByItem.get(itemId);
         String priorAnswer = maskedUtterancesByItem.get(itemId);
         // 등급이 **올라간** 경우만 본다(U1 이 제일 좋다 = ordinal 이 작다). 같거나 내려간
@@ -332,6 +366,15 @@ public class Session extends BaseEntity {
             maskedUtterancesByItem.put(itemId, maskedAnswer);
         }
         judgmentsByItem.put(judgment.itemId(), judgment);
+    }
+
+    /**
+     * 집계 입력용 — 항목별 입력 시간(ms). 없으면 빈 맵.
+     *
+     * <p>❗<b>0 이 아니라 없는 것</b>이 정상 상태다. 화면이 안 보낸 답변은 여기 안 들어온다.
+     */
+    public Map<String, Long> inputMsByItem() {
+        return Map.copyOf(inputMsByItem);
     }
 
     /**

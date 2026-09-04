@@ -150,7 +150,7 @@ public class SessionService {
         }
         // ❗발화와 판정을 **한 번에** 넘긴다 (이슈 #268 (d)). 따로 부르면 직전 발화가 먼저
         // 지워져서, 같은 답을 되풀이했는데 등급만 올라간 경우를 볼 수 없다.
-        session.recordAnswer(judgment.itemId(), maskedAnswer, judgment);
+        session.recordAnswer(judgment.itemId(), maskedAnswer, judgment, inputMeta);
         if (reverifying && judgment.grade() == Grade.U1) {
             session.fire(SessionFsm.Event.RESUME);
         }
