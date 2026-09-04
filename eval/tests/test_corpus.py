@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -162,6 +163,39 @@ class TestLabelerNamingDoesNotDrift:
         assert stale == [], (
             f"라벨러 표기가 낡았다: {stale} — 바꿀 때 일곱 자리를 같이 고친다"
             " (eval/labeling/guideline.md §5 의 목록)"
+        )
+
+    def test_documented_label_paths_name_real_labelers(self):
+        """❗`eval/data/labels/<이름>.jsonl` 로 적힌 자리도 실물과 같아야 한다.
+
+        위 블랙리스트는 **짝**(`강희진·오준서`)만 본다. 그런데 라벨러 이름은 짝이 아니라
+        **경로 한 줄씩**으로도 적히고, 그 형태는 위 그물을 그냥 통과한다 — 실제로 `#350`
+        이 일곱 자리를 맞춘 뒤에도 `eval/README.md` 와 `run_eval.py` 의 「무엇을 읽나」
+        블록이 옛 라벨러를 가리키고 있었다. 라벨을 붙이려는 사람이 그대로 따라 하면
+        리포트에 없는 이름의 파일을 만든다.
+
+        옛 값을 이름으로 들지 않고 **실물에서 유도한다** — 다음에 라벨러가 또 바뀌어도
+        고칠 것이 없다.
+        """
+        actual = sorted(p.stem for p in (ROOT / "eval" / "data" / "labels").glob("*.jsonl"))
+        if not actual:
+            pytest.skip("아직 라벨 파일이 없다 — 이 회차에서는 대조할 실물이 없다")
+        pattern = re.compile(r"eval/data/labels/([^/\s`]+)\.jsonl")
+        wrong, seen = [], 0
+        for rel in self.NAMED:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for name in pattern.findall(text):
+                seen += 1
+                if name not in actual:
+                    wrong.append(f"{rel}: eval/data/labels/{name}.jsonl")
+        # ❗공회전 방지 — 경로 표기 형식이 바뀌면 정규식이 0건이 되고, 그때 이 그물은
+        # 아무것도 안 재면서 초록이 된다. 찢어진 것을 스스로 말하게 한다(#352 ⓒ 와 같은 자리).
+        assert seen > 0, (
+            "문서 어디에도 `eval/data/labels/<이름>.jsonl` 형태가 없다 — 표기가 바뀌었다면"
+            " 이 테스트의 정규식도 같이 고친다. 지금 상태로는 대조가 늘 통과한다"
+        )
+        assert wrong == [], (
+            f"문서가 없는 라벨 파일을 가리킨다: {wrong} — 실물은 {actual} 다"
         )
 
     def test_the_label_files_match_the_documented_pair(self):

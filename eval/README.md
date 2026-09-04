@@ -28,7 +28,7 @@ python eval/run_eval.py --out report.md  # 파일로도
 ```
 eval/data/model.jsonl          {"sample_id": …, "item_id": …, "grade": "U4"}
 eval/data/labels/강희진.jsonl   같은 모양
-eval/data/labels/오준서.jsonl   같은 모양
+eval/data/labels/정세현.jsonl   같은 모양
 ```
 
 ## ❗숫자를 지어내지 않는다

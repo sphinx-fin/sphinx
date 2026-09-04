@@ -23,7 +23,7 @@ JSONL 세 종류. 한 줄이 한 (표본, 항목) 이다.
 
     eval/data/model.jsonl            {"sample_id": "...", "item_id": "...", "grade": "U4"}
     eval/data/labels/강희진.jsonl     {"sample_id": "...", "item_id": "...", "grade": "U3"}
-    eval/data/labels/오준서.jsonl     같은 모양
+    eval/data/labels/정세현.jsonl     같은 모양
 
 JSONL 인 이유는 라벨링이 이어붙이는 작업이라서다 — 한 줄씩 늘고, diff 가 사람이 읽을 수
 있는 모양으로 남는다(라벨은 감사 대상은 아니지만 심사에서 근거를 물을 수 있다).
