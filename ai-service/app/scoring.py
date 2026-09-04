@@ -22,7 +22,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from . import misconception, rubrics, textsim
+from . import misconception, rubrics, shadow, textsim
 from .config import settings
 from .llm_client import LlmClient, LlmError, client as default_client
 from .schemas import Grade, Judgment, MisconceptionResponse, RiskItem
@@ -216,7 +216,12 @@ def score(
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = apply_misconception_floor(judgment, matched, rubric)
-        return _pin_escalation(judgment, matched, rubric)
+        judgment = _pin_escalation(judgment, matched, rubric)
+        # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
+        # 걸렸는지 세기만 한다 — 등급을 안 바꾼다(이슈 #284 (b) 의 결정 근거).
+        # floor 뒤인 이유: "켰으면 등급이 달라졌을 것인가" 는 최종 등급을 알아야 답한다.
+        shadow.observe(answer_text, rubric, judgment.grade.value)
+        return judgment
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
     # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
