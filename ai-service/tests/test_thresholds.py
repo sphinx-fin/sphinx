@@ -27,6 +27,8 @@ REPO = Path(__file__).resolve().parents[2]
 GATE_RULES = REPO / "server" / "src" / "main" / "resources" / "gate_rules.yaml"
 ECHO_CAP_TEST = (REPO / "server" / "src" / "test" / "java" / "com" / "sphinxfin"
                  / "sphinx" / "core" / "gate" / "EchoCapBelowR05Test.java")
+BUILD_GRADLE = REPO / "server" / "build.gradle"
+CI_YML = REPO / ".github" / "workflows" / "ci.yml"
 
 
 # ── (가) 양방향 ──────────────────────────────────────────────────────────────
@@ -145,3 +147,53 @@ def test_the_server_side_check_points_at_this_file() -> None:
     assert thresholds.THRESHOLDS_PATH.name in java, (
         f"서버 대조가 아직 옛 자리를 읽는다 — {thresholds.THRESHOLDS_PATH.name} 를 가리켜야 한다")
     assert "scoring.py" not in java, "옛 경로가 남아 있다"
+
+
+def _effective_lines(path: Path) -> list[str]:
+    """판별에 **실제로 쓰이는** 줄만. 주석은 뺀다.
+
+    ❗주석을 같이 세면 **내가 단 설명 한 줄이 검사를 만족시킨다.** 실제로 그랬다 —
+    `ci.yml` 의 `server_extra` 를 옛 경로로 되돌렸는데도 초록이었고, 원인이 바로 위에
+    적어 둔 주석이었다(변이 ⓗ).
+    """
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("//"):
+            continue
+        if "inputs.file(" in line or "server_extra=" in line:
+            out.append(line)
+    return out
+
+
+@pytest.mark.parametrize(("path", "what"), [
+    (BUILD_GRADLE, "gradle 이 이 파일을 test 태스크 입력으로 든다"),
+    (CI_YML, "CI 의 server 잡 판별이 이 파일을 센다"),
+])
+def test_the_guard_actually_runs_when_only_this_file_changes(path: Path, what: str) -> None:
+    r"""★ **값만 바꾼 PR 에서 서버 가드가 실제로 돈다** (`#368` 리뷰, 강희진).
+
+    ❗이 PR 의 취지에 정면으로 걸리는 자리다. 값을 파일로 빼는 목적이 *"튜닝이 코드 변경이
+    아니게"* 인데, **코드 변경이 아니게 되는 순간 가드가 꺼져 있었다.**
+
+        server/build.gradle   inputs.file('../ai-service/app/scoring.py')
+        ci.yml server_extra   ai-service/app/scoring\.py$
+
+    둘 다 옛 경로였다. 실측(강희진): 캡을 R-05 위로 올려 두고 `./gradlew test` 가
+    **UP-TO-DATE 로 초록**이었고, `--rerun-tasks` 를 줘야 빨개졌다. CI 는 server 잡이
+    아예 안 뜬다.
+
+    **세 자리를 손으로 맞추던 것을 여기서 잠근다** — Java 대조가 읽는 파일 · gradle 입력 ·
+    CI 필터가 같은 파일을 가리켜야 한다. 하나만 낡으면 나머지는 조용하다.
+    """
+    stem = thresholds.THRESHOLDS_PATH.stem          # scoring_thresholds
+    lines = _effective_lines(path)
+    assert lines, f"{path.name}: 판별에 쓰이는 줄을 못 찾았다 — 이 검사가 0건을 잰다"
+    joined = "\n".join(lines)
+    assert stem in joined, (
+        f"{path.name}: {stem} 를 안 든다 — {what}. 값만 바꾼 PR 에서 "
+        f"EchoCapBelowR05Test 가 안 돈다(초록으로 통과한다). 본 줄: {lines}")
+    # ❗정규식 이스케이프(`scoring\.py`)를 지우고 본다. 안 지우면 `app/scoring.py` 부분열
+    # 검사가 ci.yml 에서 **빗나간다** — 변이가 실제로 걸렸는데 초록이었다.
+    assert "app/scoring.py" not in joined.replace("\\", ""), (
+        f"{path.name}: 옛 경로(app/scoring.py)가 남아 있다 — 값은 이제 그 파일에 없다")

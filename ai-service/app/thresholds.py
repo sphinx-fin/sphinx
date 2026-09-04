@@ -35,6 +35,14 @@ THRESHOLDS_PATH = Path(__file__).resolve().parent / "scoring_thresholds.yaml"
 #: **숫자만 남고 왜인지가 사라진다** — 그러면 파일로 뺀 이유가 없어진다.
 FIELDS = ("value", "used_by", "reacts_to", "why")
 
+#: 정수여야 하는 id. **로더가 잡는다** (`#368` 리뷰, 강희진).
+#:
+#: `value: 2` 를 `2.0` 으로 적으면 로더는 통과하고 **쓸 때 터진다**
+#: (`range(MAX_SCORING_ATTEMPTS)` → `TypeError`, 32건이 빨개진다). 이 로더가
+#: *"로딩 시점에 터진다 — 조용한 기본값이 없다"* 를 선언하는데 이 값만 예외였다.
+#: **32건이 빨개진 화면에서 원인을 찾는 것과 한 줄을 읽는 것은 다르다.**
+INTEGER_IDS = frozenset({"max_scoring_attempts"})
+
 #: 코드가 실제로 요구하는 id. 파일과 **양방향으로** 대조한다.
 REQUIRED = frozenset({
     "ngram_match", "ngram_review",
@@ -67,6 +75,11 @@ def _load() -> dict[str, float | int]:
         value = body["value"]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ThresholdError(f"{name}: value 는 숫자여야 한다 — 받은 값 {value!r}")
+        if name in INTEGER_IDS and not isinstance(value, int):
+            raise ThresholdError(
+                f"{name}: 정수여야 한다 — 반복 횟수다. 받은 값 {value!r}. "
+                "실수로 두면 로더는 통과하고 range() 에서 터진다"
+            )
         out[name] = value
 
     unknown = sorted(set(out) - REQUIRED)

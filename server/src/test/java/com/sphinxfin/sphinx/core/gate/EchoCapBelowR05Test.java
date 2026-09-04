@@ -47,7 +47,13 @@ class EchoCapBelowR05Test {
     private static final Path SCORING = Path.of("../ai-service/app/scoring_thresholds.yaml");
     private static final Path RULES = Path.of("src/main/resources/gate_rules.yaml");
 
-    private static final Pattern CAP = Pattern.compile("^\\s+echo_confidence_cap:\\s*$\\s*^\\s+value:\\s*([0-9.]+)", Pattern.MULTILINE);
+    /**
+     * ❗<b>필드 순서에 안 걸리게 둔다</b>({@code #368} 리뷰, 강희진). 규약(파일 머리)은 네 필드를
+     * 필수로 두지만 <b>순서는 안 정한다</b> — {@code value} 를 둘째 줄로 옮기면 인접 정규식은
+     * <i>"못 읽었다"</i> 로 빨개진다. 안전한 쪽으로 깨지긴 하나 <b>실패 문면이 원인을 안 가리킨다.</b>
+     * 비탐욕 건너뛰기로 그 결합을 없앤다.
+     */
+    private static final Pattern CAP = Pattern.compile("^\\s+echo_confidence_cap:[\\s\\S]*?^\\s+value:\\s*([0-9.]+)", Pattern.MULTILINE);
     private static final Pattern R05 = Pattern.compile("anyConfidenceBelow\\s+([0-9.]+)");
 
     @Test
