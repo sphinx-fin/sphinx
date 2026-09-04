@@ -77,6 +77,7 @@ class AskedQuestionTest {
     }
 
     private static final String ITEM = "ELS-PRINCIPAL-LOSS-WARNING";
+    private static final String Q_REVERIFY = "방금 설명드린 것 중 가장 중요한 게 뭐라고 이해하셨는지 말씀해 주시겠어요?";
     private static final String Q_AI = "이 상품은 어떤 경우에 원금이 줄어들 수 있을까요? 아시는 대로 말씀해 주세요.";
 
     @Autowired private MockMvc mvc;
@@ -86,9 +87,15 @@ class AskedQuestionTest {
     void stub() {
         RECORDED.clear();
         SOURCES.clear();
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
-                .thenAnswer(inv -> new AiServiceClient.Question(Q_AI, "OPEN_ENDED", false));
-        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class), anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
+                // ❗변형별로 다른 문면을 낸다. 재검증 질문도 이제 ai-service 가 만들고
+                // (7-4 1단계 — 고정 문항이면 사전에 확보돼 뚫린다), 같은 문장을 두 번
+                // 내면 "다시 묻는" 것이 아니다.
+                .thenAnswer(inv -> new AiServiceClient.Question(
+                        "reverify".equals(inv.getArgument(3)) ? Q_REVERIFY : Q_AI,
+                        "OPEN_ENDED", false));
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                anyString(), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.9"),
                                 new Judgment.Evidence("낙인 하회하면 손실", "원금손실 조건 인지"),
@@ -235,7 +242,7 @@ class AskedQuestionTest {
         // (F-INT-002). 화면에는 정상적으로 나가므로 고객 경험은 DISPLAYED 와 같고,
         // 갈리는 것은 **무엇을 측정했는가** 다 — 폴백 질문으로 받은 답이 성능 수치에
         // 섞이면 F-INT-002 가 사실상 안 돈 회차를 정상으로 센다(이슈 #234).
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenAnswer(inv -> new AiServiceClient.Question(
                         "이 항목에 대해 이해하신 대로 말씀해 주시겠어요?", "OPEN_ENDED", true));
 
@@ -257,13 +264,13 @@ class AskedQuestionTest {
     @Test
     @DisplayName("❗폴백 뒤 정상 질문을 받으면 표식이 사라진다 — 항목이 영원히 폴백으로 집계되면 안 된다")
     void aLaterNormalQuestionClearsTheMark() throws Exception {
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenAnswer(inv -> new AiServiceClient.Question("고정 문장", "OPEN_ENDED", true));
         String sid = createSession();
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
 
         // 재질문에서 모델이 정상 문면을 냈다. 채점 맥락은 이쪽이므로 표식도 이쪽을 따라야 한다.
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenAnswer(inv -> new AiServiceClient.Question(
                         "낙인이 무엇인지 설명해 주시겠어요?", "OPEN_ENDED", false));
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
@@ -284,7 +291,7 @@ class AskedQuestionTest {
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
 
         String second = "다시 여쭙겠습니다 — 원금이 줄어드는 조건을 말씀해 주시겠어요?";
-        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString()))
+        when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(), nullable(com.sphinxfin.sphinx.core.aiservice.AiServiceClient.InterviewContext.class)))
                 .thenAnswer(inv -> new AiServiceClient.Question(second, "OPEN_ENDED", false));
         mvc.perform(post("/sessions/{sid}/questions/next", sid)).andExpect(status().isOk());
 

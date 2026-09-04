@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import com.sphinxfin.sphinx.core.pii.PiiGateway;
+import com.sphinxfin.sphinx.core.pii.PiiMeter;
 
 /**
  * ai-service(FastAPI) 호출 클라이언트. 소유: 강희진 (엔드포인트 스펙: 윤지석과 협의)
@@ -51,14 +52,51 @@ public class AiServiceClient {
     private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
 
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AiServiceClient.class);
+
     private final RestClient restClient;
+
+    /** P3 경계가 몇 번 작동했는지 센다 (이슈 #326). 원문은 안 담긴다 — PiiMeter 주석 참고. */
+    private final PiiMeter piiMeter;
+
+    /**
+     * P3 경계를 한 번 지난다 — 마스킹하고 계량기에 올린다 (이슈 #326).
+     *
+     * <p>❗<b>건별 줄에는 종류를 안 싣는다. 개수만이다.</b> 로그 줄에는 <b>시각</b>이 있고,
+     * 그 시각이 <b>세션 축 노릇을 한다</b> — 답변 제출 한 건이 한 요청이라 그 요청의 다른
+     * 로그 줄(예: {@code UnfairSignalLog} 의 {@code session=…})과 시각으로 붙는다.
+     * 그러면 로그만 읽어서 <i>"세션 S-xxx 의 고객이 주민번호를 적었다"</i> 가 복원되는데,
+     * <b>그게 마스킹이 지운 그 사실이다.</b>
+     *
+     * <p>❗<b>누적도 여기 안 찍는다.</b> 안 보이는 자리인데 — 누적을 <b>매 호출</b> 찍으면
+     * 연속한 두 줄의 <b>차분</b>이 곧 그 호출의 종류별 건수다. 즉 종류를 빼도 누적이
+     * 남아 있으면 같은 정보가 나온다. 누적은 <b>시각과 무관한 자리</b>에서 낸다
+     * ({@link PiiMeter} 종료 요약 · {@code #326} 2번의 조회 경로).
+     *
+     * <p>{@code WARN} 이 아니라 {@code INFO} 다. <b>걸린 것은 결함이 아니라 경계가 일한
+     * 것</b>이다 — 경고로 두면 정상 동작이 매번 붉게 뜨고, 그러면 진짜 경고가 안 읽힌다.
+     * 개수까지 지우려면 {@code DEBUG} 로 내려야 하는데, 그러면 <b>경계가 일하는 것을
+     * 리허설에서 못 보여준다</b> — <i>"PII 가 있었다"</i> 와 <i>"주민번호가 있었다"</i> 는
+     * 민감도가 다르므로 종류를 떼는 선까지로 둔다.
+     */
+    private PiiGateway.Masked maskAndCount(String text) {
+        PiiGateway.Masked masked = PiiGateway.maskWithHits(text);
+        piiMeter.record(masked);
+        if (masked.total() > 0) {
+            log.info("P3 마스킹 {}건", masked.total());
+        }
+        return masked;
+    }
 
     /** /internal/* 공유 시크릿 헤더명 — ai-service(PR #198)와 문자열이 같아야 한다. */
     static final String INTERNAL_TOKEN_HEADER = "x-sphinx-internal-token";
 
     public AiServiceClient(RestClient.Builder builder,
                            @Value("${sphinx.ai-service.base-url}") String baseUrl,
-                           @Value("${sphinx.ai-service.internal-token:}") String internalToken) {
+                           @Value("${sphinx.ai-service.internal-token:}") String internalToken,
+                           PiiMeter piiMeter) {
+        this.piiMeter = piiMeter;
         // 이 경계 전용 매퍼 — 전역 Jackson과 분리한다(웹은 camelCase 유지).
         ObjectMapper snakeMapper = JsonMapper.builder()
                 .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
@@ -111,9 +149,10 @@ public class AiServiceClient {
      */
     public Scored score(String itemId, String question, String answerText,
                         RiskItem riskItem, String productType, InputMeta inputMeta) {
-        String masked = PiiGateway.mask(answerText);   // P3 — 원문은 절대 나가지 않는다
-        ScoreRequest request = new ScoreRequest(itemId, question, masked, riskItem, productType,
-                inputMeta);
+        // P3 — 원문은 절대 나가지 않는다. 무엇이 몇 번 지워졌는지만 센다(이슈 #326).
+        PiiGateway.Masked masked = maskAndCount(answerText);
+        ScoreRequest request = new ScoreRequest(itemId, question, masked.text(), riskItem,
+                productType, inputMeta);
         try {
             Judgment judgment = restClient.post()
                     .uri("/internal/score")
@@ -122,7 +161,7 @@ public class AiServiceClient {
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, failure("/internal/score"))
                     .body(Judgment.class);
-            return new Scored(judgment, masked);
+            return new Scored(judgment, masked.text());
         } catch (EvidenceRequiredException | AiServiceException e) {
             throw e;   // P4/상류 실패는 그대로 502로 매핑되게 둔다
         } catch (RestClientException e) {
@@ -154,7 +193,7 @@ public class AiServiceClient {
         // 이미 마스킹된 값이지만 mask() 는 멱등이라 한 번 더 태운다 — 저장 경로가 나중에
         // 바뀌어 원문이 섞여 들어와도 여기서 걸린다 (P3 를 관행이 아니라 구조로).
         List<Utterance> utterances = maskedUtterances.entrySet().stream()
-                .map(e -> new Utterance(e.getKey(), PiiGateway.mask(e.getValue())))
+                .map(e -> new Utterance(e.getKey(), maskAndCount(e.getValue()).text()))
                 .toList();
         MismatchRequest request = new MismatchRequest(
                 sessionId, surveyResult, utterances, surveySchemaVersion);
@@ -193,8 +232,24 @@ public class AiServiceClient {
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
     public Question question(RiskItem riskItem, List<String> askedTypes, String productType) {
+        return question(riskItem, askedTypes, productType, "initial", null);
+    }
+
+    /**
+     * 면담 맥락을 실어 질문을 만든다 (F-INT-002).
+     *
+     * <p>{@code variant="reverify"} 는 재설명 뒤 다시 묻는 질문이다. 그 문면이 <b>서버에
+     * 항목별 고정 문항으로</b> 있었는데, 그 자리 주석이 스스로 <i>"사전에 확보하면 그대로
+     * 뚫린다"</i> 고 적어 두고 있었다 — 기획서 7-4 1단계(우회 비용 상향)가 요구하는 것은
+     * <b>고정 문항을 사전에 확보하는 것이 불가능한 상태</b>다. 재검증은 판매자가 미리 답을
+     * 준비시킬 동기가 가장 큰 자리라(첫 질문에서 이미 한 번 막혔으므로) 여기가 고정이면
+     * 게이트가 뚫린다.
+     */
+    public Question question(RiskItem riskItem, List<String> askedTypes, String productType,
+                             String variant, InterviewContext context) {
         List<String> asked = askedTypes == null ? List.of() : askedTypes;
-        QuestionRequest request = new QuestionRequest(riskItem, asked, productType);
+        QuestionRequest request = new QuestionRequest(riskItem, asked, productType,
+                variant, context);
         QuestionResponse response;
         try {
             response = restClient.post()
@@ -392,7 +447,22 @@ public class AiServiceClient {
      * /internal/question 요청 본문. snake_case로 ai-service QuestionRequest
      * (risk_item, asked_types, product_type)와 1:1 (PR #60).
      */
-    record QuestionRequest(RiskItem riskItem, List<String> askedTypes, String productType) {}
+    record QuestionRequest(RiskItem riskItem, List<String> askedTypes, String productType,
+                           String variant, InterviewContext context) {}
+
+    /**
+     * 면담이 지금까지 알아낸 것 — 질문 생성이 이걸 보고 다음 질문을 정한다.
+     *
+     * <p>❗<b>정답을 싣지 않는다.</b> 등급과 오해 유형 ID 뿐이다 — 발화도 루브릭 조항도
+     * 조건 원문도 안 간다. 그건 {@code answer_fragments} 가 질문에서 걸러내는 바로 그
+     * 값이고, 맥락으로 넣으면 모델이 다음 질문에 옮겨 쓴다(유도심문).
+     *
+     * @param vulnerable            코칭 정황 스코어가 임계 이상 — 눈높이를 낮춘다
+     * @param priorGrades           이 세션에서 이미 나온 등급
+     * @param matchedMisconceptions 이미 걸린 오해 유형 ID
+     */
+    public record InterviewContext(boolean vulnerable, List<String> priorGrades,
+                                   List<String> matchedMisconceptions) {}
 
     /**
      * /internal/question 응답. ai-service QuestionResponse(item_id, question, question_type,

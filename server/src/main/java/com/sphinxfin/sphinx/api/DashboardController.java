@@ -100,6 +100,28 @@ public class DashboardController {
     }
 
     /**
+     * 게이트가 <b>무엇을 결정했는가</b> (F-DSH-001 · 이슈 #321).
+     *
+     * <p>지금 대시보드가 내는 것은 전부 <b>오해율</b>이다 — <i>"고객이 무엇을 모르는가"</i>.
+     * 이 제품이 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가), 화면에 그
+     * 답이 없었다.
+     *
+     * <p>❗<b>권한을 새로 만들지 않는다.</b> {@code aggregate:heatmap:read} 를 그대로 쓴다 —
+     * 같은 데이터를 다른 축으로 자른 것이라 action 이 갈리면 <b>같은 사실에 그랜트가 둘</b>이
+     * 되고 한쪽만 좁히는 실수가 난다({@code #335} 가 세운 판단과 같다).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('aggregate:heatmap:read')")
+    @GetMapping("/decisions")
+    public ApiResponse<AggregateService.DecisionView> decisions(
+            @RequestParam(required = false) String product,
+            @RequestParam(required = false) String ageBand,
+            @RequestParam(required = false) String channel) {
+        return ApiResponse.ok(aggregateService.decisions(
+                scopeOf("aggregate:heatmap:read"), currentActor.branchId(),
+                new AggregateService.Filters(product, ageBand, channel)));
+    }
+
+    /**
      * 정책이 허용한 범위. 비면 던진다 — {@code null} 로 넘기면 서비스가 전체를 훑는다.
      *
      * <p>{@code @PreAuthorize} 가 먼저 걸러 주므로 여기 오는 것은 <b>정책과 어노테이션이

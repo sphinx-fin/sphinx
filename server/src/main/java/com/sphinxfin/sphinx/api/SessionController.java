@@ -138,13 +138,24 @@ public class SessionController {
             return ApiResponse.ok(NextQuestionResponse.done(items.size()));
         }
         var next = items.get(answered);
-        // askedTypes=[] — MVP 는 항목당 질문 1개라 항목별 사용 유형 추적을 두지 않는다.
-        var generated = aiServiceClient.question(next, List.of(), productTypeOf(session));
+        // ❗면담 맥락을 실어 보낸다 (F-INT-002). 지금까지 질문 생성이 받는 것은 항목과
+        // 상품 유형뿐이라 **이 고객이 취약한지, 방금 무엇을 틀렸는지 모른 채** 매번 첫
+        // 질문처럼 만들었다. 되말하기가 재려는 것이 "이 사람이 이 문장을 만들어 낼 수
+        // 있었나" 인데, 같은 문장이라도 요구되는 난이도가 사람마다 다르다.
+        //
+        // 지금 물으려는 항목(next)의 앞선 판정은 뺀다 — 자기 직전 등급이 맥락으로 가면
+        // 그것이 질문에 실려 고객이 자기 점수를 알게 된다.
+        //
+        // ❗**이 항목에 이미 쓴 질문 유형도 넘긴다**(이슈 #325). 재설명 뒤 재검증이 같은
+        // 항목을 다시 물어보는데, 유형까지 같으면 같은 각도로 두 번 재는 것이 된다.
+        var generated = aiServiceClient.question(next, session.askedTypes(next.itemId()),
+                productTypeOf(session),
+                "initial", sessionService.interviewContext(session, next.itemId()));
         String question = generated.question();
         // 보여준 질문을 남긴다 — 채점이 같은 문면을 써야 한다. ai-service 가 매번 생성하므로
         // 저장하지 않으면 submitAnswer 가 재현할 방법이 없다.
         // 출처를 **여기서** 정한다 — 질문을 만든 자리가 그것을 아는 유일한 곳이다.
-        sessionService.recordAskedQuestion(sid, next.itemId(), question,
+        sessionService.recordAskedQuestion(sid, next.itemId(), question, generated.questionType(),
                 generated.fallbackUsed()
                         ? EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK
                         : EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -313,7 +324,11 @@ public class SessionController {
         // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
         // risk_item 은 목(MockData)에서 찾아 넘긴다 — 서비스가 ai-service /internal/reexplain
         // 에 실어 눈높이 재설명을 생성한다. 적격성(대상 아님·상한 도달) 판단은 서비스가 한다.
-        return ApiResponse.ok(sessionService.reExplain(sid, body.itemId(), riskItemOf(body.itemId())));
+        // 재검증 질문도 ai-service 가 만든다 — 고정 문항이면 사전에 확보돼 게이트가 뚫린다
+        // (기획서 7-4 1단계). 상품 유형은 여기서 넘긴다 — core 가 MockData 를 모르게.
+        return ApiResponse.ok(sessionService.reExplain(
+                sid, body.itemId(), riskItemOf(body.itemId()),
+                productTypeOf(sessionService.get(sid))));
     }
 
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")
