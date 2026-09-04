@@ -337,10 +337,30 @@ curl -sS https://sphinxfin.duckdns.org/api/dashboard/heatmap | head -c 200   # 2
 `http://` 가 200 이면 인증서가 아직 없는 것이다(§9.2). `https://` 가 401 이면 개방 모드가
 안 켜진 것이라 `docker compose logs web | grep 모드` 를 본다.
 
-### 9.5 ❗역할 차단 시연은 **개방 모드를 끄고** 한다 (결정 10.70)
+### 9.5 데모는 alpha **개방 모드로 간다** — 역할 차단은 따로 보여준다 (결정 10.70)
 
-개방 모드(§9.3)와 ADR-001·기획 7-4 의 역할 차단 시연은 **서로 배타적**이다. 켜 둔 채로는
-차단이 하나도 안 보인다.
+**정한 것: 심사위원 무로그인 관람이 우선이다.** alpha 는 개방 모드(§9.3)를 대회 끝까지
+유지하고, **prod 는 세우지 않는다.**
+
+#### ❗`demo-*` 태그를 밀지 않는다 — prod 는 스택이 없다
+
+`deploy.yml` 에 prod 경로가 살아 있어서 태그 한 번이면 갈 것처럼 보이는데, **받아 줄 것이
+아무것도 없다.** 2026-09-04 실측이다.
+
+```
+IAM   sphinx-alpha-deployer · sphinx-alpha-instance     prod 역할 없음 → OIDC 스텝에서 죽는다
+EC2   i-010e881ef97178ce8  sphinx-alpha  running        prod 박스 없음
+SSM   /sphinx/alpha/{llm-api-key,api-user,api-password,internal-token}
+      /sphinx/prod/*                                    0건
+```
+
+`infra/locals.tf` 에 `prod` 워크스페이스가 **정의**돼 있을 뿐 한 번도 apply 하지 않았다.
+세우려면 EC2·IAM·SSM 을 새로 만들고 그 위에서 배포·인증서·모드를 처음부터 다시 밟아야 하는데,
+대회 일정 안에서 그럴 값이 없다고 봤다. 그래서 **alpha 가 데모 환경이다.**
+
+#### 그 대신 치르는 대가 — 역할 차단이 화면에서 안 보인다
+
+개방 모드와 ADR-001·기획 7-4 의 역할 차단 시연은 **서로 배타적**이다.
 
 ```
 시연 1  SELLER 가 집계에 접근 → 막힌다      /api/dashboard/… 는 nginx 가 compl-01 을
@@ -349,13 +369,36 @@ curl -sS https://sphinxfin.duckdns.org/api/dashboard/heatmap | head -c 200   # 2
                                              "남의 세션" 이 존재하지 않는다
 ```
 
-**막을 일이 아니라 절차에 적을 일이다.** `#213` 이 htpasswd 를 명부 전체로 만들어 뒀으므로
-전환은 환경변수 하나다 — 계정은 이미 다 있다.
+**alpha 를 잠가서 해결하지 않는다** — 그러면 무로그인 관람이 죽고, 그게 이번 선택의 전제다.
+역할 차단은 아래 둘 중 하나로 보여준다.
 
-#### 전환 — 배포와 **같은 명령**에서 `SPHINX_DEMO_OPEN` 만 비운다
+#### ㉮ 기본 — **로컬 compose** 로 보여준다 (권장)
 
-박스(`i-010e881ef97178ce8`)에서 돈다. `deploy.yml` 이 alpha 에 `demo_open=1` 을 박아 두므로
-**워크플로로는 못 끈다.**
+잠금이 기본값이라 아무것도 끌 것이 없다. 심사 화면(alpha)은 계속 열려 있다.
+
+```bash
+P=demo-local-only        # 로컬 전용. 아무 값이어도 되고 SSM 과 무관하다
+export SPHINX_API_USER=seller-01
+export SPHINX_API_PASSWORD=$P
+export SPHINX_INTERNAL_TOKEN=$(openssl rand -hex 32)
+export SPHINX_API_USERS=$(sed -n 's/^.*[^A-Za-z0-9_-]id:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' \
+                            server/src/main/resources/demo_accounts.yaml | paste -sd, -)
+docker compose up -d --build
+```
+
+`SPHINX_DEMO_OPEN` 을 안 주므로 **잠금**이다(기본값). `SPHINX_API_USERS` 를 넘기는 이유는
+htpasswd 를 명부 전체로 만들기 위해서다 — 안 넘기면 계정이 하나만 생겨 이 시연 자체가
+401 이다(`#213`).
+
+> ❗위 `sed` 는 `deploy_ec2.sh` 의 명부 추출을 **옮겨 적은 것**이고, 그쪽에만 있는 가드
+> (항목 수와 추출 수 대조)가 여기에는 없다. 명부 형식이 바뀌면 여기서는 **조용히 줄어든다** —
+> 붙여 넣고 나서 `echo $SPHINX_API_USERS` 로 계정 수가 명부와 같은지 한 번 본다. 정본은
+> 언제나 `demo_accounts.yaml` 과 `scripts/deploy_ec2.sh` 다.
+
+#### ㉯ alpha 를 잠가야 한다면 — **심사 시간 밖에서만**
+
+박스(`i-010e881ef97178ce8`)에서 배포와 **같은 명령**을 돌리되 `SPHINX_DEMO_OPEN` 만 비운다.
+`deploy.yml` 이 alpha 에 `demo_open=1` 을 박아 두므로 **워크플로로는 못 끈다.**
 
 ```bash
 cd /opt/sphinx
@@ -365,47 +408,43 @@ SPHINX_DEMO_OPEN= \
   ./scripts/deploy_ec2.sh
 ```
 
-배포와 글자 하나(`SPHINX_DEMO_OPEN=1` → 빈 값)만 다르다. **모드만 바꾸려고 `web` 컨테이너를
-따로 다시 만드는 지름길을 여기 적지 않는다** — 그러면 `SPHINX_PUBLIC_HOST`·`SPHINX_API_USERS`·
-SSM 세 값을 손으로 다시 넘겨야 하고, 셋 다 빠뜨렸을 때 **조용히** 나빠진다.
+되돌릴 때는 `SPHINX_DEMO_OPEN=1` 로 같은 명령을 돌린다.
+
+**모드만 바꾸려고 `web` 컨테이너를 따로 다시 만드는 지름길을 표준 절차로 적지 않는다** —
+세 값이 조용히 빠지고, 셋 다 화면이 멀쩡해 보이는 방향으로 나빠진다.
 
 ```
-SPHINX_PUBLIC_HOST 누락   443 을 안 세운다 — 시연 중 https 가 죽는다 (20-tls.sh 는 기동 때 본다)
-SPHINX_API_USERS   누락   htpasswd 에 계정이 하나만 남는다 — 그러면 이 시연 자체가 401 이다 (#213)
+SPHINX_PUBLIC_HOST 누락   443 을 안 세운다 — https 가 죽는다 (20-tls.sh 는 기동 때 본다)
+SPHINX_API_USERS   누락   htpasswd 에 계정이 하나만 남는다 — 시연 자체가 401 이다 (#213)
 --no-deps          누락   server 까지 재생성돼 SPHINX_DEMO_SYNTHETIC_SESSIONS 가 기본값으로
                           돌아가고 S-08 이 빈 표가 된다 (결정 10.58 · #179 와 같은 조용함)
 ```
 
-시간이 없어 지름길을 쓸 거면 위 셋을 **전부** 넘긴다. 어느 쪽이든 **시연 직전이 아니라
-시연 전날** 한다.
-
-#### ❗시연 창 동안 `main` 에 머지하지 않는다
+#### ❗잠가 둔 동안 `main` 에 머지하지 않는다
 
 `main` 푸시는 alpha 자동 배포를 걸고, 그 배포는 `demo_open=1` 로 다시 뜬다. **잠가 둔 것이
-머지 한 번으로 조용히 열린다** — 화면은 멀쩡히 뜨고 로그인 창만 사라지므로, 시연 중에는
-알아채기 어렵다.
+머지 한 번으로 조용히 열린다** — 화면은 멀쩡히 뜨고 로그인 창만 사라지므로 알아채기 어렵다.
+반대로, **개방으로 되돌리는 데에는 이게 쓸모가 있다**: 아무 커밋이나 밀면 원래 상태로 돌아온다.
 
-#### 확인 — 잠겼는지
+#### 확인 — 어느 모드인지
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://sphinxfin.duckdns.org/api/products
-# 잠금 401  ·  개방 200
+# 개방 200  ·  잠금 401
 
 docker compose logs --tail 20 web | grep 모드
 ```
 
-`401` 이 나와야 시연이 성립한다. `200` 이면 아직 개방 모드다.
+데모 중에는 이 값이 **200 이어야 정상**이다(무로그인 관람). `401` 이 나오면 누가 잠갔거나
+배포가 어긋난 것이다.
 
 #### 시연 — 계정을 바꿔 가며 본다
 
-비밀번호는 전 계정 공통이고 `/sphinx/alpha/api-password` 하나다. id 는 명부
-(`server/src/main/resources/demo_accounts.yaml`)에 있다.
+비밀번호는 전 계정 공통이고 alpha 는 `/sphinx/alpha/api-password` 하나다. id 는 명부
+(`server/src/main/resources/demo_accounts.yaml`)에 있다. `$B` 는 로컬이면
+`http://localhost/api`, alpha 를 잠갔으면 `https://sphinxfin.duckdns.org/api` 다.
 
 ```bash
-P=$(aws ssm get-parameter --name /sphinx/alpha/api-password --with-decryption \
-      --query Parameter.Value --output text)
-B=https://sphinxfin.duckdns.org/api
-
 # 시연 1 — 집계는 COMPL·MGR 뿐이다 (rbac_policy.yaml · ADR-001)
 curl -sS -u "seller-01:$P" -o /dev/null -w 'seller-01 → 집계 %{http_code}\n' "$B/dashboard/heatmap"   # 403
 curl -sS -u "compl-01:$P"  -o /dev/null -w 'compl-01  → 집계 %{http_code}\n' "$B/dashboard/heatmap"   # 200
@@ -423,7 +462,7 @@ session:read             SELLER(own_session) · MGR(branch) · COMPL(org)
 ```
 
 ❗**개방 모드에서는 이 명령이 전부 200 이다.** nginx 가 `Authorization` 을 경로별 데모
-계정으로 갈아 끼우므로 `-u` 가 무시된다 — 잠근 뒤에 돌려야 의미가 있다.
+계정으로 갈아 끼우므로 `-u` 가 무시된다 — 잠긴 곳에서 돌려야 의미가 있다.
 
 ❗**시연 2 에는 주인이 seller-01 인 세션이 필요하다.** 귀속은 인증 주체에서만 오고
 (`CurrentActor`), `SessionResponse` 에 `sellerId` 가 없어 **되읽어 확인할 방법이 없다** —
@@ -436,13 +475,8 @@ session:read             SELLER(own_session) · MGR(branch) · COMPL(org)
 잠금 + AUTH=seller-01      주인이 seller-01
 ```
 
-가운데 줄을 피한다. 잠근 **뒤에** 한 건 더 만들어 두는 것이 확실하다.
+가운데 줄을 피한다. 잠긴 환경에서 한 건 만들어 두는 것이 확실하다.
 
 ```bash
 AUTH=seller-01:$P BASE=$B scripts/walk_demo_session.sh
 ```
-
-#### 되돌리기
-
-같은 명령에서 `SPHINX_DEMO_OPEN=1` 로 되돌린다. `main` 에 아무 커밋이나 밀어도 자동 배포가
-같은 상태로 되돌린다.
