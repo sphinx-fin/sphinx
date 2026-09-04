@@ -140,3 +140,54 @@ def test_the_import_scanner_ignores_mere_mentions(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert importers_of("tune_ngram_threshold", tmp_path) == []
+
+
+_NUMERALS = {"셋": 3, "넷": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8}
+
+
+def _result_table_rows(markdown: str) -> list[list[str]]:
+    """「결과 표」의 데이터 행만. 헤더·구분선·다른 표는 뺀다."""
+    rows: list[list[str]] = []
+    inside = False
+    for line in markdown.splitlines():
+        if line.startswith("## 결과 표"):
+            inside = True
+            continue
+        if inside and line.startswith("## "):
+            break
+        if inside and line.startswith("|") and not set(line) <= set("|-: "):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if cells[0] not in ("방법",):
+                rows.append(cells)
+    return rows
+
+
+def test_the_fallen_count_matches_the_table() -> None:
+    """「N이 떨어진 이유」의 N 이 결과 표에서 실제로 떨어진 행 수와 같아야 한다.
+
+    ❗**이 대조가 없어서 실제로 틀렸다.** 첫 판은 어휘 매칭을 *"안전망으로 유지"* 로
+    두고 「다섯이 떨어졌다」고 셌는데, `#385` 리뷰 반영으로 그 행이 실패로 바뀌자
+    **제목의 셈만 낡았다** — 그 절 밑의 하위절은 여섯인데 제목은 다섯이었다.
+    문면이 스스로와 어긋나는 종류라 사람이 읽어도 잘 안 보인다.
+    """
+    text = DOC.read_text(encoding="utf-8")
+    rows = _result_table_rows(text)
+    assert rows, "「결과 표」의 행을 못 읽었다"
+
+    stood = [r for r in rows if "✅" in r[3]]
+    fallen = [r for r in rows if "✅" not in r[3]]
+    assert stood, "표에 서 있는 방법이 하나도 없다 — 표를 못 읽은 것이다"
+
+    heading = re.search(r"^## (\S+?)이 떨어진 이유", text, re.MULTILINE)
+    assert heading, "「N이 떨어진 이유」 제목이 없다"
+    claimed = _NUMERALS.get(heading.group(1))
+    assert claimed is not None, f"셀 수 없는 수사: {heading.group(1)!r}"
+    assert claimed == len(fallen), (
+        f"제목은 {heading.group(1)}({claimed})이 떨어졌다는데 표에서는 {len(fallen)} 행이다 "
+        f"(서는 것 {len(stood)} · 전체 {len(rows)}). 표를 고쳤으면 제목·머리말도 같이 센다."
+    )
+
+    total = re.search(r"^# 오해 탐지 — (\S+?) 방법", text, re.MULTILINE)
+    assert total and _NUMERALS.get(total.group(1)) == len(rows), (
+        f"제목이 {total.group(1) if total else '?'} 방법이라는데 표는 {len(rows)} 행이다"
+    )
