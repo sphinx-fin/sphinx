@@ -132,7 +132,15 @@ def test_pending_exceptions_cite_their_reason() -> None:
     from pathlib import Path
 
     root = Path(rubrics.__file__).resolve().parent / "rubrics"
-    for item_id, (why, until) in rubrics.unlinked_until().items():
+    pending = rubrics.unlinked_until()
+    # ❗**양성 대조** (`#395` 리뷰, 정세현). 목록이 비면 아래 루프가 **0 회 돌고 조용히
+    # 통과한다** — 그러면 "예외가 하나도 없다" 와 "이 검사가 죽었다" 가 구분되지 않는다.
+    # 기능이 은퇴하면 이 줄에서 실패하고, 그때 **합성으로 계속 지킬지**를 사람이 정한다
+    # (아래 `test_the_pending_exception_machinery_works_without_a_real_case` 가 그 자리다).
+    assert pending, (
+        "unlinked_until 대상이 하나도 없다 — 이 검사가 아무것도 안 재고 있다. "
+        "마지막 대상이 은퇴한 것이면 이 테스트를 합성 루브릭 쪽으로 옮긴다")
+    for item_id, (why, until) in pending.items():
         assert until.strip(), f"{item_id}: 빼는 조건이 비어 있다 — 그러면 지우는 사건이 안 온다"
         path = root / f"{item_id}.yaml"
         assert path.exists(), f"{item_id}: 루브릭 파일이 없는데 예외 목록에 있다"
@@ -283,23 +291,67 @@ def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
     )
 
 
+# ❗**부분적으로 참인 변액 발화** — 링크를 걸어도 되는지의 마지막 조건을 재는 모집단이다.
+# 전부 **맞는 말**이라 오해로 잡히면 안 된다. `#57` 이 M02 에서 변액을 뺀 이유가 이것이고,
+# `#395` 에서 M11 이 첫 두 조건을 채우고도 여기 걸렸다.
+PARTIALLY_TRUE_VARIABLE = (
+    "보험료 전액이 예금자보호 대상은 아니라고 하셨죠",
+    "전액 보호되는 게 아니라 일부만 된다는 거네요",
+    "예금처럼 전액 보호되는 건 아니군요",
+    "최저사망지급금하고 특약만 1억까지 보호된다는 뜻이죠",
+    "약관에서 정한 것만 예금자보호가 된다는 뜻이네요",
+)
+
+
+def _misfires_on_true_statements(match) -> dict[str, list[str]]:
+    """맞는 말을 오해로 잡는 발화를 모은다. `match` 는 런타임 매처를 그대로 받는다.
+
+    ❗**런타임이 쓰는 값을 잰다.** `textsim` 을 직접 불러 계산했을 때 `0.500` 이 나와서
+    *"패턴을 줄이면 풀린다"* 로 읽었는데, 실물 매처는 `0.625` 였다(`#395` 리뷰). 유사도를
+    여기서 다시 구현하면 그 차이가 그대로 그물의 구멍이 된다.
+    """
+    out: dict[str, list[str]] = {}
+    for utterance in PARTIALLY_TRUE_VARIABLE:
+        hits = [m.type_id for m in match(utterance, "VARIABLE_INSURANCE").matches]
+        if hits:
+            out[utterance] = hits
+    return out
+
+
 def test_unlinked_until_has_not_expired() -> None:
-    """★ 만료 조건을 기계가 본다 (`#298` 리뷰 2번).
+    """★ 만료 조건을 기계가 본다 (`#298` 리뷰 2번 · `#395` 리뷰로 조건이 셋이 됐다).
 
     `unlinked_until` 이 *"의도적으로 링크 없음"* 이면 **영구히 그렇다고 읽히고 지우는
     사건이 안 온다.** 결정 10.67(OIDC 이름 표기)에서 정리한 그 모양이다.
 
-    `VAR-PARTIAL-DEPOSIT-INSURANCE` 의 조건은 *"변액을 덮는 예금자보호 유형이 생길 때"*
-    다(결정 10.24). 그 유형이 라이브러리에 들어오는 순간 **여기서 실패하고**, 그때 항목을
-    빼면 경고가 정상적으로 서기 시작한다.
+    ## ❗조건이 셋이다 — 전에는 둘만 봤고 그게 틀렸다
+
+        (1) 변액을 덮는 예금자보호 유형이 생긴다
+        (2) 그 유형이 인용 가능한 근거를 가진다              (결정 10.24)
+        (3) 그 유형이 **부분적으로 참인 발화와 갈린다**      ← 이게 빠져 있었다
+
+    `#395` 가 (1)(2) 를 채웠는데 **(3) 이 안 됐다.** 맞는 말을 한 고객이
+    `ngram 0.65` 로 걸려 `U1 → U4` 가 되는 것을 실측했다 — `apply_misconception_floor`
+    는 `stage` 를 안 읽으므로 `ngram` 단계도 그대로 확정이다.
+
+    전 판은 (1) 만 보고 *"항목을 빼고 링크를 걸라"* 고 지시했다. **그대로 따랐으면
+    `#57` 이 막은 실패를 유형 ID 만 바꿔 되살렸다.** 트립와이어가 울리는 것과 조치해도
+    되는 것은 다르다.
     """
     covering = [
         m.type_id for m in misconception.library()
         if "DEPOSIT" in m.type_id
         and ("VARIABLE_INSURANCE" in m.products or "ALL" in m.products)
     ]
-    assert not covering, (
-        f"{covering} 가 변액을 덮는다 — 결정 10.24 의 조건이 충족됐다. "
+    if not covering:
+        # (1) 미충족. `pytest.skip` 을 쓰지 않는다 — `ci.yml` 의 `no_skip.py` 가 skip 을
+        # 실패로 바꾸므로, 아직 유형이 없는 **정상 상태**가 CI 빨강이 된다.
+        return
+
+    misfires = _misfires_on_true_statements(misconception.match)
+    assert misfires, (
+        f"{covering} 가 변액을 덮고, 부분적으로 참인 발화 {len(PARTIALLY_TRUE_VARIABLE)} 개에 "
+        "오탐이 하나도 없다 — 조건 (1)(2)(3) 이 다 충족됐다. "
         "VAR-PARTIAL-DEPOSIT-INSURANCE.yaml 의 unlinked_until 을 빼고, "
         "그 루브릭에 related_misconceptions 를 걸고, 이 테스트를 지운다"
     )
@@ -381,3 +433,72 @@ def test_the_startup_log_reports_condition_level(caplog) -> None:
         _log_enforcement_gap()
     assert "조건 단위" in caplog.text
     assert "권고만" in caplog.text, "「권고만」이 몇 개인지가 이 로그의 요점이다"
+
+
+# ── 조건 (3) 검사와 예외 기구를 **실물 없이도** 태운다 ────────────────────────
+#
+# ❗둘 다 「실물이 없으면 경로가 안 돌아 조용히 통과」를 막는 자리다. `#395` 리뷰에서
+# `test_pending_exceptions_cite_their_reason` 이 정확히 그 모양이었고(목록이 비면 루프가
+# 0 회), 같은 함정이 `test_unlinked_until_has_not_expired` 의 (3) 검사에도 있다 —
+# 덮는 유형이 없으면 `return` 으로 빠져서 **(3) 을 재는 코드가 한 번도 안 돈다.**
+class _StubMatch:
+    def __init__(self, type_ids): self.matches = [_StubHit(t) for t in type_ids]
+
+
+class _StubHit:
+    def __init__(self, type_id): self.type_id = type_id
+
+
+def test_condition_three_catches_a_type_that_misfires_on_true_statements() -> None:
+    """★ 맞는 말을 잡는 유형이면 `_misfires_on_true_statements` 가 반드시 잡는다."""
+    def always(_utterance, _product):
+        return _StubMatch(["M99-SYNTHETIC"])
+
+    # ❗**모집단부터 잰다.** 이게 없으면 `PARTIALLY_TRUE_VARIABLE` 를 비우는 변조가
+    # 전건 초록으로 지나간다 — `{} == set(())` 이라 아래 단정이 참이 된다(실측으로 확인).
+    # 그물은 모집단이 맞아야 한다.
+    assert len(PARTIALLY_TRUE_VARIABLE) >= 3, (
+        "부분적으로 참인 발화가 3 개 미만이다 — 조건 (3) 이 사실상 안 재진다")
+
+    misfires = _misfires_on_true_statements(always)
+    assert misfires, "다 잡는 매처인데 오탐이 0 이다 — 검사가 안 돌았다"
+    assert set(misfires) == set(PARTIALLY_TRUE_VARIABLE), (
+        "부분적으로 참인 발화를 다 잡는 유형인데 오탐으로 안 세었다 — "
+        "이 검사가 죽으면 링크해도 되는지를 아무도 안 재게 된다")
+
+
+def test_condition_three_passes_a_type_that_separates() -> None:
+    """★ 갈라내는 유형이면 빈 dict — 그때가 링크를 걸어도 되는 때다.
+
+    이 양성/음성 한 쌍이 있어야 *"오탐이 없다"* 와 *"검사가 안 돈다"* 가 구분된다.
+    """
+    def never(_utterance, _product):
+        return _StubMatch([])
+
+    assert _misfires_on_true_statements(never) == {}, (
+        "아무것도 안 잡는 매처인데 오탐을 셌다 — 검사가 거꾸로다")
+
+
+def test_the_pending_exception_machinery_works_without_a_real_case() -> None:
+    """★ `unlinked_until` **기구**는 실물 대상이 0 이어도 살아 있어야 한다.
+
+    `test_pending_exceptions_cite_their_reason` 은 실물 목록을 보고, 그 목록이 비면
+    양성 대조에서 실패한다. 그때 *"기능을 같이 은퇴시킬 것인가"* 를 정하게 되는데
+    (`#395` 리뷰, 정세현), **판단이 오기 전까지 기구가 조용히 썩지 않게** 여기서 합성으로
+    태운다. `enforcement_gaps` 가 이 예외를 사각으로 세지 않는 것도 같이 잰다.
+    """
+    from app.rubrics import Rubric
+
+    synthetic = Rubric(
+        item_id="SYNTH-PENDING", product_type="ELS", name="합성", status="draft",
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다",),
+        related_misconceptions=(),
+        unlinked_until=("PR #57 근거", "유형이 생기고 부분적으로 참인 발화와 갈릴 때"),
+    )
+    with patch.object(rubrics, "_all", lambda: {"SYNTH-PENDING": synthetic}):
+        assert rubrics.unlinked_until() == {
+            "SYNTH-PENDING": ("PR #57 근거", "유형이 생기고 부분적으로 참인 발화와 갈릴 때")
+        }, "파일에서 읽은 값을 그대로 못 돌려준다"
+        assert rubrics.enforcement_gaps() == {}, (
+            "의도된 예외를 사각으로 세면 진짜 사각이 그 줄에 묻힌다(#298 리뷰)")
