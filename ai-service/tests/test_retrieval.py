@@ -109,7 +109,7 @@ def test_dense_embeds_raw_text_not_the_normalized_copy() -> None:
     seen: list[list[str]] = []
 
     class _Stub:
-        def embed(self, texts, model=None):
+        def embed(self, texts, model=None, pii_scope=None):
             seen.append(list(texts))
             return [[1.0, 0.0] for _ in texts]
 
@@ -209,7 +209,7 @@ class _StubClient:
         self._raise = raise_error
         self.prompts: list[str] = []
 
-    def embed(self, texts, model=None):
+    def embed(self, texts, model=None, pii_scope=None):
         return [[1.0, 0.0] for _ in texts]
 
     def complete_json(self, **kwargs):
@@ -361,3 +361,50 @@ def test_neighbors_cannot_reach_a_far_answer() -> None:
         "반경을 키워 거리 39 를 덮으려 하고 있다 — 그러면 문서 전체를 넣는 것과 같다. "
         "페이지 경계는 청크가 스팬 목록을 들거나 파서가 문장을 이어야 풀린다"
     )
+
+
+def test_dense_declares_the_public_document_scope() -> None:
+    """★ `Dense.embed` 가 `pii_scope="public_document"` 를 **명시로** 넘긴다.
+
+    ❗기본값에 기대면 안 된다(`#358` 리뷰, 강희진). `llm_client.embed` 의 기본값은
+    다른 두 출구와 같은 `customer` 이고, **넓은 검사(EMAIL·CARD·ACCOUNT)를 끄는 것은
+    그럴 이유를 아는 호출부가 명시한다.**
+
+    실패 방향이 뒤집힌 자리다 — 예전 기본값(`public_document`)이면 나중에 고객 발화를
+    임베딩하며 인자를 빼먹은 사람이 **조용히 약한 검사로** 내보낸다. 지금은 빼먹으면
+    엄격한 쪽으로 죽는다.
+
+    이 단정이 없으면 호출부에서 인자를 지워도 초록이다(스텁이 `pii_scope` 를 받고
+    무시한다).
+    """
+    seen: list[str | None] = []
+
+    class _Stub:
+        def embed(self, texts, model=None, pii_scope=None):
+            seen.append(pii_scope)
+            return [[1.0, 0.0] for _ in texts]
+
+    doc = {"pages": [{"page": 1, "text": "원금이 보장되지 않습니다. " * 8}]}
+    retrieval.Dense.embed(retrieval.chunk_document(doc), _Stub())
+    assert seen == ["public_document"], seen
+
+
+def test_the_three_exits_share_one_default_scope() -> None:
+    """★ 세 출구의 기본 `pii_scope` 가 같다 — 하나만 약하면 그게 새는 자리가 된다.
+
+    `pii.assert_clean` 자체 기본값과도 맞춘다. 이 표가 갈리면 **어느 것이 규약인지**
+    다음 사람이 알 수 없다.
+    """
+    import inspect
+
+    from app import llm_client, pii
+
+    defaults = {
+        name: inspect.signature(getattr(llm_client.LlmClient, name))
+        .parameters["pii_scope"].default
+        for name in ("send", "complete_json", "embed")
+    }
+    defaults["pii.assert_clean"] = (
+        inspect.signature(pii.assert_clean).parameters["scope"].default
+    )
+    assert set(defaults.values()) == {"customer"}, defaults

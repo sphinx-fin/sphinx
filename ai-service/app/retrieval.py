@@ -385,7 +385,12 @@ class Dense:
 
         그래서 `norm` 은 BM25·containment 만 쓴다.
         """
-        return cls(client.embed([c.text for c in chunks], model=model))
+        # ❗공시 상품문서다(기획 7-3) — 넓은 휴리스틱을 끄고 `SPECIFIC`(RRN·PHONE)만
+        # 본다. **끄는 이유를 아는 자리가 여기다.** 실측: `parsed_els_sample.json`
+        # (13,248자·16쪽)에서 발행사 고객센터 번호 `02-785-7424` 가 ACCOUNT 패턴에
+        # 걸린다 — `customer` 로 두면 임베딩이 422 로 막힌다(`#358` 리뷰, 강희진).
+        return cls(client.embed([c.text for c in chunks], model=model,
+                                pii_scope="public_document"))
 
     def rank(self, query_vector: list[float]) -> list[tuple[int, float]]:
         scored = [(i, cosine(query_vector, v)) for i, v in enumerate(self._vectors)]

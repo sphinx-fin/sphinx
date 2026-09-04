@@ -172,14 +172,23 @@ class LlmClient:
         texts: list[str],
         *,
         model: str | None = None,
-        pii_scope: str = "public_document",
+        pii_scope: str = "customer",
     ) -> list[list[float]]:
         """텍스트 → 임베딩 벡터. **P3 경계를 지난다** (이슈 #363 준비 · retrieval.py).
 
-        ❗`pii_scope` 기본값이 `public_document` 다. 이 메서드를 부르는 곳은 지금
-        `retrieval` 뿐이고 거기 들어오는 것은 **공시 상품문서**다(기획 7-3: 공시 자료는
-        개인정보가 아니다). 고객 발화를 임베딩할 일이 생기면 **호출부가 `customer` 를
-        명시해야 한다** — 기본값에 기대면 넓은 휴리스틱이 꺼진 채로 나간다.
+        `pii_scope` 는 **무엇을 보내는지** 선언한다. 세 출구(`send` · `complete_json` ·
+        여기)가 **같은 기본값 `customer`** 를 쓴다 — `pii.assert_clean` 자체 기본값과도
+        같다.
+
+        ❗**한동안 여기만 `public_document` 였다**(`#358` 리뷰, 강희진). 유일한 호출부가
+        공시 문서를 넣으니 편했는데, 그러면 **나중에 고객 발화를 임베딩하면서 인자를
+        빼먹은 사람이 `EMAIL`·`CARD`·`ACCOUNT` 검사를 끈 채로 내보낸다.** 넓은 검사를
+        끄는 것은 **그럴 이유를 아는 호출부**가 명시한다.
+
+            SPECIFIC (항상)       RRN · PHONE
+            BROAD (customer 만)   EMAIL · CARD · ACCOUNT
+
+        실패 방향을 뒤집은 것이다 — 잊으면 조용히 약해지는 대신 **엄격한 쪽으로 죽는다.**
 
         `send()` 와 같은 이유로 여기가 유일한 통로다. 임베딩 SDK 를 호출부에서 직접
         부르면 P3 최종 방어선이 둘이 된다.
