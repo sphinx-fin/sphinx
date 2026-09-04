@@ -1317,14 +1317,15 @@ components:
 
     OverrideCount:
       type: object
-      required: [requested, approved, sessions, masked]
+      required: [requested, approved, judged, masked]
       description: >-
         적색 오버라이드. **요청과 승인을 가른다** — 요청만 하고 승인 안 된 건수가
-        그 자체로 신호다(ADR-002: 요청자 ≠ 승인자).
+        그 자체로 신호다(ADR-002: 요청자 ≠ 승인자). 분모는 판정된 세션이다 —
+        오버라이드는 RED 판정 뒤에만 생기고, 가림 판단도 같은 표본으로 한다.
       properties:
         requested: {type: integer, minimum: 0}
         approved:  {type: integer, minimum: 0}
-        sessions:  {type: integer, minimum: 0}
+        judged:    {type: integer, minimum: 0, description: "분모 — 판정된 세션 수"}
         masked:    {type: boolean}
 
     ReexplainEffect:

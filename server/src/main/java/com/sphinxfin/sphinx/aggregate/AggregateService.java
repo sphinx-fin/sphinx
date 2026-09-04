@@ -121,8 +121,14 @@ public class AggregateService {
     /** 게이트 신호 하나의 건수와 비율. {@code share} 는 판정된 세션 대비다. */
     public record SignalCount(String signal, long n, BigDecimal share) {}
 
-    /** 오버라이드 — 요청과 승인을 가른다. 요청만 하고 승인 안 된 것이 그 자체로 신호다. */
-    public record OverrideCount(long requested, long approved, long sessions, boolean masked) {}
+    /**
+     * 오버라이드 — 요청과 승인을 가른다. 요청만 하고 승인 안 된 것이 그 자체로 신호다.
+     *
+     * <p>{@code judged} 가 분모다 — 오버라이드는 RED 판정 뒤에만 생기므로 <b>진행 중
+     * 세션은 분모가 아니다.</b> 가림 판단도 같은 값으로 한다: 둘이 갈리면 화면이 그리는
+     * 비율의 분모와 가렸는지 정한 표본이 다른 값이 된다(#362 리뷰).
+     */
+    public record OverrideCount(long requested, long approved, long judged, boolean masked) {}
 
     /**
      * ★ 재설명 효과 — <b>재설명을 거친 항목 중 최종 이해에 도달한 비율.</b>
@@ -223,7 +229,6 @@ public class AggregateService {
         long overrideRequested = 0;
         long overrideApproved = 0;
         long unmeasuredSessions = 0;
-        long sessions = 0;
         long reexplained = 0;
         long resolved = 0;
 
@@ -231,13 +236,19 @@ public class AggregateService {
             if (!matches(session, filters)) {
                 continue;
             }
-            sessions++;
-            if (session.gateSignal() != null) {
-                judged++;
-                bySignal.merge(session.gateSignal().name(), 1L, Long::sum);
-                if (session.gateUnmeasured() > 0) {
-                    unmeasuredSessions++;
-                }
+            // ❗**판정된 세션만 센다 — 네 지표 전부.** 진행 중 세션은 결정이 아니다.
+            // 재설명 효과가 이 규칙 밖에 있었을 때 방향이 한쪽이었다: 재설명 직후 항목은
+            // 재채점 전이라 아직 U3 이고, 그게 전부 분모에 실패로 들어간다 — **면담을
+            // 진행할수록 성과 지표가 내려갔다**(#362 리뷰). 오버라이드도 같다. 그쪽은
+            // 분모만 어긋나 있었는데(전체 매칭 / 가림 판단은 judged), 그러면 화면이
+            // 그리는 비율의 분모와 가림에 쓴 표본이 다른 값이 된다.
+            if (session.gateSignal() == null) {
+                continue;
+            }
+            judged++;
+            bySignal.merge(session.gateSignal().name(), 1L, Long::sum);
+            if (session.gateUnmeasured() > 0) {
+                unmeasuredSessions++;
             }
             if (session.overrideStatus() != OverrideStatus.NONE) {
                 overrideRequested++;
@@ -262,7 +273,7 @@ public class AggregateService {
         }
         return new DecisionView(
                 SYNTHETIC, label(scope), signals,
-                new OverrideCount(overrideRequested, overrideApproved, sessions,
+                new OverrideCount(overrideRequested, overrideApproved, judged,
                         judged < MIN_CELL_SAMPLE),
                 new ReexplainEffect(reexplained, resolved, share(resolved, reexplained, reexplained),
                         reexplained < MIN_CELL_SAMPLE),

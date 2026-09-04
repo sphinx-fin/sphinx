@@ -598,12 +598,54 @@ class AggregateServiceTest {
     }
 
     @Test
-    @DisplayName("판정 전 세션은 신호 분포에 안 들어간다 — 진행 중인 것은 결정이 아니다")
+    @DisplayName("❗판정 전 세션은 네 지표 어디에도 안 들어간다 — 진행 중인 것은 결정이 아니다")
     void sessionsWithoutAVerdictAreNotCounted() {
         seed(PRODUCT, "BR-1", "seller-a", "60대", Channel.FACE_TO_FACE, ITEM, Grade.U2);
         seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.NONE, 0);
 
-        assertThat(orgDecisions().gate().stream()
+        var view = orgDecisions();
+        assertThat(view.gate().stream()
                 .mapToLong(AggregateService.SignalCount::n).sum()).isEqualTo(1);
+        assertThat(view.override().judged())
+                .as("분모가 매칭 전체면 가림 판단에 쓴 표본과 비율의 분모가 다른 값이 된다")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("★ 재설명 직후(재채점 전) 항목은 실패로 안 센다 — 진행할수록 성과가 내려가면 안 된다")
+    void anItemAwaitingRescoringIsNotCountedAsAFailure() {
+        // 결정된 세션 하나: 재설명 → U1. 여기만 보면 1/1 이다.
+        seedDecided(Signal.GREEN, Grade.U1, true, OverrideStatus.NONE, 0);
+        // 진행 중 세션: 재설명은 했고 **아직 재채점 전이라 U3 인 채**다. 판정이 없다.
+        Session inflight = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
+                "s02-survey-v1", Map.of(), "seller-e", "BR-1"));
+        inflight.recordJudgment(judgment(ITEM, Grade.U3));
+        inflight.recordReverify(ITEM);
+        em.persist(inflight);
+
+        var reexplain = orgDecisions().reexplain();
+
+        assertThat(reexplain.items())
+                .as("판정 전 세션이 분모에 들어가면 재채점 전 항목이 전부 실패로 계상된다")
+                .isEqualTo(1);
+        assertThat(reexplain.resolved()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("❗오버라이드도 판정된 세션만 센다 — 요청은 RED 판정 뒤에만 생긴다")
+    void overridesOnUndecidedSessionsAreNotCounted() {
+        seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.PENDING_APPROVAL, 0);
+        Session inflight = Session.create(new CreateSessionCommand(
+                PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
+                "s02-survey-v1", Map.of(), "seller-f", "BR-1"));
+        inflight.recordJudgment(judgment(ITEM, Grade.U4));
+        inflight.requestOverride("판정 전 요청");
+        em.persist(inflight);
+
+        var override = orgDecisions().override();
+
+        assertThat(override.requested()).isEqualTo(1);
+        assertThat(override.judged()).isEqualTo(1);
     }
 }
