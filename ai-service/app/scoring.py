@@ -453,11 +453,14 @@ def cap_confidence_if_pasted(judgment: Judgment, input_meta) -> Judgment:
         "F-INT-003 입력 방식 확신도 상한: item_id=%s 사유=%s — 등급은 안 바꾼다(P1)",
         judgment.item_id, why,
     )
-    return judgment.model_copy(update={
-        "confidence": PASTED_CONFIDENCE_CAP,
-        "reason": f"{judgment.reason} ({why} — 이 화면에서 작성된 답변인지 "
-                  f"가릴 수 없어 확신도 상한 적용)",
-    })
+    # ❗**`reason` 을 안 건드린다** (#372 리뷰). 이 문자열은 `JudgmentView.reason` 으로
+    # **판매자 화면에 그대로 나간다.** 다른 두 캡보다 여기가 더 나쁘다 — 복창 포함도는
+    # 측정값이고 "재현되지 않았다" 는 정황이지만, *"붙여넣기"* 는 **다음 행동을 그대로
+    # 지정한다**: 손으로 옮겨 적으면 신호만 죽고 행동은 그대로다.
+    #
+    # 사유는 위 `log.info` 에 남고, 감사 경로는 불변 기록이다 — `inputMeta` 원본이
+    # 통째로 들어 있다(#340). 화면에는 **아무 말도 안 한다.**
+    return judgment.model_copy(update={"confidence": PASTED_CONFIDENCE_CAP})
 
 
 def cap_confidence_if_inconsistent(

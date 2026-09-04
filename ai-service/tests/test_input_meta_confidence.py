@@ -57,25 +57,32 @@ def test_typing_normally_keeps_the_confidence() -> None:
     assert _score(_typed()).confidence == 1.0
 
 
-def test_pasting_caps_the_confidence() -> None:
-    """★ 붙여넣기가 확신도에 닿는다 — 지금까지 기록만 되고 아무도 안 읽었다."""
-    result = _score(_typed(paste_detected=True))
+def test_pasting_caps_the_confidence(caplog) -> None:
+    """★ 붙여넣기가 확신도에 닿는다 — 지금까지 기록만 되고 아무도 안 읽었다.
+
+    ❗**사유는 로그에만 남는다.** `reason` 에 적으면 판매자 화면으로 나가고, 그건
+    *"손으로 옮겨 적으면 된다"* 를 알려주는 것이다(#372 리뷰). 감사 경로는 로그와
+    불변 기록(`inputMeta` 원본)이다.
+    """
+    with caplog.at_level(logging.INFO):
+        result = _score(_typed(paste_detected=True))
 
     assert result.confidence == scoring.PASTED_CONFIDENCE_CAP
-    assert "붙여넣기" in result.reason, (
-        "조용히 숫자만 바뀌면 감사 시점에 왜 황색이었는지 설명할 수 없다")
+    assert "사유=붙여넣기" in caplog.text, (
+        "화면에서 뺐다고 기록에서까지 빼면 감사 시점에 왜 깎였는지 설명할 수 없다")
 
 
-def test_no_typing_time_is_caught_without_the_paste_flag() -> None:
+def test_no_typing_time_is_caught_without_the_paste_flag(caplog) -> None:
     """❗신호가 둘이다 — 붙여넣기 플래그는 **안 잡히는 경우가 있다.**
 
     IME 조합 중 붙여넣기나 일부 모바일 키보드에서 이벤트가 안 온다. 타이핑 시간이
     사실상 0 인데 글자가 있는 것은 **구조적으로** 같은 상태다.
     """
-    result = _score(_typed(paste_detected=False, total_input_ms=0))
+    with caplog.at_level(logging.INFO):
+        result = _score(_typed(paste_detected=False, total_input_ms=0))
 
     assert result.confidence == scoring.PASTED_CONFIDENCE_CAP
-    assert "타이핑" in result.reason
+    assert "사유=타이핑" in caplog.text
 
 
 def test_a_short_quick_answer_is_not_flagged() -> None:
@@ -132,3 +139,36 @@ def test_the_log_says_it_did_not_change_the_grade(caplog) -> None:
 
     assert "입력 방식 확신도 상한" in caplog.text
     assert "등급은 안 바꾼다" in caplog.text
+
+
+def test_no_cap_writes_its_trigger_into_the_reason() -> None:
+    """❗**어느 캡도 계기를 `reason` 에 안 적는다** (#372 리뷰).
+
+    `reason` 은 `JudgmentView` 로 **판매자 화면에 그대로 나간다.** `JudgmentViewFieldsTest`
+    는 레코드 **컴포넌트 이름**만 보므로 `inputMeta` 라는 필드가 없는 것은 잠그지만,
+    그 내용이 **문자열 안으로** 들어오는 것은 안 본다 — 결정 3.24 가 이름 붙인
+    *"필드 이름으로 막은 방어가 문자열 조립에는 안 걸린다"* 그 모양이다.
+
+    같은 방어가 이미 두 번 우회됐다(`#160 ②` 유형ID · `#370` 두 번째 등급). 캡이 셋으로
+    늘었으니 **하나씩 잠그지 않고 한 번에 잰다** — `EchoCapBelowR05Test` 를 전수 스캔으로
+    바꾼 것과 같은 이유다. 캡을 하나 더 만드는 사람이 이 목록을 보게 된다.
+    """
+    banned = ("붙여넣기", "타이핑", "paste", "U1", "U2", "U3", "U4",
+              "오해 라이브러리", "M01", "M02")
+
+    pasted = InputMeta(first_keystroke_delay_ms=0, total_input_ms=0, paste_detected=True,
+                       backspace_count=0, char_count=40, elderly_mode=False)
+    typed_instantly = InputMeta(first_keystroke_delay_ms=0, total_input_ms=50,
+                                paste_detected=False, backspace_count=0, char_count=40,
+                                elderly_mode=False)
+
+    reasons = []
+    for meta in (pasted, typed_instantly):
+        capped = scoring.cap_confidence_if_pasted(_judgment(), meta)
+        reasons.append(capped.reason)
+
+    for reason in reasons:
+        for word in banned:
+            assert word not in reason, (
+                f"'{word}' 가 판매자 화면에 나간다 — 계기를 알려주면 탐지를 피하는 방법을 "
+                f"알려주는 것이다(기획 7-4). 문면: {reason}")
