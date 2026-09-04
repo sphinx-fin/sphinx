@@ -290,6 +290,17 @@ def _polarity_holds(client, misconception_text: str, utterance: str) -> bool:
             type(exc).__name__, utterance[:40],
         )
         return True
+    if not isinstance(verdict, PolarityVerdict):
+        # ❗**타입이 다르면 게이트가 안 돈 것으로 본다.** 클라이언트가 `model_cls` 를
+        # 안 지키는 경우다(테스트 스텁이 그렇다). 여기서 예외를 올리면 게이트가 채점을
+        # 죽이는데, 게이트는 **과탐을 줄이는 장치이지 판정을 만드는 장치가 아니다**(P1).
+        # 그래서 실패와 같은 방향으로 — 후보를 남긴다(P5 0.2절).
+        log.info(
+            "F-DET-001 극성 게이트가 %s 를 받았다 — PolarityVerdict 가 아니다. "
+            "후보를 그대로 둔다. 발화=%r", type(verdict).__name__, utterance[:40],
+        )
+        return True
+
     holds = verdict.holds and verdict.polarity == "positive"
     if verdict.holds and not holds:
         log.info(
@@ -303,14 +314,38 @@ def _polarity_holds(client, misconception_text: str, utterance: str) -> bool:
     return holds
 
 
+def apply_polarity_gate(
+    response: MisconceptionResponse, text: str, *, client
+) -> MisconceptionResponse:
+    """**3단계.** 후보 중 그 오해를 부정·제한하는 발화를 뺀다. 후보를 만들지 않는다.
+
+    `stage` 는 그 후보를 **찾은** 단계 그대로 둔다 — 발견 경로와 확인 경로는 다른 사실이고,
+    하나로 덮으면 재현성 논의에서 둘이 섞인다.
+
+    ❗**`escalate` 를 다시 계산한다.** 게이트가 `M08-TYING` 후보를 빼면 그 신호도 같이
+    사라져야 한다 — 안 그러면 *"오해는 없는데 꺾기 신호는 있다"* 가 되고, 그 상태는
+    `F-GTE-003` 에서 설명할 수가 없다.
+    """
+    if not response.matches:
+        return response
+    kept = [m for m in response.matches if _polarity_holds(client, m.matched_pattern, text)]
+    if len(kept) == len(response.matches):
+        return response
+    log.info(
+        "F-DET-001 극성 게이트가 후보 %d 건 중 %d 건을 뺐다",
+        len(response.matches), len(response.matches) - len(kept),
+    )
+    return response.model_copy(update={
+        "matches": kept,
+        "escalate": any(_escalates(m.type_id) for m in kept),
+    })
+
+
 def match(text: str, product_type: str = "ELS", *, client=None) -> MisconceptionResponse:
-    """발화 → 오해 유형 매칭. 유형별 최고점 1건만 남긴다.
+    """발화 → 오해 유형 매칭(1·2단계). 유형별 최고점 1건만 남긴다.
 
-    `client` 를 주면 **3단계 극성 게이트**가 돈다 — 1·2단계가 만든 후보 중 그 오해를
-    부정·제한하는 발화를 떨어뜨린다. 안 주면 3단계가 아예 안 돈다(기존 동작).
-
-    **게이트는 후보를 만들지 않는다.** `stage` 는 그 후보를 **찾은** 단계 그대로 둔다 —
-    발견 경로와 확인 경로는 다른 사실이고, 하나로 덮으면 재현성 논의에서 둘이 섞인다.
+    `client` 를 주면 이어서 3단계 게이트까지 돈다. 채점 경로는 **판정 직전**에
+    `apply_polarity_gate` 를 따로 부른다 — 순서가 중요하다(아래).
     """
     norm = _normalize(text)
     matches: list[MisconceptionMatch] = []
@@ -339,25 +374,16 @@ def match(text: str, product_type: str = "ELS", *, client=None) -> Misconception
         if best is not None:
             matches.append(best)
 
-    if client is not None and matches:
-        kept = [
-            m for m in matches
-            if _polarity_holds(client, m.matched_pattern, text)
-        ]
-        if len(kept) != len(matches):
-            log.info(
-                "F-DET-001 극성 게이트가 후보 %d 건 중 %d 건을 뺐다",
-                len(matches), len(matches) - len(kept),
-            )
-        matches = kept
-
     matches.sort(key=lambda m: m.score, reverse=True)
     escalate = any(_escalates(m.type_id) for m in matches)
-    return MisconceptionResponse(
+    response = MisconceptionResponse(
         matches=matches,
         escalate=escalate,
         unclassified_candidate=(not matches) and near_miss,
     )
+    if client is not None:
+        response = apply_polarity_gate(response, text, client=client)
+    return response
 
 
 def _escalates(type_id: str) -> bool:

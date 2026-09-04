@@ -133,3 +133,81 @@ def test_the_stage_still_says_where_it_was_found() -> None:
     stub = _Stub(holds=True, polarity="positive")
     got = _matched(UTTERANCE_YES, client=stub)
     assert got[0].stage == "pattern", f"stage 가 덮였다: {got[0].stage}"
+
+
+# ── 배선: 채점 경로에서 실제로 도는가 ─────────────────────────────────────────
+class _ScoringAndGate:
+    """채점과 극성 게이트를 **둘 다** 받는 스텁. 실제 클라이언트가 하는 일이다.
+
+    `model_cls` 를 지키는 스텁이라야 게이트가 산다 — 안 지키면 게이트는 「안 돈 것」으로
+    보고 후보를 남긴다(다른 테스트 파일의 스텁이 그 경로다).
+    """
+
+    def __init__(self, judgment, holds: bool) -> None:
+        self._j, self._holds = judgment, holds
+        self.schemas: list[str] = []
+
+    def complete_json(self, **kwargs):
+        self.schemas.append(kwargs.get("schema_name", "?"))
+        if kwargs.get("model_cls") is misconception.PolarityVerdict:
+            return misconception.PolarityVerdict(
+                holds=self._holds, polarity="positive" if self._holds else "negative")
+        return self._j.model_copy()
+
+
+def _judgment_for(item_id: str, answer: str):
+    from app import rubrics
+    from app.schemas import Evidence, Grade, Judgment
+    r = rubrics.get(item_id)
+    return Judgment(item_id=item_id, grade=Grade.U1, confidence=0.9,
+                    evidence=Evidence(utterance_quote=answer[:12],
+                                      rubric_clause=r.required_elements[0]),
+                    reason="(테스트)")
+
+
+@pytest.mark.parametrize("holds,expected", [(True, "U4"), (False, "U1")])
+def test_the_gate_decides_whether_the_floor_fires(holds: bool, expected: str) -> None:
+    """★ 배선의 값 — 게이트가 후보를 빼면 **U4 상향이 안 일어난다.**
+
+    이게 `#284` (a) 가 막혀 있던 이유다. 맞게 말한 고객(`holds=False`)이 U4 로 확정되면
+    재설명 루프로 가고, 그건 **오탐** 방향이라 게이트가 없으면 링크를 걸 수 없다.
+    """
+    from app import scoring
+    # ❗**링크가 있는 쌍이라야 floor 가 운다.** `VAR-PARTIAL-DEPOSIT-INSURANCE` 로 쓰려다
+    # 안 됐는데, 그 항목은 `related_misconceptions` 가 비어 있어서다 — 그게 `#284` (a) 가
+    # 아직 안 열린 이유 그 자체다. 여기서 재는 것은 **게이트↔floor 배선**이므로
+    # 이미 링크된 쌍(ELS-PRINCIPAL-LOSS-WARNING ↔ M01)으로 잰다.
+    item = "ELS-PRINCIPAL-LOSS-WARNING"
+    answer = "은행에서 파니까 원금은 보장되는 거죠"
+    llm = _ScoringAndGate(_judgment_for(item, answer), holds)
+
+    from app.schemas import RiskItem
+    risk = RiskItem(item_id=item, product_id="p", name="원금 손실",
+                    importance="required", status="extracted",
+                    condition={"value_text": "만기평가일에 최초기준가격의 65% 미만",
+                               "source_span": {"page": 1, "start": 0, "end": 20}})
+    out = scoring.score(item, "질문?", answer, risk, "ELS", llm=llm)
+
+    assert "PolarityVerdict" in llm.schemas, (
+        f"게이트가 채점 경로에서 안 불렸다 — 배선이 끊겼다. 호출: {llm.schemas}")
+    assert out.grade.value == expected
+
+
+def test_the_gate_runs_after_scoring_not_before() -> None:
+    """❗순서를 잠근다 — 게이트가 **첫** LLM 호출이면 `#281` 이 고정한 seed 배선이 밀린다.
+
+    `#281` 은 *"첫 시도는 설정값 그대로"* 를 잠갔고, 그 테스트가 `llm.calls[0]` 을 본다.
+    게이트를 채점 앞에 두면 그 자리가 게이트 호출이 된다 — 실제로 그렇게 짰다가 세 개가
+    갈렸다.
+    """
+    from app import scoring
+    from app.schemas import RiskItem
+    item = "ELS-PRINCIPAL-LOSS-WARNING"
+    answer = "은행에서 파니까 원금은 보장되는 거죠"
+    llm = _ScoringAndGate(_judgment_for(item, answer), True)
+    risk = RiskItem(item_id=item, product_id="p", name="원금 손실",
+                    importance="required", status="extracted",
+                    condition={"value_text": "만기평가일에 최초기준가격의 65% 미만",
+                               "source_span": {"page": 1, "start": 0, "end": 20}})
+    scoring.score(item, "질문?", answer, risk, "ELS", llm=llm)
+    assert llm.schemas[0] == "Judgment", f"채점보다 먼저 게이트가 돌았다: {llm.schemas}"

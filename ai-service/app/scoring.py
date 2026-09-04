@@ -255,7 +255,7 @@ def score(
     후처리에서 확신도만 깎는다.
     """
     rubric = rubrics.get(item_id)
-    matched = misconception.match(answer_text, product_type)
+    matched = misconception.match(answer_text, product_type)      # 1·2단계 (결정론)
     client_ = llm or default_client()
     prompt = build_prompt(rubric, risk_item, question, answer_text)
 
@@ -285,6 +285,17 @@ def score(
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = cap_confidence_if_pasted(judgment, input_meta)
+        # ❗**3단계 극성 게이트를 판정 직전에 건다** (F-DET-001).
+        #
+        # 자리가 여기인 이유가 둘이다.
+        #   ① 채점 호출 **뒤**여야 한다 — 앞에 두면 게이트가 첫 LLM 호출이 되고
+        #     `#281` 이 고정한 *"첫 시도는 설정 seed 그대로"* 가 밀린다(실측).
+        #   ② `apply_misconception_floor` **앞**이어야 한다 — 그게 U4 를 확정하는 자리라
+        #     오탐의 값이 거기서 발생한다. 맞게 말한 고객이 재설명 루프로 간다.
+        #
+        # 채점과 같은 클라이언트를 쓴다. 주입된 스텁이 `model_cls` 를 안 지키면 게이트가
+        # **안 돈 것으로 보고 후보를 남긴다**(P5 0.2절) — 단위 테스트가 그 경로다.
+        matched = misconception.apply_polarity_gate(matched, answer_text, client=client_)
         judgment = apply_misconception_floor(judgment, matched, rubric)
         judgment = _pin_escalation(judgment, matched, rubric)
         # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
