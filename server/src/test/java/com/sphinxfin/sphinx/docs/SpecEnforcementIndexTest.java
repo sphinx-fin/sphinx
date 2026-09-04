@@ -188,12 +188,35 @@ class SpecEnforcementIndexTest {
     }
 
     /**
+     * 한 파일에서 읽어들일 상한. 이 대조는 후보를 <b>통째로 문자열로 읽으므로</b>
+     * ({@code resolveByContent} → {@code Files.readString}) 큰 바이너리 하나가 힙을 넘긴다.
+     *
+     * <p>❗<b>실측이다.</b> {@code infra/} 에서 {@code tofu init} 을 한 번이라도 한 랩탑에는
+     * {@code infra/.terraform/…/terraform-provider-aws} 가 <b>785MB</b> 로 있고, 그 파일에서
+     * {@code OutOfMemoryError: Java heap space} 로 <b>server 테스트 전체가 죽는다</b>
+     * (`:test` 워커가 통째로 넘어져 다른 297건의 결과도 같이 사라진다). CI 는 그 디렉토리가
+     * 없어서 초록이라 — <b>로컬에서만 죽고 아무도 안 본다.</b>
+     *
+     * <p>디렉토리 목록에 {@code .terraform} 을 넣는 것만으로는 안 된다. 그 목록은
+     * <b>오늘 아는 큰 것</b>만 알고, 다음에 생기는 것은 또 같은 방식으로 죽인다. 읽는 쪽에
+     * 상한을 두는 것이 실제 그물이고, 목록은 <b>걷는 비용</b>을 줄이는 별개 이유로 둔다.
+     *
+     * <p>소스·계약·데이터에 이만한 파일은 없다 — 이 레포에서 제일 큰 대조 대상이 폰트
+     * {@code Pretendard-Regular.ttf}(2.6MB)이고, 그것도 텍스트가 아니라 읽기에서 걸러진다.
+     */
+    private static final long MAX_BYTES = 8L * 1024 * 1024;
+
+    /**
      * 대조 대상 파일 — <b>{@code docs/} 와 {@code .md} 를 뺀다.</b> 자기 자신과 다른 문서의
      * 언급이 근거가 되면 이 대조는 무엇을 적어도 통과한다.
+     *
+     * <p>{@code .terraform} 은 {@code node_modules} 와 같은 자리다 — 내려받은 의존성이지
+     * 우리 소스가 아니다. 크기 상한({@link #MAX_BYTES})이 안전을 맡고, 이 목록은 걷지 않을
+     * 것을 줄인다.
      */
     private static List<Path> codeFiles() throws IOException {
         List<String> skipDirs = List.of(".git", "node_modules", "build", ".gradle", "dist",
-                "docs", ".venv", "__pycache__", ".pytest_cache", "target");
+                "docs", ".venv", "__pycache__", ".pytest_cache", "target", ".terraform");
         try (Stream<Path> walk = Files.walk(REPO)) {
             return walk.filter(p -> {
                         for (Path part : p) {
@@ -204,8 +227,18 @@ class SpecEnforcementIndexTest {
                         return true;
                     })
                     .filter(Files::isRegularFile)
+                    .filter(SpecEnforcementIndexTest::readable)
                     .filter(p -> !p.toString().endsWith(".md"))
                     .toList();
+        }
+    }
+
+    /** 읽어도 되는 크기인가. 크기를 못 재면 후보에서 뺀다 — 못 재는 것을 통째로 읽지 않는다. */
+    private static boolean readable(Path file) {
+        try {
+            return Files.size(file) <= MAX_BYTES;
+        } catch (IOException e) {
+            return false;
         }
     }
 

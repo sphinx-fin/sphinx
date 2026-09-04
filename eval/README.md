@@ -1,11 +1,13 @@
-# eval (운영: 정세현 / 라벨러: 강희진·오준서 — 2인 독립)
+# eval (운영: 정세현 / 라벨러: 정세현·강희진 — 2인, ❗독립 조건은 guideline.md §5)
 
 F-CMN-003 채점 성능 평가 파이프라인.
 
 - 목표: 가중 카파(QWK) 0.75+, 오해→이해 오판(미탐) 별도 관리
-- 절차: 평가 표본 → 강희진·오준서 독립 라벨 → 평가자 간 일치도(상한 기준) →
-  모델 vs 사람 일치도 산출
-- 윤지석(프롬프트 당사자)·정세현(운영자)은 라벨링 제외
+- 절차: 평가 표본 → 정세현·강희진 2인 라벨 → 평가자 간 일치도 → 모델 vs 사람 일치도 산출
+- 윤지석(프롬프트 당사자)은 라벨링 제외
+- ❗**정세현이 라벨러이자 운영자다**(2026-09-03 운영자 결정). 평가자·피평가자 분리가
+  완전하지 않으므로 **1번 수치를 조건 없이 「상한」으로 인용하지 않는다** — 무엇이 얼마나
+  약해지는지는 `eval/labeling/guideline.md` §5 에 있다
 
 ```
 metrics.py             QWK · 혼동행렬 · 미탐율 · 일치율 — 순수 함수, 의존성 없음
@@ -26,7 +28,7 @@ python eval/run_eval.py --out report.md  # 파일로도
 ```
 eval/data/model.jsonl          {"sample_id": …, "item_id": …, "grade": "U4"}
 eval/data/labels/강희진.jsonl   같은 모양
-eval/data/labels/오준서.jsonl   같은 모양
+eval/data/labels/정세현.jsonl   같은 모양
 ```
 
 ## ❗숫자를 지어내지 않는다
@@ -57,8 +59,13 @@ python -m pytest eval/tests -q
 CI 에는 아직 안 걸려 있다(`.github/workflows/ci.yml` 은 server·ai-service·web 3모듈).
 `eval` 잡을 더할지 ai-service 잡에 접을지는 워크플로 소유자(오준서) 판단이다.
 
-## 아직 없는 것 — 평가 표본
+## 아직 없는 것 — 사람 라벨
 
-`eval/data/` 가 비어 있다. **합성 세션(`data/synth_sessions/`)은 재료가 못 된다** — 등급
-분포만 있고 발화가 없어서(대시보드 집계용 생성물), 채점을 라벨링할 대상이 아니다.
-표본 구성은 별건이다.
+`eval/data/labels/` 가 비어 있다. 표본 70건(`eval/corpus/els.jsonl`)과 모델 등급 70건
+(`eval/data/model.jsonl`)은 다 있고, **두 사람의 라벨만 들어오면 리포트가 나온다.**
+
+라벨러는 `eval/labeling/worksheet.html` 을 브라우저로 열어 붙인다 — 그 파일 하나면 되고
+`eval/data/` 를 지나지 않는다(거기 model.jsonl 이 있어서 그렇다).
+
+**합성 세션(`data/synth_sessions/`)은 재료가 못 된다** — 등급 분포만 있고 발화가 없어서
+(대시보드 집계용 생성물), 채점을 라벨링할 대상이 아니다.
