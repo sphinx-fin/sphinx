@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from . import textsim
+from . import textsim, thresholds
 from .config import DATA_DIR_ENV, settings
 from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
 
@@ -42,11 +42,11 @@ def library_path() -> Path:
     """
     return settings().data_dir / LIBRARY_RELPATH
 
-# 문자 바이그램 포함도 임계값. 이 숫자가 설명 가능한 형태로 드러나 있어야 한다
-# (기획서 5절: 라이브러리 기반 재현성). 튜닝 시 dev set으로 재측정한다.
-NGRAM_THRESHOLD = 0.62
-# 후보 큐 적재 하한 — 임계값에 못 미치지만 무시하기엔 가까운 것
-REVIEW_THRESHOLD = 0.45
+# ❗**값은 `scoring_thresholds.yaml` 에서 온다.** 여기 숫자를 적지 않는다 — 그 파일이
+# 「무엇에 반응하는가 · 왜 이 값인가」를 같이 들고 있고, 그게 있어야 심사에서 설명이 되고
+# 튜닝이 코드 변경이 아니게 된다(기획서 5절: 라이브러리 기반 재현성).
+NGRAM_THRESHOLD = thresholds.get("ngram_match")
+REVIEW_THRESHOLD = thresholds.get("ngram_review")
 
 #: 오해 유형의 근거 종류. 기획서 5절은 "실제로 분쟁까지 간 오해만 라이브러리에 들어간다.
 #: 근거가 조정례와 검사결과라는 뜻이다"라고 못박는다. 나머지 값은 그 두 종류가 아니므로

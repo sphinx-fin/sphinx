@@ -140,7 +140,7 @@ jobs:
           #   web/src/api/types.ts                     ErrorCodeContractTest
           #   web/src/lib/survey.ts                    SurveyIsOptionOnlyTest
           #   web/docker-entrypoint.d/15-demo-mode.sh  DemoModeAccountMapTest
-          #   ai-service/app/scoring.py                EchoCapBelowR05Test
+          #   ai-service/app/scoring_thresholds.yaml   EchoCapBelowR05Test (#368)
           #   docs/functional-spec-v1.1.md             SpecEnforcementIndexTest
           #
           # 두 목록이 막는 것이 다르다. `inputs.file` 은 **Gradle 이 UP-TO-DATE 로 건너뛰는
@@ -156,7 +156,7 @@ jobs:
           # 개수에 비례하는 올림 과금)이 도로 는다. `survey.ts` 가 `ai-service` 필터에
           # 이름으로 박혀 있는 것은 이 단정과 무관하다 — 그 파일을 지키는 것은 JUnit 이다.
           # `docs/` 도 통짜로 넓히지 않는다 — decision-log.md 만 고치는 PR 이 대부분이다.
-          server_extra='web/src/api/types\.ts$|web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring\.py$|docs/functional-spec-v1\.1\.md$'
+          server_extra='web/src/api/types\.ts$|web/src/lib/survey\.ts$|web/docker-entrypoint\.d/15-demo-mode\.sh$|ai-service/app/scoring_thresholds\.yaml$|docs/functional-spec-v1\.1\.md$'
           server=false;    hit '^(server/|contracts/|data/timeseries/|CLAUDE\.md$|'"$server_extra"')' && server=true
           ai=false;        hit '^(ai-service/|contracts/|data/|web/src/lib/survey\.ts$)' && ai=true
           # `data/timeseries/VERSION` 이 여기 있는 이유는 상단 ③ 이다. 기초자산이 늘거나
