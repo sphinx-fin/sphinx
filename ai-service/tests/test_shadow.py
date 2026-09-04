@@ -143,6 +143,37 @@ def test_a_shadow_hit_does_not_change_the_grade() -> None:
         "등급 분포가 흔들린다")
 
 
+def test_a_broken_meter_does_not_kill_the_scoring(monkeypatch, caplog) -> None:
+    """❗**관측자가 죽어도 판정은 나온다** (#364 리뷰).
+
+    직전 테스트는 등급 **값**이 안 바뀌는 것을 잰다. 그것만으로는 *"그림자가 던져서
+    채점이 502 가 된다"* 를 못 잡는다 — 판정을 이미 다 만들어 놓고 그 뒤에서 잃는 자리다.
+    "판정을 안 바꾼다" 는 값만이 아니라 **판정이 나온다는 사실**까지여야 한다.
+    """
+    def boom(text, rubric, grade):
+        raise RuntimeError("계량기 고장")
+
+    monkeypatch.setattr(shadow, "observe", boom)
+
+    rubric = rubrics.get("ELS-NO-DEPOSIT-INSURANCE")
+    answer = "예금자보호는 안 된다고 하셨어요"
+    judgment = Judgment(
+        item_id=rubric.item_id, grade=Grade.U1, confidence=0.9,
+        evidence={"utterance_quote": answer[:8], "rubric_clause": rubric.required_elements[0]},
+        reason="사유",
+    )
+
+    class _Stub:
+        def complete_json(self, **kwargs):
+            return judgment.model_copy()
+
+    with caplog.at_level(logging.WARNING):
+        result = scoring.score(rubric.item_id, "질문?", answer, _risk_item(), "ELS", llm=_Stub())
+
+    assert result.grade == Grade.U1, "아무것도 안 하는 관측자가 채점을 죽이면 안 된다"
+    assert "그림자 매칭 실패" in caplog.text, "삼킨 채로 조용하면 계량기가 죽은 줄 모른다"
+
+
 def _risk_item():
     from app.schemas import RiskItem
     return RiskItem(

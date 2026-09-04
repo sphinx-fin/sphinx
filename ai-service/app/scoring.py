@@ -220,7 +220,14 @@ def score(
         # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
         # 걸렸는지 세기만 한다 — 등급을 안 바꾼다(이슈 #284 (b) 의 결정 근거).
         # floor 뒤인 이유: "켰으면 등급이 달라졌을 것인가" 는 최종 등급을 알아야 답한다.
-        shadow.observe(answer_text, rubric, judgment.grade.value)
+        try:
+            shadow.observe(answer_text, rubric, judgment.grade.value)
+        except Exception:  # noqa: BLE001 — 관측자가 채점을 죽이면 안 된다
+            # ❗판정은 이미 위에서 끝났다. 그림자는 "(b) 를 켤지 정할 근거" 를 모으는
+            # 관측자일 뿐이라, 여기서 던지면 **아무것도 안 하는 코드가 채점을 502 로
+            # 만든다.** "판정을 안 바꾼다" 는 등급 값만이 아니라 **판정이 나온다는
+            # 사실**까지다 (#364 리뷰).
+            log.warning("F-DET-001 그림자 매칭 실패 — 판정은 그대로 낸다", exc_info=True)
         return judgment
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
