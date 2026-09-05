@@ -63,6 +63,40 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
 
+  /products/{id}/document:
+    get:
+      summary: 상품 원문 문서 PDF — 브라우저 인라인 (F-EXT · 이슈 #412)
+      description: >
+        **응답이 공통 봉투가 아니다.** 본문이 PDF 바이트다 — `/report/preview` 와 같은
+        선례다(base64 로 봉투에 접어 넣으면 브라우저가 뷰어로 못 열고 화면이 다시 풀어야
+        한다). S-02 모달이 조항 원문·페이지·오프셋을 그려 놓고도 대조할 원본으로 갈 길이
+        없던 것을 채운다(P6 원문 인용). `inline` 이라 모달이 이미 든 페이지 번호로
+        `#page=N` 앵커를 붙여 열 수 있다(브라우저 PDF 뷰어 규약 — 서버가 할 일은 없다).
+        **오류 응답은 봉투 그대로다**(403·404). 규약이 갈리는 것은 성공 본문뿐이다.
+        권한: `product:read` — 원문 문서는 세션 데이터가 아니라 `/risk-items` 가 내는 것과
+        같은 상품 카탈로그 데이터다(그 항목이 뽑혀 나온 바로 그 문서). 그래서 읽기 둘과 같은
+        action 을 쓴다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: "PDF 본문. `Content-Disposition: inline`"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '403':
+          description: 범위 밖 접근
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: >
+            등록된 문서가 없는 상품이거나 원본 파일이 사전적재되지 않았다. 둘을 한 코드로
+            낸다 — 범위 밖 상품의 존재 여부를 알려주지 않는다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions:
     post:
       summary: 세션 생성 (F-INT-001)
