@@ -586,6 +586,39 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /dashboard/coaching-signals:
+    get:
+      summary: ★ 코칭 정황 — 기획서 7-4 2단계 사후 적발
+      description: >
+        기획서 7-4 는 판매 직원의 게이밍에 **2단계 대응**을 두고, 2단계(사후 적발)에서
+        세 신호를 이름으로 적는다 — *"1차 응답 통과율이 비정상적으로 높거나, 답변의
+        문장 유사도가 지나치게 균질하거나, 응답 지연시간 분포가 다른 곳과 다르면
+        이상치로 표시해 컴플라이언스 부서에 이관한다"*.
+        이 뷰가 **셋 다** 낸다. 셋째(지연 분포)는 입력 메타데이터가 불변 기록으로만 가고
+        세션에 안 남아 한동안 못 셌는데, 총 입력 시간만 세션에 남겨 이었다.
+        ❗**기존 이상치(`/leading-indicators`)로는 구조적으로 못 잡는다** — 그쪽은
+        오해율이 **올라간** 것만 보는데 코칭은 반대 방향이다(통과율이 오르고 오해율이
+        내려간다).
+        ❗**개인을 지목하지 않는다.** `key` 는 가명이고 발화는 한 글자도 안 나간다.
+        기획서가 *"개별 세션 단위로 코칭을 판별하기는 어려우나 집계 단위에서는 확인이
+        가능하다"* 로 범위를 정해 뒀다. 세션 하나로 판정하기 시작하면 이 화면이
+        ADR-001 이 막으려던 것이 된다.
+        권한은 선행지표와 **같은** `aggregate:indicator:read` — COMPL=org · MGR=branch.
+        SELLER 는 집계 그랜트가 없다: 코칭을 하는 쪽이 자기 정황을 보면 기능이 없는 것과
+        같다.
+      responses:
+        '200':
+          description: 판매자 가명별 1차 통과율 · 발화 균질도 · 이상치 사유
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoachingApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. SELLER·CUST·ADMIN 은 집계에 접근할 수 없다(ADR-001 · 기획서 7-4).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /dashboard/leading-indicators:
     get:
       summary: 선행지표 뷰 (F-DSH-002)
@@ -1329,6 +1362,62 @@ components:
         signal: {type: string, enum: [GREEN, YELLOW, RED]}
         n:      {type: integer, minimum: 0}
         share:  {type: number, nullable: true, description: "판정된 세션 대비. 표본 부족이면 null"}
+
+    CoachingSignal:
+      type: object
+      required: [groupBy, key, sessions, firstPassRate, homogeneity, medianInputMs, orgFirstPassRate, orgHomogeneity, orgMedianInputMs, reasons, masked]
+      description: >-
+        판매자 한 명(가명)의 코칭 정황. **판정이 아니라 이관 대상 표시**다 —
+        `reasons` 가 비어 있으면 이상치가 아니고, 줄은 그대로 남는다(가려진 것과
+        아무 일 없는 것을 화면이 구별할 수 있어야 한다).
+      properties:
+        groupBy: {type: string, enum: [seller]}
+        key:     {type: string, description: "가명. 같은 판매자는 늘 같은 값이지만 역산되지 않는다"}
+        sessions: {type: integer, minimum: 0, description: "표본 — 이 판매자의 세션 수"}
+        firstPassRate:
+          type: number
+          nullable: true
+          description: "재검증 없이 첫 답에 U1 이 된 비율. 표본 30 미만이면 null"
+        homogeneity:
+          type: number
+          nullable: true
+          description: >-
+            같은 항목에 대한 **서로 다른 세션** 발화들의 평균 겹침(문자 바이그램).
+            코칭이 없는 상태의 기준선은 라벨 코퍼스 212쌍 실측으로 평균 0.055 · 최대 0.444다.
+        medianInputMs:
+          type: integer
+          nullable: true
+          description: >-
+            답변 입력 시간의 중앙값(ms). 값을 안 보낸 답변은 안 센다 — 0 으로 채우면
+            화면이 옛 버전인 세션이 전부 "즉답" 이 되어 그 판매자가 이상치로 뜬다.
+            ❗**빠른 쪽만 이상치로 본다.** 느린 것은 대개 취약 고객이 많은 것이고
+            그건 이상이 아니다 — 양쪽을 다 물면 보호하려던 지점을 이관하게 된다.
+        orgFirstPassRate: {type: number, nullable: true, description: "같은 범위 전체의 통과율 — 「다른 곳과 다르다」의 기준"}
+        orgHomogeneity:   {type: number, nullable: true}
+        orgMedianInputMs: {type: integer, nullable: true, description: "같은 범위 전체의 입력 시간 중앙값"}
+        reasons:
+          type: array
+          items: {type: string}
+          description: "이상치로 본 사유. 비어 있으면 이상치가 아니다"
+        masked: {type: boolean, description: "표본 30 미만 — 두 비율이 null 이다"}
+
+    CoachingView:
+      type: object
+      required: [synthetic, scope, rows]
+      properties:
+        synthetic: {type: boolean, description: "합성 데이터 표기 — 항상 true (기획서)"}
+        scope:     {type: string, enum: [org, branch]}
+        rows:
+          type: array
+          items: {$ref: '#/components/schemas/CoachingSignal'}
+
+    CoachingApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/CoachingView'}
+        error:   {type: object, nullable: true}
 
     OverrideCount:
       type: object

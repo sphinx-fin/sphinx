@@ -106,17 +106,37 @@ def test_no_module_still_hardcodes_a_threshold() -> None:
 
     파일로 뺐다는 말이 참인지를 문면으로 잰다. 이 단정이 없으면 누가 값을 되돌려 박아도
     (다)가 통과한다 — 그 사람이 파일 값도 같이 바꿨을 것이기 때문이다.
+
+    ❗**손목록으로 두지 않는다.** 이름을 하나씩 적으면 *"다음 임계값을 만드는 사람이 이
+    목록을 모른 채 지나간다"* — 실제로 그렇게 캡이 셋이 되는 동안 이 목록은 하나만
+    보고 있었다(`#370` 리뷰). 이름 **꼴**로 잡는다.
     """
-    names = ("NGRAM_THRESHOLD", "REVIEW_THRESHOLD", "ECHO_THRESHOLD",
-             "ECHO_MARGIN_MIN", "ECHO_CONFIDENCE_CAP", "MAX_SCORING_ATTEMPTS")
+    # 임계값처럼 생긴 상수 이름. 새 캡이 규칙만 지키면 자동으로 들어온다.
+    #
+    # ❗**이 파일이 소유하는 범위는 「채점」이다.** `_ATTEMPTS` 를 통째로 물면
+    # `question_gen.MAX_ATTEMPTS`(질문 재생성)·`extraction.MAX_RESCUE_ATTEMPTS`(추출
+    # 구제) 같은 **다른 기능의 손잡이**가 끌려온다. 그 값들은 채점 임계값이 아니라서
+    # 여기 오면 안 되고, 억지로 넣으면 이 파일이 "채점"을 말한다는 사실이 흐려진다.
+    SHAPE = re.compile(
+        r"^(MAX_SCORING_ATTEMPTS"
+        r"|[A-Z][A-Z0-9_]*(?:_CONFIDENCE_CAP|_THRESHOLD|_MARGIN_MIN|_MS|_MIN_CHARS))"
+        r"\s*=\s*[0-9.]+\s*$"
+    )
+    assert SHAPE.match("PASTED_CONFIDENCE_CAP = 0.4"), (
+        "★ 꼴 자체가 안 맞으면 아래 스캔이 0줄을 보고 조용히 통과한다"
+    )
+
     app = Path(scoring.__file__).resolve().parent
-    hard = []
-    for path in sorted(app.glob("*.py")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            for n in names:
-                if re.match(rf"^{n}\s*=\s*[0-9.]+\s*$", line):
-                    hard.append(f"{path.name}: {line.strip()}")
-    assert not hard, f"임계값을 코드에 다시 박았다: {hard}"
+    hard = [
+        f"{path.name}: {line.strip()}"
+        for path in sorted(app.glob("*.py"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if SHAPE.match(line)
+    ]
+    assert not hard, (
+        f"임계값을 코드에 다시 박았다: {hard} — scoring_thresholds.yaml 에 "
+        f"value·used_by·reacts_to·why 를 적고 thresholds.get() 으로 읽는다"
+    )
 
 
 # ── (라) 복창 캡 < R-05 ──────────────────────────────────────────────────────

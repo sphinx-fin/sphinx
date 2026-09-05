@@ -12,6 +12,7 @@ import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.domain.RuleRef;
 import com.sphinxfin.sphinx.core.session.SessionFsm;
 import com.sphinxfin.sphinx.domain.Grade;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import com.sphinxfin.sphinx.security.AccessPolicy;
@@ -522,6 +523,227 @@ class AggregateServiceTest {
             }
         }
         em.persist(session);
+    }
+
+    // ── ★ 코칭 정황 (기획 7-4 2단계) ─────────────────────────────────────────
+    /** 서로 겹치지 않는 발화들. 균질도가 이 테스트의 결론을 흔들지 않게 한다. */
+    private static final String[] VARIED = {
+        "기초자산이 절반 아래로 내려가면 제가 넣은 돈이 줄어든다는 뜻이네요",
+        "만기에 기준보다 밑이면 손해가 난다고 이해했습니다",
+        "최악이면 원금을 상당 부분 잃을 수 있다는 거잖아요",
+        "예금처럼 보호받지 못하고 발행사가 망하면 못 돌려받는군요",
+        "중간에 팔기 어렵고 조기상환 조건을 못 맞추면 만기까지 간다는 얘기죠",
+        "낙인을 건드리면 그때부터 손실 구간이 열린다는 말씀이시군요",
+    };
+
+    private static final String COACHED = "seller-coached";
+    private static final String NORMAL = "seller-normal";
+
+    /** 같은 대본을 외운 고객들 — 발화가 거의 같고 첫 답에 U1 이다. */
+    private void seedCoached(int count) {
+        for (int i = 0; i < count; i++) {
+            Session s = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
+                    "s02-survey-v1", Map.of(), COACHED, "BR-1"));
+            // 조사·어미만 다르다. 코칭의 실물이 이 모양이다.
+            s.recordAnswer(ITEM, "낙인 하회하면 원금 손실 난다고 들었어요" + (i % 2 == 0 ? "." : ""),
+                    judgment(ITEM, Grade.U1));
+            em.persist(s);
+        }
+    }
+
+    /** 각자 자기 말로 답한 고객들. */
+    private void seedNormal(int count) {
+        String[] answers = {
+            "기초자산이 절반 아래로 내려가면 제가 넣은 돈이 줄어든다는 뜻이네요",
+            "만기에 기준보다 밑이면 손해가 난다고 이해했습니다",
+            "최악이면 넣은 돈을 상당 부분 잃을 수 있다는 거잖아요",
+            "그건 잘 모르겠는데요",
+        };
+        for (int i = 0; i < count; i++) {
+            Session s = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
+                    "s02-survey-v1", Map.of(), NORMAL, "BR-1"));
+            s.recordAnswer(ITEM, answers[i % answers.length],
+                    judgment(ITEM, i % 3 == 0 ? Grade.U3 : Grade.U1));
+            if (i % 3 == 0) {
+                s.recordReverify(ITEM);   // 재설명을 거쳤다 — 1차 통과가 아니다
+            }
+            em.persist(s);
+        }
+    }
+
+    private AggregateService.CoachingView orgCoaching() {
+        em.flush();
+        em.clear();
+        return aggregate.coachingSignals(AccessPolicy.Scope.ORG, null);
+    }
+
+    @Test
+    @DisplayName("★ 같은 대본을 외운 판매자가 이상치로 뜬다 — 기획 7-4 2단계 사후 적발")
+    void aCoachedSellerShowsUp() {
+        seedCoached(30);
+        seedNormal(30);
+
+        var coached = orgCoaching().rows().stream()
+                .filter(r -> !r.reasons().isEmpty()).toList();
+
+        assertThat(coached)
+                .as("코칭의 실물은 '조사·어미만 다른 같은 답' 이다 — 이걸 못 잡으면 "
+                        + "기획서 7-4 2단계가 문서로만 있는 것이다")
+                .hasSize(1);
+        assertThat(coached.get(0).homogeneity())
+                .as("서로 다른 고객의 답이 거의 같다")
+                .isGreaterThanOrEqualTo(AggregateService.HOMOGENEITY_MIN);
+        assertThat(coached.get(0).reasons().toString()).contains("겹칩니다");
+    }
+
+    @Test
+    @DisplayName("❗각자 자기 말로 답한 판매자는 안 걸린다 — 정상을 무는 순간 아무도 안 본다")
+    void anOrdinarySellerIsNotFlagged() {
+        seedCoached(30);
+        seedNormal(30);
+
+        var normal = orgCoaching().rows().stream()
+                .filter(r -> r.reasons().isEmpty()).toList();
+
+        assertThat(normal).hasSize(1);
+        assertThat(normal.get(0).homogeneity())
+                .as("라벨 코퍼스 212쌍 실측 평균이 0.055 다 — 정상 발화는 그 근처에 있다")
+                .isLessThan(AggregateService.HOMOGENEITY_MIN);
+    }
+
+    /** 입력 시간을 실어 세션을 심는다. {@code ms=null} 이면 화면이 안 보낸 경우다. */
+    private void seedWithInputMs(String seller, int count, Long ms) {
+        for (int i = 0; i < count; i++) {
+            Session s = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
+                    "s02-survey-v1", Map.of(), seller, "BR-1"));
+            InputMeta meta = ms == null ? null
+                    : new InputMeta(300, ms, false, 2, 60, false);
+            s.recordAnswer(ITEM, VARIED[i % VARIED.length], judgment(ITEM, Grade.U2), meta);
+            em.persist(s);
+        }
+    }
+
+    @Test
+    @DisplayName("★ 답변이 유독 빠른 판매자가 뜬다 — 기획 7-4 2단계 ③ 응답 지연 분포")
+    void anUnusuallyFastSellerShowsUp() {
+        seedWithInputMs("seller-fast", 30, 4_000L);      // 4초
+        seedWithInputMs("seller-usual", 30, 40_000L);    // 40초
+
+        var flagged = orgCoaching().rows().stream()
+                .filter(r -> r.reasons().stream().anyMatch(x -> x.contains("입력이"))).toList();
+
+        assertThat(flagged).hasSize(1);
+        assertThat(flagged.get(0).medianInputMs()).isEqualTo(4_000L);
+        assertThat(flagged.get(0).orgMedianInputMs())
+                .as("전체 중앙값이 기준이다 — 절대 시간으로 재면 문항 길이가 바뀔 때 같이 틀린다")
+                .isNotNull();
+    }
+
+    @Test
+    @DisplayName("❗느린 판매자는 안 문다 — 취약 고객이 많은 지점을 컴플라이언스로 넘기면 안 된다")
+    void aSlowSellerIsNeverFlagged() {
+        seedWithInputMs("seller-slow", 30, 120_000L);    // 2분 — 고령자 응대
+        seedWithInputMs("seller-usual", 30, 40_000L);
+
+        var slow = orgCoaching().rows().stream()
+                .filter(r -> "S-" .equals(r.key().substring(0, 2)))
+                .filter(r -> Long.valueOf(120_000L).equals(r.medianInputMs()))
+                .findFirst().orElseThrow();
+
+        assertThat(slow.reasons())
+                .as("조항은 '분포가 다르면' 이라 방향을 안 정하지만, 양쪽을 다 물면 "
+                        + "이 기능이 보호하려던 지점을 이관하게 된다")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗값을 안 보낸 답변은 0 이 아니라 없는 것이다 — 0 으로 채우면 전부 즉답이 된다")
+    void answersWithoutTimingAreNotCountedAsZero() {
+        seedWithInputMs("seller-notiming", 30, null);
+        seedWithInputMs("seller-usual", 30, 40_000L);
+
+        var noTiming = orgCoaching().rows().stream()
+                .filter(r -> r.medianInputMs() == null).toList();
+
+        assertThat(noTiming)
+                .as("화면이 옛 버전인 판매자가 전부 '즉답' 으로 뜨면 안 된다")
+                .hasSize(1);
+        assertThat(noTiming.get(0).reasons()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗재설명을 거쳐 U1 이 된 것은 1차 통과가 아니다 — 합치면 잘 도는 지점과 코칭이 같은 숫자를 낸다")
+    void reachingU1AfterReExplanationIsNotAFirstPass() {
+        // 30명 전원이 U1 인데 **전부 재설명을 거쳤다.** 재설명이 일한 것이지 코칭이 아니다.
+        for (int i = 0; i < 30; i++) {
+            Session s = Session.create(new CreateSessionCommand(
+                    PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
+                    "s02-survey-v1", Map.of(), "seller-reexplained", "BR-1"));
+            // ❗발화를 진짜로 다르게 둔다. 숫자만 바꾼 같은 문장이면 균질도가 0.79 로
+            // 튀어서 **이 테스트가 재려는 것(1차 통과 구분) 대신 균질도를 잰다.**
+            s.recordAnswer(ITEM, VARIED[i % VARIED.length], judgment(ITEM, Grade.U3));
+            s.recordReverify(ITEM);
+            s.recordAnswer(ITEM, VARIED[(i + 3) % VARIED.length], judgment(ITEM, Grade.U1));
+            em.persist(s);
+        }
+
+        var row = orgCoaching().rows().get(0);
+
+        assertThat(row.firstPassRate())
+                .as("전원 U1 이지만 전원 재설명을 거쳤다 — 1차 통과율은 0 이어야 한다. "
+                        + "여기서 재검증을 안 가르면 **재설명이 잘 도는 지점**이 코칭으로 뜬다")
+                .isEqualByComparingTo(java.math.BigDecimal.ZERO);
+        assertThat(row.reasons())
+                .as("이 판매자는 이상치가 아니다")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗기존 이상치로는 못 잡는다 — 코칭은 오해율이 **내려가는** 쪽이다")
+    void theExistingOutlierCannotSeeCoaching() {
+        seedCoached(30);
+
+        // outlier() 는 delta >= +0.15 만 본다. 코칭된 지점은 오해율이 0 에 가깝다.
+        var points = List.of(
+                new AggregateService.Point("2026-W30", new BigDecimal("0.40"), 40, false),
+                new AggregateService.Point("2026-W31", new BigDecimal("0.02"), 40, false));
+
+        assertThat(AggregateService.outlier("판매자", COACHED, points))
+                .as("오해율이 40%% → 2%% 로 떨어졌는데 기존 이상치는 아무 말도 안 한다 — "
+                        + "그게 이 뷰가 따로 있는 이유다")
+                .isEmpty();
+        assertThat(orgCoaching().rows().get(0).reasons()).isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("표본 30건 미만이면 가리되 줄은 남긴다 — 가려졌다는 사실이 마스킹의 증거다")
+    void smallSellersAreMaskedNotDropped() {
+        seedCoached(5);
+
+        var rows = orgCoaching().rows();
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).masked()).isTrue();
+        assertThat(rows.get(0).homogeneity()).isNull();
+        assertThat(rows.get(0).reasons())
+                .as("가려진 값으로 이상치를 말하면 표본 5건으로 사람을 이관하게 된다")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗발화도 세션 ID 도 안 나간다 — 개인을 지목하면 ADR-001 이 막으려던 것이 된다")
+    void nothingIdentifyingLeaves() {
+        seedCoached(30);
+
+        var row = orgCoaching().rows().get(0);
+
+        assertThat(row.key()).doesNotContain(COACHED).startsWith("S-");
+        assertThat(row.reasons().toString())
+                .as("사유에 발화가 실리면 집계가 아니라 개인 기록 열람이 된다")
+                .doesNotContain("낙인").doesNotContain("원금");
     }
 
     private AggregateService.DecisionView orgDecisions() {

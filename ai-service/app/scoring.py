@@ -67,6 +67,68 @@ class MeasurementInvalid(LlmError):
 #: best-effort 이고, 이 상수가 하는 일은 *"한 번 더 물어본다"* 뿐이다.
 MAX_SCORING_ATTEMPTS = thresholds.get("max_scoring_attempts")
 
+#: 자기일관성 재확인을 거는 등급. **게이트를 실제로 바꾸는 등급만 본다.**
+#:
+#: P5(0.2절) 가 *"미탐(놓침)을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은
+#: **통과 판정**이다. 그런데 "통과" 는 `U1` 하나다 — 처음에 `U2` 를 같이 넣었다가
+#: 게이트를 대조하고 걷어냈다(#370 리뷰).
+#:
+#:     R-04   anyGrade in ['U2','U3']    YELLOW    ← U2 는 여기서 이미 노랑
+#:     R-05   anyConfidenceBelow 0.7     YELLOW    ← 캡을 씌워도 같은 노랑
+#:
+#: **룰 순서상 R-04 가 앞이고 둘 다 YELLOW 라, `U2` 에 캡을 씌워도 판정이 한 칸도 안
+#: 움직인다.** 실제로 신호를 바꾸는 것은 `U1` 뿐이다 — 거기서만 GREEN(R-06) →
+#: YELLOW(R-05) 가 된다.
+#:
+#: 비용 차이가 작지 않다(70건 라벨 기준).
+#:
+#:     U1+U2   39/70 = 55.7%
+#:     U1 만   21/70 = 30.0%
+#:
+#: `U4` 를 안 보는 이유는 같은 계산이다 — 이미 R-01 이 RED 로 막는다.
+#:
+#: ❗이 값은 `scoring_thresholds.yaml`(`#368`)로 안 옮긴다. **임계값이 아니라 목록**이고,
+#: 무엇을 담을지가 위의 **게이트 룰 순서 대조**에서 나온다 — 룰이 바뀌면 같이 봐야 하는
+#: 값이라 숫자 튜닝과 성격이 다르다.
+CONSISTENCY_GRADES = ("U1",)
+
+#: 두 번 채점이 갈렸을 때 씌우는 상한. **R-05(`anyConfidenceBelow 0.7`) 아래여야**
+#: 게이트가 실제로 받는다 — 위면 숫자만 내려가고 아무 일도 안 일어난다.
+#: 복창 캡(0.3)과 값을 달리 둔다: 감사 시점에 **어느 이유로 깎였는지**가 숫자로도 갈린다.
+DISAGREEMENT_CONFIDENCE_CAP = thresholds.get("disagreement_confidence_cap")
+
+#: 이 화면에서 타이핑되지 않은 답변에 씌우는 상한. 세 캡의 크기가 **의심의 크기 순서**다.
+#:
+#:     0.3  복창        문서 문면을 글자 그대로 옮겼다 — 가장 확실하다
+#:     0.4  입력 방식   이 화면에서 타이핑되지 않았다
+#:     0.5  재현 실패   같은 발화가 두 번 다르게 채점됐다
+#:
+#: 셋 다 R-05(0.7) 아래여야 게이트가 받는다. 값이 서로 달라야 감사 시점에 **어느 이유로
+#: 깎였는지** 숫자로도 갈린다.
+PASTED_CONFIDENCE_CAP = thresholds.get("pasted_confidence_cap")
+
+#: 타이핑 시간이 사실상 0 인데 글자가 있는 경우. 붙여넣기 플래그가 안 왔어도 **구조적으로**
+#: 같은 상태다 — 브라우저 이벤트가 안 잡히는 경우가 있어(IME 조합 중 붙여넣기, 일부 모바일
+#: 키보드) 신호를 둘 둔다. 한 신호에만 걸면 그 신호가 안 오는 경로에서 조용히 안 돈다.
+#:
+#: ❗**두 값 다 「사람이 못 하는 영역」에 둔다.** 20자를 200ms 에 치려면 초당 100자다 —
+#: 실측이 아니라 물리적 상한이라 표본이 필요 없다. 튜닝할 값이 아니고, 그래서 경계에
+#: 민감하지 않다.
+#:
+#: 글자 수 하한이 통과 판정을 배제하지 않는지는 **잴 수 있고, 쟀다.** 라벨 코퍼스에서
+#: 두 라벨러가 합의한 51건의 등급별 발화 길이다.
+#:
+#:     U1  n=7   최소 50자 · 중앙 77자     ← 하한(20자)의 2.5배 위
+#:     U2  n=12  최소 14자 · 중앙 25자
+#:     U3  n=13  최소  2자 · 중앙 17자
+#:     U4  n=19  최소 26자 · 중앙 43자
+#:
+#: **U1 은 구조적으로 짧을 수 없다** — 요소를 전부 자기 말로 설명해야 이해로 인정된다.
+#: 20자 미만에서 이 캡이 안 걸려도 게이트가 새지 않는 이유가 이것이다. 짧은 답은
+#: R-04(U2·U3 → YELLOW)가 이미 받는다. (`eval/tools/measure_repetition.py` 가 같은 표를 낸다)
+NO_TYPING_MS = thresholds.get("no_typing_ms")
+NO_TYPING_MIN_CHARS = thresholds.get("no_typing_min_chars")
+
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "F-SCR-001_v3.md"
 PROMPT_VERSION = "F-SCR-001_v3"
 
@@ -183,8 +245,15 @@ def score(
     risk_item: RiskItem,
     product_type: str = "ELS",
     llm: LlmClient | None = None,
+    *,
+    input_meta=None,
 ) -> Judgment:
-    """고객 발화 → Judgment(측정값)."""
+    """고객 발화 → Judgment(측정값).
+
+    ❗`input_meta` 는 **프롬프트에 안 들어간다.** 모델에게 *"이 답은 붙여넣기였다"* 를
+    알려주면 등급이 그 사실에 끌리는데, 루브릭이 재는 것은 내용이지 입력 방식이 아니다.
+    후처리에서 확신도만 깎는다.
+    """
     rubric = rubrics.get(item_id)
     matched = misconception.match(answer_text, product_type)
     client_ = llm or default_client()
@@ -215,6 +284,7 @@ def score(
             last = exc
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
+        judgment = cap_confidence_if_pasted(judgment, input_meta)
         judgment = apply_misconception_floor(judgment, matched, rubric)
         judgment = _pin_escalation(judgment, matched, rubric)
         # ❗판정이 **끝난 뒤** 잰다. 루브릭이 선언만 하고 강제 못 하는 조건이 이 발화에
@@ -231,7 +301,10 @@ def score(
             # 만든다.** "판정을 안 바꾼다" 는 등급 값만이 아니라 **판정이 나온다는
             # 사실**까지다 (#364 리뷰).
             log.warning("F-DET-001 그림자 매칭 실패 — 판정은 그대로 낸다", exc_info=True)
-        return judgment
+        # 그림자 관측 **뒤**에 캡을 씌운다. 관측은 최종 **등급**을 보고(위 주석),
+        # 캡은 **확신도**만 바꾼다 — 서로 읽는 값이 달라 순서가 답을 안 바꾼다.
+        # 캡을 마지막에 두는 것은 이것이 판정을 실제로 고치는 유일한 단계여서다.
+        return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt)
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
     # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
@@ -365,6 +438,124 @@ def cap_confidence_if_echoed(
         "confidence": ECHO_CONFIDENCE_CAP,
         "reason": f"{judgment.reason} (문서 문면 복창 포함도 {echo:.2f} ≥ "
                   f"{ECHO_THRESHOLD} — 자기 말인지 가릴 수 없어 확신도 상한 적용)",
+    })
+
+
+def cap_confidence_if_pasted(judgment: Judgment, input_meta) -> Judgment:
+    """**이 화면에서 타이핑되지 않은 답변**은 확신도를 깎는다 (이슈 #325 2단계).
+
+    ## 복창 캡과 같은 질문, 다른 계기
+
+    `cap_confidence_if_echoed` 가 묻는 것은 *"이게 이 사람의 말인가"* 이고 이것도 같다.
+    복창은 **텍스트**로 재고 이건 **입력 방식**으로 잰다 — 그리고 입력 방식 쪽이 **더 굵은
+    신호**다. 판매자가 대신 입력하거나 화면 설명을 복사한 답변은 <b>발화 내용만 보면 완벽한
+    U1</b> 이라 텍스트로는 구분이 안 된다.
+
+    ## ❗등급을 안 바꾼다
+
+    붙여넣기가 곧 오해는 아니다 — 고객이 자기 메모를 붙여넣었을 수도 있다. 그래서
+    **확신도만** 깎고 판정은 게이트가 한다. R-05 가 물면 YELLOW 이고 그건 *"재설명이
+    필요하다"* 이지 *"판매 차단"* 이 아니다 — 정황의 크기에 비례한다.
+    """
+    if input_meta is None or judgment.confidence <= PASTED_CONFIDENCE_CAP:
+        return judgment
+
+    if input_meta.paste_detected:
+        why = "붙여넣기"
+    elif (input_meta.total_input_ms <= NO_TYPING_MS
+          and input_meta.char_count >= NO_TYPING_MIN_CHARS):
+        why = f"타이핑 {input_meta.total_input_ms}ms 에 {input_meta.char_count}자"
+    else:
+        return judgment
+
+    log.info(
+        "F-INT-003 입력 방식 확신도 상한: item_id=%s 사유=%s — 등급은 안 바꾼다(P1)",
+        judgment.item_id, why,
+    )
+    # ❗**`reason` 을 안 건드린다** (#372 리뷰). 이 문자열은 `JudgmentView.reason` 으로
+    # **판매자 화면에 그대로 나간다.** 다른 두 캡보다 여기가 더 나쁘다 — 복창 포함도는
+    # 측정값이고 "재현되지 않았다" 는 정황이지만, *"붙여넣기"* 는 **다음 행동을 그대로
+    # 지정한다**: 손으로 옮겨 적으면 신호만 죽고 행동은 그대로다.
+    #
+    # 사유는 위 `log.info` 에 남고, 감사 경로는 불변 기록이다 — `inputMeta` 원본이
+    # 통째로 들어 있다(#340). 화면에는 **아무 말도 안 한다.**
+    return judgment.model_copy(update={"confidence": PASTED_CONFIDENCE_CAP})
+
+
+def cap_confidence_if_inconsistent(
+    judgment: Judgment, client, prompt: str, attempt: int
+) -> Judgment:
+    """**같은 발화를 한 번 더 채점해서 등급이 갈리면 확신도를 깎는다.**
+
+    ## 왜 필요한가 — 자기보고 신뢰도가 죽어 있다
+
+    프롬프트 v2 가 `confidence` 를 *"다른 채점자에게도 같게 나올 것인가"* 로 정의해 놓고
+    **모델에게 그걸 물어본다.** 실측이 그 결과다.
+
+        ADR-005 (dev 24건)   [0.7, 0.9, 1.0]
+        라이브 (#339, 6건)    고유값 1개 — 1.0
+
+    즉 `R-05`(`anyConfidenceBelow 0.7`)가 **모델 자기보고로는 한 번도 안 돈다.** 지금 그
+    룰을 발동시키는 것은 복창 캡뿐이다.
+
+    여기서 하는 것은 **그 정의를 직접 재는 것**이다 — 다시 물어서 같게 나오는지.
+
+    ## ❗등급을 안 바꾼다
+
+    두 번째 답이 U4 라도 **등급은 첫 판정 그대로**다. 바꾸면 그건 측정이 아니라 판정이고
+    (P1), *"두 번 중 나쁜 쪽"* 이라는 룰을 코드가 몰래 갖게 된다. 갈렸다는 사실을
+    **확신도로 보고하고 판정은 게이트가 한다** — 복창 캡과 같은 자리다.
+
+    ## 통과 쪽만 다시 묻는다
+
+    P5(0.2절) 가 *"미탐을 과탐보다 비싸게 다룬다"* 이므로 다시 물어야 하는 것은 **"이해했다"**
+    판정이다. U4 를 재확인해 봐야 이미 막혀 있고 호출만 두 배가 된다. 그래서 비용은
+    <b>통과 판정 비율만큼</b>이지 전체 두 배가 아니다.
+
+    ## 두 번째 호출이 죽으면 그냥 넘어간다
+
+    확신도를 못 깎을 뿐 판정은 유효하다. 여기서 502 를 올리면 **재확인하려다 인터뷰를
+    멈추는 것**이고, 그 손해가 실패에 비례하지 않는다. 대신 로그에 남긴다 — 이 검사가
+    조용히 안 도는 것과 도는데 일치하는 것은 다르다.
+    """
+    if judgment.grade.value not in CONSISTENCY_GRADES:
+        return judgment
+    if judgment.confidence <= DISAGREEMENT_CONFIDENCE_CAP:
+        return judgment          # 이미 더 낮다 — 복창 캡이 걸린 경우
+    try:
+        second = client.complete_json(
+            prompt=prompt,
+            model_cls=Judgment,
+            schema_name="Judgment",
+            system=load_system_prompt(),
+            seed=_attempt_seed(attempt + MAX_SCORING_ATTEMPTS),
+        )
+    except LlmError as exc:
+        log.info(
+            "F-SCR-001 자기일관성 확인 실패: item_id=%s — %s. 확신도를 안 깎는다 "
+            "(판정은 유효하다)", judgment.item_id, type(exc).__name__,
+        )
+        return judgment
+
+    if second.grade == judgment.grade:
+        return judgment
+    log.info(
+        "F-SCR-001 자기일관성 불일치: item_id=%s %s vs %s — 확신도 상한 %s 적용. "
+        "등급은 안 바꾼다(P1)",
+        judgment.item_id, judgment.grade.value, second.grade.value,
+        DISAGREEMENT_CONFIDENCE_CAP,
+    )
+    return judgment.model_copy(update={
+        "confidence": DISAGREEMENT_CONFIDENCE_CAP,
+        # ❗**두 번째 등급을 안 적는다** (#370 리뷰). 이 문자열은 `JudgmentView.reason`
+        # 으로 **판매자 화면에 그대로 나간다**. 두 번째 등급이 새면 판매자가 *"이 항목은
+        # U1/U2 경계에 정확히 걸려 있다"* 를 읽고, 그건 게이트를 GREEN 으로 넘기려면
+        # 어디를 다시 물어야 하는지를 지목한다(기획 7-4). `apply_misconception_floor`
+        # 가 유형ID 를 여기 안 적는 것과 같은 자리다(#160 ②).
+        #
+        # 복창 캡은 이 선을 안 넘는다 — 포함도는 **측정값**이라 다음 행동을 지정하지
+        # 않는다. 두 번째 등급은 로그에 남고, 감사 경로는 불변 기록이다.
+        "reason": f"{judgment.reason} (재채점에서 등급이 재현되지 않아 확신도 상한 적용)",
     })
 
 

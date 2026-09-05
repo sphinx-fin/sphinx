@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
+import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
@@ -133,9 +134,25 @@ public class AiServiceClient {
      */
     public Scored score(String itemId, String question, String answerText,
                         RiskItem riskItem, String productType) {
+        return score(itemId, question, answerText, riskItem, productType, null);
+    }
+
+    /**
+     * 입력 메타데이터를 같이 넘겨 채점한다 (이슈 #325 2단계).
+     *
+     * <p>❗<b>프롬프트에 안 들어간다.</b> {@code ai-service} 가 후처리에서 <b>확신도만</b>
+     * 깎는다 — 모델에게 <i>"이 답은 붙여넣기였다"</i> 를 알려주면 등급이 그 사실에 끌리는데,
+     * 루브릭이 재는 것은 내용이지 입력 방식이 아니다.
+     *
+     * <p>❗<b>PII 가 없다.</b> 숫자와 불리언뿐이고, 서버가 {@code Map} 이 아니라 타입으로
+     * 받아 좁혀 둔 값이다({@code AnswerRequest.InputMeta}). P3 경계를 넘는 것이 늘지 않는다.
+     */
+    public Scored score(String itemId, String question, String answerText,
+                        RiskItem riskItem, String productType, InputMeta inputMeta) {
         // P3 — 원문은 절대 나가지 않는다. 무엇이 몇 번 지워졌는지만 센다(이슈 #326).
         PiiGateway.Masked masked = maskAndCount(answerText);
-        ScoreRequest request = new ScoreRequest(itemId, question, masked.text(), riskItem, productType);
+        ScoreRequest request = new ScoreRequest(itemId, question, masked.text(), riskItem,
+                productType, inputMeta);
         try {
             Judgment judgment = restClient.post()
                     .uri("/internal/score")
@@ -424,7 +441,7 @@ public class AiServiceClient {
      * (item_id, question, answer_text, risk_item, product_type)와 1:1로 맞는다.
      */
     record ScoreRequest(String itemId, String question, String answerText,
-                        RiskItem riskItem, String productType) {}
+                        RiskItem riskItem, String productType, InputMeta inputMeta) {}
 
     /**
      * /internal/question 요청 본문. snake_case로 ai-service QuestionRequest

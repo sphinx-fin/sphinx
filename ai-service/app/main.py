@@ -222,6 +222,15 @@ def _log_enforcement_gap() -> None:
         "· 라이브러리 유형=%d (이슈 #284)",
         declared, linked, total, len(misconception.library()),
     )
+    # ❗**조건 단위로도 찍는다** (이슈 #284 (c), 정세현: *"46개 중 무엇이 강제되고 무엇이
+    # 권고인지 코드도 문서도 말하지 않는다"*). 위 줄은 **루브릭** 단위라 그 질문에 답하지
+    # 못한다 — 링크가 하나라도 있으면 그 루브릭의 조건 전부가 「링크 있음」으로 세어진다.
+    enforced, advisory, explained = rubrics.condition_enforcement()
+    log.info(
+        "F-DET-001 조건 단위: 강제 가능=%d · 권고만=%d (그중 이유가 파일에 적힌 것=%d) "
+        "— 「권고만」은 프롬프트 문면일 뿐이고 모델이 놓치면 U4 상향이 없다 (이슈 #284)",
+        enforced, advisory, explained,
+    )
     # 의도된 정정은 세지 않는다 — 오탐 하나가 상시로 서면 진짜 사각도 같은 줄로 보인다
     # (`#298` 리뷰). 무엇이 예외인지는 남긴다 — 안 남기면 이 숫자가 왜 0 인지 알 수 없다.
     for item_id, (why, until) in rubrics.unlinked_until().items():
@@ -234,7 +243,7 @@ def _log_enforcement_gap() -> None:
         log.warning(
             "F-DET-001 강제 통로 없음: item_id=%s 조건=%d개 — related_misconceptions 가 "
             "비어 있고 '아직' 목록에도 없다. 모델이 놓치면 U4 상향이 아예 일어나지 않는다. "
-            "의도라면 rubrics._UNLINKED_UNTIL 에 근거와 함께 넣는다 (%s)",
+            "의도라면 그 루브릭 파일에 unlinked_until(reason·until)을 적는다 (%s)",
             item_id, len(conditions), " / ".join(conditions),
         )
 

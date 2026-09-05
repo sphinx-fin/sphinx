@@ -71,7 +71,8 @@ class RepeatedAnswerGateTest {
     @BeforeEach
     void stub() {
         when(aiServiceClient.score(anyString(), anyString(), anyString(),
-                any(RiskItem.class), anyString()))
+                any(RiskItem.class), anyString(),
+                nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
                 .thenAnswer(inv -> new AiServiceClient.Scored(
                         new Judgment(inv.getArgument(0), grade, new BigDecimal("0.95"),
                                 new Judgment.Evidence("인용", "조항"), "사유", null),

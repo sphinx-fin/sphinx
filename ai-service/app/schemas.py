@@ -297,6 +297,36 @@ class QuestionResponse(Strict):
     fallback_used: bool = False
 
 
+class InputMeta(Strict):
+    """F-INT-003 입력 메타데이터 — **무엇을 말했나가 아니라 어떻게 입력했나** (이슈 #325).
+
+    ## 왜 채점 경계까지 오나
+
+    <b>붙여넣기로 채운 되말하기는 되말하기가 아니다.</b> 판매자가 대신 입력했거나 화면에
+    뜬 설명을 복사한 것이고, **발화 내용만 보면 완벽한 U1 로 채점된다** — 텍스트로는
+    구분이 안 되고 입력 방식으로만 구분된다.
+
+    복창 판정(`cap_confidence_if_echoed`)이 묻는 것과 **같은 질문**이다: *"이게 이 사람의
+    말인가."* 복창은 **텍스트**로 재고 이건 **입력 방식**으로 잰다.
+
+    ## ❗프롬프트에 안 들어간다
+
+    모델에게 *"이 답은 붙여넣기였다"* 를 알려주면 **등급이 그 사실에 끌린다.** 루브릭이
+    재는 것은 내용이고 입력 방식이 아니다. 후처리에서 **확신도만** 깎는다(P1).
+
+    ## PII 가 없다
+
+    숫자와 불리언뿐이다 — 서버가 타입으로 좁혀 보낸다(`AnswerRequest.InputMeta`).
+    """
+
+    first_keystroke_delay_ms: int = 0
+    total_input_ms: int = 0
+    paste_detected: bool = False
+    backspace_count: int = 0
+    char_count: int = 0
+    elderly_mode: bool = False
+
+
 class ScoreRequest(Strict):
     """고객 발화는 Spring PiiGateway.mask() 통과분만 온다 (P3). 입구에서 재검사한다."""
 
@@ -305,6 +335,8 @@ class ScoreRequest(Strict):
     answer_text: str
     risk_item: RiskItem
     product_type: ProductType = "ELS"
+    input_meta: InputMeta | None = Field(
+        default=None, description="F-INT-003 — 확신도 후처리에만. 프롬프트에 안 들어간다")
 
 
 class MisconceptionMatch(Strict):
