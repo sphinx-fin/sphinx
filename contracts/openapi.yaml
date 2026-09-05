@@ -888,7 +888,16 @@ components:
       type: object
       required: [status]
       properties:
-        status: {type: string, enum: [PENDING_APPROVAL, APPROVED, REJECTED]}
+        status:
+          type: string
+          enum: [PENDING_APPROVAL, APPROVED, REJECTED]
+          description: >
+            `REJECTED` 는 현재 **도달 불가**다 (이슈 #417 · ADR-002). MVP 는 반려 경로를 두지
+            않는다 — 미승인 세션은 그대로 보류(적색)이고, 서버가 내는 값은 `PENDING_APPROVAL`·
+            `APPROVED` 뿐이다(`domain/OverrideStatus` 에 `REJECTED` 가 없다). enum 값은 후속(반려
+            엔드포인트, `POST …/override/reject`)을 위해 남기되, 지금 이 값을 기대하는 화면
+            분기를 만들면 절대 안 오는 죽은 가지가 된다. 이 문면은 `OverrideStatus` javadoc 이
+            하던 말을 계약으로 옮긴 것이다 — 계약이 낼 수 있다고 말하는 값과 실물이 어긋나지 않게.
     OverrideApiResponse:
       type: object
       required: [success, data]
@@ -1227,14 +1236,13 @@ components:
           type: string
           nullable: true
           description: >
-            브라우저 미리보기(PDF 인라인). **PDF 생성이 붙기 전까지 null 이다** — 전문
-            (`ReportResponse.previewUrl`)과 같은 이유이고, 같은 PDF 를 가리키므로 성격이
-            다를 이유가 없다(이슈 #157).
-            값을 채우면 계약이 "이 URL 로 가면 문서가 있다" 를 보장하는데 404 가 난다.
-            스키마 검증은 통과하고 화면은 링크를 그리며 **눌러야 드러난다** — 이쪽은
-            고객 교부용이라 전문보다 나쁘다.
-            `required` 에는 남긴다. 키가 없는 것과 값이 null 인 것은 다르고, 화면은
-            "아직 없다" 를 그릴 수 있어야 한다.
+            브라우저 미리보기(PDF 인라인) — `GET /sessions/{id}/report/preview`.
+            **PDF 가 붙어서 이제 값이 있다**(이슈 #233 · PR #244 · #417 덧). 전문
+            (`ReportResponse.previewUrl`)과 같은 PDF 를 가리키므로 성격이 다를 이유가 없다.
+            예전에는 null 이 계약이었다(생성이 없는데 채우면 "이 URL 로 가면 문서가 있다" 를
+            보장하는데 404 가 나고, 스키마 검증은 통과하며 화면은 링크를 그려 눌러야 드러났다).
+            `nullable`·`required` 는 남긴다 — 발행 전 상태를 화면이 "아직 없다" 로 그릴 수 있어야
+            하고, 키가 없는 것과 값이 null 인 것은 다르다.
         downloadUrl: {type: string, nullable: true, description: "교부 방식이 정해지기 전까지 nullable"}
     ReportSummaryApiResponse:
       type: object
