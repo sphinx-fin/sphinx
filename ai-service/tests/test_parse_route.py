@@ -68,15 +68,21 @@ def test_response_satisfies_contract(parsed):
 
 
 def test_route_does_not_touch_parser_output(parsed, real_pdf):
-    """라우트를 통과한 것과 파서를 직접 부른 것이 같아야 한다.
+    """라우트를 통과한 것과 **`parse_upload` 를 직접 부른 것**이 같아야 한다.
 
     다르면 직렬화가 한 겹 낀 것이고, 그 겹은 `test_parsing.py` 가 재는 계약 항등식
     (`pages[page].text[start:end] == value_text`) 밖에서 오프셋을 흔들 수 있다.
+
+    ❗**기준이 `parse_document` 에서 `parse_upload` 로 바뀌었다**(이슈 #436 · PR #441).
+    수동 파스 출력 우회가 생기면서 `.json` 이 옆에 있는 문서는 라우트가 PDF 를 안 판다 —
+    `parse_document` 와 비교하면 **우회가 걸린 문서에서 이 테스트가 항상 깨진다.** 이 테스트가
+    재려는 것은 「파서 출력 == HTTP 본문」이고, 라우트 본체는 `parse_upload` 이므로 그쪽이
+    옳은 기준이다. 우회가 걸리는지 자체는 `test_manual_parse_override.py` 가 잰다.
     """
-    direct = parsing.parse_document(
-        str(real_pdf),
-        document_id=parsing.derive_document_id(real_pdf),
+    direct = parsing.parse_upload(
+        "documents/" + real_pdf.name,
         product_type="ELS",
+        document_id=parsing.derive_document_id(real_pdf),
     )
     assert parsed == direct
 
