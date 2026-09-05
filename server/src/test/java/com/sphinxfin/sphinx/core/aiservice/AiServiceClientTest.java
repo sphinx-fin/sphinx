@@ -148,6 +148,24 @@ class AiServiceClientTest {
     }
 
     @Test
+    @DisplayName("(NFC) 조합형(NFD) 답변은 ai-service 로 나가기 전 NFC 로 정규화된다 (결정 10.2.1)")
+    void normalizesCustomerTextToNfcBeforeSending() {
+        String nfc = "원금은 지켜지죠";
+        String nfd = java.text.Normalizer.normalize(nfc, java.text.Normalizer.Form.NFD);
+        // 전제: 둘은 코드포인트가 다르다 — 아니면 이 테스트가 아무것도 안 잰다(#331 리뷰의 결).
+        org.assertj.core.api.Assertions.assertThat(nfd).isNotEqualTo(nfc);
+
+        server.expect(requestTo(BASE + "/internal/score"))
+                // 저장·해시 대상이 될 문면이 NFC 로 나간다 — NFD 로 새면 같은 발화가 환경마다
+                // 다른 utteranceQuote·다른 contentHash 가 되고, 영속 DB(#445)에선 못 고친다.
+                .andExpect(jsonPath("$.answer_text").value(nfc))
+                .andRespond(withSuccess(validJudgmentJson(), MediaType.APPLICATION_JSON));
+
+        client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", nfd, ITEM, "ELS");
+        server.verify();
+    }
+
+    @Test
     @DisplayName("(c) 상류 5xx → AiServiceException (502로 매핑됨)")
     void upstreamServerErrorRaisesAiServiceException() {
         server.expect(requestTo(BASE + "/internal/score"))
