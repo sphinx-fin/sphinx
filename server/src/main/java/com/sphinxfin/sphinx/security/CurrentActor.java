@@ -32,7 +32,7 @@ public class CurrentActor {
     /** 인증 주체의 식별자. 미인증·익명이면 null. */
     public String actorId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || isAnonymous(auth)) {
+        if (unidentified(auth)) {
             return null;
         }
         return auth.getName();
@@ -56,6 +56,18 @@ public class CurrentActor {
     public String branchId() {
         String id = actorId();
         return id == null ? null : roster.byId(id).map(a -> a.branchId()).orElse(null);
+    }
+
+    /**
+     * 행위자를 특정할 수 없는 인증 상태인가 — null 만이 아니다(#407 리뷰 ①).
+     *
+     * AnonymousAuthenticationFilter 가 빈 컨텍스트에 익명 토큰을 채우므로, 미인증 요청이
+     * 항상 null 로 오지 않는다: getName()="anonymousUser" · isAuthenticated()=true 로 온다.
+     * "auth != null 이면 이름이 있다"는 전제로 그 이름을 기록에 남기면, 승인자 불명 승인이
+     * "anonymousUser" 라는 이름을 달고 불변 기록에 남는다. 세 경우를 한 판정으로 묶는다.
+     */
+    public static boolean unidentified(Authentication auth) {
+        return auth == null || !auth.isAuthenticated() || isAnonymous(auth);
     }
 
     private static boolean isAnonymous(Authentication auth) {
