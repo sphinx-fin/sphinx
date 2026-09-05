@@ -581,6 +581,34 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /dashboard/audit-summary:
+    get:
+      summary: 접근 감사 집계 (F-CMN-002 · 이슈 #326 파트2)
+      description: >
+        권한: `audit:read` — COMPL=org 뿐이다(SELLER·MGR·CUST·ADMIN 부재).
+        기간별 action·resultCode·차단(401·403) 역할별 건수를 낸다.
+        ❗**개인 식별자(actorId·resource)는 담지 않는다** — 개방 모드에서 원시 엔트리를 열면
+        무인증·공개 상태에서 "누가 무엇을 했는가" 가 읽힌다. 심사에 필요한 것은 `deniedByRole`
+        (역할별 차단 건수 = 기획서 7-4 역이용 방지의 실물)이라는 숫자다.
+        `from` 포함·`to` 제외(반열림). 둘 다 생략하면 전체. `unreadable` 은 payload 를 못 읽어
+        어느 기간에도 못 넣은 건수 — total 이 "읽을 수 있었던 것" 으로 조용히 좁혀지지 않게 따로 센다.
+      parameters:
+        - {name: from, in: query, required: false, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: 기간별 접근 집계 (개인 식별자 없음)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditSummaryApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. COMPL 만 감사 집계를 볼 수 있다(ADR-001 · 기획서 7-4). 화면이
+            "차단됨"을 그려야 하므로 계약에 선언한다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /dashboard/vulnerability-contrast:
     get:
       summary: 취약 고객 대비 (F-DSH-001 · 이슈 #321)
@@ -1376,6 +1404,29 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/HeatmapResponse'}
+        error:   {type: object, nullable: true}
+    AuditSummary:
+      type: object
+      required: [total, unreadable, byAction, byResultCode, deniedByRole]
+      description: >
+        접근 감사 집계 (#326 파트2). ❗개인 식별자(actorId·resource)를 담지 않는다 — 집계만.
+      properties:
+        from: {type: string, format: date-time, nullable: true, description: "포함. null 이면 처음부터"}
+        to:   {type: string, format: date-time, nullable: true, description: "제외(반열림). null 이면 끝까지"}
+        total:      {type: integer, format: int64, description: "그 기간에 읽어 센 접근 수"}
+        unreadable: {type: integer, format: int64, description: "payload 를 못 읽어 어느 기간에도 못 넣은 건수 — total 과 따로 센다"}
+        byAction:     {type: object, additionalProperties: {type: integer, format: int64}, description: "action → 건수"}
+        byResultCode: {type: object, additionalProperties: {type: integer, format: int64}, description: "resultCode → 건수"}
+        deniedByRole:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "401·403 으로 끝난 접근의 역할별 건수 — 기획서 7-4(역이용 방지)의 실물 숫자"
+    AuditSummaryApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/AuditSummary'}
         error:   {type: object, nullable: true}
     IndicatorPoint:
       type: object

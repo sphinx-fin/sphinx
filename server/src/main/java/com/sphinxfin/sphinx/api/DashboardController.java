@@ -2,6 +2,8 @@ package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.aggregate.AggregateService;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.evidence.AuditLog;
+import org.springframework.format.annotation.DateTimeFormat;
 import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.security.AccessGuard;
 import com.sphinxfin.sphinx.security.AccessPolicy;
@@ -38,6 +40,33 @@ public class DashboardController {
     private final AggregateService aggregateService;
     private final AccessGuard accessGuard;
     private final CurrentActor currentActor;
+    private final AuditLog auditLog;
+
+    /**
+     * 접근 감사 집계 (F-CMN-002 · 이슈 #326 파트2). 기간별 action·resultCode·차단 역할별 건수.
+     *
+     * <p>❗<b>개인 식별자(actorId·resource)는 안 나간다</b> — 개방 모드(결정 10.57)에서 원시
+     * 엔트리를 계약에 열면 레포·주소 공개 + 무인증 상태에서 "누가 무엇을 했는가" 가 전부
+     * 읽힌다({@link AuditLog#summary} javadoc). 심사에 필요한 것은 <i>"이번 주 SELLER 집계
+     * 접근 차단 N건"</i> 이라는 숫자다 — {@code deniedByRole} 가 기획서 7-4(역이용 방지)의 실물이다.
+     *
+     * <p>권한: {@code audit:read} (COMPL org). 원시 조회와 <b>같은 action</b> 을 쓴다 — 집계는
+     * 그보다 덜 민감하지만(PII 없음) 새 action 을 만들면 같은 자료에 두 그랜트가 생겨 한쪽만
+     * 좁히는 실수가 난다(취약대비 뷰가 히트맵 action 을 재사용한 것과 같은 결). {@code /dashboard}
+     * 아래라 개방 모드 지도가 compl-01 을 실어 준다({@code DemoModeAccountMapTest}).
+     *
+     * <p>{@code from} 은 포함, {@code to} 는 제외(반열림) — 이어지는 두 기간을 합쳐도 겹치지
+     * 않는다. 둘 다 생략하면 전체 스트림을 센다.
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:read')")
+    @GetMapping("/audit-summary")
+    public ApiResponse<AuditLog.AccessSummary> auditSummary(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+        return ApiResponse.ok(auditLog.summary(from, to));
+    }
 
     /**
      * 오해 지도 히트맵 (F-DSH-001).
