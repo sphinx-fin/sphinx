@@ -256,7 +256,7 @@ _POLARITY_SYSTEM = (
 )
 
 
-def _polarity_holds(client, misconception_text: str, utterance: str) -> bool:
+def _polarity_holds(client, misconception_text: str, utterance: str, type_id: str) -> bool:
     """이 발화가 그 오해를 **실제로 담고 있는가**. 못 물으면 `True`(후보 유지).
 
     ❗**실패는 후보를 남기는 쪽으로 떨어진다.** 지우면 미탐이고 P5(0.2절)가 미탐을 과탐보다
@@ -286,19 +286,19 @@ def _polarity_holds(client, misconception_text: str, utterance: str) -> bool:
         )
     except Exception as exc:                       # LLM 계열 예외를 여기서 좁히지 않는다
         log.info(
-            "F-DET-001 극성 게이트 실패: %s — 후보를 그대로 둔다(P5 0.2절). 발화=%r",
-            type(exc).__name__, utterance[:40],
+            "F-DET-001 극성 게이트 실패: %s — 후보를 그대로 둔다(P5 0.2절). type_id=%s",
+            type(exc).__name__, type_id,
         )
         return True
     holds = verdict.holds and verdict.polarity == "positive"
     if verdict.holds and not holds:
         log.info(
-            "F-DET-001 극성 게이트 자기모순: holds=True 인데 polarity=%s — 뺀다. 발화=%r",
-            verdict.polarity, utterance[:40],
+            "F-DET-001 극성 게이트 자기모순: holds=True 인데 polarity=%s — 뺀다. type_id=%s",
+            verdict.polarity, type_id,
         )
     log.info(
-        "F-DET-001 극성 게이트: holds=%s polarity=%s → %s. 발화=%r",
-        verdict.holds, verdict.polarity, holds, utterance[:40],
+        "F-DET-001 극성 게이트: type_id=%s holds=%s polarity=%s → %s",
+        type_id, verdict.holds, verdict.polarity, holds,
     )
     return holds
 
@@ -342,7 +342,7 @@ def match(text: str, product_type: str = "ELS", *, client=None) -> Misconception
     if client is not None and matches:
         kept = [
             m for m in matches
-            if _polarity_holds(client, m.matched_pattern, text)
+            if _polarity_holds(client, m.matched_pattern, text, m.type_id)
         ]
         if len(kept) != len(matches):
             log.info(
