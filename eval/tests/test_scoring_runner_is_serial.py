@@ -6,11 +6,18 @@
 **투기 호출**이고, 두 경로의 셈이 정반대다.
 
     데모      대부분 U1  → 거의 다 적중. 아끼는 것은 벽시계
-    평가      U1 30%     → ❗70% 가 낭비. 아끼는 것은 쿼터 (70건이면 70 → 119회)
+    평가      U1 30%     → ❗70% 가 낭비. 아끼는 것은 쿼터 (70건 회차 실측 91 → 140회, 1.54배)
 
-`run_scoring.py` 가 임포트 시점에 끄는데, **끄는 자리가 임포트보다 뒤로 밀리면 조용히
-안 먹는다** — `config.settings()` 가 `@lru_cache` 이고 `scoring` 이 모듈 로드 때 임계값을
-읽기 때문이다. 그때 나는 증상은 *"쿼터가 예상의 1.7배로 나갔다"* 뿐이라 사후에나 안다.
+`run_scoring.py` 가 임포트 시점에 끈다. 그물이 두 겹인 이유가 있다.
+
+**꺼져 있다**는 결과는 임포트해서 값을 읽으면 바로 보인다. 하지만 **끄는 줄이 임포트보다
+앞에 있다**는 사실은 그 방법으로 안 보인다 — 오늘의 `run_scoring` 은 줄을 뒤로 옮겨도
+여전히 꺼진 값이 나오기 때문이다(`scoring` 은 임계값을 `settings()` 가 아니라
+`scoring_thresholds.yaml` 에서 읽고, 임포트만으로는 `settings()` 캐시가 안 굳는다 —
+#449 리뷰에서 윤지석이 변이로 보였다). 그래서 자리는 **줄 번호로** 따로 잠근다.
+
+자리가 밀린 채로 임포트 사슬 중 누가 `settings()` 를 한 번 부르는 날이 오면, 그때 나는
+증상은 *"쿼터가 예상의 1.5배로 나갔다"* 뿐이라 회차가 끝난 뒤에나 안다.
 
 ❗**끄는 것이 판정을 바꾸지 않는다**는 것도 같이 잠근다. 그게 이 스위치의 성립 조건이다 —
 병렬은 호출 타이밍만 바꾸고 등급·확신도·캡 규칙을 안 바꾼다. 판정이 바뀐다면 여기서 끄는
@@ -53,16 +60,35 @@ def test_the_eval_runner_turns_parallel_consistency_off() -> None:
     )
     assert got.returncode == 0, got.stderr
     assert got.stdout.strip() == "False", (
-        "평가 실행이 투기 호출을 켠 채로 돈다 — 70건 회차에서 호출이 70 → 119회가 된다. "
-        "끄는 줄이 임포트보다 뒤로 밀렸는지 본다(settings() 는 @lru_cache 다)")
+        "평가 실행이 투기 호출을 켠 채로 돈다 — 70건 회차에서 호출이 91 → 140회가 된다")
+
+
+def test_the_switch_is_set_before_the_first_app_import() -> None:
+    """★ 끄는 줄이 **첫 `app` 임포트보다 앞에** 있다.
+
+    위 테스트가 못 보는 자리다 — 오늘은 줄을 뒤로 옮겨도 값이 그대로 꺼져 나온다.
+    #449 리뷰(윤지석)의 변이 ⓐ 가 그것을 보였고, 이 대조가 그 변이를 잡는다.
+    """
+    src = (ROOT / "eval" / "tools" / "run_scoring.py").read_text(encoding="utf-8").splitlines()
+    setd = next(i for i, l in enumerate(src)
+                if "SPHINX_PARALLEL_CONSISTENCY" in l and "setdefault" in l)
+    first_app = next(i for i, l in enumerate(src)
+                     if l.startswith(("from app", "import app")))
+    assert setd < first_app, (
+        f"끄는 줄(L{setd + 1})이 첫 app 임포트(L{first_app + 1})보다 뒤에 있다 — "
+        "임포트 사슬이 settings() 를 부르는 날 조용히 안 먹는다")
 
 
 def test_an_empty_value_is_not_unset() -> None:
     """❗**빈 문자열은 미설정이 아니다.** `setdefault` 가 안 덮으므로 병렬이 켜진 채로 돈다.
 
     이 레포가 이미 겪은 함정이다 — `SimulatorProperties` 주석: *"Spring 의 `${VAR:기본값}` 은
-    환경변수가 빈 문자열로 존재하면 그것을 값으로 취급해 기본값이 죽는다"*. `.env` 나 배포
-    스크립트에 `SPHINX_PARALLEL_CONSISTENCY=` 를 적어 두면 여기서도 같은 일이 난다.
+    환경변수가 빈 문자열로 존재하면 그것을 값으로 취급해 기본값이 죽는다"*.
+
+    ❗**단, `.env` 로는 안 걸린다.** `setdefault` 가 먼저 키를 박고 `config._load_env_files()`
+    는 `load_dotenv(path, override=False)` 라 이미 있는 키를 안 덮는다 — 걸리는 것은 배포
+    스크립트나 셸이 `SPHINX_PARALLEL_CONSISTENCY=` 를 **프로세스 환경변수로** 내보낼 때다
+    (#449 리뷰, 윤지석).
 
     **고치라는 것이 아니라 사실을 고정한다** — 끄고 싶으면 `0` 을 명시한다. `#122` 가
     *".env.example 에 빈 값을 적어두지 않는다" 를 규약으로 세운 것과 같은 자리다.
