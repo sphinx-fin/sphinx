@@ -102,6 +102,24 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, Object> surveyResult = Map.of();   // 적합성 설문 결과, JSON 저장
 
+    /**
+     * 지금 진행 중인 재설명(F-INT-004 · 이슈 #415). {@code {itemId, content, reverifyQuestion}}.
+     *
+     * <p>화면이 <b>저장소 인계에 기대지 않고</b> 서버에서 다시 읽게 하려면 여기 있어야 한다.
+     * S-02 가 고객 화면을 새 창(window.open)으로 열면서 sessionStorage 인계가 창을 못 건넌다 —
+     * 새 창은 재설명을 못 받아 정상 흐름으로 떨어지고, <b>엉뚱한 항목의 판정이 에러 없이
+     * 재검증으로 기록</b>된다. GET 이 이 값을 돌려주면 새 창·새로고침·다른 기기 모두 서버가 출처다.
+     *
+     * <p>❗<b>GET 이 ai-service 로 재생성하지 않고 이 저장값을 돌려주는 이유</b>: 재설명 문면은
+     * LLM 산출물이라 비결정이다(P1). 재생성하면 판매자가 실제로 띄운 문장과 달라진다 — 그래서
+     * POST /re-explain 이 <b>보여준 그 문면</b>을 여기 남기고 GET 은 그것만 읽는다.
+     * 사이클(RE_EXPLAIN·RE_VERIFY)을 벗어나면 무효다({@link #inReExplainCycle()}).
+     */
+    @Convert(converter = JsonMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, Object> currentReExplanation = Map.of();
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
@@ -421,6 +439,27 @@ public class Session extends BaseEntity {
     /** 그 항목에 이미 쓴 질문 유형(물어본 순서). 없으면 빈 목록. */
     public List<String> askedTypes(String itemId) {
         return List.copyOf(askedTypesByItem.getOrDefault(itemId, List.of()));
+    }
+
+    /**
+     * 지금 보여준 재설명 문면을 세션에 남긴다(#415) — GET /re-explanations/current 가 이 값을
+     * 돌려준다. 재생성이 아니라 이 저장값을 읽는 이유는 {@link #currentReExplanation} javadoc 참고.
+     */
+    public void recordReExplanation(String itemId, String content, String reverifyQuestion) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("itemId", itemId);
+        snapshot.put("content", content);
+        snapshot.put("reverifyQuestion", reverifyQuestion);
+        this.currentReExplanation = snapshot;
+    }
+
+    /**
+     * 재설명 사이클(RE_EXPLAIN·RE_VERIFY) 안인가 — 이때만 {@link #currentReExplanation} 이
+     * 유효하다. 재검증을 통과해 IN_PROGRESS 로 돌아갔거나 판정으로 넘어갔으면, 저장값이 남아
+     * 있어도 "지금 진행 중인 재설명"은 없다. GET 이 이 경계로 404 를 가른다.
+     */
+    public boolean inReExplainCycle() {
+        return state == SessionState.RE_EXPLAIN || state == SessionState.RE_VERIFY;
     }
 
     /**
