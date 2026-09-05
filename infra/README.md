@@ -116,16 +116,25 @@ for K in llm-api-key api-user api-password; do
   aws ssm put-parameter --name "/sphinx/alpha/$K" --type SecureString --value "$V" --overwrite
 done
 
-# internal-token 만 손으로 안 넣는다 — 외울 값이 아니고, 사람이 고르면 짧아진다.
+# internal-token · db-password 는 손으로 안 넣는다 — 외울 값이 아니고, 사람이 고르면 짧아진다.
 aws ssm put-parameter --name /sphinx/alpha/internal-token --type SecureString \
   --value "$(openssl rand -hex 32)" --overwrite
+aws ssm put-parameter --name /sphinx/alpha/db-password --type SecureString \
+  --value "$(openssl rand -hex 24)" --overwrite
 ```
 
-네 값 모두 `scripts/deploy_ec2.sh` 가 읽어 compose 환경변수로만 넘긴다. `api-user` ·
+다섯 값 모두 `scripts/deploy_ec2.sh` 가 읽어 compose 환경변수로만 넘긴다. `api-user` ·
 `api-password` 는 nginx 의 htpasswd 와 server 의 prod 인증이 **같은 값**을 쓰므로
 출처가 SSM 하나로 유지된다(#162). `internal-token` 도 같은 이유로 한 값이다 — `server` 와
 `ai-service` 가 갈리면 `/internal/*` 이 전부 401 이 되고 인터뷰 경로가 통째로 죽는다
-(이슈 #41 3항 · 결정 10.4).
+(이슈 #41 3항 · 결정 10.4). `db-password` 도 같다 — `mysql` 과 `server` 가 갈리면 server 만
+`Access denied` 로 기동을 못 한다.
+
+❗**`db-password` 는 한 번 정하면 볼륨과 묶인다.** MySQL 은 계정을 데이터 디렉토리 **첫
+초기화 때** 만들고 그 뒤로는 `MYSQL_PASSWORD` 를 안 본다. SSM 만 나중에 바꾸면 mysql 은 옛
+값을 계속 쓰고 server 만 새 값으로 붙으러 간다. 바꾸려면 DB 안에서 같이 바꾼다 —
+`docker compose exec mysql mysql -uroot -p -e "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"`.
+(볼륨을 지우면 맞긴 하는데 **세션·감사 기록이 다 날아간다.**)
 
 ## 7. 접속 — 22번은 안 연다
 

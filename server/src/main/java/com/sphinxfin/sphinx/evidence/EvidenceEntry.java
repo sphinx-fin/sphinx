@@ -57,8 +57,28 @@ public class EvidenceEntry {
     @Column(nullable = false, length = 64)
     private String hash;
 
-    /** {@link CanonicalJson#serialize}의 출력. 저장 후 다시 파싱해도 같은 바이트가 나온다. */
+    /**
+     * {@link CanonicalJson#serialize}의 출력. 저장 후 다시 파싱해도 같은 바이트가 나온다.
+     *
+     * <p>❗<b>{@code length}를 지운 채로 MySQL 에 뜨면 이 테이블이 못 쓰게 된다.</b>
+     * {@code @Lob} 에 길이를 안 주면 Hibernate 가 {@code @Column} 기본값 <b>255</b> 를
+     * 그대로 타입 선택에 쓰고, MySQL 에서 그건 {@code tinytext} = <b>255바이트</b>다.
+     * 정규화 JSON 한 건도 안 들어간다.
+     *
+     * <p>H2 에서는 {@code @Lob} 이 길이와 무관하게 CLOB 이라 <b>이 결함이 안 보인다</b> —
+     * 배포를 MySQL 로 옮기기 전까지 아무 신호도 없었던 이유다. 그리고 MySQL 은 strict
+     * 모드라 조용히 자르지 않고 {@code Data too long for column 'payload_json'} 으로
+     * 거절하는데, 그 자리가 하필 <b>해시 체인 적재</b>다 — ADR-004 대로 세션 저장과 같은
+     * 트랜잭션이라 판정이 통째로 롤백된다. 즉 첫 채점에서 500 이 난다.
+     *
+     * <p>{@code Integer.MAX_VALUE} 를 적는 것은 특정 DB 를 겨냥한 값이 아니라
+     * <i>"상한을 두지 않는다"</i> 는 {@code @Lob} 의 뜻을 길이로 말한 것이다. Hibernate 가
+     * 방언별로 옮긴다 — MySQL 은 {@code longtext}, H2 는 그대로 CLOB.
+     *
+     * <p>{@code columnDefinition = "longtext"} 로 박지 않는 이유가 그것이다. 그러면 H2 에도
+     * {@code longtext} 가 나가서 로컬·테스트가 죽는다.
+     */
     @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, length = Integer.MAX_VALUE)
     private String payloadJson;
 }

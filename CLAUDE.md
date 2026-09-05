@@ -52,7 +52,7 @@ PR #6). 린터는 어느 모듈에도 설정돼 있지 않고, `ai-service`·`we
 ```
 web(:5173) ──/api 프록시──▶ server(:8000, Spring Boot) ──▶ ai-service(:8100, FastAPI)
                                      │                        └ 내부망 전용
-                                     └ H2 (MVP)
+                                     └ H2 (로컬·테스트) / MySQL (배포)
 ```
 
 `ai-service`는 브라우저에서 직접 호출하지 않는다. Spring만 호출한다.
@@ -148,7 +148,14 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
   (서비스가 web DTO에 의존하지 않도록).
 - **엔티티는 `core/persistence/BaseEntity` 상속** → `createdAt`/`updatedAt` 자동 감사(가변 엔티티 한정.
-  append-only인 `evidence/`는 상속하지 않는다). 세션은 H2/JPA로 영속한다.
+  append-only인 `evidence/`는 상속하지 않는다). 세션은 JPA로 영속한다.
+- **DB 가 환경마다 다르다.** 로컬·테스트는 H2 인메모리(`ddl-auto: update`), 배포는 MySQL 8.4
+  컨테이너(`ddl-auto: validate` + Flyway). 그래서 **엔티티를 고치면 마이그레이션도 같이 낸다**
+  — `server/src/main/resources/db/migration/`. 안 내면 prod 가 기동을 거부하고(validate),
+  로컬에서는 `update` 가 알아서 만들어 주므로 **로컬만 보면 아무 신호가 없다.**
+  마이그레이션 SQL 은 손으로 쓰지 않는다: MySQL 에 `ddl-auto: create` 로 만들게 하고
+  `mysqldump --no-data` 로 뽑는다. validate 는 JDBC 타입 코드가 아니라 **타입명**을 봐서,
+  더 넓은 타입으로 적어도 통과하지 않는다(실측 — V1__init.sql 머리말).
 
 ## 소유권과 기여 규칙
 

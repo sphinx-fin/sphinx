@@ -25,6 +25,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("F-CMN-002 SecurityConfig 프로파일 분리")
 class SecurityConfigTest {
 
+    // ── prod 프로파일을 띄우되 DB 는 H2 로 되돌린다 ────────────────────────
+    //
+    // `application-prod.yml` 이 MySQL 을 가리키고 자격증명을 **기본값 없이** 요구한다.
+    // 그건 배포에서 조용히 빈 값으로 뜨는 것을 막으려는 것이라 옳은데(#126), 그대로면
+    // 여기서 컨텍스트가 안 뜬다 — 이 테스트가 재는 것은 보안 설정이지 DB 가 아니다.
+    //
+    // ❗**H2 로 되돌리는 것이 검사를 무르게 하지 않는다.** 이 클래스가 잠그는 것은
+    // `SecurityConfig` 의 prod 체인(인증 요구 · H2 콘솔 차단 · 역할 분리)이고, 그건
+    // 데이터소스와 무관하다. 반대로 여기서 MySQL 을 띄우려 들면 테스트가 도커에
+    // 의존하게 되고 CI 가 그걸 못 준다.
+    //
+    // flyway 를 끄고 `create-drop` 을 쓰는 이유: 마이그레이션 SQL 은 MySQL 문법이라
+    // H2 에서 파싱부터 실패한다. 스키마는 엔티티에서 만든다(기본 프로파일과 같은 방식).
+    private static final String DB_URL =
+            "spring.datasource.url=jdbc:h2:mem:sectest;DB_CLOSE_DELAY=-1";
+    private static final String DB_DRIVER = "spring.datasource.driver-class-name=org.h2.Driver";
+    private static final String DB_USER = "spring.datasource.username=sa";
+    private static final String DB_PASSWORD = "spring.datasource.password=";
+    private static final String DB_NO_FLYWAY = "spring.flyway.enabled=false";
+    private static final String DB_DDL = "spring.jpa.hibernate.ddl-auto=create-drop";
+
     @Nested
     @SpringBootTest
     @AutoConfigureMockMvc
@@ -49,7 +70,8 @@ class SecurityConfigTest {
             // 기동을 거부한다(#41). nginx htpasswd 도 이 값으로 만들어지므로 어긋나면
             // 화면은 열리는데 API 가 전부 401 이 된다.
             "sphinx.api.auth.username=seller-01",
-            "sphinx.api.auth.password=test-only-not-a-real-credential"
+            "sphinx.api.auth.password=test-only-not-a-real-credential",
+            DB_URL, DB_DRIVER, DB_USER, DB_PASSWORD, DB_NO_FLYWAY, DB_DDL
     })
     @DisplayName("배포(prod 프로파일)")
     class Prod {
@@ -99,7 +121,8 @@ class SecurityConfigTest {
     @ActiveProfiles("prod")
     @TestPropertySource(properties = {
             "sphinx.api.auth.username=seller-01",
-            "sphinx.api.auth.password=test-only-not-a-real-credential"
+            "sphinx.api.auth.password=test-only-not-a-real-credential",
+            DB_URL, DB_DRIVER, DB_USER, DB_PASSWORD, DB_NO_FLYWAY, DB_DDL
     })
     @DisplayName("배포에서 역할이 실제로 가른다 (이슈 #41 ①)")
     class ProdRoles {

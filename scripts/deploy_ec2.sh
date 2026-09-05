@@ -78,6 +78,23 @@ export SPHINX_API_PASSWORD; SPHINX_API_PASSWORD=$(get api-password)
 # 대칭이라, 빠뜨리면 **배포는 성공하고 시크릿 방어선만 조용히 꺼진 채로 뜬다.**
 export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
 
+# ── DB 비밀번호 (MySQL) ──────────────────────────────────────────────────────
+#
+# **mysql 컨테이너와 server 가 같은 값을 받는다** — 여기서 한 번 읽어 compose 가 양쪽에
+# 같은 변수를 넘기므로 갈릴 수가 없다. internal-token 과 같은 구조다.
+#
+# 갈리면 증상이 고약하다: mysql 은 멀쩡히 healthy 로 뜨고 server 만
+# `Access denied for user 'sphinx'` 로 죽는데, 그건 배포 로그 깊은 곳에만 있다.
+#
+# ❗**이 값은 볼륨과 묶여 있다.** MySQL 은 계정을 데이터 디렉토리 **첫 초기화 때** 만들고
+# 그 뒤로는 MYSQL_PASSWORD 를 쳐다보지 않는다. 즉 SSM 값을 나중에 바꾸면 mysql 은 옛
+# 비밀번호를 계속 쓰고 server 만 새 값으로 붙으러 가서 **Access denied 로 기동을 못 한다.**
+# 바꾸려면 DB 안에서 같이 바꿔야 한다(볼륨을 지우면 기록이 다 날아간다):
+#
+#   docker compose exec mysql mysql -uroot -p -e \
+#     "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"
+export SPHINX_DB_PASSWORD; SPHINX_DB_PASSWORD=$(get db-password)
+
 # ── nginx htpasswd 에 넣을 계정 목록 (이슈 #213 · #195 후속) ─────────────────
 #
 # `auth_basic` 이 server 블록에 걸려 있어 **htpasswd 에 없는 id 는 Spring 까지 오지도
@@ -138,6 +155,7 @@ echo "  LLM_API_KEY           ${#LLM_API_KEY}자"
 echo "  SPHINX_API_USER       ${#SPHINX_API_USER}자"
 echo "  SPHINX_API_PASSWORD   ${#SPHINX_API_PASSWORD}자"
 echo "  SPHINX_INTERNAL_TOKEN ${#SPHINX_INTERNAL_TOKEN}자"
+echo "  SPHINX_DB_PASSWORD    ${#SPHINX_DB_PASSWORD}자"
 # id 는 값이 아니라 명부다(레포에 있다). 길이가 아니라 **그대로** 찍는 이유가 그것이고,
 # 데모 중 "이 계정으로 왜 안 되지" 를 이 한 줄로 가른다.
 echo "  SPHINX_API_USERS      $SPHINX_API_USERS"
