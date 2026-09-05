@@ -36,14 +36,26 @@
    이 래퍼는 `.s08`(flex column)의 자식 **하나**가 되므로 안쪽 간격을 여기서 다시 준다.
    안 주면 섹션들이 붙는다. */
 .s08__body { display: flex; flex-direction: column; gap: var(--space-5);
-  animation: s08-swap var(--dur) var(--ease) both; }
+  animation: s08-swap var(--dur) var(--ease) both;
+  transition: opacity 120ms var(--ease); }
 
 /* 흐리게만 한다 — `pointer-events` 를 끄지 않는다. 필터를 연속으로 바꾸는 것이 정상
-   조작이고, 요청 하나 도는 동안 화면을 잠그면 그게 더 답답하다. */
-.s08__body--busy { opacity: 0.45; transition: opacity 120ms var(--ease); }
+   조작이고, 요청 하나 도는 동안 화면을 잠그면 그게 더 답답하다.
 
+   ❗**`animation: none` 이 이 규칙의 핵심이다.** 애니메이션은 일반 선언보다 위에 있어서,
+   위 `both` 가 끝 프레임(`opacity: 1`)을 계속 적용한 채로 두면 **여기 적은 0.45 가 한
+   번도 안 보인다** — 클래스는 붙는데 화면은 그대로인, 눈으로는 못 찾는 종류다.
+   애니메이션을 걷어 내면 일반 선언이 살아나고, 요청이 끝나 클래스가 떨어지면 애니메이션이
+   다시 붙어 새 내용이 한 번 들어온다. */
+.s08__body--busy { opacity: 0.45; animation: none; }
+
+/* ❗**0 에서 시작하지 않는다.** `both` 라 시작 프레임이 애니메이션 전에도 적용되는데,
+   그 값이 `opacity: 0` 이면 **애니메이션이 진행하지 않는 순간 내용이 아예 안 보인다** —
+   배경 탭에서 재면 실제로 `currentTime: 0` 에 `opacity: 0` 으로 멈춰 있었다(실측).
+   그 자리에서는 화면이 비어 있는 것과 구분이 안 된다. 0.4 에서 시작하면 최악의 경우에도
+   읽히고, 220ms 구간에서 눈에 보이는 차이는 없다. */
 @keyframes s08-swap {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0.4; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
 
