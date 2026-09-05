@@ -73,7 +73,8 @@ class SessionServiceTest {
      *
      * <p>기본 스텁은 <b>빈 목록</b>이다: 대부분의 테스트는 등급 조합만 보고 미측정을 재지
      * 않으므로 분모 제약을 두지 않는다(빈 기대 집합 − 판정 = 0 → R-00 안 뭄). 불완전성을
-     * 실제로 재는 테스트는 각자 {@code riskItemsOf} 를 실 항목 집합으로 재스텁한다.
+     * 실제로 재는 테스트는 각자 {@code interviewItemsOf}(분모가 쓰는 required 집합, #435)를
+     * 실 항목 집합으로 재스텁한다.
      */
     private ProductRiskItems productRiskItems;
 
@@ -96,7 +97,7 @@ class SessionServiceTest {
                         nullable(AiServiceClient.InterviewContext.class)))
                 .thenReturn(new AiServiceClient.Question(AI_REVERIFY, "situation", false));
         productRiskItems = mock(ProductRiskItems.class);
-        when(productRiskItems.riskItemsOf(anyString())).thenReturn(List.of());
+        when(productRiskItems.interviewItemsOf(anyString())).thenReturn(List.of());
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
                 Optional.of(evidence), aiClient, events, productRiskItems);
     }
@@ -515,7 +516,7 @@ class SessionServiceTest {
         //
         // 분모는 그 상품의 기대 항목 집합이다(#405) — 여기선 {A,B}. B 는 채점이 실패해
         // 판정이 없다. 물어봤든 안 물어봤든, 기대 항목인데 판정이 없으면 미측정으로 잡힌다.
-        when(productRiskItems.riskItemsOf(anyString()))
+        when(productRiskItems.interviewItemsOf(anyString()))
                 .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -544,7 +545,7 @@ class SessionServiceTest {
         //
         // 분모를 추출 항목 집합으로 되돌리면(#405) C 가 판정 없는 기대 항목으로 잡혀 R-00 이 문다.
         // ❗C 에는 recordAskedQuestion 을 부르지 않는다 — 옛 분모라면 여기가 GREEN 이다.
-        when(productRiskItems.riskItemsOf(anyString()))
+        when(productRiskItems.interviewItemsOf(anyString()))
                 .thenReturn(List.of(riskItem("A"), riskItem("B"), riskItem("C")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -568,7 +569,7 @@ class SessionServiceTest {
     @DisplayName("기대 항목 전부를 판정하고 U1 이면 GREEN — 분모가 맞으면 통과도 그대로 난다 (#405)")
     void allExpectedItemsJudgedU1_isGreen() {
         // R-00 이 늘 RED 를 내면 게이트가 아무것도 안 가른다 — 분모가 채워지면 통과가 나와야 한다.
-        when(productRiskItems.riskItemsOf(anyString()))
+        when(productRiskItems.interviewItemsOf(anyString()))
                 .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordJudgment(s.id(), j("A", Grade.U1));
@@ -584,7 +585,7 @@ class SessionServiceTest {
     @Test
     @DisplayName("❗판정 뒤에 마저 채점해도 기록된 미측정 수는 그때의 값이다 — 재계산값이 아니다")
     void theRecordedGateKeepsTheNumberItWasJudgedWith() {
-        when(productRiskItems.riskItemsOf(anyString()))
+        when(productRiskItems.interviewItemsOf(anyString()))
                 .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -605,7 +606,7 @@ class SessionServiceTest {
     @Test
     @DisplayName("❗미리보기도 같은 답을 낸다 — 미리보기가 더 낙관적이면 재설명 루프를 건너뛴다")
     void thePreviewAgreesWithTheVerdict() {
-        when(productRiskItems.riskItemsOf(anyString()))
+        when(productRiskItems.interviewItemsOf(anyString()))
                 .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);

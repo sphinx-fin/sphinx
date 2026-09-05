@@ -474,12 +474,14 @@ public class SessionService {
     /**
      * 게이트 분모 — 그 상품의 <b>기대 항목 집합</b>에서 판정이 빠진 항목 수(R-00)를 낸다(#405).
      *
-     * <p>기대 집합은 {@link ProductRiskItems#riskItemsOf}(저장된 추출 우선, 없으면 MockData 폴백)
-     * 에서 온다. 여기서 <b>숫자로 접어</b> 순수 엔진에 넘긴다 — 엔진은 항목 출처를 모른다(P2).
-     * judge()·previewGate() 가 같은 계산을 쓰므로 미리보기가 판정보다 낙관적이 되지 않는다.
+     * <p>기대 집합은 {@link ProductRiskItems#interviewItemsOf}(required 만 — 면담이 묻는 바로
+     * 그 항목) 에서 온다. ❗<b>면담과 같은 메서드여야 한다</b>(#435): 면담은 required 만 묻는데
+     * 분모가 recommended 까지 세면 그 항목은 영영 측정되지 않아 R-00 이 영원히 문다. 여기서
+     * <b>숫자로 접어</b> 순수 엔진에 넘긴다 — 엔진은 항목 출처를 모른다(P2). judge()·previewGate()
+     * 가 같은 계산을 쓰므로 미리보기가 판정보다 낙관적이 되지 않는다.
      */
     private int unmeasuredCount(Session session) {
-        List<String> expectedItemIds = productRiskItems.riskItemsOf(session.productId()).stream()
+        List<String> expectedItemIds = productRiskItems.interviewItemsOf(session.productId()).stream()
                 .map(RiskItem::itemId).toList();
         return session.unmeasuredItemCount(expectedItemIds);
     }

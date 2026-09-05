@@ -202,6 +202,51 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("면담은 required 만 묻는다 — recommended 는 루브릭이 없어 502 다 (이슈 #435)")
+    void interviewAsksRequiredItemsOnly() throws Exception {
+        // 실추출에 recommended 가 처음 들어오며 드러난 경로(#414). ELS 상품에 required 1 +
+        // recommended 1 을 추출·저장한다(EnvelopeContractTest 와 같은 목→POST 방식).
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-els-kiwoom-4181", "ELS", null, "parser-v1", null, 1,
+                        java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        java.util.List.of(), java.util.List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(java.util.List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2))),
+                        RiskItem.extracted("ELS-HIGH-COMPLEXITY", "doc-els-kiwoom-4181",
+                                "고난도 금융상품", "recommended",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
+                        java.util.List.of()));
+        mvc.perform(post("/products/doc-els-kiwoom-4181/extract")).andExpect(status().isOk());
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        // required 1개뿐 — total==1, 첫 질문은 required 항목. recommended 는 분모에도 안 든다.
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemId").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        // required 를 답하면 면담이 끝난다 — recommended(ELS-HIGH-COMPLEXITY)를 안 묻는다(502 회피).
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"원금 지켜지는 줄 알았어요"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.done").value(true));
+
+        extractedRiskItems.deleteAll();
+    }
+
+    @Test
     @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
     void unknownProductTypeFailsLoudly() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
