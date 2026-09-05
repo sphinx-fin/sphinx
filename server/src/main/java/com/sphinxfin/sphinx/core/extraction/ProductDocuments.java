@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.NoSuchElementException;
 
 /**
  * 상품 원문 문서(PDF) 조회 (F-EXT · 이슈 #412). 소유: 강희진
@@ -58,14 +57,24 @@ public class ProductDocuments {
     /**
      * 상품의 원문 문서를 읽는다.
      *
-     * @throws NoSuchElementException 등록된 문서가 없는 상품이거나 파일이 디스크에 없다(→ 404)
+     * <p>❗<b>두 실패를 다른 코드로 가른다(이슈 #433).</b> <i>없는 상품</i>은 404
+     * ({@code NoSuchElementException}, {@link ProductRiskItems#documentPathOf} — 클라이언트가
+     * 잘못된 상품을 물은 것)이고, <i>매핑엔 있는데 파일이 디스크에 없다</i>는 <b>500</b>
+     * ({@code IllegalStateException} → INTERNAL_ERROR — 컨테이너에 {@code data/documents} 가
+     * 마운트 안 된 배포 설정 문제다). 둘 다 404 면 S-02 에서 원문 버튼이 404 일 때 상품이
+     * 잘못된 건지 배포가 잘못된 건지 알 수 없다 — 같은 코드가 두 뜻을 갖는다.
+     *
+     * @throws NoSuchElementException 등록된 문서가 없는 상품(→ 404, 클라이언트 오류)
+     * @throws IllegalStateException 파일이 디스크에 없다(→ 500, 배포 설정 오류)
      */
     public Document open(String productId) {
         String relative = productRiskItems.documentPathOf(productId);   // 없는 상품이면 404
         Path resolved = resolveWithin(dataDir, relative);
         if (!Files.isRegularFile(resolved)) {
-            // 매핑엔 있는데 사전적재 파일이 없는 배포 상태다 — "없는 상품"과 같은 404 로 낸다.
-            throw new NoSuchElementException("상품 문서 파일이 없다: " + resolved);
+            // 매핑엔 있는데 사전적재 파일이 없다 — 배포 설정 문제(컨테이너에 documents/ 미마운트,
+            // #433)라 404(없는 상품)가 아니라 500 이다. 로그로 배포를 고치라고 알린다.
+            throw new IllegalStateException("상품 문서 파일이 없다(배포에 data/documents 가 "
+                    + "마운트됐는지 · SPHINX_DATA_DIR 을 확인하라, #433): " + resolved);
         }
         try {
             return new Document(resolved.getFileName().toString(), Files.readAllBytes(resolved));
