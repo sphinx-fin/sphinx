@@ -78,6 +78,16 @@ class ProductAccessWiringTest {
     }
 
     @Test
+    @DisplayName("❗없는 상품의 risk-items 는 404 — 폴백이 아무 목록이나 내주지 않는다 (결정 10.81)")
+    void unknownProductRiskItemsIsNotFound() throws Exception {
+        // 예전엔 폴백이 productId 를 무시하고 같은 목록을 200 으로 냈다 — 카탈로그가 둘
+        // 이상이 되는 순간 조용히 틀린 목록이 된다. 이제 productType 과 같은 규약으로 404 다.
+        // (권한은 통과한 뒤라 403 이 아니라 404 여야 한다 — 존재 여부를 접근통제로 감추지 않는다.)
+        mvc.perform(get("/products/{id}/risk-items", "doc-does-not-exist").with(as("seller-01", "SELLER")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("❗판매자는 문서를 올리지 못한다 — 게이트가 물을 항목을 판매 라인이 만들면 안 된다")
     void theSellerCannotRegisterProducts() throws Exception {
         // 허용만 재는 단정으로는 과허용 변이가 안 잡힌다. 무서운 쪽은 덜 허용하는 변이가

@@ -85,14 +85,22 @@ public class ProductRiskItems {
                 result.warnings());
     }
 
-    /** 상품의 이해항목 — 저장된 추출이 있으면 그것, 없으면 폴백(MockData). */
+    /**
+     * 상품의 이해항목 — 저장된 추출이 있으면 그것, 없으면 폴백(MockData). <b>어느 출처도
+     * 모르는 상품이면 404</b>({@link #productTypeOf} 와 같은 규약, 결정 10.81) — 없는 상품ID
+     * 에도 폴백 목록을 내주면 카탈로그가 둘 이상이 되는 순간 조용히 틀린 목록이 된다.
+     *
+     * @throws NoSuchElementException 어느 출처도 모르는 상품(→ 404)
+     */
     @Transactional(readOnly = true)
     public List<RiskItem> riskItemsOf(String productId) {
         List<ExtractedRiskItem> stored = repository.findByProductIdOrderByItemIndexAsc(productId);
         if (!stored.isEmpty()) {
             return stored.stream().map(ExtractedRiskItem::toDomain).toList();
         }
-        return fallbackCatalog.riskItems(productId);
+        return fallbackCatalog.riskItems(productId)
+                .orElseThrow(() -> new NoSuchElementException(
+                        "상품 목록에 없음(이해항목을 알 수 없다): " + productId));
     }
 
     /**

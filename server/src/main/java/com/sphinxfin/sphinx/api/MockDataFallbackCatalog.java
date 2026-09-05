@@ -18,10 +18,12 @@ import java.util.Optional;
 class MockDataFallbackCatalog implements FallbackCatalog {
 
     @Override
-    public List<RiskItem> riskItems(String productId) {
-        // 목 시절 카탈로그 라우트가 어떤 상품이든 같은 목록을 냈다 — 그 동작을 그대로
-        // 보존한다(폴백은 새 동작을 만들지 않는다).
-        return MockData.RISK_ITEMS;
+    public Optional<List<RiskItem>> riskItems(String productId) {
+        // ❗알려진 상품일 때만 목 목록을 낸다(결정 10.81). 예전엔 어떤 productId 든 같은
+        // 목록을 냈는데, 없는 상품에도 200 이 나가 productType(없으면 404)과 답이 갈렸다.
+        // 목 RISK_ITEMS 가 한 벌뿐이라 알려진 상품끼리는 아직 같은 목록을 공유하지만, 그
+        // 한계는 실추출이 상품별로 채우면 저장 경로가 덮는다 — 이 폴백이 고칠 몫이 아니다.
+        return known(productId) ? Optional.of(MockData.RISK_ITEMS) : Optional.empty();
     }
 
     @Override
@@ -30,5 +32,9 @@ class MockDataFallbackCatalog implements FallbackCatalog {
                 .filter(p -> p.productId().equals(productId))
                 .findFirst()
                 .map(ProductSummary::productType);
+    }
+
+    private static boolean known(String productId) {
+        return MockData.PRODUCTS.stream().anyMatch(p -> p.productId().equals(productId));
     }
 }
