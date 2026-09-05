@@ -93,6 +93,12 @@ public class AiServiceClient {
         // 순서가 정규화 → 마스킹인 이유: 반대로 하면 마스킹 판정 뒤 남은 원문의 형태가 바뀌어
         // 판정과 저장 형태가 같은 입력에 안 맞는다. NFKC 가 아니라 NFC 다 — NFKC 는 전각
         // '７'→'7' 까지 접어 마스킹이 보는 내용을 바꾼다(결정 10.2.1 의 4번).
+        //
+        // ❗**`server/` 안에 정규형이 둘이고, 둘 다 맞다.** 여기(저장·해시)는 NFC 이고
+        // `core/session/AnswerRepetition:128`(두 발화가 사실상 같은 말인가)은 NFKC 다.
+        // 거기서는 접는 것이 맞다 — 전각·반각 차이는 "같다고 볼 차이" 라서다. 통일하면
+        // 어느 쪽으로 가든 하나가 깨진다: 저장을 NFKC 로 바꾸면 전각이 접혀 마스킹이 보는
+        // 내용이 바뀌고, 비교를 NFC 로 바꾸면 '７' 과 '7' 이 다른 답이 된다.
         String normalized = text == null ? null : Normalizer.normalize(text, Normalizer.Form.NFC);
         PiiGateway.Masked masked = PiiGateway.maskWithHits(normalized);
         piiMeter.record(masked);
