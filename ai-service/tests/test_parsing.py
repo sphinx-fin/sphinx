@@ -18,7 +18,7 @@ import pytest
 
 from app import parsing
 
-from conftest import SYNTHETIC_QUOTES
+from conftest import DOCS, REAL_CASES, SYNTHETIC_QUOTES
 
 SCHEMA_PATH = (
     pathlib.Path(__file__).resolve().parents[2] / "contracts" / "parsed_document.schema.json"
@@ -262,16 +262,31 @@ def test_real_document_records_its_source(real_case):
 # 있어도 통과하는 회차가 있다(`#436`, 윤지석). 잴 것은 **원문에서 끊김이 해소됐는가**고,
 # 그건 LLM 없이 여기서 잰다.
 
-def test_the_els_maturity_clause_runs_unbroken_from_condition_to_conclusion(real_case):
+@pytest.fixture(scope="session")
+def els_doc():
+    """ELS 실문서 하나만 보는 자리.
+
+    ❗**`real_case` 를 쓰고 `var` 회차에서 `skip` 하면 안 된다.** 이 레포는 CI 에서 건너뛴
+    테스트를 **실패로 센다**(`no_skip.py` · `#37` 코멘트 ②) — 실제로 그렇게 냈다가 걸렸다.
+    """
+    spec = REAL_CASES["els"]
+    pdf = DOCS / spec["pdf"]
+    if not pdf.exists():  # 추적되는 파일이다 — 없으면 체크아웃이 온전하지 않은 것이다
+        pytest.skip(f"{pdf} 없음. {spec['fetch']}")
+    return parsing.parse_document(
+        str(pdf), document_id=spec["document_id"],
+        product_type=spec["product_type"], parsed_at="2026-08-24T00:00:00Z",
+    )
+
+
+def test_the_els_maturity_clause_runs_unbroken_from_condition_to_conclusion(els_doc):
     """★ ⑧항이 조건절부터 결론까지 남의 칸 글자 없이 이어진다 (`#436` 합격 기준).
 
     이 문장이 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, 결론
     ("이 경우 원금 손실이 발생합니다.")까지 걸쳐야 손실 조건으로 읽힌다. 고치기 전에는
     사이에 수익률 칸 조각이 100자 끼어 있었다.
     """
-    if real_case["key"] != "els":
-        pytest.skip("ELS 문서의 자리다")
-    text = real_case["doc"]["pages"][7]["text"]
+    text = els_doc["pages"][7]["text"]
     head, tail = "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."
     start, end = text.index(head), text.index(tail) + len(tail)
     clause = text[start:end]
