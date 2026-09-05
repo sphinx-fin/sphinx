@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
@@ -70,8 +71,18 @@ public class ExtractedRiskItem extends BaseEntity {
 
     private String failureReason;        // extraction_failed 일 때만
 
-    /** 원문 인용(P6). 컬럼명에 condition 을 못 쓴다 — SQL 예약어다. */
-    @Column(columnDefinition = "TEXT")
+    /**
+     * 원문 인용(P6). 컬럼명에 condition 을 못 쓴다 — SQL 예약어다.
+     *
+     * <p>{@code columnDefinition="TEXT"} 대신 {@code length} 로 표현한다 — #410 이
+     * {@code EvidenceEntry.payloadJson} 에서 정한 관습이다. columnDefinition 은 DDL 문자열을
+     * 엔티티에 박아 H2·MySQL 둘 다에 같은 문자열이 나가고, length 는 방언이 각자 옮긴다
+     * (MySQL longtext, H2 CLOB). 같은 문제에 두 관습이 생기지 않게 한 쪽으로 맞춘다(정세현 #414 리뷰).
+     * length 숫자를 직접 고르지 않고 @Lob 을 쓰는 이유: length=65535 는 방언이 varchar 로 낼
+     * 수도 있어(검증하려면 실제 MySQL 이 필요) #410 이 검증해 둔 이 조합만 확실하다.
+     */
+    @Lob
+    @Column(length = Integer.MAX_VALUE)
     private String conditionValueText;
 
     private Integer spanPage;            // 페이지 상대 오프셋 [start, end) — ParsedDocument 규약
