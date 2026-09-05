@@ -49,7 +49,13 @@ class SecurityConfigTest {
             // 기동을 거부한다(#41). nginx htpasswd 도 이 값으로 만들어지므로 어긋나면
             // 화면은 열리는데 API 가 전부 401 이 된다.
             "sphinx.api.auth.username=seller-01",
-            "sphinx.api.auth.password=test-only-not-a-real-credential"
+            "sphinx.api.auth.password=test-only-not-a-real-credential",
+            // prod 는 파일 H2 가 기본이라(#399) 그대로 두면 테스트가 레포 안에
+            // server/data/db 를 만들고 실행 간 상태가 쌓인다. 여기 시험 대상은 보안
+            // 프로파일이지 영속이 아니므로 인메모리로 되돌린다 — Flyway·validate 는 prod
+            // 값 그대로 돌므로 마이그레이션 대조는 유지된다. 영속 자체는
+            // ProdPersistenceRestartTest 가 잰다.
+            "spring.datasource.url=jdbc:h2:mem:prod-security-test;DB_CLOSE_DELAY=-1"
     })
     @DisplayName("배포(prod 프로파일)")
     class Prod {
@@ -99,7 +105,9 @@ class SecurityConfigTest {
     @ActiveProfiles("prod")
     @TestPropertySource(properties = {
             "sphinx.api.auth.username=seller-01",
-            "sphinx.api.auth.password=test-only-not-a-real-credential"
+            "sphinx.api.auth.password=test-only-not-a-real-credential",
+            // 위 Prod 와 같은 이유·같은 값(#399). 같아야 컨텍스트 캐시도 한 벌로 접힌다.
+            "spring.datasource.url=jdbc:h2:mem:prod-security-test;DB_CLOSE_DELAY=-1"
     })
     @DisplayName("배포에서 역할이 실제로 가른다 (이슈 #41 ①)")
     class ProdRoles {

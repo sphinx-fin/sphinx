@@ -17,6 +17,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'   // 헬스체크·메트릭(/actuator/health)
     runtimeOnly 'com.h2database:h2'                       // MVP: H2 → 필요 시 교체
+    // prod 파일 H2 의 스키마는 Flyway 가 소유한다(#399). 버전은 Boot 3.3.2 BOM 이 관리하고,
+    // H2 는 별도 flyway 방언 모듈이 필요 없다(Postgres 로 갈 때 flyway-database-postgresql 추가).
+    implementation 'org.flywaydb:flyway-core'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml' // gate_rules.yaml 로드
 
     // F-GTE-004 PDF 리포트 (이슈 #233). Apache-2.0 이라 제출물에서 답할 것이 없다.

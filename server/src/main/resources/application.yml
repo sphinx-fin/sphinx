@@ -3,13 +3,18 @@ server:
 
 spring:
   datasource:
-    url: jdbc:h2:mem:sphinx;DB_CLOSE_DELAY=-1   # MVP: 인메모리 H2 → 영속 필요 시 jdbc:h2:file:./data/sphinx
+    url: jdbc:h2:mem:sphinx;DB_CLOSE_DELAY=-1   # 개발: 인메모리 H2. prod 는 파일 H2 + Flyway + validate 로 갈린다(application-prod.yml, #399)
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
+  flyway:
+    # 개발·테스트는 Flyway 를 끈다(#399) — 인메모리 + ddl-auto:update 라 마이그레이션이
+    # 필요 없고, 켜 두면 엔티티만 고친 로컬 작업이 매번 마이그레이션 작성에 막힌다.
+    # 마이그레이션과 엔티티의 어긋남은 ProdPersistenceRestartTest 가 validate 모드로 잡는다.
+    enabled: false
   jpa:
     hibernate:
-      ddl-auto: update                          # MVP: 엔티티 기준 스키마 자동 생성 → 운영은 마이그레이션 도구로 교체
+      ddl-auto: update                          # 개발: 엔티티 기준 스키마 자동 생성. 운영은 Flyway + validate(application-prod.yml)
     open-in-view: false                         # OSIV 비활성(지연로딩을 뷰까지 끌지 않음)
     properties:
       hibernate:

@@ -4,18 +4,33 @@
 # 그 전제는 퍼블릭 노출과 함께 성립하지 않는다. 이 파일이 배포용 차이만 덮어쓴다.
 
 spring:
+  datasource:
+    # 파일 H2 (#399). 인메모리를 그대로 물려받으면 재시작마다 세션·판정·불변 기록이 통째로
+    # 사라진다 — append-only 해시 체인(F-GTE-004·F-CMN-002)이 "재시작 전까지만 불변"이 되는
+    # 것이라 전제 자체가 무너진다. 디렉토리는 환경변수로 덮는다(컨테이너 볼륨 마운트):
+    #   volumes: ["./data/db:/data/db"]  +  SPHINX_DB_DIR=/data/db
+    # DB_CLOSE_DELAY 는 안 붙인다 — 파일 모드는 마지막 커넥션이 닫혀도 데이터가 디스크에
+    # 남고, 커넥션 풀이 상시로 잡고 있어 열고 닫기를 반복하지도 않는다. -1 로 두면 종료
+    # 시점이 JVM 에 묶여 깔끔한 닫힘을 오히려 방해한다. AUTO_SERVER 도 안 붙인다 — 이
+    # 파일을 여는 프로세스는 서버 하나뿐이고, 다중 프로세스 접근이 필요해지는 시점은
+    # 어차피 RDS 로 가는 시점이다(인프라 단계).
+    url: jdbc:h2:file:${SPHINX_DB_DIR:./data/db}/sphinx
   h2:
     console:
       # 브라우저에서 세션 테이블을 직접 조회·수정할 수 있으면 F-GTE-004(이해 기록)와
       # F-CMN-002(감사 로그)의 전제가 무너진다. 데모 중 판정 기록을 고칠 수 있으면 안 된다.
       enabled: false
+  flyway:
+    # 스키마는 Flyway 마이그레이션(db/migration)만 만든다(#399). 개발 프로파일은 꺼져
+    # 있다(application.yml) — 인메모리 + ddl-auto:update 라 필요가 없다.
+    enabled: true
   jpa:
     hibernate:
-      # 인메모리 H2 는 부팅 때 스키마를 만들어야 하므로 validate/none 을 쓸 수 없다
-      # (테이블이 없어 기동 또는 첫 쿼리에서 죽는다). update 대신 create 로 명시한다 —
-      # 매 기동 시 빈 스키마에서 시작하므로 기존 스키마를 암묵적으로 변형하지 않는다.
-      # 영속 DB로 옮기면 마이그레이션 도구를 넣고 validate 로 바꾼다.
-      ddl-auto: create
+      # 영속 DB 로 왔으므로 예고대로 validate 다(#399) — 스키마 생성·변형 권한을 Hibernate
+      # 에서 회수한다. create 를 유지하면 파일 DB 를 매 기동마다 밀어 버리고, update 는
+      # 기존 스키마를 암묵적으로 변형한다. 엔티티와 마이그레이션이 어긋나면 여기서 기동이
+      # 실패한다 — 조용히 갈라진 채 도는 것보다 낫다.
+      ddl-auto: validate
     properties:
       hibernate:
         format_sql: false     # 운영 로그에 SQL 전문을 흘리지 않는다
