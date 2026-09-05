@@ -120,8 +120,7 @@ export default function S07Report() {
         // 말해야 판매자가 다음 행동을 안다. 원문은 공용 헬퍼와 같은 모양으로 남긴다.
         setError({
           text:
-            "이 세션의 리포트를 교부할 권한이 없습니다. 교부는 세션을 진행한 창구 직원(SELLER)이 " +
-            "합니다 — 관리자·준법감시는 조회만 할 수 있습니다.",
+            "리포트를 교부할 권한이 없어요. 교부는 세션을 진행한 창구 직원만 할 수 있어요.",
           detail: `${e.code}: ${e.message}`,
         });
       } else {
@@ -144,7 +143,7 @@ export default function S07Report() {
   }
 
   if (loading) {
-    return <main className="s07"><p className="s07__loading">리포트를 불러오는 중입니다…</p></main>;
+    return <main className="s07"><p className="s07__loading">리포트를 불러오고 있어요…</p></main>;
   }
 
   return (
@@ -158,7 +157,7 @@ export default function S07Report() {
 
       {state?.kind === "no-session" && (
         <section className="s07__empty">
-          <h2>세션을 찾을 수 없습니다</h2>
+          <h2>세션을 찾을 수 없어요</h2>
           <p>주소의 세션 번호를 확인해 주세요.</p>
         </section>
       )}
@@ -166,10 +165,10 @@ export default function S07Report() {
       {/* ── 아직 발행 전. 오류가 아니라 상태다(설계 판단 ②) ───────────────── */}
       {state?.kind === "not-issued" && (
         <section className="s07__empty">
-          <h2>아직 교부하지 않았습니다</h2>
+          <h2>아직 교부하지 않았어요</h2>
           <p>
             이 세션의 이해 기록 리포트가 아직 발행되지 않았습니다. 발행하면 판정·재설명 이력이
-            기록에서 조립되고, <strong>발행 사실 자체가 감사 기록에 남습니다.</strong>
+            기록에서 조립되고, <strong>발행 사실이 감사 기록에 남아요.</strong>
           </p>
           <button type="button" className="s07__btn s07__btn--primary" onClick={issue} disabled={issuing}>
             {issuing ? "발행 중…" : "리포트 발행"}
@@ -249,7 +248,7 @@ export default function S07Report() {
             </button>
             <p className="s07__reissue-note">
               내용이 그대로면 새로 발행하지 않고 지금 문서를 그대로 돌려줍니다. 내용이 달라졌다면
-              새로 발행되며, <strong>이전 발행 기록은 지워지지 않습니다</strong> — 교부 시점에
+              새로 발행되며, <strong>이전 발행 기록은 지워지지 않아요</strong> — 교부 시점에
               무엇이 적혀 있었는지에 답하려면 둘이 나란히 남아야 합니다.
             </p>
           </footer>

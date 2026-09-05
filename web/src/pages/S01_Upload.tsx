@@ -109,7 +109,7 @@ export default function S01Upload() {
       <header className="s01__head">
         <h1>문서 업로드 · 추출 결과</h1>
         <p className="s01__sub">
-          상품 설명서를 넣으면 고객이 반드시 이해해야 할 항목을 뽑습니다.
+          설명서를 올리면 고객이 알아야 할 항목을 뽑아요.
         </p>
       </header>
 
@@ -147,10 +147,10 @@ export default function S01Upload() {
       {upload && (
         <section className={`s01__parse s01__parse--${upload.status}`}>
           {upload.status === "parsed" ? (
-            <p><strong>문서를 읽었습니다.</strong> 상품 <code>{upload.productId}</code></p>
+            <p><strong>문서를 읽었어요.</strong> 상품 <code>{upload.productId}</code></p>
           ) : (
             <p>
-              <strong>문서를 읽지 못했습니다.</strong> 텍스트 레이어가 없는 스캔본이거나
+              <strong>문서를 읽지 못했어요.</strong> 텍스트 레이어가 없는 스캔본이거나
               지원하지 않는 형식입니다 — 다른 파일로 다시 시도해 주세요.
             </p>
           )}
@@ -162,7 +162,7 @@ export default function S01Upload() {
         <section className="s01__failed">
           <h2>추출 실패 {failed.length}건</h2>
           <p className="s01__failed-why">
-            이 항목들은 문서에서 값을 찾지 못했습니다. <strong>하나라도 남아 있으면
+            문서에서 값을 찾지 못한 항목이에요. <strong>하나라도 남아 있으면
             손실 시뮬레이터가 비활성화됩니다</strong> — 조건이 불완전한 상태로 금액을
             계산하지 않기 위해서입니다(E-SIM-01). 문서를 확인하거나 담당자가 값을 채워야
             합니다.
@@ -190,7 +190,7 @@ export default function S01Upload() {
           </h2>
 
           {extracted.length === 0 ? (
-            <p className="s01__empty">추출된 항목이 없습니다.</p>
+            <p className="s01__empty">추출된 항목이 없어요.</p>
           ) : (
             <ul className="s01__list">
               {extracted.map((i) => (

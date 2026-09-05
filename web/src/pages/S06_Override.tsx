@@ -110,7 +110,7 @@ export default function S06Override() {
   }
 
   if (loading) {
-    return <main className="s06"><p className="s06__loading">세션을 불러오는 중입니다…</p></main>;
+    return <main className="s06"><p className="s06__loading">세션을 불러오고 있어요…</p></main>;
   }
 
   if (forbidden) {
@@ -147,7 +147,7 @@ export default function S06Override() {
       {/* ── 상태 ──────────────────────────────────────────────────────────── */}
       <section className={`s06__state s06__state--${status.toLowerCase().replace(/_/g, "-")}`}>
         {status === "NONE" && <p><strong>오버라이드 요청 없음</strong></p>}
-        {status === "PENDING_APPROVAL" && <p><strong>승인 대기</strong> — 판매자가 적색 진행을 요청했습니다.</p>}
+        {status === "PENDING_APPROVAL" && <p><strong>승인 대기</strong> — 판매자가 적색 진행을 요청했어요.</p>}
         {status === "APPROVED" && (
           <p>
             <strong>승인됨</strong>
@@ -174,7 +174,7 @@ export default function S06Override() {
               onChange={(e) => setReason(e.target.value)}
               rows={5}
               disabled={busy}
-              placeholder="어떤 항목을 어떻게 보완했는지, 왜 진행이 타당한지 적어 주세요."
+              placeholder="어떤 항목을 어떻게 보완했는지 적어 주세요."
             />
             {/* 설계 판단 ① — 다 적고 나서 거절당하지 않게 미리 막는다 */}
             <p className={`s06__counter ${remaining > 0 ? "s06__counter--short" : ""}`}>
@@ -204,7 +204,7 @@ export default function S06Override() {
           {/* 설계 판단 ② — 승인 버튼 위에 사유 전문을 놓는다 */}
           <div className="s06__reason-shown">
             <span className="s06__label">판매자가 적은 사유</span>
-            <blockquote>{session?.overrideReason ?? "(사유를 읽지 못했습니다)"}</blockquote>
+            <blockquote>{session?.overrideReason ?? "(사유를 읽지 못했어요)"}</blockquote>
           </div>
           <p className="s06__warn">
             승인하면 <strong>불변 기록에 남고 준법감시에 자동 통보</strong>됩니다. 반려

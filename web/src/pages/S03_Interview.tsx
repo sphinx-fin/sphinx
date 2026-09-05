@@ -281,7 +281,7 @@ export default function S03Interview() {
       <main className="iv">
         <div className="iv__shell">
           <div className="iv__alert iv__alert--error" role="alert">
-            <b>인터뷰를 시작할 수 없습니다</b>
+            <b>인터뷰를 시작할 수 없어요</b>
             {error}
           </div>
         </div>
@@ -299,7 +299,7 @@ export default function S03Interview() {
           {/* 재검증에서는 진행 막대를 그리지 않는다(설계 판단 ④) — 서버의 index/total 은
               "몇 번째 항목인가" 라 재검증 중에 그리면 진행률이 제자리이거나 뒤로 간다. */}
           {reverifying ? (
-            <p className="iv__reverify">다시 한 번 확인하는 항목입니다.</p>
+            <p className="iv__reverify">다시 한 번 확인하는 항목이에요.</p>
           ) : (
             <div className="iv__progress">
               <span className="iv__progress-label">
@@ -353,20 +353,20 @@ export default function S03Interview() {
                 className="iv__btn iv__btn--primary"
                 onClick={beginReverify}
               >
-                읽었습니다, 답변하기
+                읽었어요, 답변하기
               </button>
             </div>
           </section>
         ) : phase === "answered" ? (
           <section className="iv__card" aria-live="polite">
             <h1 className="iv__question">
-              {interviewDone ? "응답이 모두 끝났습니다." : "답변이 기록되었습니다."}
+              {interviewDone ? "응답이 모두 끝났어요." : "답변을 기록했어요."}
             </h1>
             <p className="iv__alert iv__alert--info">
               {reverifying
-                ? "다시 답해 주셔서 감사합니다. 담당자가 결과를 확인합니다."
+                ? "다시 답해 주셔서 고마워요. 담당자가 결과를 확인해요."
                 : interviewDone
-                  ? "모든 항목에 응답하셨습니다. 화면을 담당자에게 돌려주세요."
+                  ? "모두 답하셨어요. 화면을 담당자에게 돌려주세요."
                   : "다음 항목으로 넘어가시겠어요?"}
             </p>
             <div className="iv__actions">
@@ -419,7 +419,7 @@ export default function S03Interview() {
                 onPaste={meta.onPaste}
               />
               <div className="iv__meta-row">
-                <span>{elderly ? "시간 제한 없이 천천히 적으셔도 됩니다." : " "}</span>
+                <span>{elderly ? "천천히 적으셔도 돼요." : " "}</span>
                 <span className="iv__count">{charCount}자</span>
               </div>
             </div>
@@ -427,7 +427,7 @@ export default function S03Interview() {
             {piiKinds.length > 0 && (
               <p className="iv__alert iv__alert--warn" role="status">
                 <b>{piiKinds.join("·")}로 보이는 내용이 있습니다.</b>
-                이 답변에는 개인정보가 필요하지 않습니다. 빼고 적어 주세요.
+                개인정보는 적지 않아도 돼요.
               </p>
             )}
 
@@ -450,7 +450,7 @@ export default function S03Interview() {
 
             {error && (
               <p className="iv__alert iv__alert--error" role="alert">
-                <b>제출하지 못했습니다</b>
+                <b>제출하지 못했어요</b>
                 {error} 입력하신 내용은 그대로 남아 있습니다.
               </p>
             )}
@@ -494,21 +494,21 @@ function describe(e: unknown): string {
   if (e instanceof ApiRequestError) {
     switch (e.code) {
       case "NOT_FOUND":
-        return "세션을 찾을 수 없습니다. 담당자에게 알려 주세요.";
+        return "세션을 찾을 수 없어요. 담당자에게 알려 주세요.";
       case "ILLEGAL_STATE_TRANSITION":
-        return "이미 종료된 세션입니다. 담당자에게 알려 주세요.";
+        return "이미 끝난 세션이에요. 담당자에게 알려 주세요.";
       case "VALIDATION_ERROR":
       case "MALFORMED_REQUEST":
-        return "입력을 다시 확인해 주세요.";
+        return "입력을 확인해 주세요.";
       // 아래 둘은 채점 경로(server → ai-service)의 상류 실패다. 답변은 화면에 그대로 남으므로
       // 재시도가 가능하고, 재시도가 의미 있는지가 서로 다르다.
       case "AI_SERVICE_UNAVAILABLE":
-        return "채점 서비스가 잠시 응답하지 않습니다. 다시 제출해 주세요.";
+        return "채점 서비스가 잠시 멈췄어요. 다시 제출해 주세요.";
       case "EVIDENCE_REQUIRED":
-        return "채점 결과를 기록할 수 없었습니다. 담당자에게 알려 주세요.";
+        return "채점 결과를 저장하지 못했어요. 담당자에게 알려 주세요.";
       default:
         return "잠시 후 다시 시도해 주세요.";
     }
   }
-  return "알 수 없는 오류입니다. 담당자에게 알려 주세요.";
+  return "알 수 없는 오류예요. 담당자에게 알려 주세요.";
 }
