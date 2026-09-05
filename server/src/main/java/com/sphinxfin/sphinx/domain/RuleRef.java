@@ -1,5 +1,7 @@
 package com.sphinxfin.sphinx.domain;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+
 /**
  * 발화한 게이트 룰 하나 — ID 와 <b>사람이 읽는 문면</b>. (이슈 #320)
  *
@@ -26,5 +28,29 @@ package com.sphinxfin.sphinx.domain;
  * </pre>
  *
  * <p>그 규약은 사람이 지키는 것이 아니라 {@code RuleLabelSafetyTest} 가 잠근다.
+ *
+ * <h2>옛 모양({@code "R-01"} 맨 문자열)을 받는다 — 결정 10.74 의 2번</h2>
+ *
+ * <p>{@code gateRuleTrace} 는 #320 전까지 {@code List&lt;String&gt;} 이라 DB 에
+ * {@code ["R-01","R-05"]} 로 저장됐다. 영속 DB(#410)로 가면 그 행들이 프로세스보다 오래
+ * 살므로, 객체 모양만 받으면 <b>옛 세션 읽기가 전부 500</b> 이다(append-only 라 고쳐 쓸
+ * 수도 없다). {@link #fromLegacyId(String)} 가 그 모양을 받는다.
+ *
+ * <p>❗옛 기록의 문면은 {@code gate_rules.yaml} 에서 <b>다시 읽지 않는다</b> — 판정 뒤에
+ * 파일이 바뀌었으면 기록이 그때 안 한 말을 하게 된다(감사 기준점은 기록값,
+ * {@code RuleRefListConverter} javadoc). 문면이 기록되지 않았다는 사실 자체를 문면으로 남긴다.
  */
-public record RuleRef(String id, String label) {}
+public record RuleRef(String id, String label) {
+
+    /** 문면 도입(#320) 전에 기록된 룰의 label — 없던 것을 없었다고 말한다(재계산 금지). */
+    public static final String LEGACY_LABEL = "(기록 당시 문면 없음)";
+
+    /**
+     * 옛 저장 모양 {@code "R-01"} → {@code RuleRef}. Jackson 이 문자열 토큰을 만나면 이리로,
+     * 객체 토큰이면 정규 생성자로 간다(위임 생성자는 문자열에만 걸린다).
+     */
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public static RuleRef fromLegacyId(String id) {
+        return new RuleRef(id, LEGACY_LABEL);
+    }
+}
