@@ -53,10 +53,7 @@ public class ProductRiskItems {
      */
     @Transactional
     public Extraction extract(String productId) {
-        String documentPath = DEMO_DOCUMENTS.get(productId);
-        if (documentPath == null) {
-            throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
-        }
+        String documentPath = documentPathOf(productId);
         // 파스에 넘길 상품유형은 카탈로그(저장 우선)에서 온다 — 하드코딩하면 변액 문서를
         // ELS 템플릿으로 읽는 종류의 오판이 조용히 생긴다(SessionController.productTypeOf 주석).
         String productType = productTypeOf(productId);
@@ -128,5 +125,22 @@ public class ProductRiskItems {
         return fallbackCatalog.productType(productId)
                 .orElseThrow(() -> new NoSuchElementException(
                         "상품유형을 알 수 없다(상품 목록에 없음): " + productId));
+    }
+
+    /**
+     * 상품의 원문 문서 경로(SPHINX_DATA_DIR 상대). 추출({@link #extract})이 파스에 넘기는
+     * 그 경로이자, 원본 조회({@code GET /products/{id}/document}, 이슈 #412)가 파일을 찾는
+     * 값이다. 출처가 하나여야 추출이 읽은 문서와 화면이 대조하는 문서가 같다 — 그래서
+     * 매핑을 여기 한 벌만 둔다({@link #DEMO_DOCUMENTS}). 업로드(F-EXT-001)가 실배선되면
+     * 그 산출물 경로로 이 매핑이 대체된다.
+     *
+     * @throws NoSuchElementException 등록된 문서가 없는 상품(→ 404)
+     */
+    public String documentPathOf(String productId) {
+        String documentPath = DEMO_DOCUMENTS.get(productId);
+        if (documentPath == null) {
+            throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
+        }
+        return documentPath;
     }
 }
