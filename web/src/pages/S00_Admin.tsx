@@ -3,7 +3,7 @@
  *
  * ── 왜 이 화면이 필요한가 ────────────────────────────────────────────────────
  *
- * 화면 8개 중 **5개가 세션ID 를 경로에 받는다**(`/interview/:sid` 등). 그래서 주소만으로는
+ * 화면 7개 중 **5개가 세션ID 를 경로에 받는다**(`/interview/:sid` 등). 그래서 주소만으로는
  * 못 닿고, 닿는 유일한 길이 S-02 에서 세션을 만들어 그 화면의 버튼을 누르는 것이었다.
  * 심사자가 직접 눌러 보는 자리에서는 그게 막힌다 — 세션을 안 만들면 절반이 안 열리고,
  * 만들어도 S-06(적색 승인)·S-07(리포트)처럼 **특정 상태에서만 뜻이 있는 화면**은 왜 비어
@@ -89,38 +89,24 @@ interface Screen {
   id: string;
   name: string;
   audience: Audience;
-  /** 이 화면이 UI 몫을 맡은 기능ID. 심사에서 명세와 대조하는 값이다. */
-  features: string;
   /** 라우트. `:sid` 가 있으면 세션이 있어야 열린다. */
   route: string;
   /** 무엇을 보는 화면인가 — 한 줄. */
   note: string;
   /** 이 화면이 **뜻을 갖는 조건**. 비어 보이는 화면 앞에서 심사자가 멈추지 않게 적는다. */
   prereq?: string;
-  /** 범위 밖 표시. 있으면 카드에 배지가 붙는다. */
-  outOfScope?: string;
 }
 
 /**
- * 명세 8절 S-01~S-08 전수. **순서는 화면 번호 순이고 데모 흐름 순이 아니다** —
- * 흐름 순으로 두면 S-01 이 사라지고(범위 밖) S-08 이 흐름 밖이라 자리가 애매해진다.
- * 심사자는 명세를 들고 대조하므로 번호가 맞는 편이 낫다.
+ * 명세 8절 S-02~S-08. **S-01(문서 업로드)은 빼 둔다** — 이번 라운드 범위 밖이라
+ * (#406) 목차에 두면 열리는데 실제 배선이 아닌 화면을 심사자가 먼저 만난다.
+ * 순서는 화면 번호 순이고 데모 흐름 순이 아니다 — 심사자가 명세를 들고 대조한다.
  */
 const SCREENS: readonly Screen[] = [
-  {
-    id: "S-01",
-    name: "문서 업로드·추출 결과",
-    audience: "운영",
-    features: "F-EXT-001 · F-EXT-002",
-    route: "/upload",
-    note: "설명서를 올리면 고객이 알아야 할 항목을 뽑아요.",
-    outOfScope: "이번 라운드 범위 밖이에요. 화면은 열리지만 실제 데이터는 아니에요.",
-  },
   {
     id: "S-02",
     name: "세션 시작",
     audience: "판매자",
-    features: "F-INT-001",
     route: "/",
     note: "상품과 고객 정보를 넣어 세션을 만들어요.",
     prereq: "이름·전화번호를 넣는 칸은 없어요.",
@@ -129,7 +115,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-03",
     name: "되말하기 인터뷰",
     audience: "고객",
-    features: "F-INT-002 · F-INT-003 · F-INT-004",
     route: "/interview/:sid",
     note: "고객이 자기 말로 다시 설명해요.",
     prereq: "판정을 확정한 세션에서는 질문이 나오지 않아요.",
@@ -138,7 +123,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-04",
     name: "손실 시뮬레이터",
     audience: "고객",
-    features: "F-SIM-001",
     route: "/simulator/:sid",
     note: "최악·중간·최선을 금액으로 나란히 보여줘요.",
     prereq: "못 읽어낸 항목이 하나라도 있으면 계산하지 않아요.",
@@ -147,7 +131,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-05",
     name: "판정 결과",
     audience: "판매자",
-    features: "F-GTE-001 · F-GTE-003",
     route: "/judgment/:sid",
     note: "항목별 등급과 근거를 보고, 재설명을 시작해요.",
     prereq: "답변이 있어야 판정할 수 있어요. 확정하면 되돌릴 수 없어요.",
@@ -156,7 +139,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-06",
     name: "적색 승인",
     audience: "관리자",
-    features: "F-GTE-002",
     route: "/override/:sid",
     note: "판매자가 사유를 적어 요청하고, 관리자가 승인해요.",
     prereq: "신호가 빨간 세션에서만 쓸 수 있어요.",
@@ -165,7 +147,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-07",
     name: "이해 기록 리포트",
     audience: "판매자",
-    features: "F-GTE-004",
     route: "/report/:sid",
     note: "교부 문서의 내용해시와 발행 이력을 봐요.",
     prereq: "아직 발행 전이면 「발행하기」가 보여요.",
@@ -174,7 +155,6 @@ const SCREENS: readonly Screen[] = [
     id: "S-08",
     name: "오해 지도 대시보드",
     audience: "준법감시",
-    features: "F-DSH-001 · F-DSH-002",
     route: "/dashboard",
     note: "항목별·지점별 오해율과 결정 요약을 봐요.",
     prereq: "세션 없이 열 수 있어요. 개인 정보는 나오지 않아요.",
@@ -257,7 +237,7 @@ export default function S00Admin() {
       const product = products?.[0];
       if (!product) {
         setError({
-          text: "등록된 상품이 없어요. S-01 에서 문서를 먼저 올려 주세요.",
+          text: "등록된 상품이 없어요.",
           detail: null,
         });
         return;
@@ -292,7 +272,7 @@ export default function S00Admin() {
           <p className="adm__eyebrow">심사·시연용 목차</p>
           <h1 className="adm__title">화면 목록</h1>
           <p className="adm__lede">
-            명세 8절의 화면 8개예요.
+            명세 8절의 화면 7개예요.
           </p>
           <div className="adm__headrow">
             <button
@@ -316,7 +296,7 @@ export default function S00Admin() {
             세션
           </h2>
           <p className="adm__hint adm__hint--block">
-            <b>5개는 세션 번호가 필요해요.</b> S-01·S-02·S-08 은 없어도 열려요.
+            <b>5개는 세션 번호가 필요해요.</b> S-02·S-08 은 없어도 열려요.
           </p>
 
           <div className="adm__sidrow">
@@ -455,25 +435,16 @@ function ScreenCard({
   return (
     <article className={`adm__screen ${locked ? "adm__screen--locked" : ""}`}>
       <div className="adm__screen-head">
-        <span className="adm__no">{screen.id}</span>
         <h3 className="adm__screen-name">{screen.name}</h3>
         <span className="adm__badge">{screen.audience}</span>
       </div>
 
-      <p className="adm__features">{screen.features}</p>
       <p className="adm__screen-note">{screen.note}</p>
 
       {screen.prereq && (
         <p className="adm__prereq">
           <span className="sr-only">전제: </span>
           {screen.prereq}
-        </p>
-      )}
-
-      {screen.outOfScope && (
-        <p className="adm__alert adm__alert--warn">
-          <b>범위 밖</b>
-          {screen.outOfScope}
         </p>
       )}
 

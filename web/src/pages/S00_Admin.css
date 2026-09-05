@@ -208,12 +208,6 @@
 .adm__screen--locked { background: var(--surface-sunken); box-shadow: none; }
 
 .adm__screen-head { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
-.adm__no {
-  font-size: calc(12px * var(--scale));
-  font-weight: 700; letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
 .adm__screen-name {
   font-size: calc(17px * var(--scale));
   line-height: calc(1.4 * var(--leading-scale));
@@ -234,11 +228,6 @@
 }
 .adm__screen--locked .adm__badge { background: var(--border); }
 
-.adm__features {
-  font-size: calc(12px * var(--scale));
-  font-weight: 600; letter-spacing: 0.01em;
-  color: var(--accent);
-}
 .adm__screen-note {
   font-size: calc(14px * var(--scale));
   line-height: calc(1.55 * var(--leading-scale));
