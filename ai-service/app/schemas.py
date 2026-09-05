@@ -226,7 +226,26 @@ class ExtractRequest(Strict):
 
 
 class ExtractionWarning(Strict):
-    """추출을 은폐하지 않고 노출한다 (E-EXT-03). parse_warnings 와 같은 성격이다."""
+    """추출을 은폐하지 않고 노출한다 (E-EXT-03). parse_warnings 와 같은 성격이다.
+
+    ## ❗`MANUAL_SOURCE` — 표식이 층을 건너게 한다
+
+    `#441` 이 `data/documents/x.json` 을 두면 파스 출력을 사람이 만든 것으로 대체할 수 있게
+    했고, 그 사실이 `ParsedDocument.parse_warnings` 의 `MANUAL_OVERRIDE` 로 남는다.
+    **그런데 추출은 `parse_warnings` 를 안 본다** — 즉 그 문서에서 나온 `RiskItem` 은
+    *"사람이 만든 파스에서 왔다"* 를 잃은 채로 서버·evidence·게이트로 간다.
+
+        parse       MANUAL_OVERRIDE 있음   ParsedDocument.is_manual → True
+        extract     ❗아무것도 안 실림      RiskItem 만 나간다
+        서버·게이트  구분할 방법이 없다
+
+    `is_manual` 이 *"성능 수치를 인용할 때 구분해야 한다"* 고 적어 뒀는데, **읽는 쪽이
+    `app/` 에 하나도 없었다.** 표식을 만들어 두고 아무도 안 읽으면 다음 사람이 그 표식을
+    안 믿는다 — `#409`(model.jsonl)·F-EXT-003(추출 재현율)이 걸러야 할 자리가 여기다.
+
+    그래서 **추출 경고로 한 번 더 싣는다.** 항목별이 아니라 문서 단위이므로 `item_id` 는
+    비운다(계약이 nullable 로 허용하는 그 경우다).
+    """
 
     code: Literal[
         "ITEM_NOT_FOUND",        # 템플릿 항목을 문서에서 못 찾음 → status=extraction_failed
@@ -238,6 +257,7 @@ class ExtractionWarning(Strict):
         "NARROWING_REFUSED",     # 좁히면 풀리지만 수치가 빠져 거부 (P6 · 1절) → extraction_failed
         "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
         "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
+        "MANUAL_SOURCE",         # ❗파스 출력이 사람이 만든 것이다 (#436·#441) — 아래 참조
     ]
     item_id: str | None = None
     message: str
