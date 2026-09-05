@@ -58,7 +58,9 @@ public class JpaImmutableStore implements ImmutableStore {
         String payloadJson = CanonicalJson.serialize(payload);
         String hash = HashChain.link(prevHash, seq, payload);
 
-        entries.save(new EvidenceEntry(null, stream, seq, prevHash, hash, payloadJson));
+        // 세대를 행에 찍는다 — 나중에 못 채운다(CanonicalJson.CANONICAL_VERSION 주석).
+        entries.save(new EvidenceEntry(null, stream, seq, prevHash, hash, payloadJson,
+                CanonicalJson.CANONICAL_VERSION));
         anchor.advance(hash);
         anchors.save(anchor);
 

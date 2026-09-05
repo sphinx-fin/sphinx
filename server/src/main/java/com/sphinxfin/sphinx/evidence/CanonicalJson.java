@@ -63,6 +63,47 @@ import java.util.TreeMap;
  */
 public final class CanonicalJson {
 
+    /**
+     * 이 판본이 쓰는 <b>정규화 규약 세대</b>. {@code evidence_entries.canonical_version} 에
+     * 행마다 찍힌다.
+     *
+     * <h2>왜 행에 찍는가</h2>
+     *
+     * <p>{@code evidence} 는 append-only 라(ADR-004) <b>나중에 채울 수 없다.</b> 지금
+     * 결정 10.74 ①(NFC 정본 경계)이 미구현이라 고객 발화가 NFD 로 들어오면 그대로 해시된다
+     * — 같은 말이 입력 형태에 따라 다른 바이트가 된다(윤지석 실측, {@code #410} 리뷰:
+     * NFD 입력의 {@code utterance_quote} 가 len 6 → 15).
+     *
+     * <p>❗<b>깨지는 것은 무결성이 아니라 균질성이다.</b> 체인 검증도 리포트 재현 대조도
+     * 성립한다 — 둘 다 저장된 바이트를 다시 읽기 때문이다. 못 하게 되는 것은 <b>세대를 넘는
+     * 교차 비교</b>이고, 그건 되돌리는 것이 아니라 <b>어느 세대인지 아는 것</b>으로 푼다.
+     * 그래서 필요한 것이 값이 아니라 표식이다.
+     *
+     * <p>넣는 시점이 지금뿐인 이유가 여기 있다. 이 컬럼 없이 행이 쌓이면 그 행들은 영원히
+     * <i>"모르는 세대"</i> 다 — 나중에 채우려면 append-only 테이블에 {@code UPDATE} 를 해야
+     * 하고 그건 ADR-004 와 정면으로 부딪힌다. 배포 시각으로 역산하는 것은 evidence <b>밖</b>의
+     * 정보라 감사에서 근거가 아니다(ADR-003: 기록이 스스로 말한다).
+     *
+     * <h2>❗해시 대상이 아니다</h2>
+     *
+     * <p>이 값은 {@code payload_json} 밖의 컬럼이라 <b>해시에 안 들어간다.</b> 즉 표식 자체는
+     * 변조를 막지 못한다 — 컬럼만 고쳐도 체인 검증은 통과한다. 페이로드에 넣으면 그것까지
+     * 잠기지만, 그러면 이 상수를 올리는 날 <b>과거 기록 전체의 해시가 바뀐다.</b>
+     * <b>표식이 하는 일은 감사자에게 세대를 알려 주는 것이지 세대를 증명하는 것이 아니다.</b>
+     *
+     * <h2>언제 올리나</h2>
+     *
+     * <pre>
+     * "0"  현재. NFC 정본 경계 이전 — 입력 형태가 보장되지 않는다
+     * "1"  결정 10.74 ①(AiServiceClient.score() 안에서 NFC 고정)이 들어간 뒤
+     * </pre>
+     *
+     * <p>올리는 것은 <b>규약이 바뀔 때</b>이지 코드가 바뀔 때가 아니다. ADR-008 의 직렬화
+     * 규약이 바뀌는 경우도 같은 자리에서 올린다 — 둘 다 <i>"같은 내용이 같은 바이트가 되는가"</i>
+     * 를 정하는 것이라, 세대가 갈리면 교차 비교가 안 되는 것도 같다.
+     */
+    public static final String CANONICAL_VERSION = "0";
+
     /** ADR-008 — UTC · 밀리초 3자리 고정. 자릿수만 다른 같은 시각이 다른 해시를 내지 않게 한다. */
     private static final DateTimeFormatter TIMESTAMP =
             DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
