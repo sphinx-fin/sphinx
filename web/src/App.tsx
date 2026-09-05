@@ -20,6 +20,9 @@ export default function App() {
       {/* 라우터 안·Routes 밖 — 화면마다 붙이면 새 화면에서 빠뜨린다(BrandBar 주석). */}
       <BrandBar />
       <Routes>
+        {/* ❗S-01 은 이번 라운드 개발하지 않는다(이슈 #406). 라우트는 남겨 둔다 —
+            화면은 목 엔드포인트 상대로 동작하고, 어디서도 링크되지 않아 URL 직접
+            입력으로만 닿는다. 지우면 다음 라운드에 되살리는 값이 생긴다. */}
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/" element={<SessionStartPage />} />
         <Route path="/interview/:sid" element={<InterviewPage />} />
