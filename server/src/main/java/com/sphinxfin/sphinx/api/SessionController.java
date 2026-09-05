@@ -431,6 +431,28 @@ public class SessionController {
     }
 
     /**
+     * 고객 교부용 요약 (F-GTE-004 · 이슈 #413). 판매자용 전문(report())과 <b>다른 문서</b>다.
+     *
+     * <p>권한이 다르다 — {@code report:summary:read} 는 CUST·own_session 이고
+     * {@code report:read}(전문)는 SELLER·MGR·COMPL 이다. rbac_policy.yaml 이 action 을 나눈
+     * 근거가 두 문서가 다르다는 것이라, 경로도 나눈다.
+     *
+     * <p>❗<b>전문과 같은 {@code contentHash}</b> 를 싣는다 — 고객이 받은 문서를 나중에
+     * 대조할 수 있어야 한다. 대신 항목별 판정 이력·재설명 이력은 담지 않는다(계약
+     * {@code ReportSummaryResponse}). 여기서는 그 축소가 <b>payload 조립 단위</b>로 이뤄진다 —
+     * 같은 발행 기록(같은 해시)에서 요약 필드만 고른다. 다른 문서를 새로 만드는 게 아니다.
+     *
+     * <p>발행한 적 없으면 404 — report() 와 같은 이유로 세션 없음과 같은 코드를 낸다.
+     */
+    @PreAuthorize("@accessGuard.can('report:summary:read', #sid)")
+    @GetMapping("/{sid}/report/summary")
+    public ApiResponse<Map<String, Object>> reportSummary(@PathVariable String sid) {
+        sessionService.get(sid);   // 없는 세션이면 404
+        return ApiResponse.ok(reportSummaryPayload(reportService.latest(sid).orElseThrow(
+                () -> new NoSuchElementException("아직 발행된 리포트가 없다: " + sid))));
+    }
+
+    /**
      * 발행된 리포트를 PDF 로 본다 (F-GTE-004 2번 · 이슈 #233).
      *
      * <p><b>인라인이다</b> — 브라우저가 뷰어로 연다. 내려받기는 {@link #downloadReportPdf}
@@ -520,6 +542,24 @@ public class SessionController {
         out.put("contentHash", report.contentHash());
         out.put("previewUrl", "/sessions/" + report.sessionId() + "/report/preview");
         out.put("downloadUrl", "/sessions/" + report.sessionId() + "/report/download");
+        return out;
+    }
+
+    /**
+     * 계약({@code ReportSummaryResponse}) 응답 — 전문(reportPayload)의 부분집합이다.
+     *
+     * <p>같은 발행 기록에서 요약 필드만 고른다: {@code contentHash} 는 전문과 <b>같은 값</b>
+     * (고객 대조용), {@code previewUrl} 은 같은 PDF 를 가리킨다. 전문에만 있는
+     * {@code downloadUrl} 은 뺀다 — 교부용 요약 계약에 없다. 항목별 이력은 애초에 이
+     * payload 가 담지 않는다(요약이 전문과 다른 문서인 이유).
+     */
+    private static Map<String, Object> reportSummaryPayload(ReportService.Report report) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("reportId", report.reportId());
+        out.put("sessionId", report.sessionId());
+        out.put("generatedAt", report.generatedAt().toString());
+        out.put("contentHash", report.contentHash());
+        out.put("previewUrl", "/sessions/" + report.sessionId() + "/report/preview");
         return out;
     }
 }
