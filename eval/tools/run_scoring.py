@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -22,6 +23,44 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "ai-service"))
+
+# ❗**평가는 자기일관성 재질의를 순차로 돌린다** (이슈 #437 · PR #447).
+#
+# `#447` 이 재질의를 첫 채점과 **동시에** 던져 통과 답변을 4.5초 → 2.1초로 줄였다. 그 대가는
+# **투기 호출**이다 — 등급을 보기 전에 던지므로 U1 이 아닌 답변에서는 그 호출이 버려진다.
+#
+# 두 경로의 셈이 정반대다.
+#
+#     데모·리허설   대부분 U1 (「이해했다」를 보여주는 시연)  → 거의 다 적중. 아끼는 것은 벽시계
+#     평가(여기)    U1 30% (공식 70건 회차 실측)             → ❗70% 가 낭비. 아끼는 것은 쿼터
+#
+# 70건 회차의 실측 U1 은 21건이다. 순차는 **70 + 21 = 91회**, 병렬은 던지고 보므로
+# **70 × 2 = 140회** — 켜 두면 **+49회(1.54배)** 다. 배치라 그 대가로 사는 벽시계는 아무 값이 없다.
+#
+# ❗**이것이 "평가용 경로를 따로 만들지 않는다" 를 안 깬다.** 병렬은 **호출 타이밍**만 바꾸고
+# 판정을 안 바꾼다 — 등급·확신도·캡 규칙이 그대로다(`#447`: 켠 상태는 `#370` 이전이 아니라
+# `#437` 이전 동작이다). 만약 판정이 바뀐다면 여기서 끄는 순간 평가한 것과 서비스하는 것이
+# 달라져 이 스위치를 못 쓴다.
+#
+# `setdefault` 라 **명시적으로 준 값이 이긴다** — 병렬 경로를 평가로 재 보고 싶으면
+# `SPHINX_PARALLEL_CONSISTENCY=1 python eval/tools/run_scoring.py` 로 켠다.
+#
+# ❗**`.env` 로는 못 켠다(그리고 못 깬다).** `setdefault` 가 **먼저** 키를 박고,
+# `config._load_env_files()` 는 `load_dotenv(path, override=False)` 라 이미 있는 키를 안 덮는다.
+# 여는 길도 아래 빈 문자열 함정도 **프로세스 환경변수일 때만** 성립한다(#449 리뷰, 윤지석).
+#
+# ❗**임포트보다 먼저 둔다 — 오늘의 필요가 아니라 보험이다.**
+# 처음에 나는 *"`settings()` 가 `@lru_cache` 라 임포트 때 굳는다"* 고 적었는데 **그건 틀렸다**
+# (#449 리뷰, 윤지석). 실측하면 `run_scoring` 임포트 직후 `settings.cache_info()` 는
+# `hits=0 misses=0` 이고, `scoring` 은 임계값을 `settings()` 가 아니라
+# `thresholds.get(...)`(`scoring_thresholds.yaml`)에서 읽는다 — 그래서 **오늘은** 이 줄이
+# 임포트 뒤에 있어도 먹는다.
+#
+# 그래도 앞에 두는 이유는, `settings()` 가 `@lru_cache(maxsize=1)` 라 임포트 사슬 중 누군가가
+# 한 번만 불러도 그 순간 값이 굳기 때문이다. 그날 나는 증상은 *"쿼터가 1.5배로 나갔다"* 뿐이라
+# 회차가 끝난 뒤에나 안다. 자리를 코드가 아니라 **줄 번호로** 잠그는 것이 그래서 필요하다 —
+# `eval/tests/test_scoring_runner_is_serial.py` 가 그 대조를 한다.
+os.environ.setdefault("SPHINX_PARALLEL_CONSISTENCY", "0")
 
 from app import scoring  # noqa: E402
 from app.config import MODEL_POLICY_SUBSTRING, settings  # noqa: E402
