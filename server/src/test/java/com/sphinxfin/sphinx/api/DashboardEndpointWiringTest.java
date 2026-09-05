@@ -71,6 +71,19 @@ class DashboardEndpointWiringTest {
     }
 
     @Test
+    @DisplayName("❗from/to 가 ISO_INSTANT 로 바인딩된다 — @DateTimeFormat 없이 InstantFormatter (#468)")
+    void auditSummaryBindsFromToAsInstant() throws Exception {
+        // 애노테이션 없이 Instant 쿼리 파라미터가 실제로 바인딩되는지 잠근다 — 정세현이 수기로
+        // 확인한 그 회차다. 응답 from 이 그대로 echo 되면 서버가 파싱해 받은 것이다.
+        mvc.perform(get("/dashboard/audit-summary")
+                        .param("from", "2026-09-01T00:00:00Z")
+                        .param("to", "2026-09-07T00:00:00Z")
+                        .with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.from").value("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
     @DisplayName("❗감사 체인 검증은 COMPL 만 — 무결성 결과만 낸다 (#326 파트2)")
     void auditVerifyIsComplOnly() throws Exception {
         mvc.perform(get("/dashboard/audit-verify").with(user("compl-01").roles("COMPL")))

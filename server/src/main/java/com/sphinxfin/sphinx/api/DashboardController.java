@@ -4,7 +4,6 @@ import com.sphinxfin.sphinx.aggregate.AggregateService;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.evidence.AuditLog;
 import com.sphinxfin.sphinx.evidence.HashChain;
-import org.springframework.format.annotation.DateTimeFormat;
 import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.security.AccessGuard;
 import com.sphinxfin.sphinx.security.AccessPolicy;
@@ -62,10 +61,10 @@ public class DashboardController {
     @PreAuthorize("@accessGuard.canAggregate('audit:read')")
     @GetMapping("/audit-summary")
     public ApiResponse<AuditLog.AccessSummary> auditSummary(
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
-            @RequestParam(required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+            // Instant 는 Spring 의 InstantFormatter 가 ISO_INSTANT(…Z)로 바인딩한다 —
+            // @DateTimeFormat 은 Instant 대상 타입이 없어 no-op 이라 안 붙인다(#468 리뷰, 정세현).
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to) {
         return ApiResponse.ok(auditLog.summary(from, to));
     }
 
