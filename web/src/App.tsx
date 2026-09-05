@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import BrandBar from "./components/BrandBar";
 import Splash from "./components/Splash";
+import AdminPage from "./pages/S00_Admin";
 import UploadPage from "./pages/S01_Upload";
 import SessionStartPage from "./pages/S02_SessionStart";
 import InterviewPage from "./pages/S03_Interview";
@@ -20,6 +21,15 @@ export default function App() {
       {/* 라우터 안·Routes 밖 — 화면마다 붙이면 새 화면에서 빠뜨린다(BrandBar 주석). */}
       <BrandBar />
       <Routes>
+        {/* 심사·시연용 목차. 제품 흐름 밖이라 화면 번호도 흐름 밖(S-00)이다.
+            ❗**아래 라우트를 늘리거나 지우면 `pages/S00_Admin.tsx` 의 `SCREENS` 도 같이
+            고친다.** 두 벌이고 web 에는 테스트 러너가 없어(결정 10.59) 대조가 자동으로
+            돌지 않는다 — 어긋나면 목차에 없는 화면이 생기거나 목차의 링크가 죽는다. */}
+        <Route path="/admin" element={<AdminPage />} />
+        {/* ❗S-01 은 이번 라운드 개발하지 않는다(이슈 #406). 라우트는 남겨 둔다 —
+            화면은 목 엔드포인트 상대로 동작하고, 지우면 다음 라운드에 되살리는 값이 생긴다.
+            제품 흐름에서는 여전히 어디서도 링크되지 않는다 — 닿는 길은 URL 직접 입력과
+            심사용 목차(S-00) 두 개이고, 목차에서는 "범위 밖" 배지가 붙는다. */}
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/" element={<SessionStartPage />} />
         <Route path="/interview/:sid" element={<InterviewPage />} />

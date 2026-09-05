@@ -29,6 +29,13 @@
  *    어긋난다. 그래서 생성 후에는 멈춰서 세션 번호를 보여주고, "고객에게 넘겨주세요" 를
  *    명시한 뒤 시작 버튼을 누르게 한다.
  *
+ *    ❗**그 두 버튼은 새 창으로 연다.** 같은 탭에서 옮기면 판매자 화면이 고객 화면으로
+ *    덮이고, 창구에서 실제로 벌어지는 일 — *한 화면을 둘이 번갈아 쓰는 것* — 이 그대로
+ *    재현된다. 대필 방지 안내를 적어 두고 화면은 대필하기 좋은 모양인 셈이다. 새 창이면
+ *    고객 화면은 고객 앞의 창이고 판매자는 자기 창(세션 번호·판정)을 그대로 들고 있다.
+ *    판정 화면은 애초에 판매자 것이라 더 그렇다 — 세션을 연 창을 잃지 않아야 한다.
+ *    팝업이 막히면 같은 탭 이동으로 떨어진다(그때는 예전과 같이 동작한다).
+ *
  * ⑤ **가입금액 구간을 화면에서 필수로 건다 — 계약은 nullable 그대로.**
  *    `amountBand` 는 계약상 선택이지만 취약 가중의 입력이다. 데모 고객(65세·5,000만 원)이
  *    `ageBand"60대"`3 + `amountBand"5천만원대"`1 = **정확히 임계값 4** 라서, 이 칸을
@@ -50,7 +57,7 @@
  *    그 전에는 무엇이 없는지만 적는다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
   Channel,
@@ -106,6 +113,23 @@ export default function S02SessionStart() {
     })();
     return () => { alive = false; };
   }, []);
+
+  /**
+   * 새 창으로 연다. 막히면 같은 탭으로 간다.
+   *
+   * `noopener` 를 붙이는 이유는 보안 관례이기도 하지만, 붙이면 브라우저가 `null` 을
+   * 돌려주는 경우가 있어 **성공/차단을 반환값으로 못 가른다.** 그래서 팝업 차단 판정은
+   * `noreferrer` 없이 열어 본 뒤 `null` 인지로만 본다 — 열렸으면 그 핸들의 `opener` 를
+   * 직접 끊는다.
+   */
+  const openAside = useCallback((path: string) => {
+    const win = window.open(path, "_blank");
+    if (!win) {
+      navigate(path);   // 팝업 차단 — 아무 데도 못 가는 것보다 같은 탭이 낫다
+      return;
+    }
+    win.opener = null;
+  }, [navigate]);
 
   const closeDoc = useCallback(() => {
     setDocOpen(false);
@@ -195,18 +219,22 @@ export default function S02SessionStart() {
               <button
                 type="button"
                 className="ss__btn ss__btn--primary"
-                onClick={() => navigate(`/interview/${session.sessionId}`)}
+                onClick={() => openAside(`/interview/${session.sessionId}`)}
               >
                 고객 인터뷰 시작
               </button>
               <button
                 type="button"
                 className="ss__btn ss__btn--ghost"
-                onClick={() => navigate(`/judgment/${session.sessionId}`)}
+                onClick={() => openAside(`/judgment/${session.sessionId}`)}
               >
                 판정 화면으로
               </button>
             </div>
+            <p className="ss__hint">
+              두 화면 모두 <b>새 창</b>으로 열립니다. 이 창은 세션 번호를 그대로 들고
+              있으니 닫지 마세요.
+            </p>
           </section>
         </div>
       </main>
@@ -222,6 +250,15 @@ export default function S02SessionStart() {
       <div className="ss__shell">
         <header className="ss__head">
           <h1 className="ss__title">고객검사 시작</h1>
+          {/* 심사용 목차(S-00)로 가는 **유일한 링크**다. 목차에 있는 화면 5개가 세션ID 를
+              경로에 받아 주소만으로는 못 닿으므로, 심사자가 목차를 못 찾으면 절반이 안
+              열린다. 이 자리인 이유는 두 가지다 — ① 브랜드 바에 달 수 없다. 그건 전
+              화면에 뜨고 그중 S-03 은 고객이 답변 도중이라, 습관적으로 눌렀다가 세션 밖으로
+              나가는 사고가 정확히 BrandBar 가 링크를 안 거는 이유다. ② S-02 는 태블릿을
+              넘기기 **전**의 판매자 화면이라 그 사고가 없다. 그래서 목차 진입은 여기 하나다. */}
+          <Link className="ss__navlink" to="/admin">
+            심사용 화면 목록
+          </Link>
         </header>
 
         <section className="ss__card">
