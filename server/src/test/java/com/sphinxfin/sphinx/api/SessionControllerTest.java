@@ -49,6 +49,9 @@ class SessionControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository extractedRiskItems;
+
     /**
      * ai-service(F-SCR-001)는 이 통합 테스트의 대상이 아니라 상류 의존성이다 — 실제
      * HTTP(:8100)에 붙이지 않고 목으로 대신한다. 채점 결과는 예전 컨트롤러 목과 동일하게
@@ -158,6 +161,24 @@ class SessionControllerTest {
                                 "부분 보호 범위를 정확히 진술", null),
                         inv.getArgument(2)));
 
+        // 변액 상품의 항목은 실추출 스냅샷에서 온다 — 폴백(ELS 한 벌)은 유형이 다른 상품에
+        // 목 목록을 안 내준다(이슈 #427). 그래서 변액 세션을 돌리려면 먼저 변액 항목을
+        // 추출·저장해 둔다(EnvelopeContractTest 와 같은 방식: parse·extract 를 목으로 세우고
+        // POST /extract 가 실제로 영속). 이렇게 해야 productType 도 항목도 변액에서 온다.
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-var-samsung-b2601", "VARIABLE_INSURANCE", null, "parser-v1", null, 1,
+                        java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        java.util.List.of(), java.util.List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(java.util.List.of(
+                        RiskItem.extracted("VAR-DEPOSIT-INSURANCE-SCOPE", "doc-var-samsung-b2601",
+                                "예금자보호 범위(부분 보호)", "required",
+                                new RiskItem.Condition("최저사망지급금까지만 보호",
+                                        new RiskItem.SourceSpan(1, 0, 2)))),
+                        java.util.List.of()));
+        mvc.perform(post("/products/doc-var-samsung-b2601/extract")).andExpect(status().isOk());
+
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"productId":"doc-var-samsung-b2601","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
@@ -166,13 +187,18 @@ class SessionControllerTest {
 
         mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
+                                {"itemId":"VAR-DEPOSIT-INSURANCE-SCOPE","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grade").value("U1"));
 
         // 하드코딩이면 "ELS" 스텁이 잡혀 U4가 나온다 — 넘어간 값을 직접 확인한다.
         verify(aiServiceClient).score(anyString(), anyString(), anyString(), any(RiskItem.class),
                 eq("VARIABLE_INSURANCE"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class));
+
+        // 저장한 변액 스냅샷을 지운다 — 같은 H2 컨텍스트를 쓰는 다른 테스트가 폴백 대신
+        // 이 행을 읽지 않도록(ProductAccessWiringTest 와 같은 정리). deleteAll 은 스스로
+        // 트랜잭션을 관리한다(파생 deleteByProductId 는 호출부 트랜잭션이 필요해 여기선 못 쓴다).
+        extractedRiskItems.deleteAll();
     }
 
     @Test

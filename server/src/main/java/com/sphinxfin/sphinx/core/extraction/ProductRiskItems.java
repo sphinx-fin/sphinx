@@ -86,11 +86,13 @@ public class ProductRiskItems {
     }
 
     /**
-     * 상품의 이해항목 — 저장된 추출이 있으면 그것, 없으면 폴백(MockData). <b>어느 출처도
-     * 모르는 상품이면 404</b>({@link #productTypeOf} 와 같은 규약, 결정 10.81) — 없는 상품ID
-     * 에도 폴백 목록을 내주면 카탈로그가 둘 이상이 되는 순간 조용히 틀린 목록이 된다.
+     * 상품의 이해항목 — 저장된 추출이 있으면 그것, 없으면 폴백(MockData). <b>저장 추출도 없고
+     * 맞는 폴백도 없으면 404</b>({@link #productTypeOf} 와 같은 규약, 결정 10.81 · 이슈 #427).
+     * 폴백은 상품유형이 맞는 상품에만 목 목록을 낸다({@link FallbackCatalog#riskItems}) — 없는
+     * 상품ID 나 유형이 다른 상품에 목 목록을 내주면 조용히 틀린 목록(예: 변액 세션에 ELS 질문)이
+     * 된다. 그 둘은 여기서 404 로 드러난다.
      *
-     * @throws NoSuchElementException 어느 출처도 모르는 상품(→ 404)
+     * @throws NoSuchElementException 저장 추출도 맞는 폴백도 없는 상품(→ 404)
      */
     @Transactional(readOnly = true)
     public List<RiskItem> riskItemsOf(String productId) {
@@ -100,7 +102,8 @@ public class ProductRiskItems {
         }
         return fallbackCatalog.riskItems(productId)
                 .orElseThrow(() -> new NoSuchElementException(
-                        "상품 목록에 없음(이해항목을 알 수 없다): " + productId));
+                        "이해항목을 알 수 없다(저장 추출도, 상품유형이 맞는 폴백도 없다 — "
+                                + "추출을 먼저 돌려라): " + productId));
     }
 
     /**
