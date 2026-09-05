@@ -250,3 +250,69 @@ def test_real_document_records_its_source(real_case):
     source = real_case["sample"]["_source"]
     assert source["sha256"] and len(source["sha256"]) == 64
     assert source["fetch_key"]
+
+
+# --- 4. 표 안은 칸 순서로 읽는다 (이슈 #436) ---------------------------------------
+#
+# `extract_text` 는 줄을 y 하나로 세워서, 한 행 안의 오른쪽 칸 줄이 왼쪽 칸 줄들 *사이* y 에
+# 떨어지면 두 칸이 번갈아 들어간다. 그러면 **인용의 쓸모**가 깨진다 — 조건부터 결론까지
+# 걸치는 인용에 남의 칸 글자가 끼므로, 모델은 깨끗한 조각만 인용하고 결론을 버린다.
+#
+# ❗**`13/13` 은 합격 기준이 아니다.** 회차마다 어디까지 인용하는지가 갈리므로 끊김이 남아
+# 있어도 통과하는 회차가 있다(`#436`, 윤지석). 잴 것은 **원문에서 끊김이 해소됐는가**고,
+# 그건 LLM 없이 여기서 잰다.
+
+def test_the_els_maturity_clause_runs_unbroken_from_condition_to_conclusion(real_case):
+    """★ ⑧항이 조건절부터 결론까지 남의 칸 글자 없이 이어진다 (`#436` 합격 기준).
+
+    이 문장이 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, 결론
+    ("이 경우 원금 손실이 발생합니다.")까지 걸쳐야 손실 조건으로 읽힌다. 고치기 전에는
+    사이에 수익률 칸 조각이 100자 끼어 있었다.
+    """
+    if real_case["key"] != "els":
+        pytest.skip("ELS 문서의 자리다")
+    text = real_case["doc"]["pages"][7]["text"]
+    head, tail = "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."
+    start, end = text.index(head), text.index(tail) + len(tail)
+    clause = text[start:end]
+    strays = ["33.00%", "(연 11.00%)", "-100% ~-30%",
+              "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
+    assert [s for s in strays if s in clause] == [], clause
+
+
+def test_cell_ordering_only_permutes_lines(real_case):
+    """★ 칸 순서 읽기는 **자리바꿈**이다 — 줄을 더하거나 지우거나 고치지 않는다.
+
+    이걸 안 잠그면 「읽는 순서를 고친다」가 「원문을 다시 쓴다」로 조용히 번진다. 그러면
+    `pages[page].text[start:end] == value_text`(1절 F-EXT-002 통제의 P6)가 원문이 아닌
+    것을 가리키게 되고, 그 결함은 감사 시점까지 안 드러난다.
+    """
+    import pdfplumber
+
+    with pdfplumber.open(real_case["pdf"]) as pdf:
+        for index, page in enumerate(pdf.pages):
+            before = page.extract_text(x_tolerance=parsing._X_TOLERANCE,
+                                       y_tolerance=parsing._Y_TOLERANCE) or ""
+            after = real_case["doc"]["pages"][index]["text"]
+            assert sorted(unicodedata.normalize("NFC", before).split("\n")) == \
+                sorted(after.split("\n")), f"p{index + 1}"
+
+
+def test_lines_outside_tables_do_not_move(real_case):
+    """★ 표 밖의 줄은 한 글자도 안 움직인다 — 파급을 표 안으로 가둔다."""
+    import pdfplumber
+
+    with pdfplumber.open(real_case["pdf"]) as pdf:
+        for index, page in enumerate(pdf.pages):
+            boxes = [t.bbox for t in page.find_tables()]
+            lines = page.extract_text_lines(x_tolerance=parsing._X_TOLERANCE,
+                                            y_tolerance=parsing._Y_TOLERANCE)
+            outside = {
+                i: line["text"] for i, line in enumerate(lines)
+                if not any(b[1] - 1 <= (line["top"] + line["bottom"]) / 2 <= b[3] + 1
+                           for b in boxes)
+            }
+            got = real_case["doc"]["pages"][index]["text"].split("\n")
+            for i, expected in outside.items():
+                assert got[i] == unicodedata.normalize("NFC", expected), \
+                    f"p{index + 1} L{i + 1}"
