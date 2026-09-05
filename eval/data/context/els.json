@@ -1,7 +1,7 @@
 {
   "_생성": "eval/tools/build_context.py — 손으로 고치지 않는다",
-  "built_at": "2026-08-31T03:32:42+00:00",
-  "model": "gemini-3.5-flash-lite",
+  "built_at": "2026-09-05T10:01:48+00:00",
+  "model": "gpt-5-mini",
   "product_type": "ELS",
   "product_id": "eval-els-001",
   "parsed_document": "contracts/samples/parsed_els_sample.json",
@@ -12,11 +12,11 @@
       "name": "예금자보호 비대상",
       "importance": "required",
       "condition": {
-        "value_text": "또한 이 파생결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로",
+        "value_text": "이 파생결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
         "source_span": {
           "page": 1,
-          "start": 120,
-          "end": 162
+          "start": 123,
+          "end": 206
         }
       },
       "status": "extracted",
@@ -28,10 +28,10 @@
       "name": "원금손실 가능성 고지",
       "importance": "required",
       "condition": {
-        "value_text": "투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
+        "value_text": "결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
         "source_span": {
           "page": 1,
-          "start": 163,
+          "start": 127,
           "end": 206
         }
       },
@@ -44,11 +44,11 @@
       "name": "고난도금융투자상품",
       "importance": "recommended",
       "condition": {
-        "value_text": "본 증권은 투자자가 이해하기 어려운 고난도금융투자상품으로 손",
+        "value_text": "본 증권은 투자자가 이해하기 어려운 고난도금융투자상품으로 손\n실이 발생할 가능성이 있으니 투자에 유의하시기 바랍니다.",
         "source_span": {
           "page": 2,
           "start": 422,
-          "end": 455
+          "end": 487
         }
       },
       "status": "extracted",
@@ -60,11 +60,11 @@
       "name": "고령투자자 숙려제도 대상",
       "importance": "recommended",
       "condition": {
-        "value_text": "동 파생결합증권은 숙려제도 대상 투자자(65세이상 고령투자자",
+        "value_text": "동 파생결합증권은 숙려제도 대상 투자자(65세이상 고령투자자\n, 투자성향 부적합· 부적정 투자자)의 투자유의 상품으로 지정\n된 금융상품이며, 고난도금융투자상품*인 파생결합증권은 숙려제도\n대상 투자자(개인일반투자자)의 투자유의 상품으로 지정된 금\n융상품입니다.",
         "source_span": {
           "page": 2,
           "start": 491,
-          "end": 524
+          "end": 635
         }
       },
       "status": "extracted",
@@ -76,11 +76,11 @@
       "name": "조기상환 조건",
       "importance": "required",
       "condition": {
-        "value_text": "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK",
+        "value_text": "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK\nEI225 지수, EuroStoxx50 지수의 자동조기상환평가가격이 모\n두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경",
         "source_span": {
           "page": 7,
-          "start": 355,
-          "end": 390
+          "start": 358,
+          "end": 469
         }
       },
       "status": "extracted",
@@ -92,11 +92,11 @@
       "name": "낙인 배리어",
       "importance": "required",
       "condition": {
-        "value_text": "최초기준가격평가일(불포함)부터",
+        "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터\n만기평가일(포함)까지 세 기초자산의 종가 중 어느 하나라\n도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로\n하락한 적이 있는 경우(어느 한 기초자산의 가격만 발표되\n는 날도 포함)만기상환금액은 다음과 같습니다.",
         "source_span": {
           "page": 8,
-          "start": 657,
-          "end": 673
+          "start": 827,
+          "end": 982
         }
       },
       "status": "extracted",
@@ -108,11 +108,11 @@
       "name": "만기 손실조건",
       "importance": "required",
       "condition": {
-        "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터",
+        "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터\n만기평가일(포함)까지 세 기초자산의 종가 중 어느 하나라\n도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로\n하락한 적이 있는 경우(어느 한 기초자산의 가격만 발표되\n는 날도 포함)만기상환금액은 다음과 같습니다.",
         "source_span": {
           "page": 8,
-          "start": 643,
-          "end": 673
+          "start": 827,
+          "end": 982
         }
       },
       "status": "extracted",
@@ -124,11 +124,11 @@
       "name": "전액손실 사례",
       "importance": "required",
       "condition": {
-        "value_text": "⇒ 1억 + [1억 × (-100%)]= 0 원 상환(전액손실)",
+        "value_text": "만기일에 [S&P500 지수], [NIKKEI225 지수], [EuroStoxx50 지수]의 만\n기평가가격이 각각 50, 75, 0일때\n사례4 -100%",
         "source_span": {
           "page": 10,
-          "start": 772,
-          "end": 807
+          "start": 653,
+          "end": 738
         }
       },
       "status": "extracted",
@@ -140,11 +140,11 @@
       "name": "과거 데이터 수익률 모의실험",
       "importance": "required",
       "condition": {
-        "value_text": "제4181회 파생결합증권 (수익률 모의실험)",
+        "value_text": "위 그래프와 표는 2003년 08월 18일부터 2023년 08월 18일 까지의 기초자산의 종가\n를 이용하여 분석한 결과입니다.",
         "source_span": {
-          "page": 11,
-          "start": 61,
-          "end": 85
+          "page": 12,
+          "start": 60,
+          "end": 130
         }
       },
       "status": "extracted",
@@ -156,11 +156,11 @@
       "name": "중도상환 원금손실",
       "importance": "required",
       "condition": {
-        "value_text": "실제 중도상환금액은 상\n기한 공정가액(기준가)의 95% 이상(단, 발행후 6개월까지는 90%이상)수준에서 발",
+        "value_text": "실제 중도상환금액은 상\n기한 공정가액(기준가)의 95% 이상(단, 발행후 6개월까지는 90%이상)수준에서 발\n행사가 신의성실의 원칙에 따라 산정하며, 이 경우 원금손실이 발생할 수 있습니다.",
         "source_span": {
           "page": 13,
           "start": 414,
-          "end": 474
+          "end": 520
         }
       },
       "status": "extracted",
@@ -172,11 +172,11 @@
       "name": "숙려기간",
       "importance": "recommended",
       "condition": {
-        "value_text": "청약기간 2026년 08월 25일 (17:00 까지)",
+        "value_text": "숙려기간 (청약일(불포함)이후 2영업일로, 청약시점에 따라 다르게 적\n용됩니다.)",
         "source_span": {
           "page": 5,
-          "start": 210,
-          "end": 239
+          "start": 276,
+          "end": 321
         }
       },
       "status": "extracted",
@@ -188,11 +188,11 @@
       "name": "환금성 제약(비상장)",
       "importance": "required",
       "condition": {
-        "value_text": "본 증권은 상장하지 않을 예정이므로 증권 보유자는 장외매매를",
+        "value_text": "본 증권은 상장하지 않을 예정이므로 증권 보유자는 장외매매를\n통하여 본 증권을 양도하거나, 투자자의 요청에 의한 중도상환 등",
         "source_span": {
           "page": 14,
           "start": 560,
-          "end": 593
+          "end": 629
         }
       },
       "status": "extracted",
@@ -204,11 +204,11 @@
       "name": "발행사 신용위험",
       "importance": "required",
       "condition": {
-        "value_text": "본 증권은 발행인의 신용으로 발행되는 무보증 증권이므로 발행",
+        "value_text": "발행인의 신용상태에 따라 투자원금이 보호되지 않을 수 있는 신용위험\n이 있으므로 발행인의 재무현황 및 신용등급(키움증권, 발행사\n신용등급 AA, 2026년 06월 30일 한국기업평가 , 2026년 06월\n30일 한국신용평가 , 2026년 06월 30일 NICE신용평가 ) 등을\n파악하고 투자결정을 하시기 바랍니다.",
         "source_span": {
-          "page": 14,
-          "start": 407,
-          "end": 440
+          "page": 2,
+          "start": 3,
+          "end": 178
         }
       },
       "status": "extracted",
@@ -216,19 +216,19 @@
     }
   },
   "questions": {
-    "ELS-NO-DEPOSIT-INSURANCE": "은행에서 파는 다른 상품들과 비교했을 때 이 상품의 보장 내용이 어떻게 다른지 말씀해 주시겠어요?",
-    "ELS-PRINCIPAL-LOSS-WARNING": "어떤 상황에서 돈을 잃게 되는지 본인의 말로 설명해 주시겠어요?",
-    "ELS-HIGH-COMPLEXITY": "어떤 상황에서 이 상품에서 손실이 발생할 수 있는지 본인의 말로 설명해 주시겠어요?",
-    "ELS-ELDERLY-COOLING": "투자 기간이 어떻게 되는지 직접 말씀해 주시겠어요?",
-    "ELS-EARLY-REDEMPTION-CONDITION": "어떤 상황이 되어야 돈을 정해진 때보다 일찍 받을 수 있는지 말씀해 주시겠어요?",
-    "ELS-KNOCKIN-BARRIER": "어떤 상황이 발생했을 때 조건이 성립하게 되는지 설명해 주시겠어요?",
-    "ELS-MATURITY-LOSS-CONDITION": "어떤 상황에서 손실이 나는지 말씀해 주시겠어요?",
-    "ELS-TOTAL-LOSS-SCENARIO": "최악의 상황이 오면 내 돈이 어떻게 되는지 말씀해 주시겠어요?",
-    "ELS-LOSS-SIMULATION": "과거 자료로 해본 실험 결과가 앞으로의 수익을 어떻게 보여주는지 말씀해 주시겠어요?",
-    "ELS-MIDWAY-REDEMPTION-COST": "약속된 기간이 되기 전에 돈을 찾으시면 원금이 어떻게 되는지 말씀해 주시겠어요?",
-    "ELS-COOLING-PERIOD": "생각해보실 수 있는 기간이 언제까지인지 말씀해 주시겠어요?",
-    "ELS-NO-LISTING": "급하게 돈이 필요할 때 어떻게 현금으로 바꿀 수 있는지 말씀해 주시겠어요?",
-    "ELS-ISSUER-CREDIT-RISK": "발행회사에 문제가 생겼을 때 투자하신 돈이 어떻게 처리되는지 설명해 주시겠어요?"
+    "ELS-NO-DEPOSIT-INSURANCE": "이 상품이 예금자보호를 받는지 어떻게 이해하고 계신지 말씀해 주시겠어요?",
+    "ELS-PRINCIPAL-LOSS-WARNING": "이 상품에 넣은 돈이 어떻게 될 수 있는지 본인 말씀으로 설명해 주시겠어요?",
+    "ELS-HIGH-COMPLEXITY": "이 상품이 어느 정도로 복잡하고 위험한 상품이라고 들으셨는지 말씀해 주시겠어요?",
+    "ELS-ELDERLY-COOLING": "청약하시기 전에 따로 생각할 시간을 두는 절차가 있다고 들으셨나요? 어떤 절차인지 말씀해 주시겠어요?",
+    "ELS-EARLY-REDEMPTION-CONDITION": "만기 전에 돈을 돌려받는 경우가 있다면 어떤 조건일 때인지 말씀해 주시겠어요?",
+    "ELS-KNOCKIN-BARRIER": "기초자산이 어느 정도까지 떨어지면 문제가 되는지 말씀해 주시겠어요?",
+    "ELS-MATURITY-LOSS-CONDITION": "만기에 손실이 확정되는 경우가 어떤 상황인지 설명해 주시겠어요?",
+    "ELS-TOTAL-LOSS-SCENARIO": "가장 나쁜 경우에 얼마를 잃을 수 있다고 이해하고 계신가요?",
+    "ELS-LOSS-SIMULATION": "과거 데이터로 해본 모의실험 결과를 어떻게 이해하셨는지 말씀해 주시겠어요?",
+    "ELS-MIDWAY-REDEMPTION-COST": "만기 전에 중간에 돈을 빼려면 어떻게 되는지 말씀해 주시겠어요?",
+    "ELS-COOLING-PERIOD": "청약 후에 다시 생각할 수 있는 기간이 있는지, 있다면 어떤 것인지 말씀해 주시겠어요?",
+    "ELS-NO-LISTING": "가입한 뒤에 이 상품을 팔고 싶으면 어떻게 되는지 말씀해 주시겠어요?",
+    "ELS-ISSUER-CREDIT-RISK": "이 상품을 발행한 회사에 문제가 생기면 어떻게 되는지 말씀해 주시겠어요?"
   },
   "unusable": {}
 }

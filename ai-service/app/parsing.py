@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 MANUAL_OVERRIDE_CODE = "MANUAL_OVERRIDE"
 
 #: 출력이 달라지면 올린다. 파싱 파라미터(_X_TOLERANCE 등) 변경도 출력 변경이다.
-PARSER_VERSION = "0.1.0"
+PARSER_VERSION = "0.2.0"
 
 #: 데모 범위. contracts/parsed_document.schema.json 의 product_type enum과 1:1.
 PRODUCT_TYPES = ("ELS", "VARIABLE_INSURANCE")
@@ -103,9 +103,101 @@ def parse_document(
     return doc
 
 
+def _cell_ordered_lines(page) -> list[str] | None:
+    """표 안에서는 **칸 순서로** 읽는다. 표가 없거나 못 읽으면 `None`(호출자가 그대로 간다).
+
+    ## 무엇을 고치는가
+
+    `extract_text` 는 줄을 **y 하나로** 세운다. 그래서 한 행 안에서 오른쪽 칸의 줄이 왼쪽 칸
+    줄들 *사이* y 에 떨어지면, 두 칸이 한 글자씩 번갈아 들어간다. ELS 간이투자설명서 8쪽
+    ⑧항이 그 자리다 — 수익률 칸("(기초자산 중 하 / 락폭이 큰 종목의 / 수익률)")이 본문
+    문장 사이에 7pt 씩 어긋나 있다.
+
+        본문 y=516.55  …최초기준가격의 45%인 45/ 45/ 45 미만으로
+        칸   y=523.63  (기초자산 중 하          ← 끼어든다
+        본문 y=531.43  하락한 적이 있는 경우(…
+        칸   y=538.51  락폭이 큰 종목의         ← 끼어든다
+
+    **1절 F-EXT-002 통제**의 `P6` 항등식은 이래도 성립한다(원문 그대로 인용하면 되니까).
+    깨지는 것은 인용의 **쓸모**다 —
+    조건부터 결론까지 걸치는 인용에 남의 칸 글자가 100자 섞여 들어가므로, 모델은 깨끗한
+    조각(조건절)만 인용하고 결론("이 경우 원금 손실이 발생합니다.")을 버린다. 이슈 `#436`
+    에서 `@yoonjiseok` 이 **끊김이 없는가**를 합격 기준으로 못박은 것이 이 성질이다:
+    *"13/13 은 합격 기준이 아니다 — 회차마다 어디까지 인용하는지가 갈린다."*
+
+    ## 어떻게 고치는가 — 자리바꿈이지 재조립이 아니다
+
+    줄 목록의 **순서만** 행 안에서 바꾼다. 각 행이 차지한 자리(인덱스)는 그대로 두고 그
+    안에서 `(칸, y)` 로 다시 세운다. 그래서
+
+    - 표 밖의 줄은 **한 글자도 안 움직인다.**
+    - 한 행에 칸이 하나만 차 있으면 결과가 같다(대부분의 행).
+    - 두 칸이 **같은 y** 면 `extract_text` 가 이미 한 줄로 합쳤으므로 여기 안 걸린다.
+
+    실측으로 ELS 문서 16쪽 중 8쪽 21개 행만 순서가 바뀐다.
+
+    ❗**출력이 바뀌므로 `PARSER_VERSION` 을 올린다.** 오프셋을 박아 둔 파생물
+    (`contracts/samples/*.json` · `eval/data/context/*.json`)은 **손으로 고치지 않고 생성기를
+    다시 돌린다** — 둘 다 문면으로 찾아 `resolve_span` 으로 계산하므로 스스로 낫는다.
+    """
+    try:
+        tables = page.find_tables()
+        if not tables:
+            return None
+        lines = page.extract_text_lines(x_tolerance=_X_TOLERANCE, y_tolerance=_Y_TOLERANCE)
+    except Exception:
+        return None  # 표를 못 읽는 것은 텍스트를 못 읽는 것과 다르다 — 본문은 그대로 낸다
+    if not lines:
+        return None
+
+    order = list(range(len(lines)))
+    claimed: set[int] = set()
+
+    for table in tables:
+        for row in table.rows:
+            _, top, _, bottom = row.bbox
+            members = [
+                i for i, line in enumerate(lines)
+                if i not in claimed and top - 1 <= (line["top"] + line["bottom"]) / 2 <= bottom + 1
+            ]
+            if len(members) < 2:
+                continue
+            cells = [c for c in row.cells if c]
+
+            def rank(i: int, cells=cells) -> int:
+                """줄이 **가장 많이 걸친** 칸. 왼쪽 끝(`x0`)이 아니다.
+
+                ❗**여러 칸을 물고 온 줄이 있다.** `extract_text` 가 같은 y 의 칸들을 이미 한 줄로
+                합쳐 놓은 경우다(`만기 하락한 적이 없는 경우(…) (연 11.00%)` — 라벨·본문·수익률
+                셋을 문다). 그런 줄을 `x0` 으로 정하면 **라벨 칸**을 따라가는데, `만기상환` 처럼
+                병합된 라벨 칸은 ⑥⑦⑧을 걸쳐 y 가 위쪽이라 줄이 **다른 항목 위로 올라간다.**
+
+                `#452` 리뷰에서 `@yoonjiseok` 이 ⑦행으로 잡아낸 자리다. 그렇게 나온 결과는
+                *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는 경우 만기상환금액은 다음과 같습니다"* 로,
+                **1절 F-EXT-002 통제의 `P6` 항등식은 통과하는데 뜻이 틀렸다** — 축자 인용이라 그렇다. 인용이 원문과
+                같은데 뜻이 다른 것이 제일 나쁘고, `#446` 이 닫힌 이유(*"끊김을 없앤 게 아니라
+                옮겼다"*)가 정확히 이것이다. 겹침 폭으로 정하면 그 줄은 본문 칸으로 간다.
+                """
+                x0, x1 = lines[i]["x0"], lines[i]["x1"]
+                widths = [min(x1, c[2]) - max(x0, c[0]) for c in cells]
+                best = max(range(len(cells)), key=lambda k: widths[k]) if cells else None
+                if best is None or widths[best] <= 0:
+                    return len(cells)  # 어느 칸에도 안 걸리면 행 끝으로 — 순서는 y 가 가른다
+                return best
+
+            slots = sorted(members)
+            for slot, i in zip(slots, sorted(members, key=lambda i: (rank(i), lines[i]["top"]))):
+                order[slot] = i
+            claimed.update(members)
+
+    return [lines[i]["text"] for i in order]
+
+
 def _extract_page_text(page, page_no: int, warnings: list[dict]) -> str:
     try:
-        raw = page.extract_text(x_tolerance=_X_TOLERANCE, y_tolerance=_Y_TOLERANCE)
+        ordered = _cell_ordered_lines(page)
+        raw = ("\n".join(ordered) if ordered is not None
+               else page.extract_text(x_tolerance=_X_TOLERANCE, y_tolerance=_Y_TOLERANCE))
     except Exception as exc:  # pdfminer는 깨진 폰트에서 다양한 예외를 던진다
         warnings.append({
             "page": page_no,

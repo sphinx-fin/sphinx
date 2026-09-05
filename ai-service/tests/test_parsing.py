@@ -18,7 +18,7 @@ import pytest
 
 from app import parsing
 
-from conftest import SYNTHETIC_QUOTES
+from conftest import DOCS, REAL_CASES, SYNTHETIC_QUOTES
 
 SCHEMA_PATH = (
     pathlib.Path(__file__).resolve().parents[2] / "contracts" / "parsed_document.schema.json"
@@ -250,3 +250,110 @@ def test_real_document_records_its_source(real_case):
     source = real_case["sample"]["_source"]
     assert source["sha256"] and len(source["sha256"]) == 64
     assert source["fetch_key"]
+
+
+# --- 4. 표 안은 칸 순서로 읽는다 (이슈 #436) ---------------------------------------
+#
+# `extract_text` 는 줄을 y 하나로 세워서, 한 행 안의 오른쪽 칸 줄이 왼쪽 칸 줄들 *사이* y 에
+# 떨어지면 두 칸이 번갈아 들어간다. 그러면 **인용의 쓸모**가 깨진다 — 조건부터 결론까지
+# 걸치는 인용에 남의 칸 글자가 끼므로, 모델은 깨끗한 조각만 인용하고 결론을 버린다.
+#
+# ❗**`13/13` 은 합격 기준이 아니다.** 회차마다 어디까지 인용하는지가 갈리므로 끊김이 남아
+# 있어도 통과하는 회차가 있다(`#436`, 윤지석). 잴 것은 **원문에서 끊김이 해소됐는가**고,
+# 그건 LLM 없이 여기서 잰다.
+
+@pytest.fixture(scope="session")
+def els_doc():
+    """ELS 실문서 하나만 보는 자리.
+
+    ❗**`real_case` 를 쓰고 `var` 회차에서 `skip` 하면 안 된다.** 이 레포는 CI 에서 건너뛴
+    테스트를 **실패로 센다**(`no_skip.py` · `#37` 코멘트 ②) — 실제로 그렇게 냈다가 걸렸다.
+    """
+    spec = REAL_CASES["els"]
+    pdf = DOCS / spec["pdf"]
+    if not pdf.exists():  # 추적되는 파일이다 — 없으면 체크아웃이 온전하지 않은 것이다
+        pytest.skip(f"{pdf} 없음. {spec['fetch']}")
+    return parsing.parse_document(
+        str(pdf), document_id=spec["document_id"],
+        product_type=spec["product_type"], parsed_at="2026-08-24T00:00:00Z",
+    )
+
+
+#: p8 상환조건 표에서 **조건절부터 결론까지 한 항목으로 읽혀야 하는** 자리들.
+#: ⑧ 은 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, ⑦ 은 `#452`
+#: 리뷰에서 `@yoonjiseok` 이 *"⑧만 고치고 ⑦은 오히려 옮겨 놨다"* 로 잡아낸 자리다.
+ELS_P8_CLAUSES = [
+    ("⑦", "⑦ 위 ⑥에 해당하지", "원금 × [100%+33.00%]"),
+    ("⑧", "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."),
+]
+
+
+#: ⑧행 수익률 칸의 줄들. **다른 y** 에 있어서 본문 줄 사이로 끼어들던 것들이다.
+_STRAYS = ["-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
+
+
+@pytest.mark.parametrize("tag,head,tail", ELS_P8_CLAUSES, ids=[c[0] for c in ELS_P8_CLAUSES])
+def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, head, tail):
+    """★ 조건절부터 결론까지 **다른 항목이 끼지 않고** 이어진다 (`#436` 합격 기준).
+
+    ⑧ 은 고치기 전 사이에 수익률 칸 조각이 100자 끼어 있었다. ⑦ 은 `#452` 의 첫 판이
+    끊김을 **없앤 게 아니라 옮겨** 놓아서, *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는
+    경우 만기상환금액은 다음과 같습니다"* 라는 **P6 를 통과하는 오답**이 만들어졌던 자리다.
+
+    ❗그래서 이 그물은 ⑧ 하나로는 부족하다 — `#446` 도 `#452` 첫 판도 **고친 자리 옆에서**
+    깨졌다. 한 항목만 재는 그물은 옮겨 간 끊김을 구조적으로 못 본다.
+
+    ## ❗이 그물이 재지 **않는** 것 — 같은 y 로 이미 합쳐진 조각
+
+    `_STRAYS` 는 **다른 y 에 있던 칸 줄**만 본다. `extract_text` 가 같은 y 의 칸들을 이미
+    한 줄로 합쳐 온 것은 줄 재정렬로 못 가르므로 그대로 남는다. ⑦ 이 그 경우다.
+
+        도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로 33.00%    ← 33.00% 가 붙어 있다
+        만기 하락한 적이 없는 경우(…                (연 11.00%)     ← 라벨·수익률이 붙어 있다
+
+    그래서 ⑦ 에 대해 이 단정이 참인 것은 **"칸 조각이 없다"** 가 아니라 **"항목이 끊기지
+    않는다"** 다(`#452` 리뷰, 윤지석). 그 구간은 `main` 과 바이트 동일이라 이 변경의 몫이
+    아니고, 가르려면 줄이 아니라 **낱말 단위**로 읽어야 한다 — 별도 사안이다.
+    """
+    text = els_doc["pages"][7]["text"]
+    start, end = text.index(head), text.index(tail) + len(tail)
+    clause = text[start:end]
+    assert [s for s in _STRAYS if s in clause] == [], f"{tag}: {clause}"
+
+
+def test_cell_ordering_only_permutes_lines(real_case):
+    """★ 칸 순서 읽기는 **자리바꿈**이다 — 줄을 더하거나 지우거나 고치지 않는다.
+
+    이걸 안 잠그면 「읽는 순서를 고친다」가 「원문을 다시 쓴다」로 조용히 번진다. 그러면
+    `pages[page].text[start:end] == value_text`(1절 F-EXT-002 통제의 P6)가 원문이 아닌
+    것을 가리키게 되고, 그 결함은 감사 시점까지 안 드러난다.
+    """
+    import pdfplumber
+
+    with pdfplumber.open(real_case["pdf"]) as pdf:
+        for index, page in enumerate(pdf.pages):
+            before = page.extract_text(x_tolerance=parsing._X_TOLERANCE,
+                                       y_tolerance=parsing._Y_TOLERANCE) or ""
+            after = real_case["doc"]["pages"][index]["text"]
+            assert sorted(unicodedata.normalize("NFC", before).split("\n")) == \
+                sorted(after.split("\n")), f"p{index + 1}"
+
+
+def test_lines_outside_tables_do_not_move(real_case):
+    """★ 표 밖의 줄은 한 글자도 안 움직인다 — 파급을 표 안으로 가둔다."""
+    import pdfplumber
+
+    with pdfplumber.open(real_case["pdf"]) as pdf:
+        for index, page in enumerate(pdf.pages):
+            boxes = [t.bbox for t in page.find_tables()]
+            lines = page.extract_text_lines(x_tolerance=parsing._X_TOLERANCE,
+                                            y_tolerance=parsing._Y_TOLERANCE)
+            outside = {
+                i: line["text"] for i, line in enumerate(lines)
+                if not any(b[1] - 1 <= (line["top"] + line["bottom"]) / 2 <= b[3] + 1
+                           for b in boxes)
+            }
+            got = real_case["doc"]["pages"][index]["text"].split("\n")
+            for i, expected in outside.items():
+                assert got[i] == unicodedata.normalize("NFC", expected), \
+                    f"p{index + 1} L{i + 1}"
