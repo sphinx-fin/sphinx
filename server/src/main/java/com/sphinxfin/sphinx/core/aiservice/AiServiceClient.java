@@ -23,6 +23,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.math.BigDecimal;
+import java.text.Normalizer;
 import java.util.List;
 import java.util.Map;
 import com.sphinxfin.sphinx.core.pii.PiiGateway;
@@ -83,7 +84,17 @@ public class AiServiceClient {
      * 민감도가 다르므로 종류를 떼는 선까지로 둔다.
      */
     private PiiGateway.Masked maskAndCount(String text) {
-        PiiGateway.Masked masked = PiiGateway.maskWithHits(text);
+        // ❗정규화 → 마스킹 (NFC 정본 경계, 결정 10.2.1). 고객 텍스트가 ai-service 로 나가는
+        // 단일 지점이 여기다. Spring 은 NFC 를 보장하지 않아(요청 진입점도 Jackson 도 들어온
+        // 코드포인트를 그대로 들고 있다) 저장되는 utteranceQuote 가 입력 형태(NFC/NFD)를 그대로
+        // 따르고, 그러면 같은 발화가 다른 contentHash 를 낸다 — 영속 DB(#445)로 해시가 굳은
+        // 지금은 되돌릴 수 없어(교차검증 불가) 여기서 형태를 고정한다.
+        //
+        // 순서가 정규화 → 마스킹인 이유: 반대로 하면 마스킹 판정 뒤 남은 원문의 형태가 바뀌어
+        // 판정과 저장 형태가 같은 입력에 안 맞는다. NFKC 가 아니라 NFC 다 — NFKC 는 전각
+        // '７'→'7' 까지 접어 마스킹이 보는 내용을 바꾼다(결정 10.2.1 의 4번).
+        String normalized = text == null ? null : Normalizer.normalize(text, Normalizer.Form.NFC);
+        PiiGateway.Masked masked = PiiGateway.maskWithHits(normalized);
         piiMeter.record(masked);
         if (masked.total() > 0) {
             log.info("P3 마스킹 {}건", masked.total());
