@@ -247,6 +247,61 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("추출 실패한 required 는 안 물어지되(502 회피) 미측정으로 게이트가 막는다 (이슈 #462)")
+    void extractionFailedRequiredIsSkippedButStillGatesRed() throws Exception {
+        // 실추출은 비결정적이라 required 하나가 extraction_failed(condition=null)로 올 수 있다.
+        // 그걸 면담이 물으면 ai-service /score 의 require_condition() 이 던져 면담 중 502 다.
+        // A(성공)·B(실패) 둘 다 required 로 추출·저장한다.
+        when(aiServiceClient.score(anyString(), anyString(), anyString(), any(RiskItem.class),
+                eq("ELS"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class)))
+                .thenAnswer(inv -> new AiServiceClient.Scored(
+                        new Judgment(inv.getArgument(0), Grade.U1, new BigDecimal("0.95"),
+                                new Judgment.Evidence("낙인 하회하면 원금 손실 난다고 들었어요",
+                                        "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
+                                "조건을 정확히 진술", null),
+                        inv.getArgument(2)));
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-els-kiwoom-4181", "ELS", null, "parser-v1", null, 1,
+                        java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        java.util.List.of(), java.util.List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(java.util.List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2))),
+                        RiskItem.failed("ELS-KNOCKIN-BARRIER", "doc-els-kiwoom-4181",
+                                "낙인 배리어", "required", "SPAN_UNRESOLVED")),
+                        java.util.List.of()));
+        mvc.perform(post("/products/doc-els-kiwoom-4181/extract")).andExpect(status().isOk());
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        // 면담은 성공 항목만 묻는다 — total==1, 실패 항목(ELS-KNOCKIN-BARRIER)은 안 나온다.
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemId").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        // 성공 항목을 이해(U1)로 답해도 — 실패 required 가 미측정으로 남아 게이트는 GREEN 이
+        // 아니다(R-00). 검증 못 한 required 를 통과시키지 않는다.
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 원금 손실 난다고 들었어요"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/" + sid + "/judge"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.signal").value("RED"))
+                .andExpect(jsonPath("$.data.ruleTrace[*].id", hasItem("R-00")));
+
+        extractedRiskItems.deleteAll();
+    }
+
+    @Test
     @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
     void unknownProductTypeFailsLoudly() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
