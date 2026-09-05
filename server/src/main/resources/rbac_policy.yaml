@@ -94,6 +94,17 @@ permissions:
   # 행위자가 SELLER 가 되면 `report:issue` 와 겹치는지가 갈려야 해서 F-GTE-004 판단이다.
   # 그래서 **CUST 도달 불가라는 사실은 그 action 에 여전히 살아 있고**,
   # `AccessPolicyTest.CustIsUnreachable` 이 그쪽으로 옮겨 붙들고 있다.
+  #
+  # ❗**그 판단을 닫았다 (#419 리뷰, F-GTE-004 정세현).** `#419` 가 엔드포인트를 붙였으므로
+  # *"엔드포인트도 아직 없다"* 는 더 이상 이유가 아니다 — 남은 이유는 **CUST 미도달 하나**다.
+  # 이 둘을 갈라 두지 않으면 다음 사람이 *"엔드포인트를 만들었으니 이제 열리겠네"* 로 읽는다.
+  #
+  # **SELLER 에게 열지 않는다.** 근거가 둘이다.
+  #   ① 수요가 없다 — S-07 은 `/report`(전문)만 부른다(`S07_Report.tsx:88`, 강희진 확인).
+  #      `/report/summary` 를 부르는 화면이 없다.
+  #   ② 열면 감사 로그에서 두 사건이 붙는다 — `report:issue`(교부했다)와 요약 조회(읽었다)가
+  #      같은 행위자로 남는다. 그 둘을 가르려고 action 을 나눈 것이 129-141행의 근거다.
+  # 여는 것은 `#166`(세션 결속 단기 토큰)이 CUST 를 도달 가능하게 만들 때다.
   session:answer:                                    # F-INT-003 고객 응답 입력 (S-03)
     - { roles: [SELLER], scope: own_session }        # CUST 를 걷었다 (#166 B안)
   session:judge:
@@ -142,7 +153,7 @@ permissions:
   report:issue:                                      # F-GTE-004 발행(교부) — PR #94 리뷰
     - { roles: [SELLER], scope: own_session }
   report:summary:read:                               # 고객 교부용 요약
-    - { roles: [CUST], scope: own_session }          # 도달 불가 (#166). 엔드포인트도 아직 없다
+    - { roles: [CUST], scope: own_session }          # 도달 불가 (#166) — 이유는 하나뿐이다
 
   override:request:
     - { roles: [SELLER], scope: own_session }
