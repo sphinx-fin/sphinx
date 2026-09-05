@@ -79,9 +79,9 @@ const SIGNAL_LABEL: Record<Signal, string> = {
 };
 
 const SIGNAL_DESC: Record<Signal, string> = {
-  GREEN: "계약을 진행할 수 있습니다.",
-  YELLOW: "재설명이 필요한 항목이 있습니다.",
-  RED: "이 상태로는 계약을 진행할 수 없습니다.",
+  GREEN: "계약을 진행할 수 있어요.",
+  YELLOW: "재설명이 필요한 항목이 있어요.",
+  RED: "이 상태로는 계약을 진행할 수 없어요.",
 };
 
 /**
@@ -228,7 +228,7 @@ export default function S05Judgment() {
   const reExplainInFlight = session?.state === "RE_EXPLAIN";
 
   if (loading) {
-    return <main className="s05"><p className="s05__loading">판정을 불러오는 중입니다…</p></main>;
+    return <main className="s05"><p className="s05__loading">판정을 불러오고 있어요…</p></main>;
   }
 
   return (
@@ -260,14 +260,14 @@ export default function S05Judgment() {
             <p className="s05__signal-desc">{SIGNAL_DESC[gate.signal]}</p>
             {gate.suitability === "NOT_EVALUATED" && (
               <p className="s05__unevaluated-desc">
-                적합성 모순은 아직 평가되지 않았습니다. 확정 시 신호가 바뀔 수 있습니다.
+                적합성 모순은 아직 확인 전이에요. 확정하면 신호가 바뀔 수 있어요.
               </p>
             )}
           </div>
           <p className="s05__settled">
             {gate.settled
-              ? "확정된 판정입니다."
-              : "아직 확정되지 않은 미리보기입니다. 아래에서 확정합니다."}
+              ? "확정된 판정이에요."
+              : "아직 확정 전이에요. 아래에서 확정해요."}
           </p>
         </section>
       )}
@@ -279,7 +279,7 @@ export default function S05Judgment() {
       {reExplainInFlight && (
         <section className="s05__reexplain" role="status">
           <div>
-            <b>재설명이 진행 중입니다.</b>
+            <b>재설명이 진행 중이에요.</b>
             <p>
               고객 화면에서 재설명을 읽고 다시 답하면 재검증으로 기록됩니다. 그전까지는
               판정을 확정할 수 없습니다.
@@ -311,7 +311,7 @@ export default function S05Judgment() {
             ))}
           </ul>
           <p className="s05__trace-note">
-            이 신호를 만든 룰입니다. 판정 근거로 기록에 남습니다.
+            이 신호를 만든 룰이에요. 판정 근거로 남아요.
           </p>
         </section>
       )}
@@ -331,7 +331,7 @@ export default function S05Judgment() {
 
         {judgments.length === 0 ? (
           <p className="s05__empty">
-            아직 판정된 항목이 없습니다. 고객 응답이 들어오면 여기에 쌓입니다.
+            아직 판정된 항목이 없어요. 고객이 답하면 여기에 쌓여요.
           </p>
         ) : (
           <ul className="s05__list">
@@ -448,7 +448,7 @@ export default function S05Judgment() {
         {gate && !gate.settled && confirming && (
           <div className="s05__confirm" role="alertdialog" aria-label="판정 확정 확인">
             <p>
-              <strong>확정하면 되돌릴 수 없습니다.</strong> 확정 이후에는 재설명·재검증으로
+              <strong>확정하면 되돌릴 수 없어요.</strong> 확정 이후에는 재설명·재검증으로
               돌아갈 수 없고 종료만 가능합니다.
             </p>
             <div className="s05__confirm-buttons">
@@ -472,10 +472,10 @@ export default function S05Judgment() {
         {gate?.signal === "RED" && !gate.settled && (
           <p className="s05__action-note">
             {judgments.length === 0 ? (
-              <>아직 채점된 응답이 없습니다. <b>인터뷰를 진행한 뒤</b> 판정을 확정하면 적색
+              <>아직 채점된 응답이 없어요. <b>인터뷰를 진행한 뒤</b> 판정을 확정하면 적색
                 진행 요청을 할 수 있습니다.</>
             ) : (
-              <>적색 진행 요청은 <b>판정을 확정한 뒤</b>에 할 수 있습니다.</>
+              <>적색 진행 요청은 <b>판정을 확정한 뒤</b>에 할 수 있어요.</>
             )}
           </p>
         )}
@@ -502,23 +502,23 @@ function noteFor(itemId: string, e: unknown): ReExplainNote {
     if (e.code === "REVERIFY_EXHAUSTED") {
       return {
         itemId, kind: "exhausted",
-        text: "재검증 상한에 도달했습니다. 이 항목은 더 재설명하지 않고 판정으로 넘어갑니다.",
+        text: "재설명 횟수를 다 썼어요. 이 항목은 판정으로 넘어가요.",
       };
     }
     if (e.code === "REEXPLAIN_NOT_ELIGIBLE") {
       return {
         itemId, kind: "not_eligible",
-        text: "재설명 대상이 아닙니다. 판정이 없거나 이미 이해한 항목입니다.",
+        text: "재설명할 항목이 아니에요. 판정이 없거나 이미 이해했어요.",
       };
     }
     if (e.code === "ILLEGAL_STATE_TRANSITION") {
       return {
         itemId, kind: "failed",
-        text: "지금 상태에서는 재설명을 시작할 수 없습니다. 화면을 새로고침해 주세요.",
+        text: "지금은 재설명을 시작할 수 없어요. 새로고침해 주세요.",
       };
     }
     // 서버 원문을 그대로 붙이지 않는다 — 이 자리도 판매자가 보는 화면이다(#316).
     return { itemId, kind: "failed", text: `재설명을 시작하지 못했습니다. ${describeError(e).text}` };
   }
-  return { itemId, kind: "failed", text: "재설명을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요." };
+  return { itemId, kind: "failed", text: "재설명을 시작하지 못했어요. 잠시 후 다시 시도해 주세요." };
 }

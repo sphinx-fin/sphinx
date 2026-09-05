@@ -39,21 +39,21 @@ import type { ErrorCode } from "../api/types";
  * 하면 되는지**를 적는다 — 무엇이 잘못됐는지만 적으면 화면 앞에서 멈춘다.
  */
 const ERROR_TEXT: Record<ErrorCode, string> = {
-  NOT_FOUND: "찾을 수 없습니다. 주소를 다시 확인해 주세요.",
-  VALIDATION_ERROR: "입력한 내용을 다시 확인해 주세요.",
-  MALFORMED_REQUEST: "요청을 처리하지 못했습니다. 새로고침 후 다시 시도해 주세요.",
-  ILLEGAL_STATE_TRANSITION: "지금 단계에서는 할 수 없는 동작입니다. 화면을 새로고침해 주세요.",
-  UNAUTHORIZED: "로그인이 필요합니다.",
+  NOT_FOUND: "찾을 수 없어요. 주소를 확인해 주세요.",
+  VALIDATION_ERROR: "입력한 내용을 확인해 주세요.",
+  MALFORMED_REQUEST: "처리하지 못했어요. 새로고침해 주세요.",
+  ILLEGAL_STATE_TRANSITION: "지금은 할 수 없어요. 새로고침해 주세요.",
+  UNAUTHORIZED: "로그인이 필요해요.",
   // 차단은 결함이 아니라 시연 대상이다(기획서 7-4). "오류" 로 읽히지 않게 적는다.
-  FORBIDDEN: "이 화면을 볼 권한이 없습니다. 담당자에게 문의해 주세요.",
-  REEXPLAIN_NOT_ELIGIBLE: "이 항목은 재설명 대상이 아닙니다.",
-  REVERIFY_EXHAUSTED: "재검증 횟수를 모두 사용했습니다. 판정으로 넘어갑니다.",
-  OVERRIDE_NOT_ELIGIBLE: "판정을 확정한 뒤에 요청할 수 있습니다.",
+  FORBIDDEN: "볼 권한이 없어요. 담당자에게 문의해 주세요.",
+  REEXPLAIN_NOT_ELIGIBLE: "재설명할 수 있는 항목이 아니에요.",
+  REVERIFY_EXHAUSTED: "재설명 횟수를 다 썼어요. 판정으로 넘어가요.",
+  OVERRIDE_NOT_ELIGIBLE: "판정을 확정한 뒤에 요청할 수 있어요.",
   // 502 셋은 고칠 곳이 다르다. 문면도 다르게 적어야 판매자가 무엇을 할지 안다.
-  EVIDENCE_REQUIRED: "채점 결과에 근거가 없어 받지 않았습니다. 다시 시도해 주세요.",
-  MEASUREMENT_INVALID: "채점 결과를 검증하지 못했습니다. 다시 시도해 주세요.",
-  AI_SERVICE_UNAVAILABLE: "채점 서비스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-  INTERNAL_ERROR: "서버에서 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+  EVIDENCE_REQUIRED: "채점 근거가 없어요. 다시 시도해 주세요.",
+  MEASUREMENT_INVALID: "채점 결과를 확인하지 못했어요. 다시 시도해 주세요.",
+  AI_SERVICE_UNAVAILABLE: "채점 서비스에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.",
+  INTERNAL_ERROR: "문제가 생겼어요. 잠시 후 다시 시도해 주세요.",
 };
 
 /** 화면이 들고 그리는 에러 한 건. */
@@ -76,12 +76,12 @@ export function describeError(e: unknown): ShownError {
     return {
       // 계약에 없는 코드가 오면 여기로 떨어진다. 그 경우가 정확히 계약이 갈린 순간이라
       // 원문을 같이 남기는 것이 중요하다 — 접힌 자리에 코드가 그대로 보인다.
-      text: known ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      text: known ?? "처리하지 못했어요. 잠시 후 다시 시도해 주세요.",
       detail: `${e.code}: ${e.message}`,
     };
   }
   return {
-    text: "요청을 처리하지 못했습니다. 네트워크 상태를 확인해 주세요.",
+    text: "처리하지 못했어요. 네트워크를 확인해 주세요.",
     detail: e instanceof Error ? e.message : null,
   };
 }

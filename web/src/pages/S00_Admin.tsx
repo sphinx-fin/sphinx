@@ -113,9 +113,8 @@ const SCREENS: readonly Screen[] = [
     audience: "운영",
     features: "F-EXT-001 · F-EXT-002",
     route: "/upload",
-    note: "상품 설명서를 넣고, 시스템이 조건으로 읽어낸 이해항목과 추출 실패 큐를 본다.",
-    outOfScope:
-      "이번 라운드 개발 범위 밖(#406). 화면은 동작하지만 목 응답 상대다 — 실제 파싱·추출 배선이 붙어 있지 않다.",
+    note: "설명서를 올리면 고객이 알아야 할 항목을 뽑아요.",
+    outOfScope: "이번 라운드 범위 밖이에요. 화면은 열리지만 실제 데이터는 아니에요.",
   },
   {
     id: "S-02",
@@ -123,8 +122,8 @@ const SCREENS: readonly Screen[] = [
     audience: "판매자",
     features: "F-INT-001",
     route: "/",
-    note: "상품·채널·비식별 고객속성·적합성 설문을 입력해 세션을 만든다. 데모의 시작점이다.",
-    prereq: "식별정보 입력칸이 아예 없다(P3). 참조번호 칸에 이름·전화번호를 적으면 경고가 뜬다.",
+    note: "상품과 고객 정보를 넣어 세션을 만들어요.",
+    prereq: "이름·전화번호를 넣는 칸은 없어요.",
   },
   {
     id: "S-03",
@@ -132,9 +131,8 @@ const SCREENS: readonly Screen[] = [
     audience: "고객",
     features: "F-INT-002 · F-INT-003 · F-INT-004",
     route: "/interview/:sid",
-    note: "고객이 자기 말로 되말한다. 고령자 모드와 무응답 안내가 이 화면에 있다. 데모의 심장.",
-    prereq:
-      "질문은 CREATED·IN_PROGRESS 에서 나온다. 판정을 확정(JUDGED)한 세션에서는 더 물을 것이 없다.",
+    note: "고객이 자기 말로 다시 설명해요.",
+    prereq: "판정을 확정한 세션에서는 질문이 나오지 않아요.",
   },
   {
     id: "S-04",
@@ -142,9 +140,8 @@ const SCREENS: readonly Screen[] = [
     audience: "고객",
     features: "F-SIM-001",
     route: "/simulator/:sid",
-    note: "최악·중간·최선을 같은 크기로 나란히, 확률이 아니라 금액으로 보여준다.",
-    prereq:
-      "추출 실패 항목이 하나라도 있으면 E-SIM-01 로 비활성이다 — 불완전한 조건으로 금액을 계산하지 않는다.",
+    note: "최악·중간·최선을 금액으로 나란히 보여줘요.",
+    prereq: "못 읽어낸 항목이 하나라도 있으면 계산하지 않아요.",
   },
   {
     id: "S-05",
@@ -152,9 +149,8 @@ const SCREENS: readonly Screen[] = [
     audience: "판매자",
     features: "F-GTE-001 · F-GTE-003",
     route: "/judgment/:sid",
-    note: "항목별 등급(U1~U4)과 근거 인용·루브릭 조항, 세션 신호등과 발화한 룰 ID. 재설명도 여기서 시작한다.",
-    prereq:
-      "답변이 없으면 판정할 것이 없다. 확정 전에는 미리보기 신호만 보이고, 확정(/judge)은 되돌릴 수 없다.",
+    note: "항목별 등급과 근거를 보고, 재설명을 시작해요.",
+    prereq: "답변이 있어야 판정할 수 있어요. 확정하면 되돌릴 수 없어요.",
   },
   {
     id: "S-06",
@@ -162,9 +158,8 @@ const SCREENS: readonly Screen[] = [
     audience: "관리자",
     features: "F-GTE-002",
     route: "/override/:sid",
-    note: "판매자가 30자 이상 사유로 요청하고, 다른 사람(MGR)이 그 사유를 보고 승인한다(ADR-002).",
-    prereq:
-      "판정을 확정하고 신호가 적색인 세션에서만 뜻이 있다. 녹색이면 화면이 요청 자체를 막는다.",
+    note: "판매자가 사유를 적어 요청하고, 관리자가 승인해요.",
+    prereq: "신호가 빨간 세션에서만 쓸 수 있어요.",
   },
   {
     id: "S-07",
@@ -172,9 +167,8 @@ const SCREENS: readonly Screen[] = [
     audience: "판매자",
     features: "F-GTE-004",
     route: "/report/:sid",
-    note: "교부 문서의 내용해시(64자 전문)와 발행 이력. 발행은 사람이 누를 때만 나간다.",
-    prereq:
-      "발행 전에는 404 가 아니라 “발행하기”가 뜬다 — 오류가 아니라 상태다. PDF 미리보기 링크는 아직 없다.",
+    note: "교부 문서의 내용해시와 발행 이력을 봐요.",
+    prereq: "아직 발행 전이면 「발행하기」가 보여요.",
   },
   {
     id: "S-08",
@@ -182,8 +176,8 @@ const SCREENS: readonly Screen[] = [
     audience: "준법감시",
     features: "F-DSH-001 · F-DSH-002",
     route: "/dashboard",
-    note: "항목×지점 오해율·취약 대비·결정 요약. 합성 데이터 표식과 소표본(n<30) 마스킹이 그대로 보인다.",
-    prereq: "세션이 필요 없다. 집계라서 개인·세션ID 를 말하지 않는다.",
+    note: "항목별·지점별 오해율과 결정 요약을 봐요.",
+    prereq: "세션 없이 열 수 있어요. 개인 정보는 나오지 않아요.",
   },
 ];
 
@@ -263,7 +257,7 @@ export default function S00Admin() {
       const product = products?.[0];
       if (!product) {
         setError({
-          text: "등록된 상품이 없습니다. S-01 에서 상품 문서를 먼저 넣어야 합니다.",
+          text: "등록된 상품이 없어요. S-01 에서 문서를 먼저 올려 주세요.",
           detail: null,
         });
         return;
@@ -298,9 +292,7 @@ export default function S00Admin() {
           <p className="adm__eyebrow">심사·시연용 목차</p>
           <h1 className="adm__title">화면 목록</h1>
           <p className="adm__lede">
-            명세 8절의 화면 8개 전부입니다. 이 목차는 <b>클라이언트 목차</b>이고 권한을
-            판단하지 않습니다 — 여기 링크가 있다는 것이 그 화면의 API 를 부를 권한이
-            있다는 뜻은 아닙니다.
+            명세 8절의 화면 8개예요.
           </p>
           <div className="adm__headrow">
             <button
@@ -313,7 +305,7 @@ export default function S00Admin() {
               고령자 모드 {elderly ? "켜짐" : "꺼짐"}
             </button>
             <p className="adm__hint">
-              전 화면에 걸립니다. 고객 화면(S-03·S-04)에는 자체 토글도 있습니다.
+              전 화면에 적용돼요. 고객 화면에는 토글도 있어요.
             </p>
           </div>
         </header>
@@ -324,8 +316,7 @@ export default function S00Admin() {
             세션
           </h2>
           <p className="adm__hint adm__hint--block">
-            아래 8개 중 <b>5개가 세션ID 를 경로에 받습니다</b>. 세션 없이 열 수 있는 것은
-            S-01·S-02·S-08 셋뿐입니다.
+            <b>5개는 세션 번호가 필요해요.</b> S-01·S-02·S-08 은 없어도 열려요.
           </p>
 
           <div className="adm__sidrow">
@@ -338,7 +329,7 @@ export default function S00Admin() {
                 className="adm__control"
                 value={sid}
                 disabled={working}
-                placeholder="예: 3f9a1c7e-…  (직접 붙여 넣어도 됩니다)"
+                placeholder="예: 3f9a1c7e-…"
                 onChange={(e) => setSid(e.target.value)}
               />
             </div>
@@ -362,14 +353,13 @@ export default function S00Admin() {
               {busy === "creating" ? "만드는 중…" : "데모 세션 만들기"}
             </button>
             <p className="adm__hint">
-              기획 7-2 데모의 응답 조합(60대·5천만 원대·투자경험 없음)으로 세션 하나를
-              만듭니다. <b>연출이 아니라 입력을 채우는 것</b>이고, 판정과 신호등은 서버가
-              정합니다. 상품을 골라 만들려면 S-02 로 갑니다.
+              60대·5천만 원대·투자경험 없음으로 세션을 만들어요. 상품을 고르려면
+              S-02 로 가세요.
             </p>
           </div>
 
           {error && (
-            <ErrorNote error={error} className="adm__alert adm__alert--error" title="세션을 확인하지 못했습니다" />
+            <ErrorNote error={error} className="adm__alert adm__alert--error" title="세션을 확인하지 못했어요" />
           )}
 
           {session && (
@@ -398,7 +388,7 @@ export default function S00Admin() {
                   (P1) S-05 가 근거와 함께 그린다 — 목차가 색만 옮겨 적으면 근거 없는 판정을
                   화면 하나 더에서 말하는 것이 된다(P4). 대신 상태로 갈 곳을 안내한다. */}
               <p className="adm__hint">
-                신호등과 근거는 <b>S-05</b> 에서 봅니다. 이 목차는 판정을 말하지 않습니다.
+                신호등과 근거는 <b>S-05</b> 에서 봐요.
               </p>
             </div>
           )}
@@ -423,22 +413,13 @@ export default function S00Admin() {
           </h2>
           <ul className="adm__list">
             <li>
-              <b>권한 차단은 화면에서 재현되지 않습니다.</b> 심사용 배포는 로그인 창 없이
-              열리는 <b>개방 모드</b>로 띄우고, 그 대가로 웹서버가 경로마다 알맞은 데모
-              계정으로 대신 로그인합니다(집계는 준법감시, 오버라이드 승인은 지점장, 나머지는
-              창구 직원). 그래서 이 목차에서 무엇을 눌러도 차단 화면이 뜨지 않습니다 —
-              판매 직원의 집계 차단 같은 역이용 방지(기획 7-4)는 화면이 아니라 API 로
-              시연합니다. 로그인 창이 떴다면 잠금 모드로 띄운 배포이고, 그때는 어느 계정으로
-              들어왔는지에 따라 실제로 차단이 보입니다.
+              <b>권한 차단은 API 로 확인해요.</b> 심사용 배포는 로그인 없이 열려요.
             </li>
             <li>
-              <b>화면은 계산하지도 판정하지도 않습니다.</b> 등급·신호등·금액·집계는 전부
-              서버가 만든 값이고, 프론트에는 그 규칙이 한 줄도 없습니다(P1·P2).
+              <b>등급·신호등·금액·집계는 모두 서버가 만들어요.</b>
             </li>
             <li>
-              <b>대시보드의 합성 세션으로는 교부 문서를 볼 수 없습니다.</b> 합성 데이터는
-              집계용이라 불변 기록을 쌓지 않아 리포트 내용이 비어 있습니다. 리포트는 위에서
-              만든 세션을 면담·판정까지 통과시킨 뒤 S-07 에서 봅니다.
+              <b>합성 세션은 리포트가 비어 있어요.</b> 위에서 만든 세션으로 보세요.
             </li>
           </ul>
         </section>
@@ -510,7 +491,7 @@ function ScreenCard({
           열기
         </button>
         {locked ? (
-          <span className="adm__hint">세션 번호가 있어야 열립니다</span>
+          <span className="adm__hint">세션 번호가 필요해요</span>
         ) : (
           <a className="adm__newtab" href={path} target="_blank" rel="noreferrer">
             새 탭

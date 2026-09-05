@@ -249,8 +249,8 @@ export default function S04Simulator() {
         <header className="sm__head">
           <h1 className="sm__title">가입하시려는 금액이 어떻게 될 수 있는지 보시겠어요?</h1>
           <p className="sm__sub">
-            아래 세 가지는 기초자산이 과거에 실제로 움직였던 구간을 그대로 대입한 결과입니다.
-            {" "}예상이 아니라 <b>과거에 있었던 일</b>입니다.
+            아래 세 가지는 과거에 실제로 있었던 구간을 그대로 대입한 결과예요.
+            {" "}예상이 아니라 <b>과거에 있었던 일</b>이에요.
           </p>
         </header>
 
@@ -287,7 +287,7 @@ export default function S04Simulator() {
 
         {error && (
           <p className="sm__alert sm__alert--error" role="alert">
-            <b>계산 결과를 불러오지 못했습니다</b>{error}
+            <b>계산 결과를 불러오지 못했어요</b>{error}
           </p>
         )}
 
@@ -350,7 +350,7 @@ export default function S04Simulator() {
                   뜻이 아니다 — 확률을 빼 두면 반대편 오독이 생긴다. 그래서 비중을 적되,
                   **과거 빈도이지 미래 확률이 아니라는 것**을 같은 문단에서 말한다. */}
               <p className="sm__alert sm__alert--info">
-                세 가지 모두 실제로 있었던 지수 구간을 대입한 결과입니다. 어느 쪽이 될지는
+                세 가지 모두 실제로 있었던 지수 구간을 대입한 결과예요. 어느 쪽이 될지는
                 아무도 알 수 없습니다. <b>카드의 비중은 과거 구간에서 그 전개가 나온 빈도이고,
                 앞으로의 확률이 아닙니다.</b>
               </p>
@@ -368,7 +368,7 @@ export default function S04Simulator() {
                 disabled={!allSeen}
                 onClick={() => navigate(`/interview/${sid}`)}
               >
-                {allSeen ? "확인했습니다, 계속하기" : "세 가지를 모두 확인해 주세요"}
+                {allSeen ? "확인했어요, 계속하기" : "세 가지를 모두 확인해 주세요"}
               </button>
             </div>
           </>
@@ -450,11 +450,11 @@ function indexLabel(key: string): string {
 
 function describe(e: unknown): string {
   if (e instanceof ApiRequestError) {
-    if (e.code === "NOT_FOUND") return "세션을 찾을 수 없습니다. 담당자에게 알려 주세요.";
+    if (e.code === "NOT_FOUND") return "세션을 찾을 수 없어요. 담당자에게 알려 주세요.";
     // 시뮬레이터 계산은 server 안(SimulatorService)에서 끝난다 — ai-service 를 타지 않으므로
     // AI_SERVICE_UNAVAILABLE 은 이 경로로 오지 않는다. 금액 검증 실패만 따로 가른다.
     if (e.code === "VALIDATION_ERROR") return "가입 금액을 확인해 주세요.";
     return "잠시 후 다시 시도해 주세요.";
   }
-  return "알 수 없는 오류입니다. 담당자에게 알려 주세요.";
+  return "알 수 없는 오류예요. 담당자에게 알려 주세요.";
 }

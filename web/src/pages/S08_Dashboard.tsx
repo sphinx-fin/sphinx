@@ -432,13 +432,13 @@ export default function S08Dashboard() {
         <b>{itemNames[id] ?? id}</b>
         {requires.length > 0 ? (
           <>
-            <span className="s08__tip-val">고객이 이걸 자기 말로 말해야 「이해」로 봅니다</span>
+            <span className="s08__tip-val">고객이 자기 말로 말해야 「이해」예요</span>
             <ul className="s08__tip-list">
               {requires.map((r) => <li key={r}>{r}</li>)}
             </ul>
           </>
         ) : (
-          <span className="s08__tip-val">채점 기준에 등록된 이해항목입니다</span>
+          <span className="s08__tip-val">채점 기준에 등록된 항목이에요</span>
         )}
         <span className="s08__tip-src">채점 루브릭 <code>{id}</code></span>
       </>
@@ -493,7 +493,7 @@ export default function S08Dashboard() {
 
   /* 전면 로더는 **아무것도 받은 적이 없을 때만**이다. 그 뒤로는 남길 내용이 있다. */
   if (loading && data === null && indicator === null && !blocked) {
-    return <main className="s08"><p className="s08__loading">집계를 불러오는 중입니다…</p></main>;
+    return <main className="s08"><p className="s08__loading">집계를 불러오고 있어요…</p></main>;
   }
 
   /* ── 차단됨 — 오류가 아니라 정상 결과다(설계 판단 ③) ────────────────────── */
@@ -502,7 +502,7 @@ export default function S08Dashboard() {
       <main className="s08">
         <h1>대시보드</h1>
         <section className="s08__blocked">
-          <h2>이 역할에는 집계가 열리지 않습니다</h2>
+          <h2>이 역할은 집계를 볼 수 없어요</h2>
           <p>
             오해 지도와 선행지표는 준법감시(COMPL)와 관리자(MGR)만 볼 수 있습니다.
             판매 조직은 집계에 접근할 수 없습니다.
@@ -510,7 +510,7 @@ export default function S08Dashboard() {
           <p className="s08__blocked-why">
             개인의 이해도 데이터가 영업 관리 지표로 되돌아가면 이 제품은 고객을 보호하는
             대신 고객을 압박하는 도구가 됩니다. 그래서 <strong>역할 자체를 만들지
-            않았고</strong>, 집계 접근도 열지 않습니다.
+            않았고</strong>, 집계도 볼 수 없어요.
           </p>
         </section>
       </main>
@@ -528,16 +528,13 @@ export default function S08Dashboard() {
             <Tag
               show={showTip} hide={hideTip} id="tip-scope"
               text={shown ? SCOPE_LABEL[shown.scope] : "—"}
-              tip={"이 수치가 어느 범위의 세션을 센 것인지입니다. 요청자 역할이 정합니다 — " +
-                   "관리자(MGR)는 자기 지점, 준법감시(COMPL)는 전사입니다."}
+              tip="관리자는 자기 지점, 준법감시는 전사를 봐요."
             />
             {shown?.synthetic && (
               <Tag
                 show={showTip} hide={hideTip} id="tip-synth" strong
                 text="합성 데이터"
-                tip={"실제 고객 세션이 아니라 만들어 낸 세션을 집계한 수치입니다. " +
-                     "합성을 실측처럼 보이게 하지 않으려고 항상 표시합니다 — 실데이터로 " +
-                     "바뀌면 이 표식이 저절로 사라집니다."}
+                tip="실제 고객이 아니라 만들어 낸 세션이에요."
               />
             )}
           </p>
@@ -568,28 +565,13 @@ export default function S08Dashboard() {
         {/* ❗**「선행지표」는 설명 없이는 안 읽히는 말이다.** 탭 이름만 보고 무엇을 여는
             버튼인지 아는 사람이 없었다 — 그런데 이 뷰가 이 제품의 논지 절반이다(사고가
             난 뒤 세는 것이 아니라 나기 전에 본다). 두 뷰의 차이를 여기서 한 번 말한다. */}
-        <Info
-          id="tip-views" label="두 뷰" show={showTip} hide={hideTip}
-          tip={
-            <>
-              <b>오해 지도</b>는 <b>지금</b>의 단면입니다 — 어느 상품의 어느 항목에서
-              고객이 오해하고 있는지를 한 장으로 봅니다.
-              <br />
-              <b>선행지표</b>는 <b>추이</b>입니다. 「선행」은 <b>결과가 터지기 전에 먼저
-              움직이는 수치</b>라는 뜻입니다 — 민원·분쟁·불완전판매는 사고가 난 뒤에야
-              세지지만, 이해도가 무너지는 것은 그보다 먼저 나타납니다. 같은 오해율을 주
-              단위로 8주 늘어놓아 <b>어느 지점·판매자·항목이 지난주보다 나빠졌는가</b>에
-              답합니다. 단면인 오해 지도로는 그 질문을 아예 물을 수 없습니다.
-            </>
-          }
-        />
       </div>
 
       {/* 요청이 도는 동안 남기는 유일한 표식. 내용을 지우지 않으므로 이것이 없으면
           "흐려졌다" 말고는 아무 신호가 없다. 화면 낭독에는 아래 라이브 리전이 말한다. */}
       {loading && <div className="s08__progress" aria-hidden="true" />}
       <p className="sr-only" role="status" aria-live="polite">
-        {loading ? "집계를 불러오는 중입니다." : ""}
+        {loading ? "집계를 불러오고 있어요." : ""}
       </p>
 
       {/* ❗`key` 가 뷰다 — 갈아탈 때만 다시 마운트돼 진입 모션이 한 번 돈다. 축·필터가
@@ -638,42 +620,27 @@ export default function S08Dashboard() {
           "이게 무슨 비율인가" 는 ⓘ 에 붙여 둔다(마우스 hover · 키보드 포커스 둘 다). */}
       <section className="s08__kpis" aria-label="요약">
         <Kpi
-          show={showTip} hide={hideTip}
           label="오해율"
           value={stats.weighted == null ? "—" : `${Math.round(stats.weighted * 100)}%`}
           sub={stats.nShown ? `표본 ${stats.nShown.toLocaleString()}건` : "표본 부족"}
-          tipId="tip-misrate"
-          tip={"그 항목을 오해(U4)로 판정받은 세션의 비율입니다. 표본으로 가중한 평균이고, " +
-               "가려진 셀은 값이 없어 빠집니다. 나머지가 이해했다는 뜻이 아닙니다 — " +
-               "부분이해·미이해는 이 수치에 들어가지 않습니다."}
         />
         <Kpi
-          show={showTip} hide={hideTip}
           label="표본"
           value={stats.nAll.toLocaleString()}
           sub={`판정 ${stats.cellCount}칸`}
-          tipId="tip-n"
-          tip="필터를 통과한 세션의 항목별 판정 건수 합계입니다. 개인은 식별되지 않습니다."
         />
         <Kpi
-          show={showTip} hide={hideTip}
           label="가려진 칸"
           value={String(stats.maskedCells)}
           sub="표본 30건 미만"
-          tipId="tip-masked"
-          tip={"표본이 30건 미만인 칸은 개인이 역추정될 수 있어 값을 감춥니다. " +
-               "칸을 지우지는 않습니다 — 가려졌다는 사실 자체가 마스킹이 동작한 증거입니다."}
         />
         <Kpi
-          show={showTip} hide={hideTip}
           label="최다 오해 항목"
           value={ranked[0] ? `${Math.round(ranked[0].rate * 100)}%` : "—"}
           sub={ranked[0]
             ? <Term text={itemNames[ranked[0].item] ?? ranked[0].item}
                     tip={itemTip(ranked[0].item)} show={showTip} hide={hideTip} />
             : "값이 있는 칸 없음"}
-          tipId="tip-top"
-          tip="값이 있는 칸만 놓고 항목별로 합쳤을 때 오해율이 가장 높은 항목입니다."
         />
       </section>
 
@@ -690,16 +657,6 @@ export default function S08Dashboard() {
       {(decisions || decisionsFailed) && (
         <section className="s08__decide" aria-label="게이트 결정">
           <PanelTitle
-            id="tip-decide" show={showTip} hide={hideTip}
-            tip={
-              <>
-                신호 분포는 <b>판정이 끝난 세션만</b> 셉니다 — 진행 중인 세션은 아직 결정이
-                아니라서 넣으면 분모가 부풀고 모든 비율이 낮아집니다. 비율이 <b>0 이 아니라
-                「가려짐」</b>인 칸은 표본이 30건에 못 미쳐 값을 감춘 것이고,
-                <b> 「데이터 없음」</b>은 해당하는 건이 아예 없는 것입니다 — 둘은 다른
-                사실입니다.
-              </>
-            }
           >
             게이트가 무엇을 결정했는가
           </PanelTitle>
@@ -727,24 +684,6 @@ export default function S08Dashboard() {
       {ranked.length > 0 && (
         <section className="s08__rank" aria-label="항목별 오해율">
           <PanelTitle
-            id="tip-rank" show={showTip} hide={hideTip}
-            tip={
-              <>
-                항목 이름에 <b>마우스를 올리면</b> 그 항목이 무엇을 재는지 나옵니다.
-                {stats.weighted != null && (
-                  <>
-                    <br />
-                    전체 오해율(<b>{Math.round(stats.weighted * 100)}%</b>)을 넘는 항목 중
-                    <b> 상위 {FOCUS_MAX}개</b>를 <b>설명 자료 개선 대상</b>으로 표시합니다.
-                    기준은 이 화면의 오해율 그대로라 데이터가 바뀌면 같이 움직이고, 개수
-                    상한은 <b>먼저 볼 것을 좁히려는 것</b>이지 나머지가 괜찮다는 뜻이
-                    아닙니다 — 표시가 없는 항목도 오해율은 옆에 그대로 적혀 있습니다.
-                    <b> 가려진 칸은 순위에 들어가지 않습니다</b> — 여기 있는 항목은 모두
-                    표본 30건 이상을 근거로 합니다.
-                  </>
-                )}
-              </>
-            }
           >
             항목별 오해율
           </PanelTitle>
@@ -777,15 +716,6 @@ export default function S08Dashboard() {
       {(contrast || contrastFailed) && (
         <section className="s08__contrast" aria-label="취약 고객 대비">
           <PanelTitle
-            id="tip-contrast" show={showTip} hide={hideTip}
-            tip={
-              <>
-                취약 여부는 <b>서버가 정합니다</b> — 연령대만이 아니라 가입금액대·투자경험·
-                채널까지 네 요인의 합입니다(<code>vulnerability_weights.yaml</code>). 같은
-                연령대 안에서도 두 줄이 갈립니다. 위 필터는 <b>두 줄에 똑같이</b> 걸리고,
-                표본 30건 미만인 줄은 히트맵 칸과 같은 규칙으로 가려집니다.
-              </>
-            }
           >
             취약 고객 대비
           </PanelTitle>
@@ -808,20 +738,10 @@ export default function S08Dashboard() {
       )}
 
       {products.length === 0 ? (
-        <p className="s08__empty">집계된 셀이 없습니다.</p>
+        <p className="s08__empty">집계된 값이 없어요.</p>
       ) : (
         <section className="s08__matrix" aria-label="상품별 이해항목 오해율">
           <PanelTitle
-            id="tip-matrix" show={showTip} hide={hideTip}
-            tip={
-              <>
-                칸의 진하기가 그 조합의 오해율입니다. <b>표 머리의 항목 이름에 마우스를
-                올리면</b> 그 항목이 무엇을 재는지 나옵니다 — 이름은 채점 루브릭에서
-                옵니다. 칸에 올리면 표본 수까지 나옵니다. <b>「가려짐」과 「—」는 다릅니다</b>:
-                앞은 표본이 30건에 못 미쳐 값을 감춘 것이고, 뒤는 해당하는 판정이 아예 없는
-                것입니다.
-              </>
-            }
           >
             상품 × 이해항목
           </PanelTitle>
@@ -950,32 +870,12 @@ export default function S08Dashboard() {
           </label>
           {/* 축과 범위를 화면이 먼저 갈라 말한다 — 계약이 이름을 가른 이유가 이것이고,
               둘을 같은 것으로 읽으면 MGR 이 지점 추이를 전사 추이로 본다. */}
-          <Info
-            id="tip-axis" label="집계 축" show={showTip} hide={hideTip}
-            tip={
-              <>
-                상품·연령대·채널 필터는 오해 지도에만 걸립니다. 여기서 고르는 것은
-                <b> 집계 축</b>(무엇을 한 줄로 볼 것인가)이고, 보이는 <b>범위</b>(어느
-                세션까지 셀 것인가)는 역할이 정합니다 — 관리자는 자기 지점, 준법감시는
-                전사입니다. 둘은 다른 개념이라 화면도 말을 갈라 씁니다.
-              </>
-            }
-          />
         </section>
 
         {/* 이상치 — 서버가 판단한 것만. 화면은 임계값을 다시 계산하지 않는다. */}
         {(indicator?.outliers.length ?? 0) > 0 && (
           <section className="s08__outliers" aria-label="이상치">
             <PanelTitle
-              id="tip-outlier" show={showTip} hide={hideTip}
-              tip={
-                <>
-                  직전 구간 평균과 견준 값입니다. <b>가려진 구간으로는 이상치를 말하지
-                  않습니다</b> — 표본이 모자란 주는 판단에서 빠집니다. 판단은 <b>서버가</b>
-                  합니다: 화면이 임계값을 다시 계산하면 두 벌이 되고, 어긋나는 날 화면이
-                  서버가 하지 않은 판단을 말하게 됩니다. 사유 문장도 서버 것 그대로입니다.
-                </>
-              }
             >
               이상치 <span className="s08__count">{indicator?.outliers.length}건</span>
             </PanelTitle>
@@ -997,19 +897,10 @@ export default function S08Dashboard() {
         )}
 
         {rows.length === 0 ? (
-          <p className="s08__empty">집계된 계열이 없습니다.</p>
+          <p className="s08__empty">집계된 계열이 없어요.</p>
         ) : (
           <section className="s08__trend" aria-label={`${AXIS_LABEL[shownAxis]}별 주간 오해율 추이`}>
             <PanelTitle
-              id="tip-trend" show={showTip} hide={hideTip}
-              tip={
-                <>
-                  막대 높이가 그 주의 오해율입니다. <b>값이 없는 주는 막대를 그리지
-                  않습니다</b> — 판정이 없었던 주와 표본이 모자라 가린 주는 0% 와 다릅니다.
-                  숫자는 가장 최근 주에만 적습니다. 오른쪽 끝이 이번 주이고, 왼쪽으로 갈수록
-                  과거입니다.
-                </>
-              }
             >
               {AXIS_LABEL[shownAxis]}별 주간 추이
             </PanelTitle>
@@ -1119,55 +1010,9 @@ function Tag({ text, tip, id, strong, show, hide }: {
   );
 }
 
-/**
- * ⓘ 한 개. **이 화면의 설명은 전부 이 모양으로만 나온다.**
- *
- * 대시보드는 수치를 읽는 곳인데 패널마다 서너 줄짜리 안내문이 깔려 있어서, 표와 표
- * 사이가 문단으로 메워지고 **정작 값이 화면 밖으로 밀렸다.** 규칙·정의·주의는 지울 것이
- * 아니라(지우면 조용한 정책이 된다) 접을 것이라, 문면을 그대로 이 ⓘ 안으로 옮겼다.
- *
- * hover 와 **키보드 포커스** 둘 다에서 열려야 해서 `span` 이 아니라 `button` 이고,
- * `aria-describedby` 로 묶여 스크린리더에서는 열지 않아도 읽힌다 — 즉 **접었지만 아무도
- * 못 읽게 되지는 않는다.** 눈에 보이는 툴팁은 화면 좌표에 `fixed` 로 따로 뜬다(카드의
- * 스태킹 컨텍스트와 표의 overflow 를 통과해야 해서다. 파일 상단 `tip` 주석).
- */
-function Info({ id, label, tip, show, hide }: {
-  id: string; label: string; tip: ReactNode;
-  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
-}) {
-  return (
-    <>
-      <button
-        type="button"
-        className="s08__info"
-        aria-describedby={id}
-        onMouseEnter={(e) => show(e.currentTarget, tip)}
-        onMouseLeave={hide}
-        onFocus={(e) => show(e.currentTarget, tip)}
-        onBlur={hide}
-      >
-        <span aria-hidden="true">i</span>
-        <span className="sr-only">{label} 설명</span>
-      </button>
-      <span id={id} className="sr-only">{tip}</span>
-    </>
-  );
-}
-
-/**
- * 패널 제목 + ⓘ. 제목마다 손으로 엮으면 한 패널에서 빠뜨리고, **설명이 없는 패널이
- * 「설명할 것이 없는 패널」로 읽힌다.**
- */
-function PanelTitle({ children, tip, id, show, hide }: {
-  children: ReactNode; tip: ReactNode; id: string;
-  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
-}) {
-  return (
-    <h2 className="s08__panel-title">
-      {children}
-      <Info id={id} label="이 패널" tip={tip} show={show} hide={hide} />
-    </h2>
-  );
+/** 패널 제목. */
+function PanelTitle({ children }: { children: ReactNode }) {
+  return <h2 className="s08__panel-title">{children}</h2>;
 }
 
 /**
@@ -1195,20 +1040,13 @@ function Term({ text, tip, show, hide }: {
   );
 }
 
-/**
- * 요약 타일. 값이 주인공이고 라벨은 작다 — 대시보드는 문장이 아니라 수치를 읽는 곳이다.
- * 정의·주의는 ⓘ 에 붙인다.
- */
-function Kpi({ label, value, sub, tip, tipId, show, hide }: {
-  label: string; value: string; sub: ReactNode; tip: string; tipId: string;
-  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+/** 요약 타일. 값이 주인공이고 라벨은 작다. */
+function Kpi({ label, value, sub }: {
+  label: string; value: string; sub: ReactNode;
 }) {
   return (
     <article className="s08__kpi">
-      <p className="s08__kpi-label">
-        {label}
-        <Info id={tipId} label={label} tip={tip} show={show} hide={hide} />
-      </p>
+      <p className="s08__kpi-label">{label}</p>
       <p className="s08__kpi-value">{value}</p>
       <p className="s08__kpi-sub">{sub}</p>
     </article>
@@ -1256,7 +1094,7 @@ function GateBar({ gate }: { gate: SignalCount[] }) {
     return (
       <div className="s08__gate">
         <p className="s08__gate-head s08__cband-value--none">데이터 없음</p>
-        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없어요</p>
       </div>
     );
   }
@@ -1303,15 +1141,15 @@ function ReexplainStat({ effect }: { effect: ReexplainEffect }) {
       <p className="s08__dstat-label">재설명 뒤 이해 도달</p>
       {state === "none" ? (<>
         <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
-        <p className="s08__cband-sub">재설명을 거친 항목이 없습니다</p>
+        <p className="s08__cband-sub">재설명을 거친 항목이 없어요</p>
       </>) : state === "masked" ? (<>
         <p className="s08__dstat-value s08__cband-value--masked">가려짐</p>
-        <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다 (재설명 {effect.items.toLocaleString()}건)</p>
+        <p className="s08__cband-sub">표본이 30건보다 적어 가렸어요 (재설명 {effect.items.toLocaleString()}건)</p>
       </>) : (<>
         <p className="s08__dstat-value">{Math.round((effect.rate ?? 0) * 100)}%</p>
         <p className="s08__cband-sub">
           재설명을 거친 {effect.items.toLocaleString()}건 가운데{" "}
-          <b>{effect.resolved.toLocaleString()}건</b>이 최종 이해(U1)에 도달했습니다
+          <b>{effect.resolved.toLocaleString()}건</b>이 최종 이해에 도달했어요
         </p>
       </>)}
     </article>
@@ -1336,7 +1174,7 @@ function OverrideStat({ count }: { count: OverrideCount }) {
       <p className="s08__dstat-label">적색 오버라이드</p>
       {count.judged === 0 ? (<>
         <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
-        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없어요</p>
       </>) : (<>
         <p className="s08__dstat-value">
           {count.requested.toLocaleString()}<span className="s08__dstat-unit">건 요청</span>
@@ -1366,15 +1204,15 @@ function UnmeasuredStat({ count }: { count: UnmeasuredCount }) {
       <p className="s08__dstat-label">미측정 항목을 안은 판정</p>
       {state === "none" ? (<>
         <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
-        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+        <p className="s08__cband-sub">이 필터에 해당하는 판정이 없어요</p>
       </>) : state === "masked" ? (<>
         <p className="s08__dstat-value s08__cband-value--masked">가려짐</p>
-        <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다 (판정 {count.judged.toLocaleString()}건)</p>
+        <p className="s08__cband-sub">표본이 30건보다 적어 가렸어요 (판정 {count.judged.toLocaleString()}건)</p>
       </>) : (<>
         <p className="s08__dstat-value">{Math.round((count.share ?? 0) * 100)}%</p>
         <p className="s08__cband-sub">
           판정 {count.judged.toLocaleString()}건 가운데{" "}
-          <b>{count.sessions.toLocaleString()}건</b>에 못 잰 항목이 있었습니다
+          <b>{count.sessions.toLocaleString()}건</b>에 못 잰 항목이 있었어요
         </p>
       </>)}
     </article>
@@ -1420,12 +1258,12 @@ function ContrastBand({ row }: { row: ContrastRow }) {
       {row.n === 0 ? (
         <>
           <p className="s08__cband-value s08__cband-value--none">데이터 없음</p>
-          <p className="s08__cband-sub">이 필터에 해당하는 판정이 없습니다</p>
+          <p className="s08__cband-sub">이 필터에 해당하는 판정이 없어요</p>
         </>
       ) : pct == null ? (
         <>
           <p className="s08__cband-value s08__cband-value--masked">가려짐</p>
-          <p className="s08__cband-sub">표본 30건 미만이라 값을 가렸습니다</p>
+          <p className="s08__cband-sub">표본이 30건보다 적어 가렸어요</p>
         </>
       ) : (<>
         <p className="s08__cband-value">{pct}%</p>
@@ -1494,7 +1332,7 @@ function ContrastGap({ rows }: { rows: ContrastRow[] }) {
   if (v.n === 0 && o.n === 0) {
     return (
       <p className="s08__cgap s08__cgap--none">
-        이 필터에 해당하는 판정이 없습니다.
+        이 필터에 해당하는 판정이 없어요.
       </p>
     );
   }
@@ -1512,18 +1350,18 @@ function ContrastGap({ rows }: { rows: ContrastRow[] }) {
   if (v.misrate == null || o.misrate == null) {
     return (
       <p className="s08__cgap s08__cgap--none">
-        한쪽 표본이 30건 미만이라 대비를 낼 수 없습니다.
+        한쪽 표본이 30건보다 적어 비교할 수 없어요.
       </p>
     );
   }
 
   const gap = Math.round(v.misrate * 100) - Math.round(o.misrate * 100);
   if (gap === 0) {
-    return <p className="s08__cgap">두 줄의 오해율이 같습니다.</p>;
+    return <p className="s08__cgap">두 줄의 오해율이 같아요.</p>;
   }
   return (
     <p className="s08__cgap">
-      취약 고객의 오해율이 <b>{Math.abs(gap)}%p</b> {gap > 0 ? "높습니다" : "낮습니다"}.
+      취약 고객의 오해율이 <b>{Math.abs(gap)}%p</b> {gap > 0 ? "높아요" : "낮아요"}.
     </p>
   );
 }
@@ -1545,7 +1383,7 @@ function TrendCell({ point, seriesKey, latest, show, hide }: {
   const pct = point.misrate == null ? null : Math.round(point.misrate * 100);
   const label = pct == null
     ? (point.n === 0
-        ? "그 주에는 판정이 없습니다"
+        ? "그 주에는 판정이 없어요"
         : `표본 ${point.n}건 — 30건 미만이라 값을 가렸습니다`)
     : `오해율 ${pct}% · 표본 ${point.n}건`;
   const tip = (
@@ -1588,5 +1426,5 @@ function shortWeek(period: string): string {
 
 function describe(e: unknown): string {
   if (e instanceof ApiRequestError) return `${e.message} (${e.code})`;
-  return "집계를 불러오지 못했습니다.";
+  return "집계를 불러오지 못했어요.";
 }

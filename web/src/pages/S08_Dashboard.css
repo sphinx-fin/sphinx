@@ -234,25 +234,6 @@
 }
 .s08__kpi-sub { font-size: calc(12px * var(--scale)); color: var(--text-subtle); }
 
-/* ── ⓘ 와 툴팁 ───────────────────────────────────────────────────────────── */
-.s08__info {
-  width: calc(16px * var(--scale)); height: calc(16px * var(--scale));
-  flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: var(--radius-pill);
-  background: var(--surface-sunken);
-  color: var(--text-muted);
-  font-size: calc(10px * var(--scale)); font-weight: 700; font-style: italic;
-  cursor: help;
-  padding: 0;
-}
-.s08__info:hover { background: var(--border); color: var(--text); }
-
-.s08__info:hover + .s08__tooltip,
-.s08__info:focus-visible + .s08__tooltip {
-  opacity: 1; visibility: visible; transform: none;
-}
-
 /* ── 항목별 순위 ─────────────────────────────────────────────────────────── */
 .s08__rank {
   background: var(--surface);
@@ -438,8 +419,7 @@
 /* 축 선택 옆 안내. 필터가 사라진 자리라 "왜 없는지"를 적어 둔다. */
 /* `.s08__filters` 는 라벨이 두 줄(제목+컨트롤)이라 아래 정렬이다. ⓘ 는 컨트롤 높이에
    맞춰 내린다 — 위로 붙이면 라벨 글자와 겹쳐 보인다. */
-.s08__filters > .s08__info { align-self: end; margin-bottom: calc(10px * var(--scale)); }
-
+.s08__filters > 
 /* ── 이상치 ───────────────────────────────────────────────────────────────
    ❗채도 있는 색을 쓰지 않는다. 이상치는 **판정이 아니다** — 녹·황·적은 게이트
    신호등 전용이고(tokens.css 규칙 1), 여기에 빨강을 쓰면 화면에 판정이 두 종류

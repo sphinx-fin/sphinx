@@ -214,7 +214,7 @@ export default function S02SessionStart() {
       <main className="ss">
         <div className="ss__shell">
           <section className="ss__done" aria-live="polite">
-            <h1 className="ss__done-title">세션이 생성되었습니다</h1>
+            <h1 className="ss__done-title">세션을 만들었어요</h1>
             <p className="ss__done-id">
               세션 번호 <b>{session.sessionId}</b>
             </p>
@@ -302,7 +302,7 @@ export default function S02SessionStart() {
             {/* 파싱 실패는 은폐하지 않는다 (E-EXT-03) — 조건을 못 읽은 상품은 검증도 못 한다. */}
             {product?.status === "parse_failed" && (
               <p className="ss__hint" role="alert">
-                <b>이 상품은 문서를 아직 읽어내지 못했습니다.</b> 조건이 불완전해 이해도 검증
+                <b>아직 문서를 읽어내지 못한 상품이에요.</b> 조건이 불완전해 이해도 검증
                 결과를 신뢰할 수 없습니다.
               </p>
             )}
@@ -413,7 +413,7 @@ export default function S02SessionStart() {
           {refPii.length > 0 && (
             <p className="ss__alert ss__alert--warn" role="status">
               <b>참조번호 칸에 {refPii.join("·")}로 보이는 내용이 있습니다.</b>
-              이 값은 세션과 이해 기록 리포트에 그대로 남습니다. 계약 번호만 적어 주세요.
+              계약 번호만 적어 주세요. 리포트에 그대로 남아요.
             </p>
           )}
         </section>
@@ -422,7 +422,7 @@ export default function S02SessionStart() {
           <h2 className="ss__section">적합성 설문</h2>
           <p className="ss__hint ss__hint--block">
             고객이 기재한 답변 그대로 입력합니다. 이 답변은 되말하기 발화와 대조되어
-            <b> 설문과 실제 이해가 어긋나는지</b>를 판정하는 데 쓰입니다.
+            <b> 설문과 실제 이해가 어긋나는지</b>를 판정하는 데 써요.
           </p>
 
           {SURVEY_QUESTIONS.map((q, qi) => (
@@ -452,7 +452,7 @@ export default function S02SessionStart() {
 
         {error && (
           <p className="ss__alert ss__alert--error" role="alert">
-            <b>세션을 만들지 못했습니다</b>
+            <b>세션을 만들지 못했어요</b>
             {error} 입력하신 내용은 그대로 남아 있습니다.
           </p>
         )}
@@ -553,8 +553,8 @@ function ProductDocumentModal({
 
           {items && items.length === 0 && !loading && (
             <p className="ss__alert ss__alert--warn" role="status">
-              <b>읽어낸 조건이 없습니다.</b>
-              이 상태로 세션을 열면 물어볼 항목이 없습니다.
+              <b>읽어낸 조건이 없어요.</b>
+              지금 세션을 열면 물어볼 항목이 없어요.
             </p>
           )}
 
@@ -605,15 +605,15 @@ function describe(e: unknown): string {
   if (e instanceof ApiRequestError) {
     switch (e.code) {
       case "NOT_FOUND":
-        return "선택한 상품을 찾을 수 없습니다. 문서 추출이 끝났는지 확인해 주세요.";
+        return "상품을 찾을 수 없어요. 문서 추출이 끝났는지 확인해 주세요.";
       case "VALIDATION_ERROR":
       case "MALFORMED_REQUEST":
-        return "입력값을 다시 확인해 주세요.";
+        return "입력값을 확인해 주세요.";
       case "ILLEGAL_STATE_TRANSITION":
-        return "이미 진행 중인 세션입니다.";
+        return "이미 진행 중인 세션이에요.";
       default:
         return "잠시 후 다시 시도해 주세요.";
     }
   }
-  return "알 수 없는 오류입니다.";
+  return "알 수 없는 오류예요.";
 }
