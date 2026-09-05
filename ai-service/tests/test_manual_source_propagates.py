@@ -95,3 +95,40 @@ def test_the_marker_matches_what_parsing_writes() -> None:
     manual = ParsedDocument.model_validate(_doc(manual=True))
     assert manual.is_manual, "ParsedDocument.is_manual 이 MANUAL_OVERRIDE 를 못 읽는다"
     assert not ParsedDocument.model_validate(_doc(manual=False)).is_manual
+
+
+def test_the_server_javadoc_lists_the_same_codes() -> None:
+    """★ **코드 목록이 두 곳이다** — `schemas.py` 의 `Literal` 과 서버 javadoc.
+
+    `#444` 리뷰(정세현)가 짚은 것이다. 이 PR 이 `MANUAL_SOURCE` 를 `Literal` 에 더하는데
+    `AiServiceClient` javadoc 의 목록은 그대로라 **아홉 vs 열**로 갈릴 뻔했다.
+
+    `ErrorCodeContractTest` 가 네 벌(핸들러·openapi·CLAUDE.md·web 유니온)을 대조하게 만든
+    그 이유다 — `#316` 에서 *"유니온을 뺐더니 실제로 셋 갈렸다"*.
+
+    ❗**계약에는 이 코드가 없다**(`#401` ④ 의 공백). 그래서 계약 변경 절차 대상이 아니고,
+    **두 벌이 갈리는 것**만 막으면 된다. ④ 가 닫히면 이 대조에 계약도 더한다.
+
+    javadoc 은 `server/` 라 강희진 파일이지만 **주석**이고, 갈린 채로 머지되면 그 사이에
+    읽는 사람이 아홉 개짜리 목록을 믿는다.
+    """
+    import typing
+    from pathlib import Path
+
+    from app.schemas import ExtractionWarning
+
+    codes = set(typing.get_args(ExtractionWarning.model_fields["code"].annotation))
+    assert codes, "코드 목록을 못 읽었다 — Literal 형태가 바뀌었는지 본다"
+
+    javadoc = (Path(__file__).resolve().parents[2] / "server" / "src" / "main" / "java"
+               / "com" / "sphinxfin" / "sphinx" / "core" / "aiservice" / "AiServiceClient.java")
+    if not javadoc.exists():
+        # `server/` 없이 ai-service 만 받은 환경 — `pytest.skip` 을 안 쓴다(no_skip.py).
+        return
+
+    text = javadoc.read_text(encoding="utf-8")
+    missing = sorted(c for c in codes if c not in text)
+    assert not missing, (
+        f"서버 javadoc 의 ExtractionWarning 목록에 {missing} 이 없다 — 두 벌이 갈렸다.\n"
+        f"  {javadoc.relative_to(javadoc.parents[7])}\n"
+        "코드를 더할 때 그 목록도 같이 더한다(#444 리뷰 · #316 이 같은 종류)")
