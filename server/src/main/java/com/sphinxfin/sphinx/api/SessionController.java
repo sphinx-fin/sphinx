@@ -135,7 +135,7 @@ public class SessionController {
         var items = MockData.RISK_ITEMS;
         int answered = session.judgments().size();
         if (answered >= items.size()) {
-            return ApiResponse.ok(NextQuestionResponse.done(items.size()));
+            return ApiResponse.ok(NextQuestionResponse.done(items.size(), session.vulnerable()));
         }
         var next = items.get(answered);
         // ❗면담 맥락을 실어 보낸다 (F-INT-002). 지금까지 질문 생성이 받는 것은 항목과
@@ -159,10 +159,15 @@ public class SessionController {
                 generated.fallbackUsed()
                         ? EvidenceRecorder.QuestionSource.TEMPLATE_FALLBACK
                         : EvidenceRecorder.QuestionSource.DISPLAYED);
+        // ❗취약 힌트를 같이 싣는다(이슈 #319). 판정은 여기서 새로 하지 않는다 —
+        // 세션 생성 때 CoachingScoreService 가 이미 낸 값이고, 화면은 그것으로 큰 글씨를
+        // 켜기만 한다. 화면이 ageBand 를 받아 스스로 가르면 vulnerability_weights.yaml 의
+        // 임계값이 web 에 두 벌이 되고, 그 파일이 움직이는 날 조용히 갈린다.
         return ApiResponse.ok(NextQuestionResponse.of(
                 next.itemId(),
                 question,
-                answered + 1, items.size()));
+                answered + 1, items.size(),
+                session.vulnerable()));
     }
 
     @PreAuthorize("@accessGuard.can('session:answer', #sid)")
