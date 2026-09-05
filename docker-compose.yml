@@ -179,6 +179,10 @@ services:
       # 기본값이 죽고, Path.of("") 가 작업 디렉토리로 떨어진다(#126). 그 PR 이후로는
       # 빈 값이면 기동을 거부하므로 조용히 틀린 경로로 뜨지는 않는다.
       SPHINX_TIMESERIES_DIR: /data/timeseries
+      # 원본 조회(#412·#428)의 기준 디렉토리. application.yml 이 `${SPHINX_DATA_DIR:../data}`
+      # 로 적어 두고 *"컨테이너는 마운트 지점을 환경변수로 주입한다"* 고 했는데 여기가 비어
+      # 있었다. WORKDIR 이 /app 이라 기본값도 우연히 /data 로 맞지만, 기대는 게 아니다.
+      SPHINX_DATA_DIR: /data
       # Spring 완화 바인딩: sphinx.ai-service.base-url → SPHINX_AISERVICE_BASEURL
       # (점·하이픈을 없애고 대문자로). 이름이 낯설어 보이지만 이게 규칙대로다.
       SPHINX_AISERVICE_BASEURL: http://ai-service:8100
@@ -207,9 +211,11 @@ services:
       SPHINX_DEMO_SYNTHETIC_SESSIONS: ${SPHINX_DEMO_SYNTHETIC_SESSIONS:-false}
       SPHINX_DEMO_SYNTHETICSESSIONSFILE: /data/synth_sessions/sessions.json
     volumes:
-      # 시계열만 필요하다. documents/ 는 런타임에 안 쓰고 dispute_cases/ 는 어떤 코드도
-      # 읽지 않는다(#37). 읽기 전용이라 컨테이너가 원본을 건드릴 수 없다.
+      # dispute_cases/ 는 어떤 코드도 읽지 않는다(#37). 읽기 전용이라 컨테이너가 원본을
+      # 건드릴 수 없다. documents/ 는 #412·#428 의 원본 조회가 실제로 읽는다 — 예전 주석이
+      # "런타임에 안 쓴다" 로 남아 이 결손을 정당해 보이게 했다(#433).
       - ./data/timeseries:/data/timeseries:ro
+      - ./data/documents:/data/documents:ro
       # 위 합성 세션의 산출물. 추적하지 않는 생성물이라 배포 때 만들어진다.
       - ./data/synth_sessions:/data/synth_sessions:ro
     networks: [internal, edge, data]
