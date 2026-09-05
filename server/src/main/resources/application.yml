@@ -14,6 +14,15 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  # ❗**기본 프로파일에서는 끈다.** flyway-core 가 클래스패스에 있으면 Spring Boot 가
+  # 자동으로 켜는데, `db/migration/V1__init.sql` 은 **MySQL 문법**이라(enum·bit(1)·
+  # ENGINE=InnoDB) H2 에서 파싱부터 실패한다. runtimeOnly 는 테스트 런타임에도 올라오므로
+  # 안 끄면 `./gradlew test` 가 통째로 죽는다.
+  #
+  # 로컬·테스트의 스키마는 위 ddl-auto: update 가 계속 만든다. 마이그레이션은 배포 DB
+  # 하나만 상대한다 — prod 프로파일에서 켠다(application-prod.yml).
+  flyway:
+    enabled: false
   h2:
     console:
       enabled: true                             # 개발용 DB 콘솔: http://localhost:8000/h2-console

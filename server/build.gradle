@@ -16,7 +16,39 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-security'   // F-CMN-002 RBAC
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'   // 헬스체크·메트릭(/actuator/health)
-    runtimeOnly 'com.h2database:h2'                       // MVP: H2 → 필요 시 교체
+    runtimeOnly 'com.h2database:h2'                       // 로컬·테스트 전용 — 배포는 아래 MySQL
+
+    // ── 배포 DB: MySQL (결정로그 7.4 의 "원래 목표점") ─────────────────────
+    //
+    // 둘 다 runtimeOnly 다 — 컴파일 시점에 참조하는 타입이 없고, 그래서 **코드가 특정
+    // DB 를 알게 되는 경로가 생기지 않는다.** 어느 DB 로 뜨는지는 application-prod.yml 과
+    // compose 만 안다.
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // ❗**Flyway 가 없으면 prod 가 기동을 못 한다.** `ddl-auto: validate` 는 Hibernate 가
+    // 스키마를 **안 만든다**는 뜻이라 테이블을 누군가는 만들어야 한다. 그 누군가가
+    // 이것이고, 도는 순서도 이유가 있다 — Spring Boot 는 Flyway 를 JPA
+    // EntityManagerFactory **앞에** 돌린다(FlywayMigrationInitializer 가 강제한다).
+    // 즉 "마이그레이션 → validate" 순서가 설정이 아니라 구조로 보장된다.
+    //
+    // flyway-mysql 이 따로 있는 이유: Flyway 10 부터 DB 별 지원이 별도 아티팩트다.
+    // 빼면 기동이 `Unsupported Database: MySQL 8.4` 로 죽는다.
+    // ❗**기동 로그의 이 줄은 무해하다. 쫓아가지 말 것.**
+    //
+    //   Flyway upgrade recommended: MySQL 8.4 is newer than this version of Flyway
+    //   and support has not been tested. The latest supported version of MySQL is 8.1.
+    //
+    // Flyway 가 자기 **지원 표**를 근거로 내는 경고이고, 그 표가 8.1 에서 멈춰 있을 뿐이다.
+    // 실측했다: 빈 DB → V1 적용 → 재기동 시 `Successfully validated 1 migration` ·
+    // `Current version of schema: 1` 까지 전부 정상이고 Hibernate validate 도 통과한다.
+    //
+    // 올려서 없애려다 되돌렸다 — 10.20.1 도 **같은 줄을 낸다**(실측). 없애려면 메이저(11.x)를
+    // 올려야 하는데, 데모 사흘 전에 스키마를 만드는 컴포넌트를 메이저로 올리는 위험이
+    // 경고 한 줄보다 크다. MySQL 을 8.0 으로 내리는 것도 답이 아니다 — 2026-04 EOL 이다.
+    //
+    // 즉 지금 조합(Boot 3.3.2 관리 = Flyway 10.10.0 · MySQL 8.4 LTS)이 의도다.
+    runtimeOnly 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-mysql'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml' // gate_rules.yaml 로드
 
     // F-GTE-004 PDF 리포트 (이슈 #233). Apache-2.0 이라 제출물에서 답할 것이 없다.

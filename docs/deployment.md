@@ -84,6 +84,15 @@ aws ssm put-parameter --region ap-northeast-2 \
 # 외울 필요가 없는 값이고, 고르면 짧고 짐작 가능한 값이 된다.
 aws ssm put-parameter --region ap-northeast-2 \
   --name /sphinx/prod/internal-token --type SecureString --value "$(openssl rand -hex 32)"
+
+# ── DB 비밀번호 (MySQL). **mysql 컨테이너와 server 가 같은 값을 받는다** ────────
+#
+# ❗**이 값은 볼륨과 묶인다.** MySQL 은 계정을 데이터 디렉토리 첫 초기화 때 만들고 그 뒤로는
+# MYSQL_PASSWORD 를 안 본다. 나중에 SSM 만 바꾸면 mysql 은 옛 값을 계속 쓰고 server 만 새
+# 값으로 붙으러 가서 `Access denied` 로 기동을 못 한다. 바꾸려면 DB 안에서 같이 바꾼다:
+#   docker compose exec mysql mysql -uroot -p -e "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"
+aws ssm put-parameter --region ap-northeast-2 \
+  --name /sphinx/prod/db-password --type SecureString --value "$(openssl rand -hex 24)"
 ```
 
 ❗`api-user` 값은 **명부(`server/src/main/resources/demo_accounts.yaml`)의 id 중 하나**여야
@@ -95,7 +104,7 @@ aws ssm put-parameter --region ap-northeast-2 \
 계정이 두 벌이 되어 갈리는 날 **화면은 열리는데 그 계정만 401** 이 된다. 비밀번호는
 전 계정 공통이라 `api-password` 하나로 충분하다.
 
-네 값 모두 `scripts/deploy_ec2.sh` 가 읽어 **환경변수로만** 넘긴다. `internal-token` 은
+다섯 값 모두 `scripts/deploy_ec2.sh` 가 읽어 **환경변수로만** 넘긴다. `internal-token` 은
 `server` 와 `ai-service` 가 **같은 값**을 받는다 — 다르면 `/internal/*` 이 전부 401 이라
 인터뷰 경로가 통째로 죽으므로, 출처를 SSM 하나로 둔다(`api-user`/`api-password` 를 nginx 와
 server 가 나눠 쓰는 것과 같은 구조 · #162).
@@ -350,7 +359,7 @@ curl -sS https://sphinxfin.duckdns.org/api/dashboard/heatmap | head -c 200   # 2
 ```
 IAM   sphinx-alpha-deployer · sphinx-alpha-instance     prod 역할 없음 → OIDC 스텝에서 죽는다
 EC2   i-010e881ef97178ce8  sphinx-alpha  running        prod 박스 없음
-SSM   /sphinx/alpha/{llm-api-key,api-user,api-password,internal-token}
+SSM   /sphinx/alpha/{llm-api-key,api-user,api-password,internal-token,db-password}
       /sphinx/prod/*                                    0건
 ```
 
