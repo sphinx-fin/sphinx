@@ -107,18 +107,39 @@ public class ProductRiskItems {
     }
 
     /**
-     * 면담이 묻고 게이트가 세는 항목 — <b>{@code required} 만</b> (이슈 #435). {@code recommended}
-     * 항목은 화면({@code GET /risk-items})에는 뜨되 <b>루브릭이 없다</b>(결정 10.1 이 재현율
-     * 분모를 required 로 고정) — 면담이 물으면 채점에서 {@code rubrics.get()} 이 502 를 낸다.
+     * 게이트가 세는 <b>기대 항목</b> — {@code required} 전부 (status 무관, 이슈 #435 · #432 · #462).
+     * {@code recommended} 는 루브릭이 없어(결정 10.1) 채점 대상이 아니므로 분모에서 뺀다.
      *
-     * <p>❗<b>면담(nextQuestion)과 게이트 분모(#432)가 같은 이 메서드를 써야 한다.</b> 한쪽만
-     * required 로 거르면 둘이 어긋난다 — 면담은 required 만 묻는데 분모가 recommended 까지 세면
-     * 그 항목은 영영 측정되지 않아 {@code R-00}(미측정 항목) 이 영원히 문다.
+     * <p>❗<b>추출 실패한 required 도 여기 든다.</b> required 인데 검증 못 한 것이라, 분모에서
+     * 빼면 게이트가 통과시킨다 — 그건 "required 를 못 봤는데 GREEN" 이라 위험하다. 실패 항목은
+     * {@link #interviewItemsOf} 에서 빠져 <b>안 물어지고 판정도 없으니</b>, 분모에 남겨 두면
+     * 미측정으로 잡혀 {@code R-00}(RED) 이 막는다 — 안전한 방향이다.
+     */
+    @Transactional(readOnly = true)
+    public List<RiskItem> requiredItemsOf(String productId) {
+        return riskItemsOf(productId).stream()
+                .filter(r -> "required".equals(r.importance()))
+                .toList();
+    }
+
+    /**
+     * 면담(nextQuestion)이 <b>물을 수 있는</b> 항목 — {@code required} 이고 {@code status=extracted}
+     * 인 것 (이슈 #435 · #462). {@link #requiredItemsOf} 에서 실패 항목을 더 뺀다.
+     *
+     * <p>❗<b>status 를 봐야 한다.</b> {@code extraction_failed} 는 조건 원문(condition)이 없어
+     * 물을 것도 채점 대상도 없다 — 그걸 물으면 ai-service {@code /score} 가 {@code require_condition()}
+     * 에서 던져 <b>면담 도중 502</b> 다(#462). 그래서 면담은 물을 수 있는 것만, <b>분모는
+     * {@link #requiredItemsOf} 로 실패까지</b> 센다 — 두 기준이 다른 것이 여기서는 옳다(실패한
+     * required 는 안 물어지되 미측정으로 게이트가 막아야 하므로).
+     *
+     * <p>실패 항목도 화면({@code GET /risk-items})에는 그대로 뜬다(E-EXT-03 은폐 금지) —
+     * 이 필터는 면담 대상만 좁힌다. 데이터가 전부 extracted 이면 이 집합은 {@code requiredItemsOf}
+     * 와 같아 동작이 바뀌지 않는다.
      */
     @Transactional(readOnly = true)
     public List<RiskItem> interviewItemsOf(String productId) {
-        return riskItemsOf(productId).stream()
-                .filter(r -> "required".equals(r.importance()))
+        return requiredItemsOf(productId).stream()
+                .filter(r -> "extracted".equals(r.status()))
                 .toList();
     }
 

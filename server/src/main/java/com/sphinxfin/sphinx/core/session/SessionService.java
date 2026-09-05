@@ -481,7 +481,10 @@ public class SessionService {
      * 가 같은 계산을 쓰므로 미리보기가 판정보다 낙관적이 되지 않는다.
      */
     private int unmeasuredCount(Session session) {
-        List<String> expectedItemIds = productRiskItems.interviewItemsOf(session.productId()).stream()
+        // 분모는 requiredItemsOf(추출 실패까지 포함) 다 — interviewItemsOf 가 아니다(#462).
+        // 면담은 실패 항목을 못 묻지만(condition 없음), 그건 required 인데 검증 못 한 것이라
+        // 분모에 남겨야 미측정으로 R-00 이 막는다. 뺐다면 required 를 못 보고도 GREEN 이 된다.
+        List<String> expectedItemIds = productRiskItems.requiredItemsOf(session.productId()).stream()
                 .map(RiskItem::itemId).toList();
         return session.unmeasuredItemCount(expectedItemIds);
     }
