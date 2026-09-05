@@ -597,6 +597,54 @@ class SessionServiceTest {
     }
 
     @Test
+    @DisplayName("재설명 조회(#415): POST 가 보여준 그 문면·재검증 질문을 서버에서 다시 읽는다")
+    void currentReExplanation_returnsWhatWasShown() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // IN_PROGRESS
+        var shown = reExplain(s.id(), "A");                 // → RE_EXPLAIN, 문면 저장
+
+        var fetched = service.currentReExplanation(s.id());
+        assertThat(fetched).isPresent();
+        // 재생성이 아니라 저장값이라, POST 가 돌려준 것과 글자까지 같다(P1 비결정 회피).
+        assertThat(fetched.get()).isEqualTo(shown);
+        assertThat(fetched.get().itemId()).isEqualTo("A");
+        assertThat(fetched.get().content()).isEqualTo(AI_REEXPLAIN);
+        assertThat(fetched.get().reverifyQuestion()).isEqualTo(AI_REVERIFY);
+    }
+
+    @Test
+    @DisplayName("재설명 조회(#415): 재검증(RE_VERIFY) 중에도 같은 문면을 돌려준다")
+    void currentReExplanation_survivesIntoReverify() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+        reExplain(s.id(), "A");                             // RE_EXPLAIN
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // 재검증1 실패 → RE_VERIFY
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.RE_VERIFY);
+
+        assertThat(service.currentReExplanation(s.id())).isPresent();
+    }
+
+    @Test
+    @DisplayName("재설명 조회(#415): 재설명한 적 없으면(IN_PROGRESS) 빈 값 → 404")
+    void currentReExplanation_emptyBeforeAnyReExplain() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));   // IN_PROGRESS, 아직 재설명 없음
+        assertThat(service.currentReExplanation(s.id())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("재설명 조회(#415): 재검증 통과로 사이클을 벗어나면 빈 값 — 저장값이 남아도 '진행 중' 아님")
+    void currentReExplanation_emptyAfterCycleEnds() {
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U3));
+        reExplain(s.id(), "A");                             // RE_EXPLAIN
+        service.recordJudgment(s.id(), j("A", Grade.U1));   // 재검증 통과 → IN_PROGRESS 복귀
+        assertThat(service.get(s.id()).state()).isEqualTo(SessionState.IN_PROGRESS);
+
+        assertThat(service.currentReExplanation(s.id())).isEmpty();
+    }
+
+    @Test
     @DisplayName("이해(U1) 항목은 재설명 대상이 아니다 → REEXPLAIN_NOT_ELIGIBLE 계열 예외")
     void reexplainUnderstoodItem_rejected() {
         Session s = service.create(cmd(null));

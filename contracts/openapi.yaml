@@ -223,6 +223,29 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /sessions/{id}/re-explanations/current:
+    get:
+      summary: 진행 중인 재설명 조회 (F-INT-004) — 지금 보여주는 재설명 문면·재검증 질문
+      description: >
+        권한: `session:interview`. POST /re-explain 이 보여준 그 문면을 그대로 돌려준다 —
+        서버가 재생성하지 않는다(LLM 산출물이라 비결정, P1). 화면은 이 GET 을 출처로 삼아
+        저장소 인계(sessionStorage)에 기대지 않는다 — 새 창·새로고침·다른 기기에서 열어도
+        판매자 화면과 같은 재설명·같은 재검증 질문이다.
+        재설명 사이클(RE_EXPLAIN·RE_VERIFY) 밖이거나 아직 재설명한 적 없으면 404(NOT_FOUND).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 지금 진행 중인 재설명(POST /re-explain 과 같은 형태)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReExplanationApiResponse'}
+        '404':
+          description: NOT_FOUND — 진행 중인 재설명이 없다(사이클 밖 또는 미기록) 또는 세션 없음.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions/{id}/abort:
     post:
       summary: 세션 중단 (F-INT-001) — 고객 이탈 등 → ABORTED

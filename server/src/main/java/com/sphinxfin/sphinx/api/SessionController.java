@@ -330,6 +330,30 @@ public class SessionController {
                 productTypeOf(session)));
     }
 
+    /**
+     * 지금 진행 중인 재설명 조회 (F-INT-004 R · 이슈 #415).
+     *
+     * <p>❗<b>화면이 저장소 인계에 기대지 않게 하는 것이 요지다.</b> S-02 가 고객 화면을 새
+     * 창(window.open)으로 열면서 sessionStorage 인계가 창을 못 건넌다 — 새 창은 재설명을 못
+     * 받아 정상 흐름으로 떨어지고, <b>엉뚱한 항목의 판정이 에러 없이 재검증으로 기록</b>된다.
+     * 이 GET 이 서버를 출처로 만들면 새 창·새로고침·다른 기기 어디서 열어도 같은 재설명이다.
+     *
+     * <p><b>POST /re-explain 이 보여준 그 문면</b>을 돌려준다 — ai-service 로 재생성하지 않는다.
+     * 재설명은 LLM 산출물이라 비결정(P1)이라, 재생성하면 판매자가 띄운 문장과 달라진다.
+     * 재설명 사이클(RE_EXPLAIN·RE_VERIFY) 밖이거나 남긴 문면이 없으면 404 — "지금 진행 중인
+     * 재설명이 없다"를 세션 없음과 같은 코드로 낸다(리포트 조회와 같은 규약).
+     *
+     * <p>권한은 {@code session:interview} 다 — POST /re-explain 과 같은 action 이다. 재설명은
+     * 판매자가 주도하는 면담 흐름이고(고객 전용 own_session 이 아니다, #166), 문면에는
+     * 판매자 뷰 금지값(misconceptionType·escalate 등, 기획서 7-4)이 없어 그대로 실어도 된다.
+     */
+    @PreAuthorize("@accessGuard.can('session:interview', #sid)")
+    @GetMapping("/{sid}/re-explanations/current")
+    public ApiResponse<SessionService.ReExplanation> currentReExplanation(@PathVariable String sid) {
+        return ApiResponse.ok(sessionService.currentReExplanation(sid).orElseThrow(
+                () -> new NoSuchElementException("지금 진행 중인 재설명이 없다: " + sid)));
+    }
+
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")
     @PostMapping("/{sid}/abort")
     public ApiResponse<SessionResponse> abort(@PathVariable String sid) {
