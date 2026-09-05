@@ -292,9 +292,7 @@ export default function S00Admin() {
           <p className="adm__eyebrow">심사·시연용 목차</p>
           <h1 className="adm__title">화면 목록</h1>
           <p className="adm__lede">
-            명세 8절의 화면 8개예요. 이 목차는 <b>클라이언트 목차</b>이고 권한을
-            판단하지 않습니다 — 여기 링크가 있다는 것이 그 화면의 API 를 부를 권한이
-            있다는 뜻은 아닙니다.
+            명세 8절의 화면 8개예요.
           </p>
           <div className="adm__headrow">
             <button
@@ -318,8 +316,7 @@ export default function S00Admin() {
             세션
           </h2>
           <p className="adm__hint adm__hint--block">
-            아래 8개 중 <b>5개는 세션ID 가 필요해요</b>. 세션 없이 열 수 있는 것은
-            S-01·S-02·S-08 셋뿐입니다.
+            <b>5개는 세션 번호가 필요해요.</b> S-01·S-02·S-08 은 없어도 열려요.
           </p>
 
           <div className="adm__sidrow">
@@ -332,7 +329,7 @@ export default function S00Admin() {
                 className="adm__control"
                 value={sid}
                 disabled={working}
-                placeholder="예: 3f9a1c7e-…  (직접 붙여 넣어도 됩니다)"
+                placeholder="예: 3f9a1c7e-…"
                 onChange={(e) => setSid(e.target.value)}
               />
             </div>
@@ -356,9 +353,8 @@ export default function S00Admin() {
               {busy === "creating" ? "만드는 중…" : "데모 세션 만들기"}
             </button>
             <p className="adm__hint">
-              기획 7-2 데모의 응답 조합(60대·5천만 원대·투자경험 없음)으로 세션 하나를
-              만듭니다. <b>연출이 아니라 입력을 채우는 것</b>이고, 판정과 신호등은 서버가
-              정합니다. 상품을 골라 만들려면 S-02 로 갑니다.
+              60대·5천만 원대·투자경험 없음으로 세션을 만들어요. 상품을 고르려면
+              S-02 로 가세요.
             </p>
           </div>
 
@@ -392,7 +388,7 @@ export default function S00Admin() {
                   (P1) S-05 가 근거와 함께 그린다 — 목차가 색만 옮겨 적으면 근거 없는 판정을
                   화면 하나 더에서 말하는 것이 된다(P4). 대신 상태로 갈 곳을 안내한다. */}
               <p className="adm__hint">
-                신호등과 근거는 <b>S-05</b> 에서 봐요. 이 목차는 판정을 말하지 않아요.
+                신호등과 근거는 <b>S-05</b> 에서 봐요.
               </p>
             </div>
           )}
@@ -417,16 +413,13 @@ export default function S00Admin() {
           </h2>
           <ul className="adm__list">
             <li>
-              <b>권한 차단은 화면에서 볼 수 없어요.</b> 심사용 배포는 로그인 없이 열리는
-              개방 모드라 무엇을 눌러도 차단되지 않아요. 권한 차단은 API 로 확인해요.
+              <b>권한 차단은 API 로 확인해요.</b> 심사용 배포는 로그인 없이 열려요.
             </li>
             <li>
-              <b>화면은 계산하지도 판정하지도 않아요.</b> 등급·신호등·금액·집계는 모두
-              서버가 만든 값이에요.
+              <b>등급·신호등·금액·집계는 모두 서버가 만들어요.</b>
             </li>
             <li>
-              <b>합성 세션으로는 교부 문서를 볼 수 없어요.</b> 리포트를 보려면 위에서 만든
-              세션을 면담과 판정까지 진행해 주세요.
+              <b>합성 세션은 리포트가 비어 있어요.</b> 위에서 만든 세션으로 보세요.
             </li>
           </ul>
         </section>
@@ -498,7 +491,7 @@ function ScreenCard({
           열기
         </button>
         {locked ? (
-          <span className="adm__hint">세션 번호가 있어야 열립니다</span>
+          <span className="adm__hint">세션 번호가 필요해요</span>
         ) : (
           <a className="adm__newtab" href={path} target="_blank" rel="noreferrer">
             새 탭
