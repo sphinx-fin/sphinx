@@ -12,6 +12,7 @@
 import json
 import pathlib
 import unicodedata
+from collections import Counter
 
 import jsonschema
 import pytest
@@ -279,21 +280,37 @@ def els_doc():
     )
 
 
-#: p8 상환조건 표에서 **조건절부터 결론까지 한 항목으로 읽혀야 하는** 자리들.
+#: 상환조건 표에서 **조건절부터 결론까지 한 항목으로 읽혀야 하는** 자리들.
 #: ⑧ 은 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, ⑦ 은 `#452`
 #: 리뷰에서 `@yoonjiseok` 이 *"⑧만 고치고 ⑦은 오히려 옮겨 놨다"* 로 잡아낸 자리다.
-ELS_P8_CLAUSES = [
-    ("⑦", "⑦ 위 ⑥에 해당하지", "원금 × [100%+33.00%]"),
-    ("⑧", "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."),
+#: ① 은 `ELS-EARLY-REDEMPTION-CONDITION`(required) 의 근거이고 **p7** 에 있다 — `#455`
+#: 가 열린 자리다. 인용이 「이상인 경」에서 끊겨 결론이 통째로 빠져 있었다.
+ELS_CLAUSES = [
+    (7, "①", "① 1차 자동조기상환평가일", "원금 × [100%+ 5.50%]"),
+    (7, "②", "② 2차 자동조기상환평가일", "원금 × [100%+ 11.00%]"),
+    (8, "⑦", "⑦ 위 ⑥에 해당하지", "원금 × [100%+33.00%]"),
+    (8, "⑧", "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."),
 ]
 
 
-#: ⑧행 수익률 칸의 줄들. **다른 y** 에 있어서 본문 줄 사이로 끼어들던 것들이다.
-_STRAYS = ["-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
+#: 본문에 끼면 안 되는 표 칸 조각들.
+#:
+#:   앞의 넷은 ⑧행 수익률 칸이다 — **다른 y** 에 있어서 본문 줄 **사이로** 끼어들던 것이고
+#:   `#452` 가 줄 재정렬로 뺐다.
+#:
+#:   뒤의 넷은 **같은 y** 라 `extract_text` 가 본문 줄 **끝에** 붙여 오던 것이다. 줄
+#:   재정렬로는 못 갈라서 `#452` 가 별도 사안으로 미뤘고(`b51d050`), `#455` 가 낱말 사이
+#:   간격과 칸 경계로 갈랐다. 그전까지 이 그물은 *"항목이 끊기지 않는다"* 까지만 쟀고
+#:   *"칸 조각이 없다"* 는 못 쟀다 — 지금은 둘 다 잰다.
+_STRAYS = [
+    "-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)",
+    "5.50%", "11.00%", "33.00%", "(연 11.00%)",
+]
 
 
-@pytest.mark.parametrize("tag,head,tail", ELS_P8_CLAUSES, ids=[c[0] for c in ELS_P8_CLAUSES])
-def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, head, tail):
+@pytest.mark.parametrize("page,tag,head,tail", ELS_CLAUSES,
+                         ids=[f"p{c[0]}{c[1]}" for c in ELS_CLAUSES])
+def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, page, tag, head, tail):
     """★ 조건절부터 결론까지 **다른 항목이 끼지 않고** 이어진다 (`#436` 합격 기준).
 
     ⑧ 은 고치기 전 사이에 수익률 칸 조각이 100자 끼어 있었다. ⑦ 은 `#452` 의 첫 판이
@@ -303,44 +320,69 @@ def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, 
     ❗그래서 이 그물은 ⑧ 하나로는 부족하다 — `#446` 도 `#452` 첫 판도 **고친 자리 옆에서**
     깨졌다. 한 항목만 재는 그물은 옮겨 간 끊김을 구조적으로 못 본다.
 
-    ## ❗이 그물이 재지 **않는** 것 — 같은 y 로 이미 합쳐진 조각
+    ## 같은 y 로 합쳐져 있던 조각도 이제 잰다
 
-    `_STRAYS` 는 **다른 y 에 있던 칸 줄**만 본다. `extract_text` 가 같은 y 의 칸들을 이미
-    한 줄로 합쳐 온 것은 줄 재정렬로 못 가르므로 그대로 남는다. ⑦ 이 그 경우다.
+    예전에는 `_STRAYS` 가 **다른 y 에 있던 칸 줄**만 봤다. `extract_text` 가 같은 y 의
+    칸들을 이미 한 줄로 합쳐 온 것은 줄 재정렬로 못 갈라서, 이 단정이 참인 것이
+    *"칸 조각이 없다"* 가 아니라 *"항목이 끊기지 않는다"* 까지였다(`#452` 리뷰, 윤지석).
 
-        도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로 33.00%    ← 33.00% 가 붙어 있다
-        만기 하락한 적이 없는 경우(…                (연 11.00%)     ← 라벨·수익률이 붙어 있다
+        도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로 33.00%    ← 33.00% 가 붙어 있었다
+        두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경 5.50%    ← ①의 인용을 끊던 자리
 
-    그래서 ⑦ 에 대해 이 단정이 참인 것은 **"칸 조각이 없다"** 가 아니라 **"항목이 끊기지
-    않는다"** 다(`#452` 리뷰, 윤지석). 그 구간은 `main` 과 바이트 동일이라 이 변경의 몫이
-    아니고, 가르려면 줄이 아니라 **낱말 단위**로 읽어야 한다 — 별도 사안이다.
+    `#455` 가 낱말 사이 간격과 칸 경계로 그것을 갈랐고, `_STRAYS` 에 수익률 문면 넷이
+    더해졌다. **이제 두 뜻이 같다.**
     """
-    text = els_doc["pages"][7]["text"]
+    text = els_doc["pages"][page - 1]["text"]
     start, end = text.index(head), text.index(tail) + len(tail)
     clause = text[start:end]
-    assert [s for s in _STRAYS if s in clause] == [], f"{tag}: {clause}"
+    # 결론 자체가 금액이라 끝에 수익률 문면을 담는다(`원금 × [100%+ 5.50%]`). 조각을
+    # 찾는 자리는 **조건절부터 결론 직전까지**다 — 결론을 넣고 세면 늘 빨갛다.
+    body = clause[:len(clause) - len(tail)]
+    assert [s for s in _STRAYS if s in body] == [], f"p{page}{tag}: {clause}"
 
 
-def test_cell_ordering_only_permutes_lines(real_case):
-    """★ 칸 순서 읽기는 **자리바꿈**이다 — 줄을 더하거나 지우거나 고치지 않는다.
+def test_cell_ordering_never_rewrites_text(real_case):
+    """★ 칸 순서 읽기는 **자리를 바꾸고 가르기만** 한다 — 글자를 더하거나 지우거나 고치지 않는다.
 
     이걸 안 잠그면 「읽는 순서를 고친다」가 「원문을 다시 쓴다」로 조용히 번진다. 그러면
     `pages[page].text[start:end] == value_text`(1절 F-EXT-002 통제의 P6)가 원문이 아닌
     것을 가리키게 되고, 그 결함은 감사 시점까지 안 드러난다.
+
+    ❗예전에는 **줄 다중집합이 같은가**로 쟀다. `#455` 가 같은 y 의 칸을 가르면서 줄 수가
+    늘어 그 잣대가 못 쓰게 됐다. 약하게 푸는 대신 **둘로 갈라** 같은 것을 잰다.
+
+        ① 공백을 뺀 글자 다중집합이 같다        — 더하기·지우기·고치기를 잡는다
+        ② 새 줄은 전부 옛 줄 **하나 안에** 있다  — 가르기만 했지 이어 붙이지 않았다
+
+    ②가 있어야 ①이 허용하는 「글자를 섞어 다시 쓰기」가 막힌다. 하나만 두면 안 된다.
     """
     import pdfplumber
 
     with pdfplumber.open(real_case["pdf"]) as pdf:
         for index, page in enumerate(pdf.pages):
-            before = page.extract_text(x_tolerance=parsing._X_TOLERANCE,
-                                       y_tolerance=parsing._Y_TOLERANCE) or ""
+            before = unicodedata.normalize(
+                "NFC",
+                page.extract_text(x_tolerance=parsing._X_TOLERANCE,
+                                  y_tolerance=parsing._Y_TOLERANCE) or "",
+            )
             after = real_case["doc"]["pages"][index]["text"]
-            assert sorted(unicodedata.normalize("NFC", before).split("\n")) == \
-                sorted(after.split("\n")), f"p{index + 1}"
+
+            assert Counter("".join(before.split())) == Counter("".join(after.split())), \
+                f"p{index + 1} 글자가 더해졌거나 지워졌다"
+
+            was = before.split("\n")
+            for line in after.split("\n"):
+                assert not line or any(line in old for old in was), \
+                    f"p{index + 1} 옛 줄 어디에도 통째로 없는 줄이다: {line!r}"
 
 
 def test_lines_outside_tables_do_not_move(real_case):
-    """★ 표 밖의 줄은 한 글자도 안 움직인다 — 파급을 표 안으로 가둔다."""
+    """★ 표 밖의 줄은 한 글자도 안 바뀌고 **순서도 그대로**다 — 파급을 표 안으로 가둔다.
+
+    ❗예전에는 **줄 번호가 같은가**로 쟀다. `#455` 가 표 **안**에서 줄을 가르면 그 뒤 줄의
+    번호가 통째로 밀리므로, 표 밖이 멀쩡해도 그 잣대는 빨개진다. 번호 대신 **부분열**로
+    잰다 — 표 밖 줄들이 같은 문면으로 같은 순서로 남아 있는가.
+    """
     import pdfplumber
 
     with pdfplumber.open(real_case["pdf"]) as pdf:
@@ -348,12 +390,19 @@ def test_lines_outside_tables_do_not_move(real_case):
             boxes = [t.bbox for t in page.find_tables()]
             lines = page.extract_text_lines(x_tolerance=parsing._X_TOLERANCE,
                                             y_tolerance=parsing._Y_TOLERANCE)
-            outside = {
-                i: line["text"] for i, line in enumerate(lines)
+            outside = [
+                unicodedata.normalize("NFC", line["text"])
+                for line in lines
                 if not any(b[1] - 1 <= (line["top"] + line["bottom"]) / 2 <= b[3] + 1
                            for b in boxes)
-            }
+            ]
             got = real_case["doc"]["pages"][index]["text"].split("\n")
-            for i, expected in outside.items():
-                assert got[i] == unicodedata.normalize("NFC", expected), \
-                    f"p{index + 1} L{i + 1}"
+
+            at = 0
+            for expected in outside:
+                try:
+                    at = got.index(expected, at) + 1
+                except ValueError:
+                    raise AssertionError(
+                        f"p{index + 1} 표 밖 줄이 사라졌거나 순서가 바뀌었다: {expected!r}"
+                    ) from None
