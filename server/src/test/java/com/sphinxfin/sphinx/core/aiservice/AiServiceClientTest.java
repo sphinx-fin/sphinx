@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.core.aiservice;
 
+import com.sphinxfin.sphinx.evidence.CanonicalJson;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Grade;
@@ -20,6 +21,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -343,8 +345,14 @@ class AiServiceClientTest {
                           "confidence": 0.82,
                           "contradictions": [
                             {"axis": "risk_tolerance",
-                             "survey": "원금 손실은 감수할 수 있다",
-                             "utterance": "원금은 지켜지죠"}
+                             "direction": "survey_overstates_tolerance",
+                             "survey_ref": {"question_id": "SUIT-RISK-TOLERANCE",
+                                            "question_text": null,
+                                            "recorded_answer": "원금 손실은 감수할 수 있다"},
+                             "utterance_quote": "원금은 지켜지죠",
+                             "item_id": null,
+                             "reason": "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
+                             "confidence": 0.77}
                           ],
                           "reason": "설문은 손실 감수 가능인데 발화는 원금 보장을 전제한다",
                           "survey_schema_version": "s02-survey-v2"
@@ -366,6 +374,56 @@ class AiServiceClientTest {
                 .as("어느 축이 어긋났는지가 근거의 실체다 — reason 은 요약이고 이쪽이 대조 대상이다")
                 .hasSize(1);
         assertThat(m.contradictions().get(0)).containsEntry("axis", "risk_tolerance");
+    }
+
+    @Test
+    @DisplayName("★❗모순 근거가 불변 기록에 그대로 들어간다 — Double 이 섞이면 judge 가 죽는다 (#453)")
+    void mismatchBasisSurvivesCanonicalSerialization() {
+        // 계약(`contracts/suitability_mismatch.schema.json` $defs/contradiction)이 요구하는
+        // 모양 그대로다. `confidence` 가 required number 라 **모순이 1건이라도 있으면**
+        // 이 값이 반드시 온다.
+        server.expect(requestTo(BASE + "/internal/mismatch"))
+                .andRespond(withSuccess("""
+                        {
+                          "session_id": "S-1",
+                          "status": "mismatch",
+                          "mismatch": true,
+                          "confidence": 0.82,
+                          "contradictions": [
+                            {"axis": "risk_tolerance",
+                             "direction": "survey_overstates_tolerance",
+                             "survey_ref": {"question_id": "SUIT-RISK-TOLERANCE",
+                                            "question_text": null,
+                                            "recorded_answer": "공격투자형"},
+                             "utterance_quote": "은행에서 파는 거니까 원금은 지켜지는 거죠?",
+                             "item_id": null,
+                             "reason": "설문은 공격투자형인데 발화는 원금보장을 전제한다",
+                             "confidence": 0.77}
+                          ],
+                          "reason": "설문과 발화가 어긋난다",
+                          "survey_schema_version": "s02-survey-v2"
+                        }""", MediaType.APPLICATION_JSON));
+
+        SuitabilityMismatch m = client.detectMismatch(
+                "S-1", Map.of("SUIT-RISK-TOLERANCE", "공격투자형"),
+                Map.of("A", "은행에서 파는 거니까 원금은 지켜지는 거죠?"), "s02-survey-v2");
+
+        // ① 타입 — 타입이 선언되지 않은 자리에도 Double 이 들어오면 안 된다.
+        assertThat(m.contradictions().get(0).get("confidence"))
+                .as("`contradictions` 는 List<Map<String,Object>> 라 Jackson 기본값이면 "
+                        + "Double 이 된다. ADR-008 이 금지하는 타입이다")
+                .isInstanceOf(BigDecimal.class);
+
+        // ② 실물 — 이 payload 가 그대로 evidence 로 내려간다(StoredEvidenceRecorder
+        //    .appendMismatch). 여기서 던지면 /sessions/{id}/judge 가 INTERNAL_ERROR 이고
+        //    상태 전이가 커밋되지 않아 세션이 IN_PROGRESS 에 갇힌다 — 실제로 그랬다(#453).
+        //
+        //    ❗타입 단정(①)만으로는 부족하다. 중첩이 더 깊어지거나(`survey_ref` 안의 수)
+        //    새 필드가 늘면 ①은 통과하면서 여기서 죽는다. 실제로 직렬화해 본다.
+        assertThatCode(() -> CanonicalJson.serialize(
+                Map.of("contradictions", m.contradictions())))
+                .as("경계를 넘어온 근거가 불변 기록에 못 들어가면 판정 자체가 실패한다")
+                .doesNotThrowAnyException();
     }
 
     @Test

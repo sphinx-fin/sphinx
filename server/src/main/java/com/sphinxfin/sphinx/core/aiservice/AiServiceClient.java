@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.sphinxfin.sphinx.domain.MeasurementInvalidException;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.web.client.RestClient.ResponseSpec.ErrorHandler;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -99,8 +100,20 @@ public class AiServiceClient {
                            PiiMeter piiMeter) {
         this.piiMeter = piiMeter;
         // 이 경계 전용 매퍼 — 전역 Jackson과 분리한다(웹은 camelCase 유지).
+        //
+        // ❗**소수를 BigDecimal 로 받는다** (이슈 #453). 응답 중 타입이 선언된 자리
+        // (`MismatchResponse.confidence` 등)는 레코드가 BigDecimal 로 잡아 주지만,
+        // `List<Map<String, Object>> contradictions` 처럼 **타입이 없는 자리**는 Jackson 이
+        // 기본값대로 Double 을 넣는다. 그 Map 은 그대로 불변 기록으로 내려가고,
+        // `CanonicalJson` 은 ADR-008 에 따라 double/float 에서 **던진다** — 재현 가능한
+        // 십진 표현이 없어서 해시가 환경마다 갈리기 때문이다.
+        //
+        // 그래서 계약이 `contradiction.confidence` 를 required number 로 주는 순간
+        // (모순이 1건이라도 있는 세션) `/sessions/{id}/judge` 가 INTERNAL_ERROR 로 죽고
+        // 세션이 IN_PROGRESS 에 갇혔다. 여기서 BigDecimal 로 받으면 그 자리가 없어진다.
         ObjectMapper snakeMapper = JsonMapper.builder()
                 .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .build();
         MappingJackson2HttpMessageConverter snakeConverter =
                 new MappingJackson2HttpMessageConverter(snakeMapper);
