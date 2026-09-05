@@ -232,12 +232,23 @@ export default function S04Simulator() {
     return (
       <main className="sm">
         <div className="sm__shell">
-          <h1 className="sm__title">조건 확인이 필요합니다</h1>
+          <h1 className="sm__title">조건 확인이 필요해요</h1>
           <p className="sm__alert sm__alert--warn" role="alert" style={{ marginTop: "var(--space-4)" }}>
-            <b>상품 조건을 아직 다 읽어내지 못했습니다: {blocked}</b>
-            조건이 불완전한 상태로 금액을 계산해 보여드리면 잘못된 숫자를 믿게 됩니다.
-            담당자가 조건을 확인한 뒤에 이용해 주세요.
+            <b>아직 다 읽어내지 못한 조건이 있어요: {blocked}</b>
+            조건이 불완전한 채로 금액을 보여드리면 잘못된 숫자를 믿게 돼요.
+            담당자가 확인한 뒤에 이용해 주세요.
           </p>
+          {/* ❗**막는 분기에도 나가는 길을 둔다.** 판단은 맞지만(불완전한 조건으로 금액을
+              보여주지 않는다) 여기서 early return 이라 아래 「면담으로」 버튼이 안 그려져,
+              리허설에서 실제로 갇혔다(#438 ①). 정상 경로와 같은 곳으로 보낸다. */}
+          <button
+            type="button"
+            className="sm__btn"
+            style={{ marginTop: "var(--space-4)" }}
+            onClick={() => navigate(`/interview/${sid}`)}
+          >
+            면담으로 돌아가기
+          </button>
         </div>
       </main>
     );

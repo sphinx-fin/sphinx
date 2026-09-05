@@ -61,6 +61,7 @@
  * 문장을 그대로 낸다. 색으로 소리치지도 않는다 — 이상치는 **판정이 아니다.**
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { ApiRequestError, get } from "../api/client";
 import type {
   ContrastResponse, ContrastRow, DecisionView, GradeDistribution, HeatmapCell,
@@ -432,7 +433,7 @@ export default function S08Dashboard() {
         <b>{itemNames[id] ?? id}</b>
         {requires.length > 0 ? (
           <>
-            <span className="s08__tip-val">고객이 자기 말로 말해야 「이해」예요</span>
+            <span className="s08__tip-val">채점이 보는 요소예요</span>
             <ul className="s08__tip-list">
               {requires.map((r) => <li key={r}>{r}</li>)}
             </ul>
@@ -503,15 +504,12 @@ export default function S08Dashboard() {
         <h1>대시보드</h1>
         <section className="s08__blocked">
           <h2>이 역할은 집계를 볼 수 없어요</h2>
-          <p>
-            오해 지도와 선행지표는 준법감시(COMPL)와 관리자(MGR)만 볼 수 있습니다.
-            판매 조직은 집계에 접근할 수 없습니다.
-          </p>
+          <p>오해 지도와 선행지표는 준법감시와 관리자만 볼 수 있어요.</p>
           <p className="s08__blocked-why">
-            개인의 이해도 데이터가 영업 관리 지표로 되돌아가면 이 제품은 고객을 보호하는
-            대신 고객을 압박하는 도구가 됩니다. 그래서 <strong>역할 자체를 만들지
-            않았고</strong>, 집계도 볼 수 없어요.
+            개인의 이해도가 영업 관리 지표로 되돌아가면 이 제품은 고객을 지키는 대신
+            압박하는 도구가 돼요. 그래서 <strong>역할 자체를 만들지 않았어요.</strong>
           </p>
+          <p><Link className="s08__back" to="/admin">화면 목록으로</Link></p>
         </section>
       </main>
     );
@@ -521,6 +519,9 @@ export default function S08Dashboard() {
     <main className="s08">
       <header className="s08__head">
         <div>
+          {/* 이 화면은 세션에 매이지 않아 「돌아갈 곳」이 화면 안에 없었다 — navigate 호출이
+              0건이라 브라우저 뒤로가기 말고는 못 나왔다(#438 ③). 목차로 보낸다. */}
+          <p><Link className="s08__back" to="/admin">← 화면 목록</Link></p>
           <h1>대시보드</h1>
           {/* 범위와 합성 여부는 문장이 아니라 **표식**으로 남긴다. 둘 다 명세가 요구하는
               것이라(F-DSH-001 표시 · 연출 금지) 지우지 않고 최소 형태로 줄였다. */}

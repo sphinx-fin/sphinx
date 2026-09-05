@@ -699,3 +699,13 @@
   margin: calc(var(--space-3) * -1);
 }
 .s08__dstat--lead .s08__dstat-value { font-size: calc(34px * var(--scale)); }
+
+/* 나가는 길. 이 화면은 세션에 안 매여 있어 출구가 화면 안에 없었다(#438 ③). */
+.s08__back {
+  display: inline-block;
+  color: var(--limestone-88);
+  font-size: calc(13px * var(--scale));
+  text-decoration: none;
+  margin-bottom: var(--space-2);
+}
+.s08__back:hover { color: var(--text); text-decoration: underline; }
