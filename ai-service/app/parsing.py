@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import statistics
 import unicodedata
 from pathlib import Path
 
@@ -36,7 +37,7 @@ log = logging.getLogger(__name__)
 MANUAL_OVERRIDE_CODE = "MANUAL_OVERRIDE"
 
 #: 출력이 달라지면 올린다. 파싱 파라미터(_X_TOLERANCE 등) 변경도 출력 변경이다.
-PARSER_VERSION = "0.2.0"
+PARSER_VERSION = "0.3.0"
 
 #: 데모 범위. contracts/parsed_document.schema.json 의 product_type enum과 1:1.
 PRODUCT_TYPES = ("ELS", "VARIABLE_INSURANCE")
@@ -51,6 +52,29 @@ _CID_LEFTOVER = re.compile(r"\(cid:\d+\)")
 
 #: 캡션 후보를 찾을 표 위쪽 범위(pt).
 _CAPTION_LOOKUP_HEIGHT = 28
+
+#: 같은 y 의 두 칸을 가르는 문턱 — **그 줄의 글자폭 배수**다. 절대 pt 가 아닌 이유가 실측이다.
+#:
+#:     칸 **안**의 최대 간격      ELS 21.9pt · 변액 운용설명서 131.7pt
+#:     칸 경계를 넘는 최소 간격    ELS  0.7pt · 변액 상품요약  0.1pt
+#:
+#: 두 분포가 pt 로는 완전히 겹친다 — 문턱을 어디에 둬도 한쪽이 틀린다. 글자폭으로 나누면
+#: 갈린다(칸 안 99%tile 0.52~1.00 · 교차 중앙값 5.9~8.9). 낱말 한가운데를 지나는 칸 경계가
+#: 실제로 있어서(`홈페이❙지` · `ELS❙, DLS의`) 교차만으로는 못 가른다.
+_CELL_SPLIT_GAP_RATIO = 1.0
+
+#: 가른 조각 중 **가장 긴 것**이 이만큼의 한글을 담아야 실제로 가른다.
+#:
+#: 고치려는 해악은 *"문장이 끊긴다"* 이므로, 끊긴 것이 문장일 때만 가르는 값이 있다.
+#: 칸이 전부 짧은 **수치 표**(변액 운용설명서 11~13쪽 특별계정 수익률)에서는 한 행이 한
+#: 줄로 붙어 있는 편이 낫다 — 가르면 값 하나가 한 줄이 되어 **어느 행의 값인지가 사라진다.**
+#:
+#:     문턱 없음   운용설명서 +1046줄 (56 → 222줄. 행 결속이 깨진다)
+#:     한글 12자   운용설명서   +49줄 · ELS +41줄 (①⑦⑧은 그대로 갈린다)
+_CELL_SPLIT_MIN_HANGUL = 12
+
+#: 조각이 산문인지 재는 문자류. 숫자·기호만 있는 칸은 아무리 길어도 문장이 아니다.
+_HANGUL = re.compile(r"[가-힣]")
 
 
 def _nfc(s: str) -> str:
@@ -103,6 +127,104 @@ def parse_document(
     return doc
 
 
+def _text_offsets(text: str, chars: list) -> list[int] | None:
+    """`chars[i]` 가 `text` 의 몇 번째 글자인지. 못 세우면 `None`.
+
+    ❗**원문을 자를 뿐 되짓지 않는다.** `extract_text_lines` 는 낱말 사이 공백을 자체
+    레이아웃 규칙으로 끼워 넣는데, 그 규칙은 밖에서 재현되지 않는다 — 실측으로 글자
+    이어붙이기는 1467/1678 줄이 어긋나고, `extract_text` 도 `extract_words` 도 554/1678 이
+    어긋난다. 그래서 조각의 문면을 만들지 않고 **원문 문자열을 자리에서 자른다.**
+
+    끼워 넣어진 공백만 건너뛴다. 공백이 아닌 것을 건너뛰어야 하면 정렬이 깨진 것이므로
+    `None` 을 내고 호출자가 그 줄을 안 가른다(3개 문서 1678줄 전건 성립).
+    """
+    pos, out = 0, []
+    for c in chars:
+        t = c["text"]
+        while pos < len(text) and text[pos] != t[:1]:
+            if not text[pos].isspace():
+                return None
+            pos += 1
+        if not text.startswith(t, pos):
+            return None
+        out.append(pos)
+        pos += len(t)
+    return out
+
+
+def _split_line_at_cell_edges(line: dict, cells: list) -> list[dict]:
+    """한 줄이 여러 칸을 물고 있으면 칸별 조각으로 가른다. 안 갈리면 `[line]`.
+
+    ## 왜 가르나
+
+    `extract_text` 는 **같은 y** 의 칸들을 이미 한 줄로 합쳐 온다. `#452` 가 푼 것은 다른 y
+    에 있던 칸이고, 같은 y 는 줄 재정렬로 못 가른다 — `#452` 가 *"낱말 단위로 읽어야 한다,
+    별도 사안"* 으로 미뤄 둔 그 자리다(`b51d050`).
+
+        p7 21| 두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경 5.50%
+                                                          ↑ 수익률 칸이 문장 끝에 붙었다
+
+    그래서 `ELS-EARLY-REDEMPTION-CONDITION`(required) 의 인용이 **「이상인 경」에서 끝난다** —
+    「경우」가 갈리고 결론(`자동조기상환되며 … 원금 × [100%+5.50%]`)이 빠진다(`#455`).
+
+    ## 어디서 가르나 — 두 조건을 **곱한다**
+
+        ① 글자 사이가 칸 경계를 넘는다
+        ② 그 간격이 그 줄 글자폭의 `_CELL_SPLIT_GAP_RATIO` 배를 넘는다
+        ③ 갈린 조각 중 하나가 `_CELL_SPLIT_MIN_HANGUL` 자 이상의 한글을 담는다
+
+    ❗①만으로는 안 된다. 칸 경계가 낱말 한가운데를 지나는 줄이 ELS 에만 23건 있다
+    (`…(당사 홈페이❙지 'ELS 기초자산정보'…` · `-원금손실조건: ELS❙, DLS의 낙인배리어…`).
+    거기서 가르면 **낱말이 반으로 잘린다** — 지금 고치려는 것보다 나쁘다.
+
+    ❗②만으로도 안 된다. 칸 안에서 131.7pt 벌어지는 줄이 있다(변액 운용설명서 7쪽
+    `주식형 주식형 인덱스주식형`). 절대 pt 문턱은 두 분포가 겹쳐서 못 세운다.
+    """
+    chars = line.get("chars") or []
+    if len(chars) < 2 or not cells:
+        return [line]
+    widths = [c["x1"] - c["x0"] for c in chars if c["x1"] > c["x0"]]
+    if not widths:
+        return [line]
+    unit = statistics.median(widths)
+    if unit <= 0:
+        return [line]
+
+    edges = sorted({c[0] for c in cells} | {c[2] for c in cells})
+    cuts = [
+        k for k in range(1, len(chars))
+        if (chars[k]["x0"] - chars[k - 1]["x1"]) > unit * _CELL_SPLIT_GAP_RATIO
+        and any(chars[k - 1]["x1"] < e < chars[k]["x0"] for e in edges)
+    ]
+    if not cuts:
+        return [line]
+
+    offsets = _text_offsets(line["text"], chars)
+    if offsets is None:
+        return [line]
+
+    pieces = []
+    for a, b in zip([0] + cuts, cuts + [len(chars)]):
+        seg = chars[a:b]
+        end = offsets[b - 1] + len(chars[b - 1]["text"])
+        text = line["text"][offsets[a]:end].strip()
+        if not text:
+            continue
+        pieces.append({
+            "text": text,
+            "x0": min(c["x0"] for c in seg),
+            "x1": max(c["x1"] for c in seg),
+            "top": min(c["top"] for c in seg),
+            "bottom": max(c["bottom"] for c in seg),
+            "chars": seg,
+        })
+    if not pieces:
+        return [line]
+    if max(len(_HANGUL.findall(pc["text"])) for pc in pieces) < _CELL_SPLIT_MIN_HANGUL:
+        return [line]        # 끊긴 것이 문장이 아니다 — 수치 표의 행 결속을 지킨다
+    return pieces
+
+
 def _cell_ordered_lines(page) -> list[str] | None:
     """표 안에서는 **칸 순서로** 읽는다. 표가 없거나 못 읽으면 `None`(호출자가 그대로 간다).
 
@@ -125,16 +247,22 @@ def _cell_ordered_lines(page) -> list[str] | None:
     에서 `@yoonjiseok` 이 **끊김이 없는가**를 합격 기준으로 못박은 것이 이 성질이다:
     *"13/13 은 합격 기준이 아니다 — 회차마다 어디까지 인용하는지가 갈린다."*
 
-    ## 어떻게 고치는가 — 자리바꿈이지 재조립이 아니다
+    ## 어떻게 고치는가 — 자리바꿈과 가르기지, 재조립이 아니다
 
-    줄 목록의 **순서만** 행 안에서 바꾼다. 각 행이 차지한 자리(인덱스)는 그대로 두고 그
-    안에서 `(칸, y)` 로 다시 세운다. 그래서
+    두 걸음이다. 둘 다 **글자를 만들지 않는다** — 원문을 자르고 자리를 바꿀 뿐이다.
 
-    - 표 밖의 줄은 **한 글자도 안 움직인다.**
+    ① **가르기**(`_split_line_at_cell_edges`, `#455`) — 같은 y 라 `extract_text` 가 한 줄로
+       합쳐 온 칸들을 칸 경계에서 도로 가른다.
+    ② **자리바꿈**(`#452`) — 각 행이 차지한 자리(인덱스)는 그대로 두고 그 안에서
+       `(칸, y)` 로 다시 세운다.
+
+    그래서
+
+    - 표 밖의 줄은 **문면도 순서도 안 바뀐다.** (줄 번호는 ①이 앞에서 가르면 밀린다)
     - 한 행에 칸이 하나만 차 있으면 결과가 같다(대부분의 행).
-    - 두 칸이 **같은 y** 면 `extract_text` 가 이미 한 줄로 합쳤으므로 여기 안 걸린다.
+    - 칸이 전부 짧은 수치 표는 ①이 안 건드린다 — `_CELL_SPLIT_MIN_HANGUL` 참조.
 
-    실측으로 ELS 문서 16쪽 중 8쪽 21개 행만 순서가 바뀐다.
+    실측으로 바뀌는 페이지는 ELS 16쪽 중 6쪽 · 변액 2종에서 4쪽·8쪽이다.
 
     ❗**출력이 바뀌므로 `PARSER_VERSION` 을 올린다.** 오프셋을 박아 둔 파생물
     (`contracts/samples/*.json` · `eval/data/context/*.json`)은 **손으로 고치지 않고 생성기를
@@ -150,47 +278,71 @@ def _cell_ordered_lines(page) -> list[str] | None:
     if not lines:
         return None
 
-    order = list(range(len(lines)))
-    claimed: set[int] = set()
-
+    # ── ① 줄을 행에 배정한다. 한 줄은 한 행에만 속한다(먼저 잡은 행이 이긴다).
+    #    줄이 하나뿐인 행은 배정하지 않는다 — 자리를 바꿀 상대가 없고, 뒤 행이 잡을 수 있다.
+    row_cells: list[list] = []
+    row_of: dict[int, int] = {}
     for table in tables:
         for row in table.rows:
+            cells = [c for c in row.cells if c]
+            if not cells:
+                continue
             _, top, _, bottom = row.bbox
             members = [
                 i for i, line in enumerate(lines)
-                if i not in claimed and top - 1 <= (line["top"] + line["bottom"]) / 2 <= bottom + 1
+                if i not in row_of and top - 1 <= (line["top"] + line["bottom"]) / 2 <= bottom + 1
             ]
             if len(members) < 2:
                 continue
-            cells = [c for c in row.cells if c]
+            for i in members:
+                row_of[i] = len(row_cells)
+            row_cells.append(cells)
 
-            def rank(i: int, cells=cells) -> int:
-                """줄이 **가장 많이 걸친** 칸. 왼쪽 끝(`x0`)이 아니다.
+    # ── ② 여러 칸을 물고 온 줄을 칸별로 가른다 (`#455`). 갈린 조각은 원래 줄 자리에 그대로
+    #    들어가고, 아래 ③이 그 조각들까지 칸 순서로 다시 세운다.
+    units: list[dict] = []
+    unit_row: list[int | None] = []
+    for i, line in enumerate(lines):
+        r = row_of.get(i)
+        pieces = _split_line_at_cell_edges(line, row_cells[r]) if r is not None else [line]
+        for piece in pieces:
+            units.append(piece)
+            unit_row.append(r)
 
-                ❗**여러 칸을 물고 온 줄이 있다.** `extract_text` 가 같은 y 의 칸들을 이미 한 줄로
-                합쳐 놓은 경우다(`만기 하락한 적이 없는 경우(…) (연 11.00%)` — 라벨·본문·수익률
-                셋을 문다). 그런 줄을 `x0` 으로 정하면 **라벨 칸**을 따라가는데, `만기상환` 처럼
-                병합된 라벨 칸은 ⑥⑦⑧을 걸쳐 y 가 위쪽이라 줄이 **다른 항목 위로 올라간다.**
+    # ── ③ 행 안에서 칸 순서로 세운다.
+    order = list(range(len(units)))
 
-                `#452` 리뷰에서 `@yoonjiseok` 이 ⑦행으로 잡아낸 자리다. 그렇게 나온 결과는
-                *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는 경우 만기상환금액은 다음과 같습니다"* 로,
-                **1절 F-EXT-002 통제의 `P6` 항등식은 통과하는데 뜻이 틀렸다** — 축자 인용이라 그렇다. 인용이 원문과
-                같은데 뜻이 다른 것이 제일 나쁘고, `#446` 이 닫힌 이유(*"끊김을 없앤 게 아니라
-                옮겼다"*)가 정확히 이것이다. 겹침 폭으로 정하면 그 줄은 본문 칸으로 간다.
-                """
-                x0, x1 = lines[i]["x0"], lines[i]["x1"]
-                widths = [min(x1, c[2]) - max(x0, c[0]) for c in cells]
-                best = max(range(len(cells)), key=lambda k: widths[k]) if cells else None
-                if best is None or widths[best] <= 0:
-                    return len(cells)  # 어느 칸에도 안 걸리면 행 끝으로 — 순서는 y 가 가른다
-                return best
+    for r, cells in enumerate(row_cells):
+        members = [j for j, rr in enumerate(unit_row) if rr == r]
+        if len(members) < 2:
+            continue
 
-            slots = sorted(members)
-            for slot, i in zip(slots, sorted(members, key=lambda i: (rank(i), lines[i]["top"]))):
-                order[slot] = i
-            claimed.update(members)
+        def rank(i: int, cells=cells) -> int:
+            """줄이 **가장 많이 걸친** 칸. 왼쪽 끝(`x0`)이 아니다.
 
-    return [lines[i]["text"] for i in order]
+            ❗**여러 칸을 물고 온 줄이 있다.** `extract_text` 가 같은 y 의 칸들을 이미 한 줄로
+            합쳐 놓은 경우다(`만기 하락한 적이 없는 경우(…) (연 11.00%)` — 라벨·본문·수익률
+            셋을 문다). 그런 줄을 `x0` 으로 정하면 **라벨 칸**을 따라가는데, `만기상환` 처럼
+            병합된 라벨 칸은 ⑥⑦⑧을 걸쳐 y 가 위쪽이라 줄이 **다른 항목 위로 올라간다.**
+
+            `#452` 리뷰에서 `@yoonjiseok` 이 ⑦행으로 잡아낸 자리다. 그렇게 나온 결과는
+            *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는 경우 만기상환금액은 다음과 같습니다"* 로,
+            **1절 F-EXT-002 통제의 `P6` 항등식은 통과하는데 뜻이 틀렸다** — 축자 인용이라 그렇다. 인용이 원문과
+            같은데 뜻이 다른 것이 제일 나쁘고, `#446` 이 닫힌 이유(*"끊김을 없앤 게 아니라
+            옮겼다"*)가 정확히 이것이다. 겹침 폭으로 정하면 그 줄은 본문 칸으로 간다.
+            """
+            x0, x1 = units[i]["x0"], units[i]["x1"]
+            widths = [min(x1, c[2]) - max(x0, c[0]) for c in cells]
+            best = max(range(len(cells)), key=lambda k: widths[k]) if cells else None
+            if best is None or widths[best] <= 0:
+                return len(cells)  # 어느 칸에도 안 걸리면 행 끝으로 — 순서는 y 가 가른다
+            return best
+
+        slots = sorted(members)
+        for slot, i in zip(slots, sorted(members, key=lambda i: (rank(i), units[i]["top"]))):
+            order[slot] = i
+
+    return [units[i]["text"] for i in order]
 
 
 def _extract_page_text(page, page_no: int, warnings: list[dict]) -> str:

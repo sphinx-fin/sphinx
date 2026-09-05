@@ -72,6 +72,11 @@ def main() -> int:
         "product_type": PRODUCT_TYPE,
         "product_id": PRODUCT_ID,
         "parsed_document": str(PARSED_DOC.relative_to(REPO)),
+        # ❗**어느 파서로 뽑은 문서인가**를 같이 찍는다. 이 파일의 `source_span` 은 파싱
+        # 출력의 오프셋이라 파서가 바뀌면 통째로 낡는데, 지금까지는 그 사실이 파일 안
+        # 어디에도 안 남았다 — `#446` 리뷰가 *"낡음 탐지 불가"* 로 지적한 그 모양이고,
+        # `#455` 에서 실제로 그렇게 됐다(이 파일은 파서 0.2.0 판, 레포는 0.3.0).
+        "parser_version": doc.get("parser_version"),
         "risk_items": items,
         "questions": questions,
         "unusable": unusable,
