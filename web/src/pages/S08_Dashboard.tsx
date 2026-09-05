@@ -63,7 +63,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
 import type {
-  ContrastResponse, ContrastRow, DecisionResponse, GradeDistribution, HeatmapCell,
+  ContrastResponse, ContrastRow, DecisionView, GradeDistribution, HeatmapCell,
   HeatmapResponse, IndicatorAxis, IndicatorPoint, LeadingIndicatorResponse, OverrideCount,
   ProductSummary, ReexplainEffect, Signal, SignalCount, UnmeasuredCount,
 } from "../api/types";
@@ -188,7 +188,7 @@ export default function S08Dashboard() {
    * 조용히 사라지게 두지 않는다. 규칙을 하나 더 만들지 않는 이유는 두 패널이 갈리는 날
    * 어느 쪽이 맞는 처리인지 알 수 없어지기 때문이다.
    */
-  const [decisions, setDecisions] = useState<DecisionResponse | null>(null);
+  const [decisions, setDecisions] = useState<DecisionView | null>(null);
   /** 결정 패널만 실패했는가. */
   const [decisionsFailed, setDecisionsFailed] = useState(false);
   /** 집계 축. 계약 기본값과 같은 `branch` 로 연다 — 화면이 서버와 다른 기본을 갖지 않는다. */
@@ -256,7 +256,7 @@ export default function S08Dashboard() {
           get<HeatmapResponse>(`/dashboard/heatmap${suffix}`),
           get<ContrastResponse>(`/dashboard/vulnerability-contrast${suffix}`)
             .then((r) => r, () => null),
-          get<DecisionResponse>(`/dashboard/decisions${suffix}`)
+          get<DecisionView>(`/dashboard/decisions${suffix}`)
             .then((r) => r, () => null),
         ]);
         setData(heat);

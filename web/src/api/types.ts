@@ -813,7 +813,17 @@ export interface UnmeasuredCount {
 }
 
 /**
- * 게이트가 무엇을 결정했는가 (`GET /dashboard/decisions`. 계약 이름은 `DecisionView`).
+ * 게이트가 무엇을 결정했는가 (`GET /dashboard/decisions`).
+ *
+ * ❗**이름을 계약(`DecisionView`)에 맞췄다.** 예전 이름은 `DecisionResponse` 였고 주석이
+ * *"계약 이름은 DecisionView"* 라고 적어 두기만 했는데, 그 한 글자 차이가 **그물을 통째로
+ * 비껴가게 한다** — `WebTypesMirrorContractTest` 는 **이름이 같은** 스키마와 인터페이스만
+ * 짝지어 대조하므로, 이름이 다르면 필드가 갈려도 아무 말이 없다. 이 화면이 대시보드의
+ * 결정 패널이라 갈리면 조용히 빈 칸이 된다(이슈 #417 계열).
+ *
+ * 이름을 일부러 다르게 두는 것은 *"미러하지 않는다"* 는 뜻이어야 한다({@link Judgment} 가
+ * 그 경우다 — 그건 계약이 아니라 `JudgmentView` 를 미러하고 판매자에게 안 보일 필드를
+ * 일부러 뺀다). 여기는 필드가 계약과 **완전히 같아서** 그 뜻이 아니었다.
  *
  * 이 화면의 나머지 수치는 전부 **측정**(오해율)이다 — *"고객이 무엇을 모르는가"*. 이 제품이
  * 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가) 화면에 그 답이 없었다.
@@ -822,7 +832,7 @@ export interface UnmeasuredCount {
  * 권한·필터·마스킹 규칙은 히트맵과 **같다**(`aggregate:heatmap:read`). 같은 데이터를 다른
  * 축으로 자른 것이라 화면도 같은 시점에 같이 받는다.
  */
-export interface DecisionResponse {
+export interface DecisionView {
   synthetic: boolean;
   scope: "branch" | "org";
   gate: SignalCount[];
