@@ -36,7 +36,7 @@ class SecurityConfigTest {
         @Test
         @DisplayName("전면 허용 — 프론트가 인증 없이 개발할 수 있다")
         void permitsEverything() throws Exception {
-            mvc.perform(get("/products/mock-els-001/risk-items")).andExpect(status().isOk());
+            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")).andExpect(status().isOk());
         }
     }
 
@@ -59,7 +59,7 @@ class SecurityConfigTest {
         @Test
         @DisplayName("인증 없는 API 요청 → 401")
         void rejectsAnonymous() throws Exception {
-            mvc.perform(get("/products/mock-els-001/risk-items")).andExpect(status().isUnauthorized());
+            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")).andExpect(status().isUnauthorized());
             mvc.perform(get("/sessions/any")).andExpect(status().isUnauthorized());
             mvc.perform(get("/dashboard/heatmap")).andExpect(status().isUnauthorized());
         }
@@ -67,7 +67,7 @@ class SecurityConfigTest {
         @Test
         @DisplayName("자격증명이 맞으면 통과")
         void allowsAuthenticated() throws Exception {
-            mvc.perform(get("/products/mock-els-001/risk-items")
+            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")
                             .with(org.springframework.security.test.web.servlet.request
                                     .SecurityMockMvcRequestPostProcessors
                                     .httpBasic("seller-01", "test-only-not-a-real-credential")))
@@ -151,7 +151,7 @@ class SecurityConfigTest {
         @Test
         @DisplayName("❗명부에 없는 계정은 인증부터 막힌다")
         void unknownAccountIsRejected() throws Exception {
-            mvc.perform(get("/products/mock-els-001/risk-items").with(httpBasic("nobody", PW)))
+            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items").with(httpBasic("nobody", PW)))
                     .andExpect(status().isUnauthorized());
         }
 
