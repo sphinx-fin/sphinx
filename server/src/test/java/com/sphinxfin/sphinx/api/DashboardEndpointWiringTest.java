@@ -51,6 +51,54 @@ class DashboardEndpointWiringTest {
                 .andExpect(jsonPath("$.data.outliers").exists());
     }
 
+    @Test
+    @DisplayName("❗접근 감사 집계는 COMPL 만, 개인 식별자 없이 집계만 낸다 (#326 파트2)")
+    void auditSummaryIsComplOnlyAndAggregateOnly() throws Exception {
+        mvc.perform(get("/dashboard/audit-summary").with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.total").exists())
+                .andExpect(jsonPath("$.data.byAction").exists())
+                .andExpect(jsonPath("$.data.byResultCode").exists())
+                .andExpect(jsonPath("$.data.deniedByRole").exists())
+                // ❗개인 식별자는 나가면 안 된다 — 개방 모드에서 "누가 무엇을 했는가" 누설(집계만)
+                .andExpect(jsonPath("$.data.actorId").doesNotExist())
+                .andExpect(jsonPath("$.data.resource").doesNotExist());
+
+        // SELLER 는 집계 접근 불가 — audit:read 는 COMPL 전용(ADR-001 · 기획서 7-4)
+        mvc.perform(get("/dashboard/audit-summary").with(user("seller-01").roles("SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("❗from/to 가 ISO_INSTANT 로 바인딩된다 — @DateTimeFormat 없이 InstantFormatter (#468)")
+    void auditSummaryBindsFromToAsInstant() throws Exception {
+        // 애노테이션 없이 Instant 쿼리 파라미터가 실제로 바인딩되는지 잠근다 — 정세현이 수기로
+        // 확인한 그 회차다. 응답 from 이 그대로 echo 되면 서버가 파싱해 받은 것이다.
+        mvc.perform(get("/dashboard/audit-summary")
+                        .param("from", "2026-09-01T00:00:00Z")
+                        .param("to", "2026-09-07T00:00:00Z")
+                        .with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.from").value("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
+    @DisplayName("❗감사 체인 검증은 COMPL 만 — 무결성 결과만 낸다 (#326 파트2)")
+    void auditVerifyIsComplOnly() throws Exception {
+        mvc.perform(get("/dashboard/audit-verify").with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.ok").exists())
+                .andExpect(jsonPath("$.data.checked").exists())
+                // 개인 식별자 없음
+                .andExpect(jsonPath("$.data.actorId").doesNotExist());
+
+        // audit:verify 도 COMPL 전용 — 조회(audit:read)와 다른 action 이지만 범위는 같다
+        mvc.perform(get("/dashboard/audit-verify").with(user("seller-01").roles("SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
     // 계약이 소문자 enum [branch, org] 이고 서비스의 label() 이 그대로 낸다.
     // 대문자로 적으면 이 테스트가 계약이 아니라 자바 enum 이름을 재게 된다.
     @Test

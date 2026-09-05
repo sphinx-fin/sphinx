@@ -2,6 +2,8 @@ package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.aggregate.AggregateService;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
+import com.sphinxfin.sphinx.evidence.AuditLog;
+import com.sphinxfin.sphinx.evidence.HashChain;
 import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.security.AccessGuard;
 import com.sphinxfin.sphinx.security.AccessPolicy;
@@ -38,6 +40,48 @@ public class DashboardController {
     private final AggregateService aggregateService;
     private final AccessGuard accessGuard;
     private final CurrentActor currentActor;
+    private final AuditLog auditLog;
+
+    /**
+     * 접근 감사 집계 (F-CMN-002 · 이슈 #326 파트2). 기간별 action·resultCode·차단 역할별 건수.
+     *
+     * <p>❗<b>개인 식별자(actorId·resource)는 안 나간다</b> — 개방 모드(결정 10.57)에서 원시
+     * 엔트리를 계약에 열면 레포·주소 공개 + 무인증 상태에서 "누가 무엇을 했는가" 가 전부
+     * 읽힌다({@link AuditLog#summary} javadoc). 심사에 필요한 것은 <i>"이번 주 SELLER 집계
+     * 접근 차단 N건"</i> 이라는 숫자다 — {@code deniedByRole} 가 기획서 7-4(역이용 방지)의 실물이다.
+     *
+     * <p>권한: {@code audit:read} (COMPL org). 원시 조회와 <b>같은 action</b> 을 쓴다 — 집계는
+     * 그보다 덜 민감하지만(PII 없음) 새 action 을 만들면 같은 자료에 두 그랜트가 생겨 한쪽만
+     * 좁히는 실수가 난다(취약대비 뷰가 히트맵 action 을 재사용한 것과 같은 결). {@code /dashboard}
+     * 아래라 개방 모드 지도가 compl-01 을 실어 준다({@code DemoModeAccountMapTest}).
+     *
+     * <p>{@code from} 은 포함, {@code to} 는 제외(반열림) — 이어지는 두 기간을 합쳐도 겹치지
+     * 않는다. 둘 다 생략하면 전체 스트림을 센다.
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:read')")
+    @GetMapping("/audit-summary")
+    public ApiResponse<AuditLog.AccessSummary> auditSummary(
+            // Instant 는 Spring 의 InstantFormatter 가 ISO_INSTANT(…Z)로 바인딩한다 —
+            // @DateTimeFormat 은 Instant 대상 타입이 없어 no-op 이라 안 붙인다(#468 리뷰, 정세현).
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to) {
+        return ApiResponse.ok(auditLog.summary(from, to));
+    }
+
+    /**
+     * 감사 체인 무결성 검증 (F-CMN-002 · 이슈 #326 파트2). 해시 체인을 재계산해 이어져 있는지
+     * (꼬리 절단까지) 본다. S-07 이 {@code contentHash} 를 보여주지만 <b>그 해시가 속한 체인이
+     * 실제로 온전한지</b>는 이것이 답한다 — 감사 무결성이 "주장" 에서 "확인된 사실" 로 바뀐다.
+     *
+     * <p>권한: {@code audit:verify} (COMPL org). 조회({@code audit:read})와 <b>가른다</b> —
+     * "몇 건 있었나"(집계)와 "그 기록이 변조되지 않았나"(무결성)는 다른 질문이라 감사에서도
+     * 갈려야 한다. 응답에 개인 식별자는 없다({@code ok}·검사 건수·끊긴 지점·사유뿐).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:verify')")
+    @GetMapping("/audit-verify")
+    public ApiResponse<HashChain.Verification> auditVerify() {
+        return ApiResponse.ok(auditLog.verify());
+    }
 
     /**
      * 오해 지도 히트맵 (F-DSH-001).
