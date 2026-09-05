@@ -17,13 +17,20 @@ import java.util.Optional;
 @Component
 class MockDataFallbackCatalog implements FallbackCatalog {
 
+    /** 폴백이 대표하는 상품유형 — {@code MockData.RISK_ITEMS} 는 ELS 항목 한 벌이다. */
+    private static final String FALLBACK_PRODUCT_TYPE = "ELS";
+
     @Override
     public Optional<List<RiskItem>> riskItems(String productId) {
-        // ❗알려진 상품일 때만 목 목록을 낸다(결정 10.81). 예전엔 어떤 productId 든 같은
-        // 목록을 냈는데, 없는 상품에도 200 이 나가 productType(없으면 404)과 답이 갈렸다.
-        // 목 RISK_ITEMS 가 한 벌뿐이라 알려진 상품끼리는 아직 같은 목록을 공유하지만, 그
-        // 한계는 실추출이 상품별로 채우면 저장 경로가 덮는다 — 이 폴백이 고칠 몫이 아니다.
-        return known(productId) ? Optional.of(MockData.RISK_ITEMS) : Optional.empty();
+        // ❗상품유형이 맞을 때만 목 목록을 낸다(결정 10.81 · 이슈 #427). RISK_ITEMS 는 ELS
+        // 한 벌뿐이라, 변액 상품에 이걸 내주면 변액 세션에 ELS 질문이 조용히 나온다(유형은
+        // productType 이 맞게 내는데 항목은 틀리는, 같은 폴백 안의 두 기준 어긋남). productType
+        // 이 이미 상품을 보니 대조할 값이 있다 — 유형이 다르거나 없는 상품이면 empty 라,
+        // riskItemsOf 가 404 로 실패시킨다(조용한 오답보다 낫다). 실추출이 상품별로 채우면
+        // 저장 경로가 이 폴백을 덮으므로, 이건 키 없는 데모용 임시 가드다.
+        return productType(productId)
+                .filter(FALLBACK_PRODUCT_TYPE::equals)
+                .map(t -> MockData.RISK_ITEMS);
     }
 
     @Override
@@ -32,9 +39,5 @@ class MockDataFallbackCatalog implements FallbackCatalog {
                 .filter(p -> p.productId().equals(productId))
                 .findFirst()
                 .map(ProductSummary::productType);
-    }
-
-    private static boolean known(String productId) {
-        return MockData.PRODUCTS.stream().anyMatch(p -> p.productId().equals(productId));
     }
 }

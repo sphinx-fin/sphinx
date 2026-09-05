@@ -88,6 +88,18 @@ class ProductAccessWiringTest {
     }
 
     @Test
+    @DisplayName("❗추출 전 변액 상품 risk-items 는 404 — ELS 폴백을 변액에 안 내준다 (이슈 #427)")
+    void variableProductWithoutExtractionIsNotFound() throws Exception {
+        // 폴백(MockData.RISK_ITEMS)은 ELS 한 벌뿐이다. 변액 상품(존재하고 productType 은
+        // VARIABLE_INSURANCE 로 맞게 나온다)에 그 목록을 내주면 변액 세션에 ELS 질문이 조용히
+        // 나온다 — 유형이 다르면 폴백이 empty 라 404 로 실패시킨다(조용한 오답보다 낫다).
+        // 실추출이 이 상품을 채우면 저장 경로가 폴백을 덮어 200 이 된다. @AfterEach 가 스냅샷을
+        // 지우므로 여기서는 '추출 전' 상태다.
+        mvc.perform(get("/products/{id}/risk-items", "doc-var-samsung-b2601").with(as("seller-01", "SELLER")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("❗판매자는 문서를 올리지 못한다 — 게이트가 물을 항목을 판매 라인이 만들면 안 된다")
     void theSellerCannotRegisterProducts() throws Exception {
         // 허용만 재는 단정으로는 과허용 변이가 안 잡힌다. 무서운 쪽은 덜 허용하는 변이가
