@@ -40,36 +40,37 @@
 -- 엔티티를 고치는 사람은 V2 를 같이 낸다. 안 내면 validate 가 기동을 거부한다 —
 -- 조용히 틀린 스키마로 뜨는 경로가 없다는 것이 이 설정을 고른 이유다.
 CREATE TABLE `sessions` (
-  `id`                    varchar(255) NOT NULL,
-  `product_id`            varchar(255) NOT NULL,
-  `channel`               enum('FACE_TO_FACE','MOBILE','TM') NOT NULL,
-  `age_band`              varchar(255) NOT NULL,
-  `experience_level`      varchar(255) DEFAULT NULL,
-  `amount_band`           varchar(255) DEFAULT NULL,
-  `contract_ref`          varchar(255) DEFAULT NULL,
-  `seller_id`             varchar(255) DEFAULT NULL,
-  `branch_id`             varchar(255) DEFAULT NULL,
-  `survey_schema_version` varchar(255) DEFAULT NULL,
-  `survey_result`         text,
-  `state`                 enum('ABORTED','CLOSED','CREATED','IN_PROGRESS','JUDGED','RE_EXPLAIN','RE_VERIFY') NOT NULL,
-  `asked_types`           text,
-  `judgments_by_item`     text,
-  `repeated_answer_items` text,
-  `input_ms`              text,
-  `suitability_status`    enum('MISMATCH','NOT_EVALUATED','NO_MISMATCH','UNKNOWN') NOT NULL,
-  `coaching_score`        int NOT NULL,
-  `vulnerable`            bit(1) NOT NULL,
-  `gate_signal`           enum('GREEN','RED','YELLOW') DEFAULT NULL,
-  `gate_rule_trace`       text,
-  `gate_unmeasured`       int NOT NULL,
-  `gate_rules_version`    int NOT NULL,
-  `judged_at`             datetime(6) DEFAULT NULL,
-  `override_status`       enum('APPROVED','NONE','PENDING_APPROVAL') NOT NULL,
-  `override_reason`       varchar(255) DEFAULT NULL,
-  `override_approver`     varchar(255) DEFAULT NULL,
-  `override_decided_at`   datetime(6) DEFAULT NULL,
-  `created_at`            datetime(6) NOT NULL,
-  `updated_at`            datetime(6) NOT NULL,
+  `id`                     varchar(255) NOT NULL,
+  `product_id`             varchar(255) NOT NULL,
+  `channel`                enum('FACE_TO_FACE','MOBILE','TM') NOT NULL,
+  `age_band`               varchar(255) NOT NULL,
+  `experience_level`       varchar(255) DEFAULT NULL,
+  `amount_band`            varchar(255) DEFAULT NULL,
+  `contract_ref`           varchar(255) DEFAULT NULL,
+  `seller_id`              varchar(255) DEFAULT NULL,
+  `branch_id`              varchar(255) DEFAULT NULL,
+  `survey_schema_version`  varchar(255) DEFAULT NULL,
+  `survey_result`          text,
+  `state`                  enum('ABORTED','CLOSED','CREATED','IN_PROGRESS','JUDGED','RE_EXPLAIN','RE_VERIFY') NOT NULL,
+  `current_re_explanation` text,
+  `asked_types`            text,
+  `judgments_by_item`      text,
+  `repeated_answer_items`  text,
+  `input_ms`               text,
+  `suitability_status`     enum('MISMATCH','NOT_EVALUATED','NO_MISMATCH','UNKNOWN') NOT NULL,
+  `coaching_score`         int NOT NULL,
+  `vulnerable`             bit(1) NOT NULL,
+  `gate_signal`            enum('GREEN','RED','YELLOW') DEFAULT NULL,
+  `gate_rule_trace`        text,
+  `gate_unmeasured`        int NOT NULL,
+  `gate_rules_version`     int NOT NULL,
+  `judged_at`              datetime(6) DEFAULT NULL,
+  `override_status`        enum('APPROVED','NONE','PENDING_APPROVAL') NOT NULL,
+  `override_reason`        varchar(255) DEFAULT NULL,
+  `override_approver`      varchar(255) DEFAULT NULL,
+  `override_decided_at`    datetime(6) DEFAULT NULL,
+  `created_at`             datetime(6) NOT NULL,
+  `updated_at`             datetime(6) NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -114,18 +115,47 @@ CREATE TABLE `session_asked_source` (
   CONSTRAINT `FKd1m1nxlamy4iri51db24xi6qo` FOREIGN KEY (`session_id`) REFERENCES `sessions` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- ── core/extraction — 문서에서 뽑아낸 이해항목 (F-EXT-002 · #414) ───────────
+--
+-- 세션이 물을 항목이 여기서 나온다. 읽는 축이 `product_id` 하나라 인덱스도 그 하나다.
+-- `condition_value_text` 가 longtext 인 것은 `payload_json` 과 같은 이유다 — 원문 인용을
+-- 담으므로 상한을 두지 않는다(`@Lob` + length).
+CREATE TABLE `extracted_risk_items` (
+  `item_index`           int NOT NULL,
+  `span_end`             int DEFAULT NULL,
+  `span_page`            int DEFAULT NULL,
+  `span_start`           int DEFAULT NULL,
+  `created_at`           datetime(6) NOT NULL,
+  `id`                   bigint NOT NULL AUTO_INCREMENT,
+  `updated_at`           datetime(6) NOT NULL,
+  `document_id`          varchar(255) DEFAULT NULL,
+  `failure_reason`       varchar(255) DEFAULT NULL,
+  `importance`           varchar(255) NOT NULL,
+  `item_id`              varchar(255) NOT NULL,
+  `name`                 varchar(255) NOT NULL,
+  `parsed_at`            varchar(255) DEFAULT NULL,
+  `parser_version`       varchar(255) DEFAULT NULL,
+  `product_id`           varchar(255) NOT NULL,
+  `product_type`         varchar(255) NOT NULL,
+  `status`               varchar(255) NOT NULL,
+  `condition_value_text` longtext,
+  PRIMARY KEY (`id`),
+  KEY `idx_extracted_risk_items_product` (`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- ── evidence/ — append-only 해시 체인 (ADR-003 · ADR-004) ───────────────────
 --
 -- `uk_evidence_stream_seq` 는 빼면 안 된다. 같은 자리에 두 번 적재되는 것은 코드 결함이고,
 -- 그때 조용히 덮이는 대신 DB 가 거절해야 한다는 것이 EvidenceEntry 주석의 논지다.
 CREATE TABLE `evidence_entries` (
-  `id`           bigint NOT NULL AUTO_INCREMENT,
-  `stream`       varchar(255) NOT NULL,
-  `seq`          bigint NOT NULL,
-  `prev_hash`    varchar(64) NOT NULL,
-  `hash`         varchar(64) NOT NULL,
+  `id`                bigint NOT NULL AUTO_INCREMENT,
+  `stream`            varchar(255) NOT NULL,
+  `seq`               bigint NOT NULL,
+  `prev_hash`         varchar(64) NOT NULL,
+  `hash`              varchar(64) NOT NULL,
+  `canonical_version` varchar(16) NOT NULL,
   -- ❗`@Lob` 에 length 를 준 결과다. 위 머리말 참조 — 안 주면 tinytext(255) 가 나온다.
-  `payload_json` longtext NOT NULL,
+  `payload_json`      longtext NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_evidence_stream_seq` (`stream`,`seq`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
