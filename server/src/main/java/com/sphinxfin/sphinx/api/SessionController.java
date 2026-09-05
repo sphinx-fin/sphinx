@@ -131,8 +131,10 @@ public class SessionController {
         //
         // 항목 출처는 ProductRiskItems 다(F-EXT-002 배선) — 추출 스냅샷이 있으면 그것을
         // 순서대로 묻고, 없으면 MockData 폴백이다. 분모(total)도 같은 목록에서 나온다.
+        // ❗required 만 묻는다(#435) — recommended 는 루브릭이 없어 채점에서 502 다. 게이트
+        // 분모(SessionService.unmeasuredCount)도 같은 interviewItemsOf 를 써야 어긋나지 않는다.
         var session = sessionService.get(sid);
-        var items = productRiskItems.riskItemsOf(session.productId());
+        var items = productRiskItems.interviewItemsOf(session.productId());
         int answered = session.judgments().size();
         if (answered >= items.size()) {
             return ApiResponse.ok(NextQuestionResponse.done(items.size(), session.vulnerable()));

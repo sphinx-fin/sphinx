@@ -107,6 +107,22 @@ public class ProductRiskItems {
     }
 
     /**
+     * 면담이 묻고 게이트가 세는 항목 — <b>{@code required} 만</b> (이슈 #435). {@code recommended}
+     * 항목은 화면({@code GET /risk-items})에는 뜨되 <b>루브릭이 없다</b>(결정 10.1 이 재현율
+     * 분모를 required 로 고정) — 면담이 물으면 채점에서 {@code rubrics.get()} 이 502 를 낸다.
+     *
+     * <p>❗<b>면담(nextQuestion)과 게이트 분모(#432)가 같은 이 메서드를 써야 한다.</b> 한쪽만
+     * required 로 거르면 둘이 어긋난다 — 면담은 required 만 묻는데 분모가 recommended 까지 세면
+     * 그 항목은 영영 측정되지 않아 {@code R-00}(미측정 항목) 이 영원히 문다.
+     */
+    @Transactional(readOnly = true)
+    public List<RiskItem> interviewItemsOf(String productId) {
+        return riskItemsOf(productId).stream()
+                .filter(r -> "required".equals(r.importance()))
+                .toList();
+    }
+
+    /**
      * 항목 하나 — {@link #riskItemsOf} 와 같은 목록에서 찾는다. 출처가 갈리면 채점 항목과
      * 질문 항목이 다른 목록에서 나온다.
      *
