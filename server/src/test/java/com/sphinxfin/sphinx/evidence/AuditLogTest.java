@@ -36,6 +36,8 @@ class AuditLogTest {
     @Autowired
     private AuditLog auditLog;
     @Autowired
+    private ImmutableStore store;
+    @Autowired
     private EvidenceEntryRepository entries;
     @Autowired
     private EvidenceStreamAnchorRepository anchors;
@@ -134,6 +136,92 @@ class AuditLogTest {
             assertThat(auditLog.replay())
                     .as("같은 사람이 같은 것을 두 번 열어본 사실이 감사 정보다")
                     .hasSize(2);
+        }
+    }
+
+    /**
+     * 집계 조회(이슈 #326 파트2). 여기서 지키는 것 둘이다 — <b>개인이 안 실려 나가는 것</b>과
+     * <b>못 센 것을 0 으로 뭉개지 않는 것</b>.
+     */
+    @Nested
+    @DisplayName("집계 — 심사에서 물어볼 숫자")
+    class Summary {
+
+        @Test
+        @DisplayName("차단을 역할별로 센다 — 기획서 7-4 의 실물 숫자가 이것이다")
+        void countsDenialsByRole() {
+            auditLog.record(entry("seller-01", "ROLE_SELLER", "aggregate:heatmap:read", "403", T0));
+            auditLog.record(entry("seller-02", "ROLE_SELLER", "aggregate:heatmap:read", "403", T0.plusSeconds(1)));
+            auditLog.record(entry(null, null, "report:read", "401", T0.plusSeconds(2)));
+            auditLog.record(entry("compl-01", "ROLE_COMPL", "aggregate:heatmap:read", "200", T0.plusSeconds(3)));
+
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.total()).isEqualTo(4);
+            assertThat(summary.deniedByRole())
+                    .as("401 과 403 을 같이 센다 — 둘 다 막힌 시도다")
+                    .containsExactlyInAnyOrderEntriesOf(
+                            Map.of("ROLE_SELLER", 2L, AuditLog.UNKNOWN, 1L));
+            assertThat(summary.byResultCode()).containsEntry("200", 1L).containsEntry("403", 2L);
+            assertThat(summary.byAction()).containsEntry("aggregate:heatmap:read", 3L);
+        }
+
+        @Test
+        @DisplayName("★ 개인 식별자가 집계에 안 실린다 — 열지 않기로 한 것이 그것이다")
+        void carriesNoIdentifiers() {
+            auditLog.record(entry("seller-02", "ROLE_SELLER", "report:read", "403", T0));
+
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.toString())
+                    .as("alpha 가 개방 모드라 계약에 나가는 값에 actorId·resource 가 있으면 "
+                            + "인증 없이 '누가 무엇을 했는가' 가 읽힌다")
+                    .doesNotContain("seller-02")
+                    .doesNotContain("/sessions/S-1/report");
+        }
+
+        @Test
+        @DisplayName("기간은 반열림이다 — 이어지는 두 기간을 합쳐도 겹치는 건이 없다")
+        void windowIsHalfOpen() {
+            auditLog.record(entry("mgr-01", "ROLE_MGR", "report:read", "200", T0));
+            auditLog.record(entry("mgr-01", "ROLE_MGR", "report:read", "200", T0.plusSeconds(10)));
+            auditLog.record(entry("mgr-01", "ROLE_MGR", "report:read", "200", T0.plusSeconds(20)));
+
+            long first = auditLog.summary(T0, T0.plusSeconds(10)).total();
+            long second = auditLog.summary(T0.plusSeconds(10), T0.plusSeconds(20)).total();
+            long whole = auditLog.summary(T0, T0.plusSeconds(20)).total();
+
+            assertThat(first).isEqualTo(1);
+            assertThat(second).isEqualTo(1);
+            assertThat(first + second)
+                    .as("경계가 닫혀 있으면 경계에 걸린 건이 두 기간에 다 들어간다")
+                    .isEqualTo(whole);
+        }
+
+        @Test
+        @DisplayName("❗못 읽은 건을 따로 센다 — 0 으로 뭉개면 '접근이 없었다' 로 읽힌다")
+        void countsUnreadableSeparately() {
+            auditLog.record(entry("mgr-01", "ROLE_MGR", "report:read", "200", T0));
+            // 감사 스트림에 감사 항목이 아닌 payload 가 섞인 경우. 사슬은 무엇이든 담을 수
+            // 있으므로 집계가 이걸 만난다고 죽으면 안 되고, 조용히 버려도 안 된다.
+            store.append("audit", Map.of("무엇인가", "occurredAt 이 없다"));
+
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.total()).as("셀 수 있었던 것만 total 이다").isEqualTo(1);
+            assertThat(summary.unreadable())
+                    .as("여기가 0 이면 '10건 중 1건' 과 '1건만 읽고 1건' 이 같아 보인다")
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("기록이 없으면 0 이다 — 빈 집계도 답이어야 한다")
+        void emptyStreamIsAnAnswer() {
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.total()).isZero();
+            assertThat(summary.unreadable()).isZero();
+            assertThat(summary.deniedByRole()).isEmpty();
         }
     }
 }
