@@ -395,50 +395,71 @@ export default function S05Judgment() {
         )}
       </section>
 
-      {/* ── 다음 행동 ─────────────────────────────────────────────────────── */}
+      {/* ── 다음 행동 ───────────────────────────────────────────────────────
+          ❗**버튼 줄과 설명 줄을 세로로 가른다.** 예전에는 한 flex 줄에 버튼과 `<p>` 안내가
+          섞여 있어서, 안내가 뜨는 순간(적색·미확정 — 데모에서 제일 자주 보는 상태다) 문단이
+          버튼 사이를 밀고 들어와 **버튼이 두 덩이로 쪼개지고 baseline 도 안 맞았다.**
+          확인 패널(`width:100%`)까지 같은 줄에 있어서 확정을 누르면 배치가 한 번 더 바뀐다.
+          버튼은 **항상 맨 위 한 줄**에 있고, 이유·경고는 그 아래에 붙는다. */}
       <footer className="s05__actions">
-        {gate && !gate.settled && (
-          confirming ? (
-            <div className="s05__confirm" role="alertdialog" aria-label="판정 확정 확인">
-              <p>
-                <strong>확정하면 되돌릴 수 없습니다.</strong> 확정 이후에는 재설명·재검증으로
-                돌아갈 수 없고 종료만 가능합니다.
-              </p>
-              <div className="s05__confirm-buttons">
-                <button type="button" className="s05__btn" onClick={() => setConfirming(false)} disabled={busy}>
-                  취소
-                </button>
-                <button type="button" className="s05__btn s05__btn--primary" onClick={settle} disabled={busy}>
-                  {busy ? "확정 중…" : "확정합니다"}
-                </button>
-              </div>
-            </div>
-          ) : (
+        <div className="s05__cta">
+          {gate && !gate.settled && (
             <button
               type="button"
               className="s05__btn s05__btn--primary"
               onClick={() => setConfirming(true)}
               // 재설명 중에는 상태머신이 판정을 안 받는다(설계 판단 ⑦). 눌러서 409 를
               // 받는 것보다 눌리지 않는 게 낫다 — 설계 판단 ③과 같은 규칙이다.
-              disabled={judgments.length === 0 || reExplainInFlight}
+              // 확인 패널이 열려 있는 동안에도 잠근다 — 두 번 눌러도 하는 일이 없다.
+              disabled={judgments.length === 0 || reExplainInFlight || confirming}
             >
               판정 확정
             </button>
-          )
-        )}
+          )}
 
-        {/* 적색이면 오버라이드 요청 경로를 연다. 승인은 MGR 이 S-06 에서 한다.
+          {/* 적색이면 오버라이드 요청 경로를 연다. 승인은 MGR 이 S-06 에서 한다.
 
-            ❗`settled` 를 같이 본다. 미리보기 적색은 **아직 판정이 아니다** — 응답 0건
-            세션도 `R-00`(unmeasured > 0)으로 RED 가 서므로, 이 조건이 신호만 보면
-            인터뷰를 시작도 안 한 세션에서 버튼이 열리고 서버가 409 를 낸다(이슈 #311).
-            바로 위 `판정 확정` 이 이미 같은 규칙을 지킨다 — 눌러서 409 를 받는 것보다
-            눌리지 않는 게 낫다(설계 판단 ③). `recorded` 를 둔 목적이 미리보기를 확정으로
-            오인하지 않게 하는 것이고(결정 2.6), 여기가 정확히 그 자리다. */}
-        {gate?.signal === "RED" && gate.settled && (
-          <button type="button" className="s05__btn" onClick={() => navigate(`/override/${sid}`)}>
-            적색 진행 요청(오버라이드)
+              ❗`settled` 를 같이 본다. 미리보기 적색은 **아직 판정이 아니다** — 응답 0건
+              세션도 `R-00`(unmeasured > 0)으로 RED 가 서므로, 이 조건이 신호만 보면
+              인터뷰를 시작도 안 한 세션에서 버튼이 열리고 서버가 409 를 낸다(이슈 #311).
+              바로 위 `판정 확정` 이 이미 같은 규칙을 지킨다 — 눌러서 409 를 받는 것보다
+              눌리지 않는 게 낫다(설계 판단 ③). `recorded` 를 둔 목적이 미리보기를 확정으로
+              오인하지 않게 하는 것이고(결정 2.6), 여기가 정확히 그 자리다. */}
+          {gate?.signal === "RED" && gate.settled && (
+            <button type="button" className="s05__btn" onClick={() => navigate(`/override/${sid}`)}>
+              적색 진행 요청(오버라이드)
+            </button>
+          )}
+
+          {gate?.settled && (
+            <button type="button" className="s05__btn" onClick={() => navigate(`/report/${sid}`)}>
+              이해 기록 리포트
+            </button>
+          )}
+
+          {/* 오른쪽 끝에 떨어뜨린다 — 이 줄에서 유일하게 세션을 앞으로 못 밀고,
+              나머지와 섞여 있으면 다음 행동을 고르는 눈이 한 번 더 멈춘다. */}
+          <button type="button" className="s05__btn s05__btn--quiet s05__btn--end"
+                  onClick={() => void load()}>
+            새로고침
           </button>
+        </div>
+
+        {gate && !gate.settled && confirming && (
+          <div className="s05__confirm" role="alertdialog" aria-label="판정 확정 확인">
+            <p>
+              <strong>확정하면 되돌릴 수 없습니다.</strong> 확정 이후에는 재설명·재검증으로
+              돌아갈 수 없고 종료만 가능합니다.
+            </p>
+            <div className="s05__confirm-buttons">
+              <button type="button" className="s05__btn" onClick={() => setConfirming(false)} disabled={busy}>
+                취소
+              </button>
+              <button type="button" className="s05__btn s05__btn--primary" onClick={settle} disabled={busy}>
+                {busy ? "확정 중…" : "확정합니다"}
+              </button>
+            </div>
+          </div>
         )}
 
         {/* 잠긴 이유를 적는다. 안 적으면 판매자가 "적색인데 버튼이 없다"에서 멈춘다.
@@ -458,16 +479,6 @@ export default function S05Judgment() {
             )}
           </p>
         )}
-
-        {gate?.settled && (
-          <button type="button" className="s05__btn" onClick={() => navigate(`/report/${sid}`)}>
-            이해 기록 리포트
-          </button>
-        )}
-
-        <button type="button" className="s05__btn s05__btn--quiet" onClick={() => void load()}>
-          새로고침
-        </button>
       </footer>
     </main>
   );

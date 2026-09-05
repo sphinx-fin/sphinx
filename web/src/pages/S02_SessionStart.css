@@ -19,6 +19,19 @@
   line-height: calc(1.32 * var(--leading-scale));
   letter-spacing: -0.03em; font-weight: 700; }
 
+/* 심사용 목차(S-00) 진입. **작게 둔다** — 이 화면의 주인공은 세션을 여는 일이고 목차는
+   심사자·발표자만 쓴다. 밑줄을 기본으로 두지 않는 이유도 같다(hover 에서만 그린다).
+   그래도 `--accent` 를 주는 것은 토큰 규칙 2 그대로다 — 누를 수 있는 것이므로. */
+.ss__navlink {
+  align-self: flex-start;
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ss__navlink:hover { text-decoration: underline; }
+.ss__navlink::after { content: " →"; }
+
 
 /* ── 카드 ─────────────────────────────────────────────────────────────────── */
 /* 테두리 대신 그림자로 띄운다. 지면이 회색이라 흰 카드가 테두리 없이도 분리된다. */

@@ -128,6 +128,35 @@ export interface SessionResponse {
 }
 
 /**
+ * F-GTE-002 오버라이드 요청·승인 응답 (`POST /sessions/{id}/override` · `…/override/approve`).
+ *
+ * ❗**{@link OverrideStatus} 와 값 집합이 다르다 — 재사용하면 안 된다.**
+ *
+ * ```
+ * SessionResponse.overrideStatus   NONE · PENDING_APPROVAL · APPROVED
+ * OverrideResponse.status                 PENDING_APPROVAL · APPROVED · REJECTED
+ * ```
+ *
+ * 세션 쪽은 *"오버라이드가 없다"* 를 말해야 해서 `NONE` 이 있고, 이 응답은 **오버라이드를
+ * 방금 움직인 결과**라 `NONE` 이 올 수 없다. 둘을 한 타입으로 묶으면 양쪽 다 틀린다 —
+ * 여기서는 못 오는 값이 허용되고, 저기서는 `REJECTED` 가 빠진다.
+ *
+ * ❗**`REJECTED` 는 지금 도달 불가다**(계약 `OverrideResponse.status` 설명 · ADR-002).
+ * MVP 는 반려 경로를 두지 않고 미승인 세션은 그대로 보류(적색)다 — 서버 `OverrideStatus`
+ * enum 에 값 자체가 없다. **이 값을 기대하는 분기를 만들면 절대 안 오는 죽은 가지가 된다.**
+ * 계약이 값을 남긴 것은 후속(`POST …/override/reject`)을 위해서이고, 화면 타입도 계약을
+ * 그대로 비춘다 — 여기서 좁히면 그게 다음 드리프트다(이슈 #417 이 잡은 것이 정확히 그것).
+ *
+ * ❗**응답에 `reason`·`approver`·`decidedAt` 은 없다.** `S06_Override.tsx` 가 로컬 선언에
+ * 그 셋을 적어 두고 있었는데 계약에도 서버 DTO(`api/dto/OverrideResponse`)에도 없다 —
+ * 지금은 응답을 버리고 세션을 다시 읽어서 안 드러났을 뿐이고, 누가 이 타입을 믿고
+ * `res.approver` 를 쓰면 **항상 `undefined`** 다. 그 셋은 {@link SessionResponse} 에 있다.
+ */
+export interface OverrideResponse {
+  status: "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+}
+
+/**
  * P4 — 근거 없는 판정은 무효. `evidence`는 서버 `domain/Judgment` 컴팩트 생성자가
  * 강제하므로 optional이 아니다. 화면은 근거 없이 판정을 그리지 않는다.
  */
@@ -232,14 +261,18 @@ export interface ReportResponse {
    */
   contentHash: string;
   /**
-   * ❗**PDF 생성이 붙기 전까지 `null` 이다.** 계약이 그렇게 정한 이유가 여기 있다 —
-   * 값을 채우면 "이 URL 로 가면 문서가 있다" 를 계약이 보장하는데 404 가 난다.
-   * 스키마 검증은 통과하고 화면은 링크를 그리며, **눌러야 드러난다.**
+   * 브라우저 미리보기(PDF 인라인) — `GET /sessions/{id}/report/preview`.
    *
-   * 그래서 화면은 `null` 일 때 링크를 그리지 않는다. 빈 링크보다 "아직 없다" 가 낫다.
+   * ❗**이제 값이 있다**(이슈 #233 · `SessionController` 가 분기 없이 채운다). 예전 문면은
+   * *"PDF 생성이 붙기 전까지 null"* 이었는데 그 전제가 사라졌다 — 낡은 채로 두면 화면이
+   * 있는 링크를 안 그린다.
+   *
+   * `nullable` 은 그대로 둔다. 값을 못 채우는 상태가 생기면(교부 방식 변경 등) 화면이
+   * "아직 없다" 를 그릴 수 있어야 하고, 지금도 화면은 `null` 일 때 링크를 안 그린다 —
+   * 빈 링크보다 "아직 없다" 가 낫다는 판단은 유효하다.
    */
   previewUrl?: string | null;
-  /** `previewUrl` 과 같은 이유로 PDF 생성 전까지 null. */
+  /** 내려받기. 같은 PDF 이고 `Content-Disposition` 만 다르다. `previewUrl` 과 같은 규칙. */
   downloadUrl?: string | null;
 }
 
@@ -280,6 +313,24 @@ export interface GatePreview {
    * "적합성 미확인" 을 함께 낸다(신호 자체는 바꾸지 않는다).
    */
   suitabilityStatus: SuitabilityStatus;
+}
+
+/**
+ * F-EXT-001 문서 업로드 응답 (`POST /products/documents`).
+ *
+ * ❗**`status` 는 「문서를 읽었는가」이지 「항목을 뽑았는가」가 아니다.** `parse_failed` 는
+ * 파서가 문서 자체를 못 읽은 것이고, 항목별 추출 실패는 `RiskItem.status` 의
+ * `extraction_failed` 다 — 층이 다르고 화면이 갈라 그려야 한다(S-01 설계 판단 ①).
+ *
+ * 한동안 `S01_Upload.tsx` 가 이 모양을 **로컬로 다시 선언**하고 있었다(이슈 #417). 그 주석이
+ * *"계약 추가는 강희진 몫"* 이라고 적어 둬서 남의 일로 넘어가 있었는데, 계약에는 처음부터
+ * 있었고(`openapi.yaml` `UploadResponse`) 빠진 곳은 이 파일 하나였다. 로컬 선언은
+ * `WebTypesMirrorContractTest` 의 대조 대상이 아니라 **갈려도 아무것도 안 말한다.**
+ */
+export interface UploadResponse {
+  productId: string;
+  /** `parsed` 면 추출로 넘어간다. `parse_failed` 면 문서를 못 읽은 것이다. */
+  status: "parsed" | "parse_failed";
 }
 
 /**
@@ -484,8 +535,14 @@ export interface ProductSummary {
  * 비율로 받으면 반올림 때문에 그 검산이 사라진다.
  *
  * ❗**`misrate` 하나로는 「이해했는가」를 말할 수 없다.** 41% 만 보이면 *"59% 는 이해했다"*
- * 로 읽히는데 그 안에 부분이해·미이해가 섞여 있고, **U1 이 0 건이어도 같은 값이 나온다.**
- * 계약이 이 필드를 둔 이유가 그것이다.
+ * 로 읽히는데 그 안에 부분이해(U2)·미이해(U3)가 섞여 있고, **U1 이 0 건이어도 같은 값이
+ * 나온다.** 계약이 이 필드를 둔 이유가 그것이고, 취약 대비가 두 줄 다 분포를 같이 그리는
+ * 이유이기도 하다.
+ *
+ * ❗**한동안 이 선언이 두 벌이었다**(히트맵 쪽과 취약 대비 쪽). 인터페이스는 이름이 같으면
+ * TypeScript 가 **조용히 병합**해서 `tsc` 가 아무 말도 안 한다 — 필드가 갈리는 날에야
+ * 드러나고, 그때는 어느 쪽을 고쳐야 하는지가 안 보인다. 히트맵과 취약 대비가 같은 값을
+ * 받으므로 한 벌이 맞다. 새로 선언하지 말고 여기를 쓴다.
  */
 export interface GradeDistribution {
   /** 이해 */
@@ -494,7 +551,7 @@ export interface GradeDistribution {
   u2: number;
   /** 미이해 */
   u3: number;
-  /** 오해 */
+  /** 오해 — 이 건수가 `misrate` 의 분자다. */
   u4: number;
 }
 
@@ -521,6 +578,18 @@ export interface HeatmapCell {
    * 멈추지 않는다.
    */
   itemName: string | null;
+  /**
+   * **이 항목이 무엇을 재는가** — 고객이 말할 수 있어야 채점이 「이해」로 보는 요소들.
+   *
+   * `itemName` 의 다음 층이다. 이름을 고쳐 놔도 축을 처음 보는 사람은 「전액손실 사례」가
+   * *무엇을 센 칸인지* 를 모른다 — 이름은 항목을 **가리키기만** 하고 뜻은 말하지 않는다.
+   * 화면은 이것을 ⓘ 로 펼친다.
+   *
+   * ❗**채점 루브릭 원문이다.** 서버가 요약하지 않고 그대로 싣고, 화면도 고쳐 쓰지 않는다 —
+   * 요약본은 그럴듯하게 틀리고, 틀린 줄을 아무도 못 알아챈다. 카탈로그에 없으면 빈 배열이고
+   * 그때는 뜻 없이 이름만 그린다(`itemName` 과 같은 규칙).
+   */
+  itemRequires: string[];
   /** 오해율 0~1. `masked` 면 null. */
   misrate: number | null;
   /** 표본 수. 마스킹돼도 내려준다. */
@@ -588,6 +657,18 @@ export interface IndicatorSeries {
   groupBy: IndicatorAxis;
   /** 지점·항목 식별자, 또는 **판매자 비식별 대체키**(로그인 ID 가 아니다). */
   key: string;
+  /**
+   * 사람이 읽는 이름. **`groupBy: "item"` 에서만 찬다** — 나머지 축은 `null` 이고 화면이
+   * `key` 를 그대로 그린다.
+   *
+   * `HeatmapCell.itemName` 과 **같은 출처·같은 규칙**이다(채점 루브릭의 항목명 · 결정 5.42).
+   * 두 뷰가 같은 항목을 다른 이름으로 부르지 않게 서버가 한 곳에서 푼다 — 화면이 오해 지도
+   * 응답에서 이름표를 주워 오는 방식은 **탭으로 바로 들어오거나 히트맵에 필터가 걸리면
+   * 비어서** 조용히 ID 원문으로 되돌아간다.
+   *
+   * ❗**판매자 축에는 이름이 없다.** `key` 가 비식별 대체키인 이유가 그것이다.
+   */
+  itemName: string | null;
   points: IndicatorPoint[];
 }
 
@@ -598,6 +679,18 @@ export interface IndicatorSeries {
 export interface IndicatorOutlier {
   groupBy: IndicatorAxis;
   key: string;
+  /**
+   * 사람이 읽는 이름. **`groupBy: "item"` 에서만 찬다** — 나머지 축은 `null` 이고 화면이
+   * `key` 를 그대로 그린다.
+   *
+   * `HeatmapCell.itemName` 과 **같은 출처·같은 규칙**이다(채점 루브릭의 항목명 · 결정 5.42).
+   * 두 뷰가 같은 항목을 다른 이름으로 부르지 않게 서버가 한 곳에서 푼다 — 화면이 오해 지도
+   * 응답에서 이름표를 주워 오는 방식은 **탭으로 바로 들어오거나 히트맵에 필터가 걸리면
+   * 비어서** 조용히 ID 원문으로 되돌아간다.
+   *
+   * ❗**판매자 축에는 이름이 없다.** `key` 가 비식별 대체키인 이유가 그것이다.
+   */
+  itemName: string | null;
   /** 사람이 읽는 사유(예: `직전 4구간 평균 대비 +18.0%p`). 화면은 이 문장을 그대로 낸다. */
   reason: string;
   /** 기계 판독용 변화량. 없을 수 있다. */
@@ -611,27 +704,6 @@ export interface LeadingIndicatorResponse {
   scope: "branch" | "org";
   series: IndicatorSeries[];
   outliers: IndicatorOutlier[];
-}
-
-/**
- * 등급별 **건수** (`GradeDistribution`. 이슈 #177).
- *
- * 비율이 아니라 건수인 것이 요점이다 — 건수로 받으면 화면이 비율·합계를 다 만들 수 있고
- * `u1+u2+u3+u4 === n` 검산이 성립한다. 비율로 받으면 반올림 때문에 그 검산이 사라진다.
- *
- * ❗**`misrate` 하나로는 "이해했는가" 를 말할 수 없다.** 41% 만 보이면 "59% 는 이해했다"
- * 로 읽히는데 그 안에 부분이해(U2)·미이해(U3)가 섞여 있고, U1 이 0 건이어도 같은 값이
- * 나온다. 그래서 취약 대비는 두 줄 다 분포를 같이 그린다.
- */
-export interface GradeDistribution {
-  /** 이해 */
-  u1: number;
-  /** 부분이해 */
-  u2: number;
-  /** 미이해 */
-  u3: number;
-  /** 오해 — 이 건수가 `misrate` 의 분자다. */
-  u4: number;
 }
 
 /**
@@ -741,7 +813,17 @@ export interface UnmeasuredCount {
 }
 
 /**
- * 게이트가 무엇을 결정했는가 (`GET /dashboard/decisions`. 계약 이름은 `DecisionView`).
+ * 게이트가 무엇을 결정했는가 (`GET /dashboard/decisions`).
+ *
+ * ❗**이름을 계약(`DecisionView`)에 맞췄다.** 예전 이름은 `DecisionResponse` 였고 주석이
+ * *"계약 이름은 DecisionView"* 라고 적어 두기만 했는데, 그 한 글자 차이가 **그물을 통째로
+ * 비껴가게 한다** — `WebTypesMirrorContractTest` 는 **이름이 같은** 스키마와 인터페이스만
+ * 짝지어 대조하므로, 이름이 다르면 필드가 갈려도 아무 말이 없다. 이 화면이 대시보드의
+ * 결정 패널이라 갈리면 조용히 빈 칸이 된다(이슈 #417 계열).
+ *
+ * 이름을 일부러 다르게 두는 것은 *"미러하지 않는다"* 는 뜻이어야 한다({@link Judgment} 가
+ * 그 경우다 — 그건 계약이 아니라 `JudgmentView` 를 미러하고 판매자에게 안 보일 필드를
+ * 일부러 뺀다). 여기는 필드가 계약과 **완전히 같아서** 그 뜻이 아니었다.
  *
  * 이 화면의 나머지 수치는 전부 **측정**(오해율)이다 — *"고객이 무엇을 모르는가"*. 이 제품이
  * 하는 일은 그다음이고(막았는가 · 되돌렸는가 · 예외를 뒀는가) 화면에 그 답이 없었다.
@@ -750,7 +832,7 @@ export interface UnmeasuredCount {
  * 권한·필터·마스킹 규칙은 히트맵과 **같다**(`aggregate:heatmap:read`). 같은 데이터를 다른
  * 축으로 자른 것이라 화면도 같은 시점에 같이 받는다.
  */
-export interface DecisionResponse {
+export interface DecisionView {
   synthetic: boolean;
   scope: "branch" | "org";
   gate: SignalCount[];

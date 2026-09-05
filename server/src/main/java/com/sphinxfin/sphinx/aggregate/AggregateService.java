@@ -156,8 +156,15 @@ public class AggregateService {
      * <b>상품 유형 축에서만</b> 찬다: 실제 상품ID 로 집계되는 축의 이름은
      * {@code GET /products} 가 이미 주므로 여기서 비워 두 벌이 되는 것을 막는다
      * (자세한 근거: {@link RiskItemCatalog#productName}).
+     *
+     * <p>❗<b>{@code itemRequires} 는 이름의 다음 층이다.</b> 「전액손실 사례」로 고쳐 놔도
+     * 축을 처음 보는 사람은 <i>그 칸이 무엇을 센 것인지</i> 를 모른다 — 이름은 항목을
+     * 가리키기만 하고 <b>무엇을 재는지는 말하지 않는다.</b> 채점이 요구하는 요소를 그대로
+     * 실어 화면이 ⓘ 로 펼친다. 루브릭 원문이라 요약하지 않는다(P6 와 같은 결).
+     * 카탈로그에 없으면 빈 목록이고, 그때 화면은 뜻 없이 이름만 그린다.
      */
     public record Cell(String product, String item, String productName, String itemName,
+                       List<String> itemRequires,
                        BigDecimal misrate, long n, boolean masked, Grades grades) {}
 
     /**
@@ -235,9 +242,36 @@ public class AggregateService {
 
     public record Point(String period, BigDecimal misrate, long n, boolean masked) {}
 
-    public record Series(String groupBy, String key, List<Point> points) {}
+    /**
+     * 한 계열. {@code key} 는 <b>축의 키</b>이고 {@code itemName} 은 <b>사람이 읽는 이름</b>이다 —
+     * 히트맵 셀과 같은 규칙이다({@link Cell}).
+     *
+     * <p>❗<b>항목 축에서만 찬다.</b> 지점(`BR-001`)·판매자(`S-2BC6FDBE`)는 카탈로그에 없는
+     * 키이고, 특히 판매자는 <b>비식별 대체키라 이름이 있으면 안 된다</b> — 그 자리에 이름을
+     * 실으면 계약이 대체키를 쓰는 이유가 사라진다. 나머지 축에서는 {@code null} 이고 화면이
+     * 키를 그대로 그린다.
+     */
+    public record Series(String groupBy, String key, String itemName, List<Point> points) {}
 
-    public record Outlier(String groupBy, String key, String reason, BigDecimal delta) {}
+    /**
+     * 이상치 한 건. {@code itemName} 규칙은 {@link Series} 와 같다.
+     *
+     * <p>이름을 여기에도 싣는 이유는 <b>이상치 목록이 추이 표와 다른 자리이기 때문</b>이다.
+     * 표에만 이름을 붙이면 <i>"먼저 봐야 하는 줄"</i> 인 이상치가 ID 원문으로 남는다 —
+     * 사람이 제일 먼저 읽는 자리가 제일 안 읽히는 상태가 된다.
+     */
+    public record Outlier(String groupBy, String key, String itemName, String reason,
+                          BigDecimal delta) {
+        /**
+         * 표시명만 붙인 사본. <b>판단과 표시를 갈라 두려고</b> 이 모양이다 —
+         * {@link AggregateService#outlier} 는 <i>"이상치인가"</i> 만 정하는 순수 함수이고
+         * 이름은 그 판단에 아무 영향이 없다. 함수에 카탈로그를 넣으면 통계 판정이 표시
+         * 데이터에 의존하게 되고, 그 함수를 직접 부르는 테스트도 같이 끌려온다.
+         */
+        public Outlier withItemName(String itemName) {
+            return new Outlier(groupBy, key, itemName, reason, delta);
+        }
+    }
 
     public record IndicatorView(boolean synthetic, String scope,
                                 List<Series> series, List<Outlier> outliers) {}
@@ -292,6 +326,7 @@ public class AggregateService {
         byCell.forEach((key, tally) -> cells.add(new Cell(
                 key.product(), key.item(),
                 catalog.productName(key.product()), catalog.itemName(key.item()),
+                catalog.itemRequires(key.item()),
                 tally.misrateOrNull(), tally.n(), tally.masked(),
                 tally.gradesOrNull())));
         return new HeatmapView(SYNTHETIC, label(scope), cells);
@@ -589,8 +624,13 @@ public class AggregateService {
                 Tally tally = byPeriod.getOrDefault(period, new Tally());
                 points.add(new Point(period, tally.misrateOrNull(), tally.n(), tally.masked()));
             }
-            series.add(new Series(label(groupBy), key, points));
-            outlier(label(groupBy), key, points).ifPresent(outliers::add);
+            // 항목 축에서만 이름을 푼다 — 지점·판매자 키는 카탈로그에 없고, 판매자는
+            // 비식별 대체키라 이름이 붙으면 안 된다(Series 주석).
+            String itemName = groupBy == GroupBy.ITEM ? catalog.itemName(key) : null;
+            series.add(new Series(label(groupBy), key, itemName, points));
+            outlier(label(groupBy), key, points)
+                    .map(found -> found.withItemName(itemName))
+                    .ifPresent(outliers::add);
         });
         return new IndicatorView(SYNTHETIC, label(scope), series, outliers);
     }
@@ -728,7 +768,8 @@ public class AggregateService {
         String reason = "직전 %d구간 평균 대비 +%s%%p".formatted(baseline.size(),
                 delta.multiply(BigDecimal.valueOf(100)).setScale(1, RoundingMode.HALF_UP)
                         .toPlainString());
-        return Optional.of(new Outlier(groupBy, key, reason, delta));
+        // 표시명은 여기서 안 붙인다 — 부르는 쪽이 축을 알고 withItemName 으로 얹는다.
+        return Optional.of(new Outlier(groupBy, key, null, reason, delta));
     }
 
     /** ISO 주(계약 예시 {@code 2026-W32}). <b>최신이 목록의 끝</b>이다. */

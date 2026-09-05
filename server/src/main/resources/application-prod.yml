@@ -4,21 +4,67 @@
 # 그 전제는 퍼블릭 노출과 함께 성립하지 않는다. 이 파일이 배포용 차이만 덮어쓴다.
 
 spring:
+  # ── DB: H2(인메모리) → MySQL (결정로그 7.4 가 적은 "원래 목표점") ──────────
+  #
+  # 값은 compose 가 넘긴다(docker-compose.yml 의 mysql 서비스). **기본값을 안 준다** —
+  # `${VAR:}` 로 두면 Spring 이 빈 문자열을 값으로 취급해서(#126 이 밟은 함정) 자격증명
+  # 없이 붙으러 갔다가 런타임에 죽는다. 없으면 플레이스홀더 해석 단계에서 기동이 멈추는
+  # 편이 낫다 — 원인이 한 줄로 나온다.
+  datasource:
+    # ❗쿼리 파라미터 넷 다 이유가 있다.
+    #
+    #   characterEncoding=utf8         한글 발화·근거 인용이 그대로 오간다(서버는 utf8mb4).
+    #   connectionTimeZone=UTC         `Instant`(createdAt·judgedAt)를 컨테이너 TZ 와 무관하게
+    #   forceConnectionTimeZoneToSession  UTC 로 저장한다. 이 값이 교부 문서와 감사 로그에
+    #                                  찍히고 해시 대상에 들어가므로, 박스 TZ 가 바뀌면
+    #                                  같은 사건이 다른 시각으로 남는다.
+    #   sslMode=DISABLED               같은 호스트의 compose `data` 네트워크 안에서만 오가는
+    #   allowPublicKeyRetrieval=true   연결이라 TLS 를 안 건다. 다만 MySQL 8.4 의 기본
+    #                                  인증(caching_sha2_password)은 평문 연결에서 서버
+    #                                  공개키를 받아와야 첫 인증이 되므로 둘이 **세트**다.
+    #                                  하나만 넣으면 `Public Key Retrieval is not allowed`
+    #                                  로 기동에서 죽는다.
+    url: "jdbc:mysql://${SPHINX_DB_HOST:mysql}:${SPHINX_DB_PORT:3306}/${SPHINX_DB_NAME:sphinx}?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&sslMode=DISABLED&allowPublicKeyRetrieval=true"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${SPHINX_DB_USER}
+    password: ${SPHINX_DB_PASSWORD}
+
+  # ❗**스키마를 만드는 것은 Hibernate 가 아니라 이것이다.** 아래 ddl-auto 가 validate 라
+  # 테이블이 없으면 기동에서 죽는다 — 그 테이블을 여기서 만든다.
+  # 기본 프로파일에서는 꺼져 있다(application.yml) — 로컬·테스트는 H2 다.
+  flyway:
+    enabled: true
+    # 실패하면 기동을 멈춘다(기본값). 스키마가 반만 올라간 채로 뜨는 것보다 낫다.
+    locations: classpath:db/migration
+
   h2:
     console:
       # 브라우저에서 세션 테이블을 직접 조회·수정할 수 있으면 F-GTE-004(이해 기록)와
       # F-CMN-002(감사 로그)의 전제가 무너진다. 데모 중 판정 기록을 고칠 수 있으면 안 된다.
+      #
+      # MySQL 로 옮긴 뒤에도 이 줄을 지우지 않는다 — H2 는 로컬용으로 클래스패스에 남아
+      # 있고, prod 프로파일이 이 값을 안 덮으면 기본 프로파일의 `true` 가 그대로 산다.
       enabled: false
   jpa:
     hibernate:
-      # 인메모리 H2 는 부팅 때 스키마를 만들어야 하므로 validate/none 을 쓸 수 없다
-      # (테이블이 없어 기동 또는 첫 쿼리에서 죽는다). update 대신 create 로 명시한다 —
-      # 매 기동 시 빈 스키마에서 시작하므로 기존 스키마를 암묵적으로 변형하지 않는다.
-      # 영속 DB로 옮기면 마이그레이션 도구를 넣고 validate 로 바꾼다.
-      ddl-auto: create
+      # ❗**create 에서 validate 로 바꿨다** — 이 전환의 본체다.
+      #
+      # 인메모리 H2 시절에는 매 기동마다 빈 스키마를 만들어야 해서 `create` 밖에 쓸 수
+      # 없었다(결정 7.4). 영속 DB 에서 그 값을 그대로 두면 **재배포마다 세션과 감사
+      # 기록을 통째로 지운다** — MySQL 을 붙이는 이유가 바로 그것을 안 지우려는 것이다.
+      #
+      # `update` 도 아니다. update 는 엔티티를 보고 DDL 을 **추론해서** 말없이 실행하는데,
+      # 그러면 스키마의 근거가 코드 어디에도 안 남고 컬럼을 지우는 변경은 아예 무시한다.
+      # validate 는 어긋나면 **기동을 거부**한다 — 마이그레이션(V1__init.sql)과 엔티티가
+      # 갈린 채로 뜨는 경로가 없어진다.
+      ddl-auto: validate
     properties:
       hibernate:
         format_sql: false     # 운영 로그에 SQL 전문을 흘리지 않는다
+        jdbc:
+          # 위 connectionTimeZone 과 짝이다. 드라이버 쪽만 UTC 로 맞추고 Hibernate 를
+          # 안 맞추면 `Instant` 를 JVM 기본 TZ 로 써서 9시간 밀린 값이 저장된다.
+          time_zone: UTC
 
 # 인증 자격증명은 환경변수로만 주입한다. 값을 이 파일에 적지 않는다.
 # 미설정 상태로 prod 를 띄우면 SecurityConfig 가 기동을 거부한다 — Spring 이 임의 비밀번호를
