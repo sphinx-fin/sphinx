@@ -8,11 +8,11 @@ import com.sphinxfin.sphinx.api.dto.CreateSessionRequest;
 import com.sphinxfin.sphinx.api.dto.JudgmentsResponse;
 import com.sphinxfin.sphinx.api.dto.NextQuestionResponse;
 import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
-import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.security.CurrentActor;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
@@ -51,6 +51,7 @@ public class SessionController {
     private final CurrentActor currentActor;
     private final ReportService reportService;
     private final SimulationScenarios simulationScenarios;
+    private final ProductRiskItems productRiskItems;
 
     @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
@@ -99,13 +100,12 @@ public class SessionController {
     @GetMapping("/{sid}/risk-items")
     public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String sid) {
         Session session = sessionService.get(sid);   // 없는 세션이면 404
-        // TODO(강희진): 추출(F-EXT-002)이 붙으면 session.productId() 로 실제 항목을 읽는다.
-        //   그때 이 라우트와 카탈로그 라우트의 목록이 갈린다 — 여기는 "이 세션이 검증할 항목",
-        //   저기는 "상품의 전체 항목"이다. SessionRiskItemsTest 의 카탈로그 대조도 같이 지운다.
-        //   지금은 목이지만 **세션을 실제로 조회한 뒤** 낸다 — 그래야 없는 세션과 남의 세션이
-        //   여기서 걸린다. 목을 그냥 돌려주면 @PreAuthorize 만 남고 404 가 사라진다.
+        // 추출(F-EXT-002)이 붙었다 — session.productId() 의 저장된 스냅샷을 읽고, 없으면
+        // MockData 폴백이다(ProductRiskItems). 세션을 실제로 조회한 뒤 내는 규약은 그대로다 —
+        // 그래야 없는 세션과 남의 세션이 여기서 걸린다.
         log.debug("세션 {} (상품 {}) 의 이해항목을 낸다", session.id(), session.productId());
-        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+        return ApiResponse.ok(new RiskItemsResponse(
+                productRiskItems.riskItemsOf(session.productId())));
     }
 
     /**
@@ -129,10 +129,10 @@ public class SessionController {
         // 진행 상태(index/total/done)는 서버가 준다 — 화면이 '추출된 항목 수'로 분모를
         // 보완하면 서버가 물어볼 항목 수와 어긋나 조용히 틀린 진행률이 나온다.
         //
-        // TODO(강희진): risk_item 은 아직 목이다 — 추출(F-EXT-002)이 서버에 붙으면 세션에
-        //   쌓인 항목으로 교체한다. 지금은 MockData.RISK_ITEMS 를 순서대로 물어본다.
+        // 항목 출처는 ProductRiskItems 다(F-EXT-002 배선) — 추출 스냅샷이 있으면 그것을
+        // 순서대로 묻고, 없으면 MockData 폴백이다. 분모(total)도 같은 목록에서 나온다.
         var session = sessionService.get(sid);
-        var items = MockData.RISK_ITEMS;
+        var items = productRiskItems.riskItemsOf(session.productId());
         int answered = session.judgments().size();
         if (answered >= items.size()) {
             return ApiResponse.ok(NextQuestionResponse.done(items.size(), session.vulnerable()));
@@ -178,9 +178,10 @@ public class SessionController {
         // 마스킹은 AiServiceClient 경계 안에서 강제된다(원문 유출 경로 없음, P3).
         // P1: 이 응답은 '측정'이며 게이트 판정이 아니다.
         //
-        // risk_item 은 아직 목이다 — 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 교체한다.
+        // risk_item 출처는 ProductRiskItems 다(F-EXT-002 배선) — 질문(nextQuestion)과
+        // 같은 목록에서 찾아야 채점 항목과 질문 항목이 갈리지 않는다.
         Session session = sessionService.get(sid);
-        RiskItem item = riskItemOf(body.itemId());
+        RiskItem item = riskItemOf(session, body.itemId());
         // 한 번 구해서 채점과 기록에 같이 쓴다 — 두 번 구하면 폴백에서 갈린다(#137 리뷰).
         // 문면과 출처를 한 값으로 묶은 것도 같은 이유다: 둘을 따로 구하면 한쪽만 폴백이 된다.
         AskedQuestion asked = askedQuestionFor(session, item);
@@ -288,16 +289,12 @@ public class SessionController {
     }
 
     /**
-     * 목(MockData)에서 risk_item 을 찾는다. 목록에 없으면 404(NoSuchElementException)로 드러낸다 —
-     * submitAnswer·reExplain 이 같은 규약을 쓰도록 한 곳으로 모은다.
-     * TODO(강희진): 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목에서 찾는다.
+     * 세션의 상품 항목에서 risk_item 을 찾는다(F-EXT-002 배선 — 저장 우선, MockData 폴백).
+     * 목록에 없으면 404(NoSuchElementException)로 드러낸다 — submitAnswer·reExplain 이
+     * 같은 규약을 쓰도록 한 곳으로 모은다.
      */
-    private static RiskItem riskItemOf(String itemId) {
-        return MockData.RISK_ITEMS.stream()
-                .filter(r -> r.itemId().equals(itemId))
-                .findFirst()
-                .orElseThrow(() -> new NoSuchElementException(
-                        "항목을 찾을 수 없다: " + itemId));
+    private RiskItem riskItemOf(Session session, String itemId) {
+        return productRiskItems.itemOf(session.productId(), itemId);
     }
 
     /**
@@ -309,17 +306,12 @@ public class SessionController {
      * "예금자보호 되는 줄 알았어요"가 부분적으로 참이다 — 호출부가 변액 세션에도 "ELS"를
      * 보내면 라이브러리에서 닫은 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀린다.
      *
-     * TODO(강희진): 추출(F-EXT-002)이 붙으면 세션 필드로 옮긴다. 지금은 MockData의 상품 목록에서
-     *   productId로 찾는다 — 목록에 없으면 404(NoSuchElementException)로 드러낸다. 기본값을 두면
-     *   위 오판이 조용히 되살아나므로 폴백을 만들지 않는다.
+     * 출처는 ProductRiskItems 다(F-EXT-002 배선) — 추출 스냅샷이 있으면 파스가 판별한 값,
+     * 없으면 MockData 카탈로그. 어느 쪽도 모르면 404(NoSuchElementException)로 드러낸다.
+     * 기본값을 두면 위 오판이 조용히 되살아나므로 폴백 기본값을 만들지 않는 규약은 그대로다.
      */
-    private static String productTypeOf(Session session) {
-        return MockData.PRODUCTS.stream()
-                .filter(p -> p.productId().equals(session.productId()))
-                .findFirst()
-                .map(ProductSummary::productType)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "상품유형을 알 수 없다(상품 목록에 없음): " + session.productId()));
+    private String productTypeOf(Session session) {
+        return productRiskItems.productTypeOf(session.productId());
     }
 
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")
@@ -327,13 +319,15 @@ public class SessionController {
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
         // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
-        // risk_item 은 목(MockData)에서 찾아 넘긴다 — 서비스가 ai-service /internal/reexplain
-        // 에 실어 눈높이 재설명을 생성한다. 적격성(대상 아님·상한 도달) 판단은 서비스가 한다.
-        // 재검증 질문도 ai-service 가 만든다 — 고정 문항이면 사전에 확보돼 게이트가 뚫린다
-        // (기획서 7-4 1단계). 상품 유형은 여기서 넘긴다 — core 가 MockData 를 모르게.
+        // risk_item 은 세션 상품의 항목(저장 우선, MockData 폴백)에서 찾아 넘긴다 — 서비스가
+        // ai-service /internal/reexplain 에 실어 눈높이 재설명을 생성한다. 적격성(대상 아님·
+        // 상한 도달) 판단은 서비스가 한다. 재검증 질문도 ai-service 가 만든다 — 고정 문항이면
+        // 사전에 확보돼 게이트가 뚫린다(기획서 7-4 1단계). 상품 유형은 여기서 넘긴다 —
+        // 세션 서비스가 항목 출처를 모르게.
+        Session session = sessionService.get(sid);
         return ApiResponse.ok(sessionService.reExplain(
-                sid, body.itemId(), riskItemOf(body.itemId()),
-                productTypeOf(sessionService.get(sid))));
+                sid, body.itemId(), riskItemOf(session, body.itemId()),
+                productTypeOf(session)));
     }
 
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")

@@ -49,6 +49,15 @@ class EnvelopeContractTest {
     private MockMvc mvc;
     @Autowired
     private SessionRepository repository;
+    @Autowired
+    private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository extractedRiskItems;
+
+    @org.junit.jupiter.api.AfterEach
+    void cleanUpExtraction() {
+        // productEndpoints 가 추출 스냅샷을 영속한다 — 같은 컨텍스트(H2)를 공유하는 다른
+        // 테스트가 MockData 폴백 대신 그 스냅샷을 읽지 않도록 지운다.
+        extractedRiskItems.deleteAll();
+    }
 
     /**
      * /questions/next 가 ai-service /internal/question 을 호출하므로(F-INT-002 배선) 상류를
@@ -84,7 +93,20 @@ class EnvelopeContractTest {
     void productEndpoints() throws Exception {
         assertEnveloped(mvc.perform(get("/products")));
         assertEnveloped(mvc.perform(get("/products/mock-els-001/risk-items")));
-        assertEnveloped(mvc.perform(post("/products/mock-els-001/extract")));
+        // extract 는 실배선(#355)이라 등록된 문서가 있는 상품이어야 200 이다 — 봉투를 보는
+        // 테스트이므로 성공 응답이 나오는 상태(실 데모 상품 + ai-service 목)를 만들어서 본다.
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-parse-001", "ELS", null, "parser-v1", null, 1,
+                        List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        List.of(), List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
+                        List.of()));
+        assertEnveloped(mvc.perform(post("/products/doc-els-kiwoom-4181/extract")));
         assertEnveloped(mvc.perform(multipart("/products/documents")
                 .file(new MockMultipartFile("file", "a.pdf", "application/pdf", "x".getBytes()))));
     }
