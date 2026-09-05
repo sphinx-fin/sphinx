@@ -111,14 +111,27 @@ def test_the_server_javadoc_lists_the_same_codes() -> None:
 
     javadoc 은 `server/` 라 강희진 파일이지만 **주석**이고, 갈린 채로 머지되면 그 사이에
     읽는 사람이 아홉 개짜리 목록을 믿는다.
+
+    ## ❗왜 「들어 있나」가 아니라 「같은가」인가 (변조로 재고 고쳤다)
+
+    첫 판은 `code not in text` 였다. 변조 셋 중 하나가 **안 물었다.**
+
+        ⓐ javadoc 에서 MANUAL_SOURCE 를 지운다      1 failed   ✅
+        ⓑ 다른 코드(NARROWING_REFUSED)를 지운다      1 failed   ✅
+        ⓒ MANUAL_SOURCE → MANUAL_SOURCES 로 고친다   5 passed   ❗
+
+    부분열이라 통과한다. 그리고 **반대 방향이 아예 안 잡혔다** — `Literal` 에서 코드를
+    빼도 javadoc 이 그대로면 읽는 사람이 **낼 수 없는 코드**를 믿는다. 목록을 뽑아
+    **집합으로 같음**을 요구하면 셋 다 닫힌다.
     """
+    import re
     import typing
     from pathlib import Path
 
     from app.schemas import ExtractionWarning
 
     codes = set(typing.get_args(ExtractionWarning.model_fields["code"].annotation))
-    assert codes, "코드 목록을 못 읽었다 — Literal 형태가 바뀌었는지 본다"
+    assert len(codes) >= 5, f"코드 목록을 못 읽었다 — Literal 형태가 바뀌었는지 본다: {codes}"
 
     javadoc = (Path(__file__).resolve().parents[2] / "server" / "src" / "main" / "java"
                / "com" / "sphinxfin" / "sphinx" / "core" / "aiservice" / "AiServiceClient.java")
@@ -127,8 +140,18 @@ def test_the_server_javadoc_lists_the_same_codes() -> None:
         return
 
     text = javadoc.read_text(encoding="utf-8")
-    missing = sorted(c for c in codes if c not in text)
-    assert not missing, (
-        f"서버 javadoc 의 ExtractionWarning 목록에 {missing} 이 없다 — 두 벌이 갈렸다.\n"
+    listed = re.search(r"\{@code ExtractionWarning\}\((.*?)\)", text, re.S)
+    assert listed, (
+        "javadoc 에서 `{@code ExtractionWarning}(…)` 목록을 못 찾았다 — 문면이 바뀌었으면 "
+        "이 대조가 조용히 아무것도 안 잰다. 정규식을 같이 고친다"
+    )
+    #: javadoc 안이라 줄바꿈 · ` * ` 접두 · `<b>` 강조가 섞여 온다. 이름만 남긴다.
+    here = {c for c in re.split(r"[·\s*]+", re.sub(r"</?b>", "", listed.group(1))) if c}
+
+    assert here == codes, (
+        "ai-service `ExtractionWarning` 과 서버 javadoc 목록이 갈렸다 (#444 리뷰 · #316 이 같은 종류).\n"
+        f"  javadoc 에만: {sorted(here - codes) or '없음'}\n"
+        f"  Literal 에만: {sorted(codes - here) or '없음'}\n"
         f"  {javadoc.relative_to(javadoc.parents[7])}\n"
-        "코드를 더할 때 그 목록도 같이 더한다(#444 리뷰 · #316 이 같은 종류)")
+        "코드를 더하거나 빼거나 **이름을 바꿀 때** 그 목록도 같이 고친다"
+    )
