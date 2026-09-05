@@ -225,4 +225,45 @@ class JpaImmutableStoreTest {
             assertThat(result.brokenAt()).isEqualTo(1);
         }
     }
+
+    @Nested
+    @DisplayName("정규화 세대 표식 (canonical_version)")
+    class CanonicalVersion {
+
+        @Test
+        @DisplayName("★ 적재되는 행마다 세대가 찍힌다 — append-only 라 나중에 못 채운다")
+        void everyAppendedRowCarriesItsGeneration() {
+            store.append(STREAM, judgment("ELS-PRINCIPAL-LOSS-WARNING", "U1", "0.9"));
+            store.append(STREAM, judgment("ELS-KNOCKIN-BARRIER", "U4", "0.8"));
+            em.flush();
+            em.clear();
+
+            assertThat(entries.findByStreamOrderBySeqAsc(STREAM))
+                    .as("세대가 비면 그 행은 영원히 「모르는 세대」다 — UPDATE 로 채우는 것은 "
+                            + "ADR-004 가 금지한다")
+                    .isNotEmpty()
+                    .allSatisfy(e -> assertThat(e.canonicalVersion())
+                            .isEqualTo(CanonicalJson.CANONICAL_VERSION));
+        }
+
+        @Test
+        @DisplayName("❗세대는 payload 밖이다 — 해시를 안 바꾼다")
+        void theGenerationIsNotPartOfTheHash() {
+            var payload = judgment("ELS-PRINCIPAL-LOSS-WARNING", "U1", "0.9");
+            HashChain.ChainEntry appended = store.append(STREAM, payload);
+
+            assertThat(appended.hash())
+                    .as("세대를 해시에 넣으면 이 상수를 올리는 날 **과거 기록 전체가** 검증 "
+                            + "실패한다 — 표식은 알려 주는 장치이지 잠그는 장치가 아니다")
+                    .isEqualTo(HashChain.link(HashChain.GENESIS, HashChain.FIRST_SEQ, payload));
+        }
+
+        @Test
+        @DisplayName("현재 세대는 \"0\" — NFC 정본 경계(10.74 ①) 이전이라는 뜻이다")
+        void theCurrentGenerationIsZero() {
+            assertThat(CanonicalJson.CANONICAL_VERSION)
+                    .as("이 값을 올리는 것은 규약이 바뀔 때다. 코드가 바뀔 때가 아니다")
+                    .isEqualTo("0");
+        }
+    }
 }

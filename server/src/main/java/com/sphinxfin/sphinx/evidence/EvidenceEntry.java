@@ -57,8 +57,23 @@ public class EvidenceEntry {
     @Column(nullable = false, length = 64)
     private String hash;
 
+
     /** {@link CanonicalJson#serialize}의 출력. 저장 후 다시 파싱해도 같은 바이트가 나온다. */
     @Lob
     @Column(nullable = false)
     private String payloadJson;
+
+    /**
+     * 이 행이 쌓인 <b>정규화 규약 세대</b>. 값과 뜻은 {@link CanonicalJson#CANONICAL_VERSION}
+     * 에 있다 — 여기서 다시 적지 않는다(두 벌이 되면 갈린다).
+     *
+     * <p>❗<b>append-only 라 나중에 못 채운다.</b> 이 컬럼이 없는 채로 행이 쌓이면 그 행들은
+     * 영원히 "모르는 세대" 이고, 채우려면 {@code UPDATE} 가 필요한데 그건 ADR-004 가 금지한다.
+     * 그래서 값이 늘 {@code "0"} 인 지금도 컬럼이 있어야 한다 — <b>세대가 하나뿐인 것과
+     * 세대를 모르는 것은 다르다.</b>
+     *
+     * <p>{@code payload_json} 밖이라 해시에 안 들어간다. 그 한계도 위 상수 주석에 있다.
+     */
+    @Column(nullable = false, length = 16)
+    private String canonicalVersion;
 }
