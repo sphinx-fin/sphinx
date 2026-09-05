@@ -279,20 +279,31 @@ def els_doc():
     )
 
 
-def test_the_els_maturity_clause_runs_unbroken_from_condition_to_conclusion(els_doc):
-    """★ ⑧항이 조건절부터 결론까지 남의 칸 글자 없이 이어진다 (`#436` 합격 기준).
+#: p8 상환조건 표에서 **조건절부터 결론까지 한 항목으로 읽혀야 하는** 자리들.
+#: ⑧ 은 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, ⑦ 은 `#452`
+#: 리뷰에서 `@yoonjiseok` 이 *"⑧만 고치고 ⑦은 오히려 옮겨 놨다"* 로 잡아낸 자리다.
+ELS_P8_CLAUSES = [
+    ("⑦", "⑦ 위 ⑥에 해당하지", "원금 × [100%+33.00%]"),
+    ("⑧", "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."),
+]
 
-    이 문장이 `ELS-MATURITY-LOSS-CONDITION`·`ELS-KNOCKIN-BARRIER` 의 근거고, 결론
-    ("이 경우 원금 손실이 발생합니다.")까지 걸쳐야 손실 조건으로 읽힌다. 고치기 전에는
-    사이에 수익률 칸 조각이 100자 끼어 있었다.
+
+@pytest.mark.parametrize("tag,head,tail", ELS_P8_CLAUSES, ids=[c[0] for c in ELS_P8_CLAUSES])
+def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, head, tail):
+    """★ 조건절부터 결론까지 **남의 칸 글자 없이** 이어진다 (`#436` 합격 기준).
+
+    ⑧ 은 고치기 전 사이에 수익률 칸 조각이 100자 끼어 있었다. ⑦ 은 `#452` 의 첫 판이
+    끊김을 **없앤 게 아니라 옮겨** 놓아서, *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는
+    경우 만기상환금액은 다음과 같습니다"* 라는 **P6 를 통과하는 오답**이 만들어졌던 자리다.
+
+    ❗그래서 이 그물은 ⑧ 하나로는 부족하다 — `#446` 도 `#452` 첫 판도 **고친 자리 옆에서**
+    깨졌다. 한 항목만 재는 그물은 옮겨 간 끊김을 구조적으로 못 본다.
     """
     text = els_doc["pages"][7]["text"]
-    head, tail = "⑧ 위 ⑥에 해당하지", "이 경우 원금 손실이 발생합니다."
     start, end = text.index(head), text.index(tail) + len(tail)
     clause = text[start:end]
-    strays = ["33.00%", "(연 11.00%)", "-100% ~-30%",
-              "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
-    assert [s for s in strays if s in clause] == [], clause
+    strays = ["-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
+    assert [s for s in strays if s in clause] == [], f"{tag}: {clause}"
 
 
 def test_cell_ordering_only_permutes_lines(real_case):

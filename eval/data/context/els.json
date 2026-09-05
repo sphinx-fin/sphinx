@@ -1,6 +1,6 @@
 {
   "_생성": "eval/tools/build_context.py — 손으로 고치지 않는다",
-  "built_at": "2026-09-05T09:38:41+00:00",
+  "built_at": "2026-09-05T10:01:48+00:00",
   "model": "gpt-5-mini",
   "product_type": "ELS",
   "product_id": "eval-els-001",
@@ -76,10 +76,10 @@
       "name": "조기상환 조건",
       "importance": "required",
       "condition": {
-        "value_text": "① 1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK\nEI225 지수, EuroStoxx50 지수의 자동조기상환평가가격이 모\n두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경",
+        "value_text": "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK\nEI225 지수, EuroStoxx50 지수의 자동조기상환평가가격이 모\n두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경",
         "source_span": {
           "page": 7,
-          "start": 356,
+          "start": 358,
           "end": 469
         }
       },
@@ -108,11 +108,11 @@
       "name": "만기 손실조건",
       "importance": "required",
       "condition": {
-        "value_text": "이 경우 원금 손실이 발생합니다.",
+        "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터\n만기평가일(포함)까지 세 기초자산의 종가 중 어느 하나라\n도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로\n하락한 적이 있는 경우(어느 한 기초자산의 가격만 발표되\n는 날도 포함)만기상환금액은 다음과 같습니다.",
         "source_span": {
           "page": 8,
-          "start": 1004,
-          "end": 1022
+          "start": 827,
+          "end": 982
         }
       },
       "status": "extracted",
@@ -124,11 +124,11 @@
       "name": "전액손실 사례",
       "importance": "required",
       "condition": {
-        "value_text": "⇒ 1억 + [1억 × (-100%)]= 0 원 상환(전액손실)",
+        "value_text": "만기일에 [S&P500 지수], [NIKKEI225 지수], [EuroStoxx50 지수]의 만\n기평가가격이 각각 50, 75, 0일때\n사례4 -100%",
         "source_span": {
           "page": 10,
-          "start": 772,
-          "end": 807
+          "start": 653,
+          "end": 738
         }
       },
       "status": "extracted",
@@ -161,6 +161,22 @@
           "page": 13,
           "start": 414,
           "end": 520
+        }
+      },
+      "status": "extracted",
+      "failure_reason": null
+    },
+    "ELS-COOLING-PERIOD": {
+      "item_id": "ELS-COOLING-PERIOD",
+      "product_id": "eval-els-001",
+      "name": "숙려기간",
+      "importance": "recommended",
+      "condition": {
+        "value_text": "숙려기간 (청약일(불포함)이후 2영업일로, 청약시점에 따라 다르게 적\n용됩니다.)",
+        "source_span": {
+          "page": 5,
+          "start": 276,
+          "end": 321
         }
       },
       "status": "extracted",
@@ -209,11 +225,10 @@
     "ELS-MATURITY-LOSS-CONDITION": "만기에 손실이 확정되는 경우가 어떤 상황인지 설명해 주시겠어요?",
     "ELS-TOTAL-LOSS-SCENARIO": "가장 나쁜 경우에 얼마를 잃을 수 있다고 이해하고 계신가요?",
     "ELS-LOSS-SIMULATION": "과거 데이터로 해본 모의실험 결과를 어떻게 이해하셨는지 말씀해 주시겠어요?",
-    "ELS-MIDWAY-REDEMPTION-COST": "중도에 돈을 찾고 싶을 때 그때 받는 금액이 어떻게 산정되는지 말씀해 주시겠어요?",
+    "ELS-MIDWAY-REDEMPTION-COST": "만기 전에 중간에 돈을 빼려면 어떻게 되는지 말씀해 주시겠어요?",
+    "ELS-COOLING-PERIOD": "청약 후에 다시 생각할 수 있는 기간이 있는지, 있다면 어떤 것인지 말씀해 주시겠어요?",
     "ELS-NO-LISTING": "가입한 뒤에 이 상품을 팔고 싶으면 어떻게 되는지 말씀해 주시겠어요?",
     "ELS-ISSUER-CREDIT-RISK": "이 상품을 발행한 회사에 문제가 생기면 어떻게 되는지 말씀해 주시겠어요?"
   },
-  "unusable": {
-    "ELS-COOLING-PERIOD": "좁힌 인용(38자)은 원문에서 찾았지만 cue 와 겹치지 않아 거부했다 — 표 옆 열 조각일 수 있다. 인용: '숙려기간 (청약일(불포함)이후 2영업일로, 청약시점에 따라 다르게 적' · 인용을 원문에서 찾지 못했다: '숙려기간 (청약일(불포함)이후 2영업일로, 청약시점에 따라 다르게 적 용' · 문서에서 찾지 못했다 (숙려기간)"
-  }
+  "unusable": {}
 }

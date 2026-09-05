@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO / "ai-service"))
 from app import extraction, question_gen  # noqa: E402
 from app.config import MODEL_POLICY_SUBSTRING, settings  # noqa: E402
 
+CORPUS = REPO / "eval" / "corpus"
 PARSED_DOC = REPO / "contracts" / "samples" / "parsed_els_sample.json"
 OUT = REPO / "eval" / "data" / "context" / "els.json"
 PRODUCT_TYPE = "ELS"
@@ -82,7 +83,37 @@ def main() -> int:
         print(f"  ❗{k}: {v}")
     for w in result.warnings:
         print(f"  경고 {w.code} {w.item_id}")
+
+    missing = _items_the_corpus_needs() - set(items)
+    if missing:
+        # ❗**여기서 멈추지 않으면 91회를 쓴 뒤에야 드러난다.** run_scoring 은 문맥에 없는
+        #   항목의 표본을 건너뛰고 model.skipped.json 에 적는데, 그때는 이미 호출을 다 쓴
+        #   뒤다. 그리고 줄어든 표본으로 낸 수치가 이전 회차와 나란히 놓인다.
+        #
+        #   추출은 회차마다 갈린다(#436 — "13/13 은 합격 기준이 아니다"). 그래서 이건
+        #   **고칠 결함이 아니라 다시 돌릴 사건**이다. 다만 다시 돌린 것 중에서 결과가
+        #   좋은 회차를 고르면 안 된다 — 조건은 "표본이 쓰는 항목을 다 덮는가" 하나이고,
+        #   그걸 통과한 첫 회차를 쓴다.
+        print(f"\n❗표본이 쓰는 항목 {len(missing)}개가 문맥에 없다: {sorted(missing)}",
+              file=sys.stderr)
+        print("   이대로 run_scoring 을 돌리면 해당 표본이 통째로 건너뛰어진다. 다시 돌린다.",
+              file=sys.stderr)
+        return 2
     return 0
+
+
+def _items_the_corpus_needs() -> set[str]:
+    """`eval/corpus/*.jsonl` 이 실제로 채점하는 item_id 전부."""
+    needed: set[str] = set()
+    for path in sorted(CORPUS.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            item_id = json.loads(line).get("item_id")
+            if item_id:
+                needed.add(item_id)
+    return needed
 
 
 if __name__ == "__main__":

@@ -165,11 +165,25 @@ def _cell_ordered_lines(page) -> list[str] | None:
             cells = [c for c in row.cells if c]
 
             def rank(i: int, cells=cells) -> int:
-                x0 = lines[i]["x0"]
-                for k, cell in enumerate(cells):
-                    if cell[0] - 1 <= x0 <= cell[2] + 1:
-                        return k
-                return len(cells)  # 어느 칸에도 안 걸리면 행 끝으로 — 순서는 y 가 가른다
+                """줄이 **가장 많이 걸친** 칸. 왼쪽 끝(`x0`)이 아니다.
+
+                ❗**여러 칸을 물고 온 줄이 있다.** `extract_text` 가 같은 y 의 칸들을 이미 한 줄로
+                합쳐 놓은 경우다(`만기 하락한 적이 없는 경우(…) (연 11.00%)` — 라벨·본문·수익률
+                셋을 문다). 그런 줄을 `x0` 으로 정하면 **라벨 칸**을 따라가는데, `만기상환` 처럼
+                병합된 라벨 칸은 ⑥⑦⑧을 걸쳐 y 가 위쪽이라 줄이 **다른 항목 위로 올라간다.**
+
+                `#452` 리뷰에서 `@yoonjiseok` 이 ⑦행으로 잡아낸 자리다. 그렇게 나온 결과는
+                *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는 경우 만기상환금액은 다음과 같습니다"* 로,
+                **1절 F-EXT-002 통제의 `P6` 항등식은 통과하는데 뜻이 틀렸다** — 축자 인용이라 그렇다. 인용이 원문과
+                같은데 뜻이 다른 것이 제일 나쁘고, `#446` 이 닫힌 이유(*"끊김을 없앤 게 아니라
+                옮겼다"*)가 정확히 이것이다. 겹침 폭으로 정하면 그 줄은 본문 칸으로 간다.
+                """
+                x0, x1 = lines[i]["x0"], lines[i]["x1"]
+                widths = [min(x1, c[2]) - max(x0, c[0]) for c in cells]
+                best = max(range(len(cells)), key=lambda k: widths[k]) if cells else None
+                if best is None or widths[best] <= 0:
+                    return len(cells)  # 어느 칸에도 안 걸리면 행 끝으로 — 순서는 y 가 가른다
+                return best
 
             slots = sorted(members)
             for slot, i in zip(slots, sorted(members, key=lambda i: (rank(i), lines[i]["top"]))):
