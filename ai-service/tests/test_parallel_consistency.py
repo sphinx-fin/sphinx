@@ -115,6 +115,17 @@ def parallel(monkeypatch):
     scoring.METER = scoring.ConsistencyMeter()
 
 
+def _attempt_seeds(attempt: int) -> set[int | None]:
+    """한 시도가 쓰는 seed 둘 — 첫 채점과 투기 호출.
+
+    `scoring.score` 가 첫 채점에 `_attempt_seed(attempt)` 를, 투기 호출에
+    `_attempt_seed(attempt + MAX_SCORING_ATTEMPTS)` 를 쓴다. 그래서 시도가 둘이면
+    seed 넷이 전부 다르고, **스텁이 호출 순서 없이 시도를 가를 수 있다.**
+    """
+    return {scoring._attempt_seed(attempt),
+            scoring._attempt_seed(attempt + scoring.MAX_SCORING_ATTEMPTS)}
+
+
 def _score(llm) -> Judgment:
     return scoring.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", ANSWER,
                          _risk_item(), "ELS", llm=llm)
@@ -318,24 +329,31 @@ def test_a_retry_does_not_reuse_the_probe(parallel) -> None:
     )
 
     class RetryOnce(ThreadSafeLlm):
-        def __init__(self):
-            super().__init__(first=bad)
-            self._served = 0
+        """1차 시도는 무효 판정, 2차 시도는 유효 판정을 준다.
+
+        ❗**seed 로 시도를 가른다 — 호출 순서로 가르지 않는다.** 한 시도가 쓰는 seed
+        둘(첫 채점 `attempt`, 투기 호출 `attempt + MAX_SCORING_ATTEMPTS`)이 시도마다
+        다르므로 넷이 전부 구별된다. 순서로 가르면 이 파일 머리말이 금지한 그것이 되고,
+        실제로 `main` 이 그것으로 빨개졌다(run 33967581271 · `#448` 머지 커밋 — 그 PR 은
+        `docker-compose.yml` 만 만졌다).
+
+            투기 호출은 스레드다.  1차 투기가 2차 첫 채점보다 **늦게** 도착하면
+            2차 첫 채점이 `served == 2` 를 받아 무효 판정을 얻고, 두 시도가 다 무효라
+            `MeasurementInvalid` 가 난다. 부하가 있는 러너에서만 보인다.
+        """
 
         def complete_json(self, **kwargs):
+            seed = kwargs.get("seed")
             with self._lock:
-                self.seeds.append(kwargs.get("seed"))
+                self.seeds.append(seed)
                 self.schemas.append(kwargs.get("schema_name"))
-                self._served += 1
-                served = self._served
-            base = scoring._attempt_seed(1)
-            if kwargs.get("seed") == base:          # 1차 시도의 첫 채점 → 무효
-                return bad
-            if served <= 2:                          # 1차 시도의 투기 호출
-                return bad
-            return _judgment(Grade.U1)
+            return bad if seed in _attempt_seeds(1) else _judgment(Grade.U1)
 
-    llm = RetryOnce()
+    assert scoring._attempt_seed(1) is not None, (
+        "이 스텁은 seed 로 시도를 가른다 — seed 가 꺼져 있으면 넷이 다 None 이라 못 가른다"
+    )
+
+    llm = RetryOnce(first=bad)
     judgment = _score(llm)
 
     assert judgment.grade == Grade.U1
