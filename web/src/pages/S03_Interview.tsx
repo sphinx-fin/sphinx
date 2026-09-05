@@ -127,6 +127,12 @@ export default function S03Interview() {
   /* ── 질문 요청 ─────────────────────────────────────────────────────────── */
   const loadQuestion = useCallback(async () => {
     const next = await post<NextQuestion>(`/sessions/${sid}/questions/next`);
+    // `vulnerable` 은 렌더링 힌트다 — 재설명 경로(`handoff.vulnerable`)와 **같은 규칙·같은
+    // 함수**다. 여기서 켜지 않으면 큰 글씨는 *고객이 한 번 못 알아들은 뒤*에나 온다:
+    // 세션 시작에서 이미 「70대」를 받아 놓고 인터뷰를 작은 글씨로 시작하고 있었다(#319).
+    // 이유는 화면에 적지 않는다 — "취약 고객으로 분류됨" 을 본인에게 보이지 않는다(7-4).
+    // `enable()` 은 켜기 전용이라 고객이 직접 끈 큰 글씨를 되돌리지 않는다.
+    if (next.vulnerable) enable();
     setQuestion(next);
     setText("");
     setShortWarned(false);
@@ -136,7 +142,8 @@ export default function S03Interview() {
     //   null 인 채로 입력 화면이 그려진다 — 고객에게는 **제목이 빈 3번째 질문**으로 보이고,
     //   무엇을 적어도 `submit()` 이 itemId 없이 첫 줄에서 되돌아 나가 아무 일도 안 일어난다.
     setPhase(next.done ? "answered" : "asking");
-  }, [sid, meta]);
+    // `enable` 은 위 `next.vulnerable` 분기가 부르므로 의존성에 있어야 한다(#319 · main).
+  }, [sid, meta, enable]);
 
   /* ── 최초 로드: 검증 대상 항목 → 첫 질문 ────────────────────────────────
      항목을 **세션 경유**로 받는다(#164, 이슈 #158 1항). 예전에는 `GET /sessions/{sid}` 로
@@ -173,7 +180,7 @@ export default function S03Interview() {
     return () => {
       alive = false;
     };
-    // loadQuestion 은 sid 에만 의존하므로 최초 1회로 충분하다.
+    // loadQuestion 은 sid 와 안정 참조들(meta·enable)에만 의존하므로 최초 1회로 충분하다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sid]);
 

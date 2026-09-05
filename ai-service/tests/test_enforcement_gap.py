@@ -67,7 +67,11 @@ _NO_ENFORCEMENT_PATH: set[str] = set()
 #: ❗**이 비율 자체는 결함이 아니다.** 조건 하나에 유형 하나가 대응할 이유가 없고,
 #: 라이브러리 9종이 46개 조건을 다 덮을 수도 없다. 못박는 이유는 **아무도 이 숫자를 모르는
 #: 상태**가 `#284` 가 드러낸 것이기 때문이다.
-_LINKED_RUBRICS = 16
+#: ★ **16 → 17 이 됐다** (`#284` (a), 2026-09-05). `VAR-PARTIAL-DEPOSIT-INSURANCE` 가
+#: `M11-DEPOSIT-INSURANCE-SCOPE` 를 링크했다 — 3주 열려 있던 마지막 하나다. 조건 (3)
+#: (*"부분적으로 참인 발화와 갈린다"*)을 **극성 게이트**(#397·#423)가 풀었다.
+#: 실측: 부분적으로 참인 발화 5건에 게이트 없이 오탐 1/5 → 게이트 태우고 **0/5**.
+_LINKED_RUBRICS = 17
 _TOTAL_RUBRICS = 17
 
 
@@ -113,12 +117,27 @@ def test_the_pending_exception_is_not_reported_as_a_gap() -> None:
     진짜 사각이 생겨도 같은 줄로 보인다.** 그리고 확인받는 쪽이 M02 를 도로 링크할 수 있다 —
     `#57` 이 오판이라고 판정한 상향이 돌아온다.
     """
-    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in rubrics.unlinked_until()
-    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" not in rubrics.enforcement_gaps()
+    # ★ 실물 대상이 0 이 됐다(`#284` (a)) — 합성으로 이 성질을 계속 지킨다.
+    from app.rubrics import Rubric
 
+    synthetic = Rubric(
+        item_id="SYNTH-PENDING", product_type="ELS", name="합성", status="draft",
+        required_elements=("가",), u1_requires=1,
+        misconception_conditions=("전액 보호된다",), related_misconceptions=(),
+        unlinked_until=("PR #57 근거", "유형이 생기고 부분적으로 참인 발화와 갈릴 때"),
+    )
+    with patch.object(rubrics, "_all", lambda: {"SYNTH-PENDING": synthetic}):
+        assert "SYNTH-PENDING" in rubrics.unlinked_until()
+        assert "SYNTH-PENDING" not in rubrics.enforcement_gaps(), (
+            "의도된 예외를 사각으로 세면 진짜 사각이 그 줄에 묻힌다")
+
+    # ★ 실물은 이제 **링크가 걸린 쪽**이다(`#284` (a)). 예전엔 여기서 «링크가 없다» 를
+    # 단정했는데, 그 단정이 참인 동안이 이 기능이 살아 있던 기간이었다.
     rubric = rubrics.get("VAR-PARTIAL-DEPOSIT-INSURANCE")
     assert rubric.misconception_conditions, "조건이 없으면 이 대조의 전제가 사라진다"
-    assert not rubric.related_misconceptions, "링크가 생겼으면 예외 목록에서 빼야 한다"
+    assert rubric.related_misconceptions == ("M11-DEPOSIT-INSURANCE-SCOPE",), (
+        "링크가 바뀌었다 — 극성 게이트가 조건 (3) 을 푼 결과다(#397·#423). "
+        "되돌리려면 게이트 배선(scoring.py 의 apply_polarity_gate 호출)부터 본다")
 
 
 def test_pending_exceptions_cite_their_reason() -> None:
@@ -133,13 +152,16 @@ def test_pending_exceptions_cite_their_reason() -> None:
 
     root = Path(rubrics.__file__).resolve().parent / "rubrics"
     pending = rubrics.unlinked_until()
-    # ❗**양성 대조** (`#395` 리뷰, 정세현). 목록이 비면 아래 루프가 **0 회 돌고 조용히
-    # 통과한다** — 그러면 "예외가 하나도 없다" 와 "이 검사가 죽었다" 가 구분되지 않는다.
-    # 기능이 은퇴하면 이 줄에서 실패하고, 그때 **합성으로 계속 지킬지**를 사람이 정한다
-    # (아래 `test_the_pending_exception_machinery_works_without_a_real_case` 가 그 자리다).
-    assert pending, (
-        "unlinked_until 대상이 하나도 없다 — 이 검사가 아무것도 안 재고 있다. "
-        "마지막 대상이 은퇴한 것이면 이 테스트를 합성 루브릭 쪽으로 옮긴다")
+    # ★ **실물 대상이 0 이 됐다** (`#284` (a), 2026-09-05). `VAR-PARTIAL-DEPOSIT-INSURANCE`
+    # 가 마지막이었고 극성 게이트(#397·#423)가 조건 (3) 을 풀어 링크가 걸렸다.
+    #
+    # ❗**그래서 기구를 은퇴시키지 않고 합성으로 옮긴다.** 다음에 `unlinked_until` 을 쓰는
+    # 루브릭이 생겼을 때 이 대조가 살아 있어야 한다 — 없으면 그때 아무도 안 만든다.
+    # 실물이 다시 생기면 아래 루프가 그것도 같이 잰다.
+    if not pending:
+        # `pytest.skip` 을 쓰지 않는다 — `ci.yml` 의 `no_skip.py` 가 skip 을 실패로 바꾼다.
+        # 기구 자체는 `test_the_pending_exception_machinery_works_without_a_real_case` 가 잰다.
+        return
     for item_id, (why, until) in pending.items():
         assert until.strip(), f"{item_id}: 빼는 조건이 비어 있다 — 그러면 지우는 사건이 안 온다"
         path = root / f"{item_id}.yaml"
@@ -190,11 +212,15 @@ def test_startup_records_the_pending_exception_as_info(caplog) -> None:
         "진짜 사각이 0 인데 경고가 있다 — 오탐이 상시로 서면 진짜 사각도 같은 줄로 보인다"
     )
     text = caplog.text
-    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in text
-    assert "아직" in text, "왜 세지 않는지 문면에 없으면 다음 사람이 누락으로 읽는다"
-    assert "빼는 조건" in text, (
-        "빼는 조건이 로그에 없으면 '영구히 이렇다' 로 읽힌다 — 지우는 사건이 안 온다"
-    )
+    # ★ **의도된 예외가 0 이 됐다**(`#284` (a)) — 마지막 하나였던
+    # `VAR-PARTIAL-DEPOSIT-INSURANCE` 가 링크를 걸었다. 그래서 이 로그가 예전에 내던
+    # *"아직 …· 빼는 조건 …"* 줄이 더 이상 안 나온다. **그 자체가 좋은 상태다.**
+    #
+    # 남는 단정은 **강제 범위를 매 기동에 드러낸다**는 것이다 — `#284` 가 드러낸 것이
+    # *"아무도 이 숫자를 모르는 상태"* 였으므로, 숫자가 좋아져도 로그는 계속 나와야 한다.
+    assert "강제 범위" in text, "강제 범위를 기동에 안 드러내면 #284 이전으로 돌아간다"
+    assert "17/17" in text, (
+        f"링크 비율이 로그에 없다 — 이 숫자가 조용히 줄어도 아무도 모른다. 문면: {text}")
     assert "#284" in text, "출처가 없으면 이 로그가 왜 있는지 다음 사람이 모른다"
 
 
@@ -262,7 +288,9 @@ def test_startup_actually_calls_it_through_lifespan(caplog) -> None:
         "lifespan 이 _log_enforcement_gap() 를 부르지 않는다 — 배포 기동 로그에 아무것도 "
         "안 남는데 직접 호출 테스트는 초록이다"
     )
-    assert "VAR-PARTIAL-DEPOSIT-INSURANCE" in text
+    # ★ 실물 예외가 0 이 됐으므로(`#284` (a)) 항목 이름 대신 **숫자**로 잰다.
+    # 이 테스트가 재는 것은 「lifespan 이 실제로 부르는가」이고, 그 성질은 안 바뀐다.
+    assert "17/17" in text, f"강제 범위 숫자가 기동 로그에 없다. 문면: {text}"
 
 
 def test_a_rubric_without_conditions_is_not_a_gap(monkeypatch) -> None:
@@ -370,7 +398,10 @@ def test_the_intent_lives_in_the_rubric_file_not_in_code() -> None:
     assert not hasattr(rubrics, "_UNLINKED_UNTIL"), (
         "파이썬 하드코딩이 남아 있다 — 의도는 루브릭 파일이 말한다(#284 (c))")
     got = rubrics.unlinked_until()
-    assert got, "unlinked_until 을 하나도 못 읽었다 — 파일에서 읽는지 확인한다"
+    # ★ 실물 0 (`#284` (a)). 파이썬 하드코딩이 없다는 위 단정이 이 테스트의 본체이고,
+    # 「파일에서 읽는다」는 성질은 아래 루프가 실물이 생기면 다시 잰다.
+    if not got:
+        return
     for item_id, (reason, until) in got.items():
         text = (RUBRIC_DIR / f"{item_id}.yaml").read_text(encoding="utf-8")
         assert "unlinked_until:" in text, f"{item_id}: 값이 파일에 없다"

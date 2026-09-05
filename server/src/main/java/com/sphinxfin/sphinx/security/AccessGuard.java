@@ -172,8 +172,8 @@ public class AccessGuard {
     /**
      * 인증 주체 → Actor. 역할은 권한 이름 ROLE_<Role> 에서 되읽는다.
      *
-     * TODO(강희진): 역할별 계정 분리(결정 10.5, 정세현 8/29) 후에는 미인증을 통과시키지
-     *   않는다. 지금은 enforce=false 경로에서만 도달하므로 실질 영향이 없다.
+     * 미인증은 아래에서 즉시 거부한다 — 역할별 계정 분리(결정 10.5)가 랜딩된 뒤로는
+     * 미인증 통과 경로가 없다(이 메서드는 enforce=true 에서만 불린다).
      */
     private AccessPolicy.Actor currentActor() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

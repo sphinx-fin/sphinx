@@ -4,9 +4,17 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.UploadResponse;
+import com.sphinxfin.sphinx.core.extraction.ProductDocuments;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -22,6 +30,7 @@ import java.util.List;
  * <pre>
  *   GET  /products                    product:read    SELLER·MGR·COMPL·ADMIN
  *   GET  /products/{id}/risk-items    product:read
+ *   GET  /products/{id}/document      product:read    원문 PDF 인라인 (이슈 #412)
  *   POST /products/documents          product:manage  ADMIN 만 · audited
  *   POST /products/{id}/extract       product:manage
  * </pre>
@@ -42,7 +51,11 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/products")
+@RequiredArgsConstructor
 public class ProductController {
+
+    private final ProductRiskItems productRiskItems;
+    private final ProductDocuments productDocuments;
 
     /**
      * S-02 상품 선택 목록. 기존 /products/* 는 전부 productId 를 이미 알아야 부를 수 있어서
@@ -70,18 +83,60 @@ public class ProductController {
     /**
      * 위험항목 추출. <b>게이트의 분모를 바꾸는 자리</b>라 ADMIN 전용이고 audited 다.
      * 판매 라인이 자기가 답해야 할 질문의 목록을 편집할 수 있으면 안 된다(ADR-001 과 같은 결).
+     *
+     * <p><b>실배선이다(이슈 #355 · #401 3번)</b> — 문서 경로 결정 → ai-service
+     * {@code /internal/parse} → {@code /internal/extract} → 스냅샷 영속(교체). 이후
+     * {@code GET /{id}/risk-items} 와 세션 면담이 이 스냅샷을 읽는다. 응답 모양은 목 시절
+     * 그대로 {@code RiskItemsResponse} — 계약은 안 바꾼다. 추출 경고는 서비스가 로그로
+     * 남긴다(E-EXT-03). 실 LLM 추출은 ai-service 에 LLM_API_KEY 가 있어야 돈다.
      */
     @PreAuthorize("@accessGuard.canAggregate('product:manage')")
     @PostMapping("/{productId}/extract")
     public ApiResponse<RiskItemsResponse> extract(@PathVariable String productId) {
-        // TODO(강희진): ai-service POST /internal/extract 호출 (F-EXT-002)
-        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+        return ApiResponse.ok(new RiskItemsResponse(productRiskItems.extract(productId).items()));
     }
 
-    /** 추출된 항목 조회. 면담이 부르는 경로라 SELLER 가 닿아야 한다({@code product:read}). */
+    /**
+     * 추출된 항목 조회. 면담이 부르는 경로라 SELLER 가 닿아야 한다({@code product:read}).
+     * 저장된 추출이 있으면 그것, 없으면 MockData 폴백 — 키 없는 환경도 계속 돈다.
+     */
     @PreAuthorize("@accessGuard.canAggregate('product:read')")
     @GetMapping("/{productId}/risk-items")
     public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String productId) {
-        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+        return ApiResponse.ok(new RiskItemsResponse(productRiskItems.riskItemsOf(productId)));
+    }
+
+    /**
+     * 상품 원문 문서(PDF) 조회 (F-EXT · 이슈 #412). S-02 모달이 조항 원문·페이지·오프셋을
+     * 그려 놓고도 대조할 <b>원본</b>이 없던 것을 채운다(P6 원문 인용) — 판매자가 손에 든
+     * 설명서 대신 화면에서 바로 대조한다.
+     *
+     * <p>❗<b>공통 봉투({@code ApiResponse})에 담지 않는다.</b> {@code /report/preview} 가
+     * 만든 선례를 그대로 따른다 — PDF 는 바이트고 봉투는 JSON 이라, base64 로 접어 넣으면
+     * 브라우저가 뷰어로 못 열고 화면이 다시 풀어야 한다. <b>인라인</b>({@code Content-Disposition:
+     * inline})이라 모달이 이미 든 페이지 번호로 {@code #page=N} 앵커를 붙여 열 수 있다.
+     * 오류 경로는 봉투 그대로다 — 없는 상품·사전적재 안 된 파일은 {@code GlobalExceptionHandler}
+     * 가 404 로 낸다({@link ProductDocuments#open} 이 {@code NoSuchElementException}).
+     *
+     * <p>권한은 <b>읽기 둘과 같은 {@code product:read} 를 재사용</b>한다. 원문 문서는 세션
+     * 데이터가 아니라 {@code /risk-items} 가 내는 것과 같은 상품 카탈로그 데이터다 — 그 항목이
+     * 뽑혀 나온 바로 그 문서라 접근 단위가 같다. {@code report:read} 처럼 세션 스코프가 아니므로
+     * {@code canAggregate} 로 부른다(다른 {@code /products/*} 읽기와 같은 형태). SELLER 가
+     * 자기가 안 연 상품이라도 카탈로그를 읽을 수 있는 것과 같은 근거다(scope: org).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('product:read')")
+    @GetMapping("/{productId}/document")
+    public ResponseEntity<byte[]> document(@PathVariable String productId) {
+        ProductDocuments.Document doc = productDocuments.open(productId);   // 없으면 404
+        ContentDisposition disposition = ContentDisposition.inline()
+                .filename(doc.filename(), StandardCharsets.UTF_8)
+                .build();
+        // 리포트와 달리 no-store 를 걸지 않는다 — 상품설명서는 공시 문면이지 고객 데이터가
+        // 아니라(ParsedDocument 주석), 리포트 PDF 의 캐시 금지 근거(발화·판정 근거 포함)가
+        // 여기엔 없다. 브라우저가 정상 캐시하게 둔다.
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(doc.bytes());
     }
 }

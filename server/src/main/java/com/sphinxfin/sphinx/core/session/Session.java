@@ -102,6 +102,24 @@ public class Session extends BaseEntity {
     @Builder.Default
     private Map<String, Object> surveyResult = Map.of();   // 적합성 설문 결과, JSON 저장
 
+    /**
+     * 지금 진행 중인 재설명(F-INT-004 · 이슈 #415). {@code {itemId, content, reverifyQuestion}}.
+     *
+     * <p>화면이 <b>저장소 인계에 기대지 않고</b> 서버에서 다시 읽게 하려면 여기 있어야 한다.
+     * S-02 가 고객 화면을 새 창(window.open)으로 열면서 sessionStorage 인계가 창을 못 건넌다 —
+     * 새 창은 재설명을 못 받아 정상 흐름으로 떨어지고, <b>엉뚱한 항목의 판정이 에러 없이
+     * 재검증으로 기록</b>된다. GET 이 이 값을 돌려주면 새 창·새로고침·다른 기기 모두 서버가 출처다.
+     *
+     * <p>❗<b>GET 이 ai-service 로 재생성하지 않고 이 저장값을 돌려주는 이유</b>: 재설명 문면은
+     * LLM 산출물이라 비결정이다(P1). 재생성하면 판매자가 실제로 띄운 문장과 달라진다 — 그래서
+     * POST /re-explain 이 <b>보여준 그 문면</b>을 여기 남기고 GET 은 그것만 읽는다.
+     * 사이클(RE_EXPLAIN·RE_VERIFY)을 벗어나면 무효다({@link #inReExplainCycle()}).
+     */
+    @Convert(converter = JsonMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    @Builder.Default
+    private Map<String, Object> currentReExplanation = Map.of();
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
@@ -424,14 +442,26 @@ public class Session extends BaseEntity {
     }
 
     /**
-     * 질문을 보냈는데 <b>판정이 없는</b> 항목 수 (이슈 #280 ②).
-     *
-     * <p>게이트가 분모를 알아야 하는데 <b>"몇 항목이어야 하는가"(추출 결과)가 아직 목</b>이라,
-     * 실제로 물어본 것과 대조한다. 채점이 502 로 죽었거나 고객이 답을 안 한 항목이 여기 잡힌다.
-     *
-     * <p>둘 다 <b>판정할 수 없는 상태</b>다 — 게이트가 그 둘을 가릴 필요는 없다. 가려야 하는
-     * 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00} 이 한다.
+     * 지금 보여준 재설명 문면을 세션에 남긴다(#415) — GET /re-explanations/current 가 이 값을
+     * 돌려준다. 재생성이 아니라 이 저장값을 읽는 이유는 {@link #currentReExplanation} javadoc 참고.
      */
+    public void recordReExplanation(String itemId, String content, String reverifyQuestion) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("itemId", itemId);
+        snapshot.put("content", content);
+        snapshot.put("reverifyQuestion", reverifyQuestion);
+        this.currentReExplanation = snapshot;
+    }
+
+    /**
+     * 재설명 사이클(RE_EXPLAIN·RE_VERIFY) 안인가 — 이때만 {@link #currentReExplanation} 이
+     * 유효하다. 재검증을 통과해 IN_PROGRESS 로 돌아갔거나 판정으로 넘어갔으면, 저장값이 남아
+     * 있어도 "지금 진행 중인 재설명"은 없다. GET 이 이 경계로 404 를 가른다.
+     */
+    public boolean inReExplainCycle() {
+        return state == SessionState.RE_EXPLAIN || state == SessionState.RE_VERIFY;
+    }
+
     /**
      * 질문 생성에 넘길 면담 맥락 (F-INT-002).
      *
@@ -460,10 +490,28 @@ public class Session extends BaseEntity {
                 .toList();
     }
 
-    public int unmeasuredItemCount() {
+    /**
+     * <b>기대 항목 중 판정이 없는 항목 수</b> (이슈 #280 ② · #405). {@code R-00} 의 분모다.
+     *
+     * <p>분모({@code expectedItemIds})는 <b>그 상품의 추출 항목 집합</b>이다 —
+     * {@code ProductRiskItems.riskItemsOf(productId)} 가 낸다(저장된 추출 우선, 없으면 MockData
+     * 폴백). 세션은 그 목록을 모르므로 <b>호출부가 넣어 준다</b>({@code SessionService}). 세션은
+     * "무엇을 판정했나" 만 알고, "몇 항목이어야 하나" 는 상품 쪽이 안다 — 둘을 여기서 맞춘다.
+     *
+     * <p>❗<b>전에는 분모가 "질문을 보낸 항목" 이었다.</b> 추출이 아직 목이던 시절의 우회다
+     * (#405). 그러면 <b>아예 안 물어본 항목</b>(질문 생성 실패·항목 누락·순회 중단)이 분모에서
+     * 같이 빠져 안 잡혔다 — 13항목 중 3개에 질문을 못 보냈으면 게이트는 10개만 보고 그 10개가
+     * U1 이면 R-06 이 GREEN 을 냈다. 이제 기대 집합으로 세므로 <b>안 물어본 항목도 미측정으로
+     * 잡힌다.</b> 물어봤는데 못 잰 것(채점 502·무응답)은 이 집합의 부분집합이라 그대로 걸린다.
+     *
+     * <p>가려야 하는 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00}
+     * 이 한다 — 게이트는 왜 못 쟀는지(안 물음·채점 실패·무응답)를 가릴 필요가 없다.
+     */
+    public int unmeasuredItemCount(java.util.Collection<String> expectedItemIds) {
         java.util.Set<String> judged = judgments().stream()
                 .map(Judgment::itemId).collect(java.util.stream.Collectors.toSet());
-        return (int) askedQuestionsByItem.keySet().stream().filter(id -> !judged.contains(id)).count();
+        return (int) expectedItemIds.stream().distinct()
+                .filter(id -> !judged.contains(id)).count();
     }
 
     /** 그 항목에 마지막으로 보여준 질문의 출처. 보여준 적이 없으면 {@code null}. */

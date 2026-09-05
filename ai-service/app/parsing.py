@@ -21,8 +21,11 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from pathlib import Path
 
 import pdfplumber
+
+from .config import settings
 
 #: 출력이 달라지면 올린다. 파싱 파라미터(_X_TOLERANCE 등) 변경도 출력 변경이다.
 PARSER_VERSION = "0.1.0"
@@ -279,3 +282,143 @@ def verify_span(doc: dict, source_span: dict, value_text: str) -> bool:
     if not (0 <= start <= end <= len(text)):
         return False
     return text[start:end] == _nfc(value_text)
+
+
+# --- 라우트 진입점 -----------------------------------------------------------------
+# `/internal/parse` 가 부르는 것은 `parse_upload()` 하나다. 경로 해소와 실패 분류를 라우트가
+# 아니라 여기 두는 이유가 둘이다. `routes.py` 는 얇게 유지한다는 그 파일의 규약이 하나이고,
+# **어떤 실패가 요청 잘못이고 어떤 것이 문서 잘못인지는 파서만 안다**는 것이 다른 하나다.
+
+
+class ParseRefused(Exception):
+    """파싱을 시작하지 못했다. 하위 타입이 이유를 가르고, 라우트가 그것으로 상태 코드를 고른다.
+
+    세 이유를 한 코드로 묶으면 안 된다 — 고치는 자리가 전부 다르다. 경로 규칙 위반은
+    부르는 쪽 배선, 파일 없음은 업로드·마운트, 못 읽음은 문서 자체다.
+    """
+
+
+class DocumentPathRejected(ParseRefused):
+    """허용된 뿌리 밖을 가리킨다. 파일을 만지기 전에 거부한다."""
+
+
+class DocumentNotFound(ParseRefused):
+    """뿌리 안이지만 그 파일이 없다."""
+
+
+class DocumentUnreadable(ParseRefused):
+    """PDF 로 열리지 않는다 — 형식 오류·암호화·페이지 0."""
+
+
+#: pdfplumber 는 pdfminer 예외를 자기 타입으로 감싼다. 핀이 없는 의존성이라(requirements.txt)
+#: 클래스 위치가 버전에 따라 움직일 수 있어 임포트를 방어한다 — 여기서 못 잡으면 깨진 PDF 가
+#: 422 가 아니라 500 으로 나가고, 그건 "문서가 잘못됐다" 가 아니라 "우리가 터졌다" 로 읽힌다.
+def _unreadable_errors() -> tuple[type[BaseException], ...]:
+    found: list[type[BaseException]] = []
+    try:
+        from pdfplumber.utils.exceptions import PdfminerException
+        found.append(PdfminerException)
+    except ImportError:  # pragma: no cover - 버전 방어
+        pass
+    try:
+        from pdfminer.psparser import PSException
+        found.append(PSException)
+    except ImportError:  # pragma: no cover - 버전 방어
+        pass
+    return tuple(found)
+
+
+_UNREADABLE = _unreadable_errors()
+
+#: 파일명 → document_id 에서 살릴 문자.
+_ID_UNSAFE = re.compile(r"[^a-z0-9]+")
+
+
+def documents_root() -> Path:
+    """문서를 읽어도 되는 유일한 뿌리 — `SPHINX_DATA_DIR`(컨테이너에서는 읽기 전용 `/data`).
+
+    **전용 환경변수를 새로 만들지 않는다.** 업로드된 파일이 여기 어떻게 도달하는지는 아직
+    안 정해졌고(이슈 #401 의 2번), 결정 전에 knob 을 박으면 결정이 그 knob 에 맞춰진다.
+    지금 데모가 파싱하는 문서는 전부 `data/documents/` 에 있고 그건 이미 마운트돼 있다.
+    """
+    return settings().data_dir
+
+
+def derive_document_id(pdf_path: str | Path) -> str:
+    """파일명에서 만든 문서 id. 같은 파일이면 같은 값이다(P2).
+
+    계약상 `document_id` 는 **업로드 단위** 식별자라 원래 업로더가 가진 값이고 파서가 정할
+    것이 아니다 — 호출자가 주면 그걸 쓴다. 여기서 만드는 것은 영속 층(#401 의 3번)이 붙기
+    전까지 이 엔드포인트를 혼자 돌려볼 수 있게 하는 값이다.
+    """
+    stem = _ID_UNSAFE.sub("-", Path(pdf_path).stem.lower()).strip("-")
+    return f"doc-{stem}" if stem else "doc-unnamed"
+
+
+def resolve_document_path(document_path: str, *, root: str | Path | None = None) -> Path:
+    """요청의 경로를 실제 파일 경로로 바꾼다. 뿌리 밖이면 파일을 만지지 않고 거부한다.
+
+    상대경로는 뿌리 기준이고, 절대경로는 뿌리 안일 때만 받는다.
+
+    **존재 확인보다 먼저 거부한다.** 순서가 반대면 뿌리 밖 경로에도 "있다/없다"가 갈려
+    나가고, 그 차이만으로 호스트에 무슨 파일이 있는지 훑을 수 있다. `..` 뿐 아니라
+    심볼릭 링크로 밖을 가리키는 것도 막아야 해서 `resolve()` 로 끝까지 푼 뒤에 비교한다.
+    """
+    base = Path(root if root is not None else documents_root()).expanduser().resolve()
+
+    raw = (document_path or "").strip()
+    if not raw:
+        raise DocumentPathRejected("document_path 가 비었다")
+    if "\x00" in raw:
+        raise DocumentPathRejected("document_path 에 NUL 문자가 있다")
+
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:  # 순환 심볼릭 링크 등
+        raise DocumentPathRejected(f"경로를 해소할 수 없다: {document_path!r} ({exc})") from exc
+
+    if resolved != base and base not in resolved.parents:
+        raise DocumentPathRejected(
+            f"document_path 가 허용된 뿌리 밖이다: {document_path!r} "
+            f"(뿌리는 SPHINX_DATA_DIR — 상대경로로 주는 것이 정상이다. 예: documents/xxx.pdf)"
+        )
+    return resolved
+
+
+def parse_upload(
+    document_path: str,
+    *,
+    product_type: str,
+    document_id: str | None = None,
+    parsed_at: str | None = None,
+    root: str | Path | None = None,
+) -> dict:
+    """`/internal/parse` 본체. 경로를 해소하고 `parse_document()` 를 부른다.
+
+    `parsed_at` 은 여기서도 찍지 않는다 — 안 주면 키가 없는 채로 나간다. 파서가 현재 시각을
+    넣으면 같은 문서의 두 파싱 결과가 달라져 재현성 비교(P2)에 쓸 수 없다. 기록이 필요한
+    쪽(서버)이 자기 시각을 찍는 것이 맞다.
+    """
+    path = resolve_document_path(document_path, root=root)
+    if not path.is_file():
+        raise DocumentNotFound(f"문서가 없다: {document_path!r}")
+
+    try:
+        return parse_document(
+            str(path),
+            document_id=document_id or derive_document_id(path),
+            product_type=product_type,
+            parsed_at=parsed_at,
+        )
+    except ValueError as exc:
+        # parse_document 가 내는 것: 데모 범위 밖 product_type · 페이지 0.
+        # 둘 다 입력 문제라 500 이 아니다.
+        raise DocumentUnreadable(str(exc)) from exc
+    except _UNREADABLE as exc:
+        raise DocumentUnreadable(
+            f"PDF 로 열리지 않는다: {document_path!r} ({type(exc).__name__}: {exc})"
+        ) from exc

@@ -49,6 +49,9 @@ class SessionControllerTest {
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository extractedRiskItems;
+
     /**
      * ai-service(F-SCR-001)는 이 통합 테스트의 대상이 아니라 상류 의존성이다 — 실제
      * HTTP(:8100)에 붙이지 않고 목으로 대신한다. 채점 결과는 예전 컨트롤러 목과 동일하게
@@ -105,6 +108,12 @@ class SessionControllerTest {
                         .content("""
                                 {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 원금 손실 난다고 들었어요"}"""))
                 .andExpect(status().isOk());
+        // 두 번째 이해항목도 U1 로 채워 분모를 닫는다(#405) — 안 그러면 미측정 R-00(RED)이
+        // R-02b 를 가려 이 테스트가 재려는 "확인 못 함 → YELLOW"가 안 보인다.
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"예금자보호가 안 된다고 들었어요"}"""))
+                .andExpect(status().isOk());
 
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())          // 502 로 판매를 멈추지 않는다
@@ -152,6 +161,24 @@ class SessionControllerTest {
                                 "부분 보호 범위를 정확히 진술", null),
                         inv.getArgument(2)));
 
+        // 변액 상품의 항목은 실추출 스냅샷에서 온다 — 폴백(ELS 한 벌)은 유형이 다른 상품에
+        // 목 목록을 안 내준다(이슈 #427). 그래서 변액 세션을 돌리려면 먼저 변액 항목을
+        // 추출·저장해 둔다(EnvelopeContractTest 와 같은 방식: parse·extract 를 목으로 세우고
+        // POST /extract 가 실제로 영속). 이렇게 해야 productType 도 항목도 변액에서 온다.
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-var-samsung-b2601", "VARIABLE_INSURANCE", null, "parser-v1", null, 1,
+                        java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        java.util.List.of(), java.util.List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(java.util.List.of(
+                        RiskItem.extracted("VAR-DEPOSIT-INSURANCE-SCOPE", "doc-var-samsung-b2601",
+                                "예금자보호 범위(부분 보호)", "required",
+                                new RiskItem.Condition("최저사망지급금까지만 보호",
+                                        new RiskItem.SourceSpan(1, 0, 2)))),
+                        java.util.List.of()));
+        mvc.perform(post("/products/doc-var-samsung-b2601/extract")).andExpect(status().isOk());
+
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"productId":"doc-var-samsung-b2601","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
@@ -160,13 +187,63 @@ class SessionControllerTest {
 
         mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
+                                {"itemId":"VAR-DEPOSIT-INSURANCE-SCOPE","text":"최저사망지급금까지만 보호된다고 들었어요"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grade").value("U1"));
 
         // 하드코딩이면 "ELS" 스텁이 잡혀 U4가 나온다 — 넘어간 값을 직접 확인한다.
         verify(aiServiceClient).score(anyString(), anyString(), anyString(), any(RiskItem.class),
                 eq("VARIABLE_INSURANCE"), nullable(com.sphinxfin.sphinx.domain.InputMeta.class));
+
+        // 저장한 변액 스냅샷을 지운다 — 같은 H2 컨텍스트를 쓰는 다른 테스트가 폴백 대신
+        // 이 행을 읽지 않도록(ProductAccessWiringTest 와 같은 정리). deleteAll 은 스스로
+        // 트랜잭션을 관리한다(파생 deleteByProductId 는 호출부 트랜잭션이 필요해 여기선 못 쓴다).
+        extractedRiskItems.deleteAll();
+    }
+
+    @Test
+    @DisplayName("면담은 required 만 묻는다 — recommended 는 루브릭이 없어 502 다 (이슈 #435)")
+    void interviewAsksRequiredItemsOnly() throws Exception {
+        // 실추출에 recommended 가 처음 들어오며 드러난 경로(#414). ELS 상품에 required 1 +
+        // recommended 1 을 추출·저장한다(EnvelopeContractTest 와 같은 목→POST 방식).
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
+                        "doc-els-kiwoom-4181", "ELS", null, "parser-v1", null, 1,
+                        java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
+                        java.util.List.of(), java.util.List.of()));
+        when(aiServiceClient.extract(anyString(), any(com.sphinxfin.sphinx.domain.ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(java.util.List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2))),
+                        RiskItem.extracted("ELS-HIGH-COMPLEXITY", "doc-els-kiwoom-4181",
+                                "고난도 금융상품", "recommended",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
+                        java.util.List.of()));
+        mvc.perform(post("/products/doc-els-kiwoom-4181/extract")).andExpect(status().isOk());
+
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        // required 1개뿐 — total==1, 첫 질문은 required 항목. recommended 는 분모에도 안 든다.
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.itemId").value("ELS-PRINCIPAL-LOSS-WARNING"))
+                .andExpect(jsonPath("$.data.total").value(1));
+
+        // required 를 답하면 면담이 끝난다 — recommended(ELS-HIGH-COMPLEXITY)를 안 묻는다(502 회피).
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"원금 지켜지는 줄 알았어요"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/sessions/" + sid + "/questions/next"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.done").value(true));
+
+        extractedRiskItems.deleteAll();
     }
 
     @Test
@@ -266,6 +343,14 @@ class SessionControllerTest {
         mvc.perform(get("/sessions/" + sid))
                 .andExpect(jsonPath("$.data.state").value("IN_PROGRESS"));
 
+        // 두 번째 이해항목도 답변한다 — 게이트 분모는 그 상품의 추출 항목 집합이라(#405)
+        // 한 항목만 판정하면 나머지가 미측정으로 잡혀 R-00 이 먼저 문다. 여기서 재는 것은
+        // U4 → R-01 이므로 기대 항목을 전부 채워 분모를 닫는다(둘 다 U4).
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk());
+
         // 게이트 판정 — U4 있으니 RED, 세션은 JUDGED로
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())
@@ -295,6 +380,11 @@ class SessionControllerTest {
                                 {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"은행에서 파니까 원금은 지켜지죠"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grade").value("U4"));
+        // 기대 항목을 전부 채워 분모를 닫는다(#405) — 안 그러면 미측정 R-00 이 먼저 문다.
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk());
 
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(jsonPath("$.data.signal").value("RED"));

@@ -98,6 +98,7 @@ class RepeatedAnswerGateTest {
         reExplain(sid);
         grade = Grade.U1;
         answer(sid, FIRST + ".");          // 마침표만 붙였다 — 같은 말이다
+        completeOtherItem(sid);            // 분모 닫기(#405)
 
         mvc.perform(post("/sessions/{sid}/judge", sid))
                 .andExpect(status().isOk())
@@ -114,6 +115,7 @@ class RepeatedAnswerGateTest {
         reExplain(sid);
         grade = Grade.U1;
         answer(sid, "기초자산이 처음의 절반 아래로 내려가면 제가 넣은 돈이 줄어든다는 뜻이네요");
+        completeOtherItem(sid);            // 분모 닫기(#405)
 
         mvc.perform(post("/sessions/{sid}/judge", sid))
                 .andExpect(status().isOk())
@@ -129,6 +131,7 @@ class RepeatedAnswerGateTest {
         answer(sid, FIRST);
         reExplain(sid);
         answer(sid, FIRST);
+        completeOtherItem(sid);            // 분모 닫기(#405) — R-00 이 아니라 R-07 부재를 재려는 것이다
 
         mvc.perform(post("/sessions/{sid}/judge", sid))
                 .andExpect(status().isOk())
@@ -156,6 +159,21 @@ class RepeatedAnswerGateTest {
         mvc.perform(post("/sessions/{sid}/re-explain", sid)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"itemId\":\"" + ITEM + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    /**
+     * 두 번째 이해항목을 U1 로 채워 게이트 분모를 닫는다 (#405).
+     *
+     * <p>분모는 그 상품의 추출 항목 집합이다 — 폴백(MockData)이 ELS 에 두 항목을 낸다. 이 파일이
+     * 재는 것은 <b>첫 항목의 되풀이(R-07)</b>이므로, 나머지 한 항목을 U1 로 채우지 않으면
+     * 미측정 R-00(RED)이 먼저 물어 R-07·R-06 이 안 보인다.
+     */
+    private void completeOtherItem(String sid) throws Exception {
+        grade = Grade.U1;
+        mvc.perform(post("/sessions/{sid}/answers", sid).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"ELS-NO-DEPOSIT-INSURANCE\","
+                                + "\"text\":\"예금자보호가 안 된다고 들었어요\"}"))
                 .andExpect(status().isOk());
     }
 }

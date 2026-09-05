@@ -16,10 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.core.gate.GateEngine;
 
 /**
@@ -38,6 +40,18 @@ public class SessionService {
     private final EvidenceRecorder evidenceRecorder;
     private final AiServiceClient aiServiceClient;
     private final ApplicationEventPublisher events;
+    /**
+     * 상품별 이해항목의 단일 출처(F-EXT-002). <b>게이트 분모를 여기서 낸다</b>(이슈 #405).
+     *
+     * <p>{@code R-00} 이 보는 미측정 수 = <i>그 상품이 기대하는 항목 집합</i> − <i>판정된 항목</i>
+     * 이다. 기대 집합은 저장된 추출(없으면 MockData 폴백)에서 오고, 세션은 그 목록을 모르므로
+     * 서비스가 {@link Session#unmeasuredItemCount(java.util.Collection)} 에 넣어 준다. 목이든
+     * 실추출이든 둘 다 {@code ProductRiskItems} 를 지나므로 이 배선이 그대로 맞는다.
+     *
+     * <p>게이트({@link GateEngine})에는 <b>계산된 숫자만</b> 들어간다 — 엔진은 저장소도
+     * {@code ProductRiskItems} 도 모르는 순수 함수로 남는다(P2).
+     */
+    private final ProductRiskItems productRiskItems;
     /**
      * 항목당 재검증 상한. <b>게이트 룰에서 읽는다</b>(이슈 #66).
      *
@@ -63,13 +77,15 @@ public class SessionService {
                           CoachingScoreService coachingScoreService,
                           Optional<EvidenceRecorder> evidenceRecorder,
                           AiServiceClient aiServiceClient,
-                          ApplicationEventPublisher events) {
+                          ApplicationEventPublisher events,
+                          ProductRiskItems productRiskItems) {
         this.repository = repository;
         this.gateEngine = gateEngine;
         this.coachingScoreService = coachingScoreService;
         this.evidenceRecorder = evidenceRecorder.orElse(EvidenceRecorder.NO_OP);
         this.aiServiceClient = aiServiceClient;
         this.events = events;
+        this.productRiskItems = productRiskItems;
         this.maxReverify = gateEngine.reverifyThreshold();
     }
 
@@ -302,8 +318,33 @@ public class SessionService {
         // 아무도 의심하지 않는다.
         session.recordAskedQuestion(itemId, reverify.question(), reverify.questionType(),
                 EvidenceRecorder.QuestionSource.REVERIFY);
+        // 보여준 문면을 세션에 남긴다(#415) — GET /re-explanations/current 가 이걸 돌려줘야
+        // 화면이 저장소 인계에 안 기댄다. 재생성은 비결정(P1)이라 안 쓴다.
+        session.recordReExplanation(itemId, content, reverify.question());
         repository.save(session);
         return new ReExplanation(itemId, content, session.vulnerable(), reverify.question());
+    }
+
+    /**
+     * 지금 진행 중인 재설명을 돌려준다(F-INT-004 R · 이슈 #415). 재설명 사이클
+     * (RE_EXPLAIN·RE_VERIFY) 밖이거나 남긴 문면이 없으면 빈 값 — 컨트롤러가 404 로 옮긴다.
+     *
+     * <p>❗<b>ai-service 를 다시 부르지 않는다.</b> 재설명은 LLM 산출물이라 비결정(P1)이라,
+     * 재생성하면 판매자가 실제로 띄운 문장과 달라진다. POST /re-explain 이 남긴
+     * {@link Session#recordReExplanation} 저장값을 그대로 읽는다 — 새 창·새로고침·다른 기기
+     * 어디서 읽어도 판매자 화면과 <b>같은 문면·같은 재검증 질문</b>이다.
+     */
+    public Optional<ReExplanation> currentReExplanation(String sessionId) {
+        Session session = get(sessionId);
+        Map<String, Object> stored = session.currentReExplanation();
+        if (!session.inReExplainCycle() || stored == null || stored.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new ReExplanation(
+                (String) stored.get("itemId"),
+                (String) stored.get("content"),
+                session.vulnerable(),
+                (String) stored.get("reverifyQuestion")));
     }
 
     /**
@@ -381,7 +422,7 @@ public class SessionService {
 
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount(), session.unmeasuredItemCount(),
+                session.failedReverifyCount(), unmeasuredCount(session),
                 session.repeatedAnswerUpgradedCount());
         Instant judgedAt = Instant.now();
         session.recordGate(result, judgedAt);   // 감사 기준점 기록(F-GTE-004)
@@ -420,7 +461,7 @@ public class SessionService {
         // 루프를 건너뛰는데 /judge 는 R-00 으로 RED 를 낸다.
         GateResult result = gateEngine.judge(
                 session.judgments(), session.suitabilityMismatch(), session.suitabilityUnknown(),
-                session.failedReverifyCount(), session.unmeasuredItemCount(),
+                session.failedReverifyCount(), unmeasuredCount(session),
                 session.repeatedAnswerUpgradedCount());
         // 미리보기는 모순 판정을 부르지 않는다 — GET 이 상태를 바꾸면 안 되고 LLM 호출 비용도
         // 든다. 대신 아직 평가 전이라는 사실을 실어 보낸다. 안 실으면 signal=GREEN 만 오는데,
@@ -428,6 +469,21 @@ public class SessionService {
         // 판정보다 낙관적인 쪽이라 판매자가 재설명 루프를 건너뛰게 된다.
         return new GatePreview(result.signal(), result.ruleTrace(), false, null,
                 session.suitabilityStatus());
+    }
+
+    /**
+     * 게이트 분모 — 그 상품의 <b>기대 항목 집합</b>에서 판정이 빠진 항목 수(R-00)를 낸다(#405).
+     *
+     * <p>기대 집합은 {@link ProductRiskItems#interviewItemsOf}(required 만 — 면담이 묻는 바로
+     * 그 항목) 에서 온다. ❗<b>면담과 같은 메서드여야 한다</b>(#435): 면담은 required 만 묻는데
+     * 분모가 recommended 까지 세면 그 항목은 영영 측정되지 않아 R-00 이 영원히 문다. 여기서
+     * <b>숫자로 접어</b> 순수 엔진에 넘긴다 — 엔진은 항목 출처를 모른다(P2). judge()·previewGate()
+     * 가 같은 계산을 쓰므로 미리보기가 판정보다 낙관적이 되지 않는다.
+     */
+    private int unmeasuredCount(Session session) {
+        List<String> expectedItemIds = productRiskItems.interviewItemsOf(session.productId()).stream()
+                .map(RiskItem::itemId).toList();
+        return session.unmeasuredItemCount(expectedItemIds);
     }
 
     /** 세션에 기록된 게이트 결과(감사 기준점). 재계산하지 않는다. */

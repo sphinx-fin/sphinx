@@ -15,8 +15,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from . import (extraction, misconception, mismatch, question_gen, reexplain, rubrics,
-               scoring, templates)
+from . import (extraction, misconception, mismatch, parsing, question_gen, reexplain,
+               rubrics, scoring, templates)
 from .llm_client import LlmError, LlmNotConfigured
 from .pii import PiiDetected, assert_clean
 from .schemas import (
@@ -95,8 +95,30 @@ def _measurement_invalid(exc: scoring.MeasurementInvalid) -> HTTPException:
 # ── F-EXT-001 (정세현) ─────────────────────────────────────────────────────────
 @router.post("/parse")
 def parse(body: ParseRequest) -> dict:
-    """상품문서 파싱. 구현은 `parsing.py`(정세현 소유) — 이 파일에서 대신 구현하지 않는다."""
-    raise _not_implemented("F-EXT-001 파싱", owner="정세현")
+    """상품문서 파싱. 구현은 `parsing.py`(정세현 소유) — 이 파일에서 대신 구현하지 않는다.
+
+    **`response_model` 을 붙이지 않는다.** 붙이면 pydantic 이 미설정 optional 을 `null` 로
+    채워 내보내는데(`parsed_at: null`) 계약의 그 필드는 nullable 이 아니고, 파서 출력이
+    한 번 더 직렬화를 거치면 재현성 비교(P2)의 대상이 파서 출력이 아니게 된다.
+
+    실패 셋을 각각 다른 코드로 낸다 — 고치는 자리가 전부 다르기 때문이다.
+    경로 규칙 위반 400 · 파일 없음 404 · PDF 로 안 열림 422.
+    """
+    try:
+        return parsing.parse_upload(
+            body.document_path,
+            product_type=body.product_type,
+            document_id=body.document_id,
+            parsed_at=body.parsed_at,
+        )
+    except parsing.DocumentPathRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except parsing.DocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except parsing.DocumentUnreadable as exc:
+        # 문서가 안 열리는 것은 상류 장애가 아니라 입력 문제다 — 502 로 나가면 Spring 쪽에서
+        # "ai-service 장애"로 오진된다(`/extract` 의 413 과 같은 이유, PR #60 리뷰).
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # ── F-EXT-002 ─────────────────────────────────────────────────────────────────
@@ -172,6 +194,13 @@ def score(body: ScoreRequest) -> Judgment:
 def detect_misconception(body: MisconceptionRequest) -> MisconceptionResponse:
     assert_clean(body.text, "misconception.text")
     try:
+        # ❗**여기는 게이트를 안 태운다.** 이 엔드포인트는 재분석·큐 조회용이고, 답하는
+        # 질문이 *"이 발화가 어느 오해 패턴과 겹치는가"* 라는 **결정론적 측정**이다.
+        # 기획서 5절이 재현성을 그 성질로 설명한다 — LLM 을 끼우면 같은 입력이 회차마다
+        # 갈릴 수 있고, 조회하는 사람이 그걸 구분할 방법이 없다.
+        #
+        # 게이트는 **판정 입력**에만 건다(`/score`) — 거기서만 `apply_misconception_floor`
+        # 가 U4 를 확정하고, 오탐의 값이 거기서만 발생한다.
         return misconception.match(body.text, body.product_type)
     except NotImplementedError:
         raise _not_implemented("F-DET-001 오해 탐지")

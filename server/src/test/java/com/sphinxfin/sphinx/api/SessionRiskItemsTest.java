@@ -40,7 +40,7 @@ class SessionRiskItemsTest {
     @Autowired private MockMvc mvc;
 
     @Test
-    @DisplayName("세션의 이해항목을 낸다 — 카탈로그 경로와 같은 목록이다")
+    @DisplayName("세션의 이해항목을 낸다")
     void returnsTheItemsForTheSession() throws Exception {
         String sid = createSession();
 
@@ -53,15 +53,9 @@ class SessionRiskItemsTest {
         assertThat(items)
                 .as("항목이 비면 S-03 이 물어볼 것을 못 받는다")
                 .isNotEmpty();
-        // ❗이 대조는 **화면이 옮겨가는 동안만** 맞다. 지금 두 라우트가 같은
-        //   MockData.RISK_ITEMS 를 내므로 목록이 갈리면 그게 회귀다.
-        //   F-EXT-002(추출)가 붙으면 세션 경유는 "이 세션이 검증할 항목", 카탈로그는
-        //   "상품의 전체 항목"이라 **같을 이유가 없어진다.** 그때 이 단정을 지운다 —
-        //   안 지우면 다음 사람이 정상적인 차이를 결함으로 읽는다 (#164 리뷰).
-        assertThat(items).extracting(i -> i.get("itemId"))
-                .as("카탈로그 경로와 같은 목록이어야 화면이 옮겨갈 수 있다 "
-                        + "(F-EXT-002 가 붙으면 이 단정을 지운다)")
-                .containsExactlyElementsOf(catalogItemIds());
+        // 카탈로그 라우트와의 목록 대조는 지웠다(#164 리뷰가 예고한 그 시점) — F-EXT-002
+        // 배선이 붙어 세션 경유는 "이 세션이 검증할 항목", 카탈로그는 "상품의 전체 항목"이라
+        // 같을 이유가 없어졌다. 두 라우트가 저장 스냅샷을 읽는 것은 RealExtractionWiringTest 가 잰다.
     }
 
     @Test
@@ -84,13 +78,6 @@ class SessionRiskItemsTest {
         assertThat(state(sid))
                 .as("항목을 보는 것만으로 면담이 시작되면 안 된다 — START 는 첫 답변이 낸다")
                 .isEqualTo(before);
-    }
-
-    private List<String> catalogItemIds() throws Exception {
-        String body = mvc.perform(get("/products/{id}/risk-items", "doc-els-kiwoom-4181"))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        return JsonPath.read(body, "$.data.items[*].itemId");
     }
 
     private String state(String sid) throws Exception {

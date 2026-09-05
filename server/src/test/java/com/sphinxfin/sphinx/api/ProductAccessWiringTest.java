@@ -1,17 +1,27 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.domain.ParsedDocument;
+import com.sphinxfin.sphinx.domain.RiskItem;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -38,6 +48,22 @@ class ProductAccessWiringTest {
 
     @Autowired private MockMvc mvc;
 
+    /**
+     * extract 가 실배선(#355)이라 컨트롤러까지 닿으면 ai-service 를 부른다 — 이 파일이
+     * 재는 것은 접근통제이지 추출이 아니므로 목으로 대신한다. 403 경로는 컨트롤러에
+     * 안 닿아 스텁이 필요 없다.
+     */
+    @MockBean private AiServiceClient aiServiceClient;
+
+    @Autowired private ExtractedRiskItemRepository extractedRiskItems;
+
+    @AfterEach
+    void cleanUpExtraction() {
+        // 관리자 테스트가 스냅샷을 영속한다 — 같은 컨텍스트(H2)를 쓰는 다른 테스트가
+        // 폴백 대신 이 스냅샷을 읽지 않도록 지운다.
+        extractedRiskItems.deleteAll();
+    }
+
     private static RequestPostProcessor as(String id, String role) {
         return user(id).roles(role);
     }
@@ -49,6 +75,28 @@ class ProductAccessWiringTest {
                 .andExpect(status().isOk());
         mvc.perform(get("/products/{id}/risk-items", "doc-els-kiwoom-4181").with(as("seller-01", "SELLER")))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("❗없는 상품의 risk-items 는 404 — 폴백이 아무 목록이나 내주지 않는다 (결정 10.81)")
+    void unknownProductRiskItemsIsNotFound() throws Exception {
+        // 예전엔 폴백이 productId 를 무시하고 같은 목록을 200 으로 냈다 — 카탈로그가 둘
+        // 이상이 되는 순간 조용히 틀린 목록이 된다. 이제 productType 과 같은 규약으로 404 다.
+        // (권한은 통과한 뒤라 403 이 아니라 404 여야 한다 — 존재 여부를 접근통제로 감추지 않는다.)
+        mvc.perform(get("/products/{id}/risk-items", "doc-does-not-exist").with(as("seller-01", "SELLER")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("❗추출 전 변액 상품 risk-items 는 404 — ELS 폴백을 변액에 안 내준다 (이슈 #427)")
+    void variableProductWithoutExtractionIsNotFound() throws Exception {
+        // 폴백(MockData.RISK_ITEMS)은 ELS 한 벌뿐이다. 변액 상품(존재하고 productType 은
+        // VARIABLE_INSURANCE 로 맞게 나온다)에 그 목록을 내주면 변액 세션에 ELS 질문이 조용히
+        // 나온다 — 유형이 다르면 폴백이 empty 라 404 로 실패시킨다(조용한 오답보다 낫다).
+        // 실추출이 이 상품을 채우면 저장 경로가 폴백을 덮어 200 이 된다. @AfterEach 가 스냅샷을
+        // 지우므로 여기서는 '추출 전' 상태다.
+        mvc.perform(get("/products/{id}/risk-items", "doc-var-samsung-b2601").with(as("seller-01", "SELLER")))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -80,6 +128,16 @@ class ProductAccessWiringTest {
     @Test
     @DisplayName("관리자는 등록·추출을 한다 — 막기만 하는 구현도 위 단정들을 통과한다")
     void theAdminCanRegister() throws Exception {
+        ParsedDocument parsed = new ParsedDocument("doc-els-kiwoom-4181", "ELS", null, "v1",
+                null, 1, List.of(new ParsedDocument.Page(1, "원문", 2)), List.of(), List.of());
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed);
+        when(aiServiceClient.extract(anyString(), any(ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
+                        List.of()));
+
         mvc.perform(post("/products/{id}/extract", "doc-els-kiwoom-4181").with(as("admin-01", "ADMIN")))
                 .andExpect(status().isOk());
     }

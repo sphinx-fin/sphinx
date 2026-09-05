@@ -47,7 +47,8 @@ items:
     product-type: ELS
     name: "과거 데이터 수익률 모의실험"
     requires:
-      - "모의실험은 과거 데이터에 기초한 것이고 미래 수익을 보장하지 않는다"
+      - "모의실험은 과거 데이터에 기초한다"
+      - "미래 수익을 보장하지 않는다"
   ELS-MATURITY-LOSS-CONDITION:
     product-type: ELS
     name: "만기 손실조건"

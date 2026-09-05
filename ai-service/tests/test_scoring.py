@@ -562,7 +562,10 @@ def test_invalid_measurement_is_retried_once_and_recovers():
 
     out = scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
 
-    assert len(llm.calls) == 2, "다시 묻지 않았다"
+    # ❗**채점 호출만 센다.** 같은 클라이언트가 F-DET-001 3단계 극성 게이트의 질문도
+    # 받으므로(`schema_name="PolarityVerdict"`), 전부 세면 이 단정의 뜻이 바뀐다.
+    scoring_calls = [c for c in llm.calls if c.get("schema_name") == "Judgment"]
+    assert len(scoring_calls) == 2, f"다시 묻지 않았다: {[c.get('schema_name') for c in llm.calls]}"
     # 등급은 단정하지 않는다 — 이 발화는 M01 에 걸려 오해 상향(U4)을 타는 것이 정상이다.
     # 여기서 재는 것은 **502 대신 판정이 나왔다**는 것 하나다.
     assert out.evidence.rubric_clause in (
@@ -633,7 +636,7 @@ def test_retry_varies_the_seed():
 
     scoring.score(RISK_ITEM.item_id, "질문?", DEMO_ANSWER, RISK_ITEM, llm=llm)
 
-    seeds = [c.get("seed") for c in llm.calls]
+    seeds = [c.get("seed") for c in llm.calls if c.get("schema_name") == "Judgment"]
     assert len(seeds) == 2, f"재판정이 두 번 불려야 한다: {seeds}"
     assert seeds[0] != seeds[1], (
         f"두 시도가 같은 seed 로 나갔다 — 같은 답이 와서 재판정이 무력하다: {seeds}"

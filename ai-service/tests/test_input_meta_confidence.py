@@ -142,38 +142,31 @@ def test_the_log_says_it_did_not_change_the_grade(caplog) -> None:
 
 
 def test_the_input_signal_never_reaches_the_reason() -> None:
-    """❗**입력 방식 캡은 계기를 `reason` 에 안 적는다** (#372 리뷰).
+    """❗**입력 방식 캡은 계기를 `reason` 에 안 적는다** (#372 · #380).
 
     `reason` 은 `JudgmentView` 로 **판매자 화면에 그대로 나간다.** `JudgmentViewFieldsTest`
     는 레코드 **컴포넌트 이름**만 보므로 `inputMeta` 라는 필드가 없는 것은 잠그지만,
     그 내용이 **문자열 안으로** 들어오는 것은 안 본다 — 결정 3.24 가 이름 붙인
     *"필드 이름으로 막은 방어가 문자열 조립에는 안 걸린다"* 그 모양이다.
 
-    ## ❗이 테스트는 **이 캡 하나**를 잰다
+    ## 이 검사는 **이 캡 하나**를 잰다 — 전수는 `#380` 에서 했다
 
-    처음엔 이름과 문면이 *"어느 캡도"* 라고 말했는데 **함수 하나만 불렀다.** 그물이
-    자기가 덮는다고 말한 범위를 안 덮으면 **그걸 읽은 다음 사람이 덮였다고 믿는다** —
-    이 PR 이 세 번째로 밟았다고 적은 그 모양이 한 칸 위에서 반복되는 것이다.
+    처음엔 이름과 문면이 *"어느 캡도"* 라고 말했는데 **함수 하나만 불렀다.** 전수 그물은
+    `tests/test_reason_axis.py` 에 있다(모집단을 `scoring.py` 소스에서 뽑는다).
 
-    전수로 만드는 것은 별건이다(`#380`). 단순히 루프를 넓히면 **`#160 ②` 가 남기기로
-    정한 문면을 문다** — `apply_misconception_floor` 의 *"오해 라이브러리 매칭 … → U4
-    상향"* 은 금지어가 아니라 **허용된 문면**이다. 목록이 아니라 **축**을 먼저 세워야 한다.
+    ## 단어 목록을 버리고 **더 센 성질**로 바꿨다
 
-        측정값·상향 사실   "포함도 1.00 ≥ 0.6" · "→ U4 상향"    허용 — 다음 행동을 안 지정
-        계기·다음 행동     "붙여넣기" · "타이핑 50ms"           금지 — 무엇을 바꾸면 되는지 지목
+    옛 판은 `banned=('붙여넣기','타이핑','paste','ms','입력')` 를 봤는데, 같은 목록을
+    다른 캡으로 넓히면 `#160 ②` 가 남기기로 정한 문면을 문다. 이 캡에 한해서는 목록이
+    필요 없다 — **문면을 아예 안 건드리는 것**이 목록이 막으려던 것을 전부 막고,
+    새 어휘가 생겨도 안 샌다. 두 벌을 두면 갈리므로 강한 쪽 하나만 남긴다.
     """
-    banned = ("붙여넣기", "타이핑", "paste", "ms", "입력")
+    meta = InputMeta(first_keystroke_delay_ms=0, total_input_ms=0, paste_detected=True,
+                     backspace_count=0, char_count=40, elderly_mode=False)
+    before = _judgment()
+    capped = scoring.cap_confidence_if_pasted(before, meta)
 
-    pasted = InputMeta(first_keystroke_delay_ms=0, total_input_ms=0, paste_detected=True,
-                       backspace_count=0, char_count=40, elderly_mode=False)
-    typed_instantly = InputMeta(first_keystroke_delay_ms=0, total_input_ms=50,
-                                paste_detected=False, backspace_count=0, char_count=40,
-                                elderly_mode=False)
-
-    for meta in (pasted, typed_instantly):
-        capped = scoring.cap_confidence_if_pasted(_judgment(), meta)
-        assert capped.confidence == scoring.PASTED_CONFIDENCE_CAP, "캡이 안 걸리면 아무것도 안 잰다"
-        for word in banned:
-            assert word not in capped.reason, (
-                f"'{word}' 가 판매자 화면에 나간다 — 계기를 알려주면 **손으로 옮겨 적으면 "
-                f"된다**를 알려주는 것이다(기획 7-4). 문면: {capped.reason}")
+    assert capped.confidence == scoring.PASTED_CONFIDENCE_CAP, "캡이 안 걸리면 아무것도 안 잰다"
+    assert capped.reason == before.reason, (
+        "입력 방식 캡이 문면을 건드렸다 — 계기를 알려주면 **손으로 옮겨 적으면 된다**를 "
+        f"알려주는 것이다(기획 7-4). 문면: {capped.reason}")

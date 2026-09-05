@@ -67,6 +67,12 @@ misconception_weight:
   # 조용히 틀린 값이 아니라 **배포 실패**로 나온다. 그래서 `#207` 과 짝이다.
   M09-NO-LISTING: 1
   M10-MIDWAY-REDEMPTION-COST: 1
+  # VAR-PARTIAL-DEPOSIT-INSURANCE 가 하나 건다 (#425 · 이슈 #284 (a)).
+  # ❗**위 두 줄과 정확히 같은 사고가 한 번 더 났다** — `#425` 가 머지되면서 이 줄이 없어
+  # `deploy_ec2.sh:92` 의 생성기가 죽었고 **alpha 배포가 실패했다**(run 33945946209).
+  # 위 주석이 `#207` 을 이름까지 대며 예고해 뒀는데도 `#425` 리뷰에서 아무도 이 파일을
+  # 안 봤다. 루브릭의 `related_misconceptions` 를 건드리는 PR 은 **여기가 짝이다.**
+  M11-DEPOSIT-INSURANCE-SCOPE: 1
 
 # 유도된 오해율의 범위. 가중치 합이 가장 큰 항목이 max, 가장 작은 항목이 min 이 되도록
 # 선형으로 편다. 절대값 자체는 합성이므로 의미가 없고, **편차가 보이는 것**이 목적이다 —

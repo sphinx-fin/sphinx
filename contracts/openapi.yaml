@@ -63,6 +63,40 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RiskItemsApiResponse'}
 
+  /products/{id}/document:
+    get:
+      summary: 상품 원문 문서 PDF — 브라우저 인라인 (F-EXT · 이슈 #412)
+      description: >
+        **응답이 공통 봉투가 아니다.** 본문이 PDF 바이트다 — `/report/preview` 와 같은
+        선례다(base64 로 봉투에 접어 넣으면 브라우저가 뷰어로 못 열고 화면이 다시 풀어야
+        한다). S-02 모달이 조항 원문·페이지·오프셋을 그려 놓고도 대조할 원본으로 갈 길이
+        없던 것을 채운다(P6 원문 인용). `inline` 이라 모달이 이미 든 페이지 번호로
+        `#page=N` 앵커를 붙여 열 수 있다(브라우저 PDF 뷰어 규약 — 서버가 할 일은 없다).
+        **오류 응답은 봉투 그대로다**(403·404). 규약이 갈리는 것은 성공 본문뿐이다.
+        권한: `product:read` — 원문 문서는 세션 데이터가 아니라 `/risk-items` 가 내는 것과
+        같은 상품 카탈로그 데이터다(그 항목이 뽑혀 나온 바로 그 문서). 그래서 읽기 둘과 같은
+        action 을 쓴다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: "PDF 본문. `Content-Disposition: inline`"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '403':
+          description: 범위 밖 접근
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '404':
+          description: >
+            등록된 문서가 없는 상품이거나 원본 파일이 사전적재되지 않았다. 둘을 한 코드로
+            낸다 — 범위 밖 상품의 존재 여부를 알려주지 않는다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions:
     post:
       summary: 세션 생성 (F-INT-001)
@@ -219,6 +253,29 @@ paths:
             화면은 고객에게 아무것도 띄우지 않고 다음 항목으로 넘어간다.
             REVERIFY_EXHAUSTED — 재검증 상한 도달. 화면은 판정으로 넘어감을 고객에게 알린다
             (F-INT-004 "2회 실패 시 해당 항목 최종 상태 확정 후 게이트로 이관").
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
+  /sessions/{id}/re-explanations/current:
+    get:
+      summary: 진행 중인 재설명 조회 (F-INT-004) — 지금 보여주는 재설명 문면·재검증 질문
+      description: >
+        권한: `session:interview`. POST /re-explain 이 보여준 그 문면을 그대로 돌려준다 —
+        서버가 재생성하지 않는다(LLM 산출물이라 비결정, P1). 화면은 이 GET 을 출처로 삼아
+        저장소 인계(sessionStorage)에 기대지 않는다 — 새 창·새로고침·다른 기기에서 열어도
+        판매자 화면과 같은 재설명·같은 재검증 질문이다.
+        재설명 사이클(RE_EXPLAIN·RE_VERIFY) 밖이거나 아직 재설명한 적 없으면 404(NOT_FOUND).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 지금 진행 중인 재설명(POST /re-explain 과 같은 형태)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReExplanationApiResponse'}
+        '404':
+          description: NOT_FOUND — 진행 중인 재설명이 없다(사이클 밖 또는 미기록) 또는 세션 없음.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
@@ -842,13 +899,25 @@ components:
 
     NextQuestion:
       type: object
-      required: [index, total, done]
+      required: [index, total, done, vulnerable]
       properties:
         itemId:   {type: string, nullable: true, description: "done=true 면 null"}
         question: {type: string, nullable: true, description: "done=true 면 null"}
         index:    {type: integer, description: "1-based. done=true 면 total 과 같다"}
         total:    {type: integer, description: "서버가 물어볼 항목 수. 추출 항목 수와 다를 수 있다"}
         done:     {type: boolean, description: "더 물을 항목이 없다. 인터뷰 종료 판단의 유일한 근거"}
+        vulnerable:
+          type: boolean
+          description: >
+            취약 고객 여부. **`ReExplanation.vulnerable` 과 같은 값·같은 규칙이다** —
+            렌더링 힌트(큰 글씨·비유)이지 화면에 표시할 라벨이 아니고, "취약 고객으로
+            분류됨"을 본인에게 보이지 않는다(기획서 7-4).
+            ❗**화면이 연령대로 대신 판정하지 않게 하려고 싣는다.** 근거는
+            vulnerability_weights.yaml(연령·가입금액대·투자경험·채널 네 요인의 합 ≥
+            임계값)이고 서버가 판정한다 — 연령대만 보는 근사가 아니다. 이 값이 없던
+            동안 S-03 은 **재설명까지 한 번 실패한 뒤에야** 큰 글씨가 켜졌다(이슈 #319).
+            done=true 여도 싣는다: 이 값은 이번 질문의 성질이 아니라 세션의 성질이라
+            물을 것이 없는 응답에서만 비면 그 자리에서 힌트가 사라진다.
     NextQuestionApiResponse:
       type: object
       required: [success, data]
