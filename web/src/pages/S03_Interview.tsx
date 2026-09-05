@@ -87,7 +87,13 @@ export default function S03Interview() {
     // index 는 "지금 묻고 있는 항목의 1-based 번호"다. 아직 답하기 전이면 그 앞까지가 완료분이고,
     // 답을 기록한 직후(phase="answered")에는 이 항목까지 완료다. 다음 질문을 받을 때까지
     // 기다리면 "답변이 기록되었습니다" 옆에서 카운터가 0 으로 남아 화면이 자기 말을 뒤집는다.
-    return phase === "answered" ? question.index : question.index - 1;
+    //
+    // ❗**"loading" 도 완료 쪽이다.** 이 값은 *다음 질문을 기다리는 사이*인데, `question`
+    //   은 아직 방금 답한 항목이라 여기서 index-1 로 돌아가면 **막대가 뒤로 간다** —
+    //   2문항 세션에서 실제로 50% → 0% → 50% 로 튀었고, CSS 에 width 트랜지션이 걸려
+    //   있어 되감기는 것이 눈에 그대로 보인다. 최초 로드의 "loading" 은 question 이
+    //   null 이라 위에서 이미 0 으로 빠진다.
+    return phase === "answered" || phase === "loading" ? question.index : question.index - 1;
   })();
 
   /* ── 지금 묻고 있는 것 ───────────────────────────────────────────────────
@@ -105,6 +111,16 @@ export default function S03Interview() {
     [items, askedItemId],
   );
 
+  /* ── 더 물을 항목이 있는가 ───────────────────────────────────────────────
+     ❗**`done` 만 보면 한 박자 늦는다.** 그 값은 서버가 *다음* 질문을 낼 때 비로소 참이
+     되므로, 마지막 항목에 답한 직후에는 아직 거짓이다. 그래서 화면이 마지막 답변 뒤에도
+     "다음 항목으로 넘어가시겠어요?" 를 묻고, 누르면 `done=true`(itemId·question 이 null)가
+     와서 **질문 없는 빈 화면**이 떴다. 세션당 항목 수가 2개라 데모에서 매번 보였다.
+     여기서 두 근거를 합쳐 한 값으로 만든다 — 렌더에서 따로 가르면 또 한쪽만 고쳐진다. */
+  const interviewDone =
+    question !== null && !reverifying
+    && (question.done || (phase === "answered" && question.index >= question.total));
+
   const charCount = text.replace(/\s/g, "").length;
   const piiKinds = useMemo(() => detectPii(text), [text]);
 
@@ -116,7 +132,10 @@ export default function S03Interview() {
     setShortWarned(false);
     setIdlePrompt(false);
     meta.reset();
-    setPhase("asking");
+    // ❗`done` 이면 물을 것이 없다. 그대로 "asking" 으로 두면 질문 문면과 itemId 가 둘 다
+    //   null 인 채로 입력 화면이 그려진다 — 고객에게는 **제목이 빈 3번째 질문**으로 보이고,
+    //   무엇을 적어도 `submit()` 이 itemId 없이 첫 줄에서 되돌아 나가 아무 일도 안 일어난다.
+    setPhase(next.done ? "answered" : "asking");
   }, [sid, meta]);
 
   /* ── 최초 로드: 검증 대상 항목 → 첫 질문 ────────────────────────────────
@@ -333,26 +352,32 @@ export default function S03Interview() {
           </section>
         ) : phase === "answered" ? (
           <section className="iv__card" aria-live="polite">
-            <h1 className="iv__question">답변이 기록되었습니다.</h1>
+            <h1 className="iv__question">
+              {interviewDone ? "응답이 모두 끝났습니다." : "답변이 기록되었습니다."}
+            </h1>
             <p className="iv__alert iv__alert--info">
               {reverifying
                 ? "다시 답해 주셔서 감사합니다. 담당자가 결과를 확인합니다."
-                : question?.done
-                  ? "모든 항목에 응답하셨습니다. 담당자가 결과를 확인합니다."
+                : interviewDone
+                  ? "모든 항목에 응답하셨습니다. 화면을 담당자에게 돌려주세요."
                   : "다음 항목으로 넘어가시겠어요?"}
             </p>
             <div className="iv__actions">
+              {/* 끝났으면 그리지 않는다. 예전에는 상시 노출이라 마지막 답변 뒤에도 눌렸고,
+                  그 한 번이 `done=true` 를 받아 **빈 질문 화면**을 띄웠다. */}
+              {!interviewDone && (
+                <button
+                  type="button"
+                  className="iv__btn iv__btn--primary"
+                  onClick={nextQuestion}
+                  disabled={busy}
+                >
+                  다음 질문
+                </button>
+              )}
               <button
                 type="button"
-                className="iv__btn iv__btn--primary"
-                onClick={nextQuestion}
-                disabled={busy}
-              >
-                다음 질문
-              </button>
-              <button
-                type="button"
-                className="iv__btn iv__btn--ghost"
+                className={`iv__btn ${interviewDone ? "iv__btn--primary" : "iv__btn--ghost"}`}
                 onClick={() => navigate(`/simulator/${sid}`)}
               >
                 손실 시뮬레이터로 확인하기
