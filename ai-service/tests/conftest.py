@@ -279,3 +279,21 @@ def scanned_pdf(tmp_path_factory):
     c.showPage()
     c.save()
     return str(path)
+
+
+#: ❗**자기일관성 재질의를 스위트 기본은 순차로 돌린다** (이슈 #437 (다)).
+#:
+#: 이 레포의 스텁 상당수가 **호출 순서대로** 답을 돌려준다(`SequenceLlm`). 투기 호출이
+#: 켜지면 그 큐를 두 스레드가 같이 꺼내서 어느 쪽이 `bad` 를 받는지가 회차마다 갈린다 —
+#: 운영에서는 두 요청이 서로 독립이라 없는 문제이고, **스텁의 성질**이다.
+#:
+#: 그래서 여기서 끄고, 병렬 경로는 `test_parallel_consistency.py` 가 스레드 안전한 스텁으로
+#: 따로 잰다. 그 파일이 이 픽스처를 다시 덮는다.
+#:
+#: 끄는 자리를 `settings()` 스위치가 아니라 `_parallel_enabled` 로 둔 이유는 계량기다 —
+#: 스위치를 끄면 `METER.disabled` 가 테스트마다 올라서 그 숫자가 뜻을 잃는다.
+@pytest.fixture(autouse=True)
+def _consistency_probe_is_serial_in_tests(monkeypatch):
+    from app import scoring
+
+    monkeypatch.setattr(scoring, "_parallel_enabled", lambda: False)
