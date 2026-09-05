@@ -4,6 +4,8 @@ import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.ProductSummary;
 import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.UploadResponse;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -42,7 +44,10 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/products")
+@RequiredArgsConstructor
 public class ProductController {
+
+    private final ProductRiskItems productRiskItems;
 
     /**
      * S-02 상품 선택 목록. 기존 /products/* 는 전부 productId 를 이미 알아야 부를 수 있어서
@@ -70,18 +75,26 @@ public class ProductController {
     /**
      * 위험항목 추출. <b>게이트의 분모를 바꾸는 자리</b>라 ADMIN 전용이고 audited 다.
      * 판매 라인이 자기가 답해야 할 질문의 목록을 편집할 수 있으면 안 된다(ADR-001 과 같은 결).
+     *
+     * <p><b>실배선이다(이슈 #355 · #401 3번)</b> — 문서 경로 결정 → ai-service
+     * {@code /internal/parse} → {@code /internal/extract} → 스냅샷 영속(교체). 이후
+     * {@code GET /{id}/risk-items} 와 세션 면담이 이 스냅샷을 읽는다. 응답 모양은 목 시절
+     * 그대로 {@code RiskItemsResponse} — 계약은 안 바꾼다. 추출 경고는 서비스가 로그로
+     * 남긴다(E-EXT-03). 실 LLM 추출은 ai-service 에 LLM_API_KEY 가 있어야 돈다.
      */
     @PreAuthorize("@accessGuard.canAggregate('product:manage')")
     @PostMapping("/{productId}/extract")
     public ApiResponse<RiskItemsResponse> extract(@PathVariable String productId) {
-        // TODO(강희진): ai-service POST /internal/extract 호출 (F-EXT-002)
-        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+        return ApiResponse.ok(new RiskItemsResponse(productRiskItems.extract(productId).items()));
     }
 
-    /** 추출된 항목 조회. 면담이 부르는 경로라 SELLER 가 닿아야 한다({@code product:read}). */
+    /**
+     * 추출된 항목 조회. 면담이 부르는 경로라 SELLER 가 닿아야 한다({@code product:read}).
+     * 저장된 추출이 있으면 그것, 없으면 MockData 폴백 — 키 없는 환경도 계속 돈다.
+     */
     @PreAuthorize("@accessGuard.canAggregate('product:read')")
     @GetMapping("/{productId}/risk-items")
     public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String productId) {
-        return ApiResponse.ok(new RiskItemsResponse(MockData.RISK_ITEMS));
+        return ApiResponse.ok(new RiskItemsResponse(productRiskItems.riskItemsOf(productId)));
     }
 }
