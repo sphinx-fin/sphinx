@@ -1182,6 +1182,21 @@ components:
       properties:
         product: {type: string}
         item:    {type: string, description: "이해항목 item_id"}
+        productName:
+          type: string
+          nullable: true
+          description: >
+            상품 **유형**의 표시명(예: VARIABLE_INSURANCE → "변액보험"). **유형 축에서만
+            찬다** — 실제 상품ID 로 집계되는 축의 이름은 GET /products 가 이미 주므로
+            여기서 null 이고 화면이 그쪽으로 그린다. 두 벌이 되는 자리를 안 만든다.
+        itemName:
+          type: string
+          nullable: true
+          description: >
+            이해항목 표시명. **루브릭 이름이다** — 추출 이름("낙인 배리어 45%")은 이 회차
+            값이라 상품을 넘어 합치는 축에 쓰면 같은 항목이 두 줄이 된다(결정 5.42).
+            카탈로그에 없으면 null 이고 화면은 item 을 그대로 그린다 — 라벨이 없다고 집계를
+            멈추지 않는다. required 가 아닌 이유가 그것이다.
         misrate: {type: number, nullable: true, minimum: 0, maximum: 1, description: "오해율. masked 면 null"}
         n:       {type: integer, minimum: 0, description: "표본 수. 마스킹돼도 내려준다"}
         masked:

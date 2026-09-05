@@ -487,6 +487,26 @@ export interface GradeDistribution {
 export interface HeatmapCell {
   product: string;
   item: string;
+  /**
+   * 상품 **유형**의 표시명. `VARIABLE_INSURANCE` → `"변액보험"`.
+   *
+   * ❗**유형 축에서만 찬다.** 실제 상품ID(`doc-els-kiwoom-4181`)로 집계되는 축에서는 `null`
+   * 이고, 그 이름은 `GET /products` 가 준다 — 화면이 `productName ?? names[product]` 로
+   * 그리는 이유이고, 둘이 겹치는 자리가 없어 표가 두 벌이 되지 않는다.
+   */
+  productName: string | null;
+  /**
+   * 이해항목 표시명. `ELS-KNOCKIN-BARRIER` → `"낙인 배리어"`.
+   *
+   * ❗**web 에 항목명 표를 두지 않는 이유가 이 필드다**(이슈 #346 · 결정 10.76). 표를 두면
+   * `INDEX_LABEL`(결정 10.59)처럼 두 벌이 되고 web 에는 러너가 없어 갈려도 아무 말이 없다.
+   * 그리고 web 표는 **교부 PDF 를 안 고친다** — 같은 ID 원문이 심사위원이 손에 받는 종이에도
+   * 찍힌다. 그래서 서버가 이름을 싣고 두 자리가 한 번에 낫는다.
+   *
+   * 카탈로그에 없으면 `null` 이고 화면은 `item` 을 그대로 그린다. 라벨이 없다고 집계를
+   * 멈추지 않는다.
+   */
+  itemName: string | null;
   /** 오해율 0~1. `masked` 면 null. */
   misrate: number | null;
   /** 표본 수. 마스킹돼도 내려준다. */
