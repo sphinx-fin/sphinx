@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -160,6 +160,16 @@ INTERNAL_TOKEN_ENV = "SPHINX_INTERNAL_TOKEN"
 #: 낸다. 데모 전 점검에서 눈으로 확인할 수 있어야 한다.
 REQUIRE_INTERNAL_AUTH_ENV = "SPHINX_REQUIRE_INTERNAL_AUTH"
 
+#: 자기일관성 재질의(`#370`)를 첫 채점과 **동시에** 던질지 (이슈 #437 (다)).
+#:
+#: 기본값은 켜짐이다 — 실측에서 통과 답변이 `4.5초 → 2.1초` 가 되고, 면담이 13문항이
+#: 되면서 그 대기가 데모 경로에 그대로 쌓인다.
+#:
+#: ❗**끄는 스위치를 둔 이유는 데모다.** 병렬이 문제를 일으키면 코드를 다시 배포하지 않고
+#: `SPHINX_PARALLEL_CONSISTENCY=0` 으로 순차로 되돌린다. 끈 상태가 `#370` 이전 동작이 아니라
+#: **`#437` 이전 동작**이다 — 재질의 자체는 그대로 돈다.
+PARALLEL_CONSISTENCY_ENV = "SPHINX_PARALLEL_CONSISTENCY"
+
 #: 우리가 붙인 핸들러임을 표시한다. `if not logger.handlers` 로 판단하면 **남이 붙인
 #: 핸들러가 하나라도 있을 때 우리 것을 안 붙인다** — pytest 가 `app` 로거에 캡처 핸들러
 #: 넷을 붙이는 것으로 실측했다(전체 실행에서 5개). 운영에서는 uvicorn 이 `uvicorn.*` 만
@@ -243,6 +253,15 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _falsy(value: str | None) -> bool:
+    """`0`·`false`·`no`·`off` 를 거짓으로 본다. **미설정과 빈 문자열은 거짓이 아니다.**
+
+    `_truthy` 의 반대가 아니다 — 기본값이 켜짐인 스위치에 쓴다. `not _truthy(...)` 로 쓰면
+    미설정이 「꺼짐」이 되어 **아무도 안 켠 기능**이 된다.
+    """
+    return (value or "").strip().lower() in {"0", "false", "no", "off"}
+
+
 def _load_env_files() -> list[Path]:
     """찾아서 로드한 파일 목록을 돌려준다. python-dotenv가 없으면 조용히 건너뛴다."""
     try:
@@ -266,7 +285,11 @@ DATA_DIR_ENV = "SPHINX_DATA_DIR"
 @dataclass(frozen=True)
 class Settings:
     llm_base_url: str
-    llm_api_key: str
+    #: ❗**repr 에 안 싣는다.** 이 객체는 `assert` 실패·예외 문면·로그에 통째로 찍히고,
+    #: 그때 키가 그대로 따라 나간다 — pytest 단정 실패 출력에서 실제로 봤다.
+    #: 레포가 이미 *"키 값 자체를 파일에 적지 않는다"* 를 지키는데 **출력 경로가 열려
+    #: 있으면 같은 값이 다른 문으로 나간다.** `internal_token` 도 같다.
+    llm_api_key: str = field(repr=False)
     llm_model: str
     llm_reasoning_effort: str
     llm_embed_model: str
@@ -275,8 +298,9 @@ class Settings:
     env_files: tuple[str, ...]
     log_level: str
     data_dir: Path
-    internal_token: str
+    internal_token: str = field(repr=False)
     require_internal_auth: bool
+    parallel_consistency: bool
 
     @property
     def internal_auth_enabled(self) -> bool:
@@ -345,6 +369,9 @@ def settings() -> Settings:
         log_level=(os.getenv(LOG_LEVEL_ENV) or DEFAULT_LOG_LEVEL).upper(),
         internal_token=_ascii_token(os.getenv(INTERNAL_TOKEN_ENV, "").strip()),
         require_internal_auth=_truthy(os.getenv(REQUIRE_INTERNAL_AUTH_ENV)),
+        # ❗**미설정이 켜짐이다.** `_truthy` 는 미설정을 거짓으로 보므로 그대로 쓰면
+        # 아무도 안 켠 상태가 된다 — 끄는 값만 명시적으로 본다.
+        parallel_consistency=not _falsy(os.getenv(PARALLEL_CONSISTENCY_ENV)),
 
         data_dir=Path(os.getenv(DATA_DIR_ENV) or (REPO_ROOT / "data")).expanduser(),
 

@@ -16,6 +16,9 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import lru_cache
 
 import re
@@ -96,6 +99,62 @@ CONSISTENCY_GRADES = ("U1",)
 #: 게이트가 실제로 받는다 — 위면 숫자만 내려가고 아무 일도 안 일어난다.
 #: 복창 캡(0.3)과 값을 달리 둔다: 감사 시점에 **어느 이유로 깎였는지**가 숫자로도 갈린다.
 DISAGREEMENT_CONFIDENCE_CAP = thresholds.get("disagreement_confidence_cap")
+
+#: 투기적 재질의를 돌리는 워커 수 (이슈 #437 (다)).
+#:
+#: 답변 하나가 최대 하나를 쓰므로 이 값이 **동시에 채점 중인 답변 수의 상한**이다. 자리가
+#: 없으면 던지지 않고 예전처럼 순차로 떨어진다(`_spawn_consistency_probe`) — 큐에 쌓으면
+#: 대기가 오히려 늘어서, 줄이려던 것을 늘리게 된다.
+PROBE_WORKERS = 4
+
+_PROBE_POOL = ThreadPoolExecutor(max_workers=PROBE_WORKERS, thread_name_prefix="scr-probe")
+_PROBE_SLOTS = threading.BoundedSemaphore(PROBE_WORKERS)
+
+
+@dataclass
+class ConsistencyMeter:
+    """자기일관성 재질의가 **몇 번 던져지고 몇 번 쓰였나.** 프로세스와 함께 사라진다.
+
+    ## 왜 세나 — 투기적 호출은 버려질 수 있다
+
+    병렬로 하려면 등급을 보기 **전에** 던져야 한다. 그래서 통과 판정이 아닌 답변에서는 그
+    호출이 그대로 버려진다. 세지 않으면 *"쿼터가 왜 늘었나"* 에 답할 수 없고, 그 질문은
+    반드시 온다 — `#266` 이 쿼터 때문에 모델을 통째로 옮긴 프로젝트다.
+
+    ## ❗`no_slot` 이 `parallel=0` 과 다른 것이 요점이다
+
+    자리가 없어 순차로 떨어진 것과 스위치로 꺼 둔 것은 **원인이 다르다.** 둘을 한 숫자로
+    합치면 *"병렬이 안 도네"* 를 보고도 설정 문제인지 부하 문제인지 못 가른다.
+    `PolarityMeter.not_run` 과 `shadow.ShadowMeter.failed` 를 만든 것과 같은 자리다
+    (결정 5.40 — **못 잰 값은 0 이 아니라 「모른다」로 적는다**).
+
+    ❗<b>발화를 안 담는다</b> (P3). 세는 것뿐이다.
+    """
+
+    #: 재질의가 실제로 필요했던 횟수 (등급이 통과이고 캡이 아직 안 걸린 경우)
+    needed: int = 0
+    #: 투기적으로 먼저 던진 횟수
+    speculated: int = 0
+    #: 던진 것 중 실제로 쓴 횟수
+    used: int = 0
+    #: 던졌는데 안 쓴 횟수 — **이만큼이 쿼터 낭비다**
+    discarded: int = 0
+    #: 자리가 없어 순차로 떨어진 횟수 (부하)
+    no_slot: int = 0
+    #: 스위치가 꺼져 있어 순차로 돈 횟수 (설정)
+    disabled: int = 0
+    #: 재질의 호출 자체가 죽은 횟수 — 확신도를 못 깎았다. **0 건과 다르다**
+    failed: int = 0
+
+    def snapshot(self) -> dict[str, int]:
+        return {
+            "needed": self.needed, "speculated": self.speculated, "used": self.used,
+            "discarded": self.discarded, "no_slot": self.no_slot,
+            "disabled": self.disabled, "failed": self.failed,
+        }
+
+
+METER = ConsistencyMeter()
 
 #: 이 화면에서 타이핑되지 않은 답변에 씌우는 상한. 세 캡의 크기가 **의심의 크기 순서**다.
 #:
@@ -261,6 +320,19 @@ def score(
 
     last: MeasurementInvalid | None = None
     for attempt in range(1, MAX_SCORING_ATTEMPTS + 1):
+        # ❗**자기일관성 재질의를 첫 채점과 동시에 던진다** (이슈 #437 (다)).
+        #
+        # 시도마다 새로 던지는 이유: seed 가 `attempt` 에 매여 있어서, 재판정으로 넘어가면
+        # 이 시도의 투기 호출은 **다른 시도의 것**이 된다. 남겨서 쓰면 두 판정이 서로 다른
+        # 프롬프트 시도를 비교하게 되고, 그건 `#370` 이 재려던 것이 아니다.
+        # 안 쓰인 것은 `_discard_probe` 가 버리며 센다.
+        #
+        # ❗**이 줄의 커버는 `tests/test_parallel_consistency.py` 하나뿐이다** (#447 리뷰).
+        # `conftest.py` 가 스위트 기본을 순차로 두므로(순서에 매인 스텁 때문 —
+        # `_parallel_enabled` 참조) **운영 기본값인 병렬이 나머지 980 건에서 한 번도 안
+        # 돈다.** 이 루프의 흐름을 바꾸면 그 파일을 **같이** 고쳐야 한다 — 안 그러면
+        # 전건 초록인 채로 병렬 경로만 조용히 깨진다.
+        probe = _spawn_consistency_probe(client_, prompt, attempt)
         judgment = client_.complete_json(
             prompt=prompt,
             model_cls=Judgment,
@@ -282,6 +354,7 @@ def score(
                 attempt, MAX_SCORING_ATTEMPTS, item_id, exc,
             )
             last = exc
+            _discard_probe(probe)   # 이 시도의 것이라 다음 시도에서 못 쓴다 (seed 가 다르다)
             continue
         judgment = cap_confidence_if_echoed(judgment, answer_text, rubric, risk_item)
         judgment = cap_confidence_if_pasted(judgment, input_meta)
@@ -315,7 +388,7 @@ def score(
         # 그림자 관측 **뒤**에 캡을 씌운다. 관측은 최종 **등급**을 보고(위 주석),
         # 캡은 **확신도**만 바꾼다 — 서로 읽는 값이 달라 순서가 답을 안 바꾼다.
         # 캡을 마지막에 두는 것은 이것이 판정을 실제로 고치는 유일한 단계여서다.
-        return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt)
+        return cap_confidence_if_inconsistent(judgment, client_, prompt, attempt, probe)
 
     # ❗여기서 U2 같은 폴백 등급을 만들지 않는다 (결정 10.10 · `#280` ③).
     # 근거를 지어내 등급을 붙이면 우리가 막겠다는 것(근거 없는 판정)을 우리가 만든다.
@@ -493,8 +566,106 @@ def cap_confidence_if_pasted(judgment: Judgment, input_meta) -> Judgment:
     return judgment.model_copy(update={"confidence": PASTED_CONFIDENCE_CAP})
 
 
+def _ask_again(client, prompt: str, attempt: int) -> Judgment:
+    """자기일관성 재질의 한 번. **첫 채점과 같은 프롬프트에 seed 만 다르다.**
+
+    이 함수를 따로 뺀 이유는 순차·병렬 두 경로가 **같은 호출**을 해야 해서다. 두 곳에
+    복사하면 seed 규칙이 갈리고, 갈린 것은 등급이 우연히 일치하는 동안 안 보인다.
+    """
+    return client.complete_json(
+        prompt=prompt,
+        model_cls=Judgment,
+        schema_name="Judgment",
+        system=load_system_prompt(),
+        seed=_attempt_seed(attempt + MAX_SCORING_ATTEMPTS),
+    )
+
+
+def _parallel_enabled() -> bool:
+    """병렬 재질의를 켤 것인가. **함수로 빼 둔 이유가 테스트다.**
+
+    스위치 자체는 `settings().parallel_consistency` 다. 그런데 이 스위치를 켠 채로 스위트를
+    돌리면 **순서에 매인 스텁**(`SequenceLlm` 처럼 호출 순서대로 답을 돌려주는 것)이
+    스레드 경합에 걸린다 — 투기 호출과 첫 채점이 같은 큐에서 답을 꺼내므로 어느 쪽이
+    먼저인지가 회차마다 갈린다. 운영에서는 두 요청이 서로 독립이라 없는 문제다.
+
+    그래서 `conftest.py` 가 이 함수를 **기본 꺼짐**으로 덮고, 병렬 경로는
+    `test_parallel_consistency.py` 가 스레드 안전한 스텁으로 따로 잰다.
+    ❗덮는 자리를 스위치가 아니라 이 함수로 둔 것은, 스위치를 끄면 `disabled` 계량기가
+    올라서 **「설정으로 꺼졌다」가 테스트마다 쌓이기** 때문이다.
+    """
+    return settings().parallel_consistency
+
+
+def _spawn_consistency_probe(client, prompt: str, attempt: int) -> Future | None:
+    """재질의를 **첫 채점과 동시에** 던진다 (이슈 #437 (다)). 못 던지면 `None`.
+
+    ## 왜 투기적인가
+
+    재질의는 등급이 통과(`CONSISTENCY_GRADES`)일 때만 필요한데, 그걸 알려면 첫 판정을
+    기다려야 한다. 기다리면 두 호출이 순차가 되고 그게 지금 대기의 대부분이다.
+
+        실측 (3회 · gpt-5-mini · #437)   순차 4.3~4.6초  →  병렬 2.0~2.3초
+
+    그래서 **등급을 보기 전에 던지고, 안 쓰면 버린다.** 버려지는 몫은 `METER.discarded`
+    가 센다 — 쿼터가 왜 늘었는지 답할 수 있어야 한다.
+
+    ## ❗바뀌지 않는 것
+
+    두 호출은 **여전히 독립**이다. 요청이 둘이고 seed 가 다르며 프롬프트가 같다 —
+    `#370` 이 재려던 *"다시 물으면 같게 나오는가"* 가 그대로 성립한다. 한 요청 안에서 두
+    판정을 받는 형태였다면 그 독립성이 깨졌을 것이고, 그래서 그 안은 안 골랐다.
+
+    ## 자리가 없으면 던지지 않는다
+
+    큐에 쌓으면 대기가 오히려 늘어난다 — 줄이려던 것을 늘리는 꼴이다. 자리가 없으면
+    `None` 을 돌려주고 호출부가 예전처럼 순차로 간다. **끄는 것과 자리 없는 것을 갈라
+    센다**(`disabled` ↔ `no_slot`) — 합치면 설정 문제와 부하 문제를 못 가른다.
+    """
+    if not _parallel_enabled():
+        METER.disabled += 1
+        return None
+    if not _PROBE_SLOTS.acquire(blocking=False):
+        METER.no_slot += 1
+        log.info("F-SCR-001 재질의 투기 호출 자리 없음 — 순차로 돈다 (워커 %d)", PROBE_WORKERS)
+        return None
+
+    def run() -> Judgment:
+        try:
+            return _ask_again(client, prompt, attempt)
+        finally:
+            _PROBE_SLOTS.release()
+
+    METER.speculated += 1
+    return _PROBE_POOL.submit(run)
+
+
+def _discard_probe(probe: Future | None) -> None:
+    """안 쓴 투기 호출을 버린다. **기다리지 않는다.**
+
+    기다리면 통과가 아닌 답변(대부분)이 지금보다 느려진다 — 정확히 반대 방향이다.
+    스레드는 알아서 끝나고 자리를 돌려준다.
+
+    ❗예외를 한 번 꺼내 준다. `Future` 는 아무도 `result()` 를 안 부르면 예외를 **조용히**
+    삼킨다. 재질의가 계속 죽고 있는데 로그가 비면 *"일관성 검사가 도는데 늘 일치한다"* 로
+    읽힌다 — 이 파일이 계속 막아 온 그 모양이다.
+    """
+    if probe is None:
+        return
+    METER.discarded += 1
+
+    def _log(f: Future) -> None:
+        exc = f.exception()
+        if exc is not None:
+            METER.failed += 1
+            log.info("F-SCR-001 버린 재질의가 실패했다: %s — 판정에 영향 없다", type(exc).__name__)
+
+    probe.add_done_callback(_log)
+
+
 def cap_confidence_if_inconsistent(
-    judgment: Judgment, client, prompt: str, attempt: int
+    judgment: Judgment, client, prompt: str, attempt: int,
+    probe: Future | None = None,
 ) -> Judgment:
     """**같은 발화를 한 번 더 채점해서 등급이 갈리면 확신도를 깎는다.**
 
@@ -530,23 +701,24 @@ def cap_confidence_if_inconsistent(
     조용히 안 도는 것과 도는데 일치하는 것은 다르다.
     """
     if judgment.grade.value not in CONSISTENCY_GRADES:
+        _discard_probe(probe)
         return judgment
     if judgment.confidence <= DISAGREEMENT_CONFIDENCE_CAP:
+        _discard_probe(probe)
         return judgment          # 이미 더 낮다 — 복창 캡이 걸린 경우
+    METER.needed += 1
     try:
-        second = client.complete_json(
-            prompt=prompt,
-            model_cls=Judgment,
-            schema_name="Judgment",
-            system=load_system_prompt(),
-            seed=_attempt_seed(attempt + MAX_SCORING_ATTEMPTS),
-        )
+        # 투기 호출이 있으면 그것을 받고, 없으면(자리 없음·스위치 꺼짐) 지금 던진다.
+        # **두 경로가 `_ask_again` 하나를 지난다** — seed 규칙이 갈릴 자리를 안 만든다.
+        second = probe.result() if probe is not None else _ask_again(client, prompt, attempt)
     except LlmError as exc:
         log.info(
             "F-SCR-001 자기일관성 확인 실패: item_id=%s — %s. 확신도를 안 깎는다 "
             "(판정은 유효하다)", judgment.item_id, type(exc).__name__,
         )
+        METER.failed += 1
         return judgment
+    METER.used += 1
 
     if second.grade == judgment.grade:
         return judgment
