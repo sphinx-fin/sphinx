@@ -326,6 +326,12 @@ def score(
         # 이 시도의 투기 호출은 **다른 시도의 것**이 된다. 남겨서 쓰면 두 판정이 서로 다른
         # 프롬프트 시도를 비교하게 되고, 그건 `#370` 이 재려던 것이 아니다.
         # 안 쓰인 것은 `_discard_probe` 가 버리며 센다.
+        #
+        # ❗**이 줄의 커버는 `tests/test_parallel_consistency.py` 하나뿐이다** (#447 리뷰).
+        # `conftest.py` 가 스위트 기본을 순차로 두므로(순서에 매인 스텁 때문 —
+        # `_parallel_enabled` 참조) **운영 기본값인 병렬이 나머지 980 건에서 한 번도 안
+        # 돈다.** 이 루프의 흐름을 바꾸면 그 파일을 **같이** 고쳐야 한다 — 안 그러면
+        # 전건 초록인 채로 병렬 경로만 조용히 깨진다.
         probe = _spawn_consistency_probe(client_, prompt, attempt)
         judgment = client_.complete_json(
             prompt=prompt,
