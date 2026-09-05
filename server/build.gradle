@@ -117,6 +117,17 @@ tasks.named('test') {
             .withPropertyName('echoConfidenceCap')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // 루브릭도 같은 이유다. RiskItemCatalogMirrorsRubricsTest 가 risk_item_catalog.yaml 이
+    // 그 디렉토리의 name·product_type 과 같은지 대조한다(이슈 #346).
+    //
+    // ❗**여기가 안 걸리면 정확히 필요한 순간에 안 돈다** — 루브릭만 고친 PR 이 곧 사본이
+    // 뒤처지는 PR 이다. 그리고 어긋남은 화면에서 안 보인다: 표시명이 없으면 ID 로
+    // 되돌아가는 것이 설계라, 새 항목 하나가 ID 원문으로 뜨는 것과 #346 이전 상태가
+    // 똑같이 생겼다. 사람 눈이 아니라 이 대조가 유일한 신호다.
+    inputs.files(fileTree('../ai-service/app/rubrics'))
+            .withPropertyName('riskItemNames')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // ❗이 목록 자신을 지키는 입력이다. CiServerFilterMirrorsGradleInputsTest 가 위
     // inputs.file 경로들을 ci.yml 의 server 판별과 대조한다(이슈 #285) — 안 걸면
     // **ci.yml 만 고친 PR 에서 UP-TO-DATE 로 안 돈다.** 잡은 뜬다(워크플로 자신이 바뀌면

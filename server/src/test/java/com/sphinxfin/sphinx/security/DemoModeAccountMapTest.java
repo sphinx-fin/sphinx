@@ -89,8 +89,19 @@ class DemoModeAccountMapTest {
         assertThat(roleOf).isNotEmpty();
         assertThat(grantsOf).isNotEmpty();
 
+        // CUST·own_session 전용 action 은 개방 모드에서 도달할 계정이 없다 — CUST 자체가
+        // 아직 도달 불가다(#166: 세션에 고객 식별자가 없어 own_session 이 성립 안 함). 그래서
+        // 지도에 경로를 더하거나 계정을 바꿔도 통과시킬 수 없고, 통과시키면 그게 #166 을
+        // 우회한 것이 된다. 이 그물이 잡는 것은 "SELLER 가 실려 403 나는 사고"이지 "CUST
+        // 경로가 아직 안 열린 것"이 아니다 — 후자는 #166 이 소유한다. 그 action 들만 제외한다.
+        // (강희진 #413: report:summary:read 매핑을 붙이며 등록. #166 해소되면 이 목록을 비운다.)
+        Set<String> custOnlyPendingReachability = Set.of("report:summary:read");
+
         List<String> broken = new ArrayList<>();
         endpoints().forEach((uri, action) -> {
+            if (custOnlyPendingReachability.contains(action)) {
+                return;
+            }
             String account = injectedAccount(map, uri);
             String role = roleOf.get(account);
             Set<String> allowed = grantsOf.getOrDefault(action, Set.of());

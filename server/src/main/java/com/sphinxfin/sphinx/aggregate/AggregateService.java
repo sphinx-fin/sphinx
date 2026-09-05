@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.aggregate;
 
+import com.sphinxfin.sphinx.catalog.RiskItemCatalog;
 import com.sphinxfin.sphinx.core.session.AnswerRepetition;
 import com.sphinxfin.sphinx.core.session.CoachingScoreService;
 import com.sphinxfin.sphinx.core.session.Session;
@@ -145,8 +146,19 @@ public class AggregateService {
      */
     public record Grades(long u1, long u2, long u3, long u4) {}
 
-    public record Cell(String product, String item, BigDecimal misrate, long n, boolean masked,
-                       Grades grades) {}
+    /**
+     * 히트맵 한 칸. {@code product}·{@code item} 은 <b>축의 키</b>이고
+     * {@code productName}·{@code itemName} 은 <b>사람이 읽는 이름</b>이다 — 둘을 같이 내는
+     * 이유는 키가 감사에 필요하기 때문이다. 화면이 이름을 크게, 키를 작게 그린다.
+     *
+     * <p>❗<b>이름은 없을 수 있고 그건 정상이다</b>({@code null}). 카탈로그에 없는 항목이면
+     * 화면이 키를 그대로 그린다 — 라벨이 없다고 집계를 멈추지 않는다. {@code productName} 은
+     * <b>상품 유형 축에서만</b> 찬다: 실제 상품ID 로 집계되는 축의 이름은
+     * {@code GET /products} 가 이미 주므로 여기서 비워 두 벌이 되는 것을 막는다
+     * (자세한 근거: {@link RiskItemCatalog#productName}).
+     */
+    public record Cell(String product, String item, String productName, String itemName,
+                       BigDecimal misrate, long n, boolean masked, Grades grades) {}
 
     /**
      * 취약/비취약 한 줄. {@code band} 는 {@code "vulnerable"} · {@code "other"} 둘뿐이다.
@@ -243,9 +255,19 @@ public class AggregateService {
      */
     private final CoachingScoreService coaching;
 
-    public AggregateService(SessionRepository sessions, CoachingScoreService coaching) {
+    /**
+     * 이해항목 표시명. <b>집계에는 루브릭 이름을 쓴다</b>(결정 5.42) — 추출 이름
+     * ({@code 낙인 배리어 45%})은 이 회차 값이라, 상품을 넘어 합치는 이 축에 쓰면 같은
+     * 항목이 회차마다 다른 줄로 갈라진다. 그건 {@code #317} 이 고치려던 것과 같은 종류의
+     * 틀린 축이다.
+     */
+    private final RiskItemCatalog catalog;
+
+    public AggregateService(SessionRepository sessions, CoachingScoreService coaching,
+                            RiskItemCatalog catalog) {
         this.sessions = sessions;
         this.coaching = coaching;
+        this.catalog = catalog;
     }
 
     /**
@@ -268,7 +290,9 @@ public class AggregateService {
 
         List<Cell> cells = new ArrayList<>();
         byCell.forEach((key, tally) -> cells.add(new Cell(
-                key.product(), key.item(), tally.misrateOrNull(), tally.n(), tally.masked(),
+                key.product(), key.item(),
+                catalog.productName(key.product()), catalog.itemName(key.item()),
+                tally.misrateOrNull(), tally.n(), tally.masked(),
                 tally.gradesOrNull())));
         return new HeatmapView(SYNTHETIC, label(scope), cells);
     }

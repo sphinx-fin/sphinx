@@ -192,10 +192,27 @@ class ParsedDocument(Strict):
 
 # ── /internal/* 요청·응답 (엔드포인트 스펙 제안 — 강희진 확정 대기) ──────────────
 class ParseRequest(Strict):
-    """F-EXT-001 (정세현). 출력은 ParsedDocument."""
+    """F-EXT-001 (정세현). 출력은 ParsedDocument.
+
+    `document_path` 는 **`SPHINX_DATA_DIR` 기준 상대경로**이거나 그 안의 절대경로다
+    (예: `documents/els_kiwoom_4181_simple_prospectus.pdf`). 뿌리 밖은 파일을 만지기 전에
+    거부한다 — `parsing.resolve_document_path`.
+
+    업로드된 파일이 그 뿌리에 어떻게 도달하는지는 아직 안 정해졌다(이슈 #401 의 2번).
+    바이트를 직접 받는 쪽으로 정해지면 이 요청 모양이 바뀐다.
+    """
 
     document_path: str
     product_type: ProductType = "ELS"
+    document_id: str | None = Field(
+        default=None,
+        description="업로드 단위 식별자. 안 주면 파일명에서 만든다 — 업로더가 가진 값이 있으면 그걸 준다",
+    )
+    parsed_at: str | None = Field(
+        default=None,
+        description="호출자가 주입한다. 파서가 현재 시각을 찍으면 같은 문서의 두 파싱 결과가 "
+                    "달라져 재현성 비교(P2)에 못 쓴다. 안 주면 출력에 키가 없다",
+    )
 
 
 class ExtractRequest(Strict):

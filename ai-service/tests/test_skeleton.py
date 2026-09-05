@@ -109,10 +109,16 @@ def test_score_with_unknown_item_is_422():
     assert "루브릭 없음" in resp.json()["detail"]
 
 
-def test_parse_is_owned_by_someone_else():
-    resp = client.post("/internal/parse", json={"document_path": "data/documents/els-001.pdf"})
-    assert resp.status_code == 501
-    assert "정세현" in resp.json()["detail"]
+def test_parse_is_no_longer_a_stub():
+    """F-EXT-001 이 붙었다 (이슈 #401 의 1번). 계약 전체는 `test_parse_route.py`(정세현).
+
+    골격 관점에서 잠그는 것은 하나다 — 이 엔드포인트가 더 이상 501 로 답하지 않는다.
+    501 이 돌아오면 실문서 흐름(업로드→파스→추출→세션)이 첫 칸에서 다시 막힌 것이다.
+
+    경로는 뿌리(`SPHINX_DATA_DIR`) 기준 상대경로이고, 없는 파일이라 404 가 정상이다.
+    """
+    resp = client.post("/internal/parse", json={"document_path": "documents/없는문서.pdf"})
+    assert resp.status_code != 501, resp.text
 
 
 # ── P3 방어선 ─────────────────────────────────────────────────────────────────

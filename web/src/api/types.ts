@@ -329,6 +329,20 @@ export interface NextQuestion {
   total: number;
   /** 더 물을 항목이 없다. */
   done: boolean;
+  /**
+   * 취약 고객 여부 — **`ReExplanation.vulnerable` 과 같은 값·같은 규칙이다.**
+   *
+   * 렌더링 힌트(큰 글씨·비유)이지 화면에 표시할 라벨이 아니다. "취약 고객으로 분류됨" 을
+   * 본인에게 보이지 않는다(기획서 7-4). 화면은 `enable()` 로 **켜기만** 한다.
+   *
+   * ❗**연령대로 대신 가르지 않는다.** 취약 판정의 근거는 `vulnerability_weights.yaml`
+   * (연령·가입금액대·투자경험·채널 네 요인의 합 ≥ 임계값)이고 서버가 한다 — 연령대만 보는
+   * 근사가 아니다. 이 값이 오기 전 S-03 은 **재설명까지 한 번 실패한 뒤**에야 큰 글씨가
+   * 켜졌다(이슈 #319).
+   *
+   * `done=true` 인 응답에도 실린다 — 세션의 성질이지 이번 질문의 성질이 아니다.
+   */
+  vulnerable: boolean;
 }
 
 /**
@@ -487,6 +501,26 @@ export interface GradeDistribution {
 export interface HeatmapCell {
   product: string;
   item: string;
+  /**
+   * 상품 **유형**의 표시명. `VARIABLE_INSURANCE` → `"변액보험"`.
+   *
+   * ❗**유형 축에서만 찬다.** 실제 상품ID(`doc-els-kiwoom-4181`)로 집계되는 축에서는 `null`
+   * 이고, 그 이름은 `GET /products` 가 준다 — 화면이 `productName ?? names[product]` 로
+   * 그리는 이유이고, 둘이 겹치는 자리가 없어 표가 두 벌이 되지 않는다.
+   */
+  productName: string | null;
+  /**
+   * 이해항목 표시명. `ELS-KNOCKIN-BARRIER` → `"낙인 배리어"`.
+   *
+   * ❗**web 에 항목명 표를 두지 않는 이유가 이 필드다**(이슈 #346 · 결정 10.76). 표를 두면
+   * `INDEX_LABEL`(결정 10.59)처럼 두 벌이 되고 web 에는 러너가 없어 갈려도 아무 말이 없다.
+   * 그리고 web 표는 **교부 PDF 를 안 고친다** — 같은 ID 원문이 심사위원이 손에 받는 종이에도
+   * 찍힌다. 그래서 서버가 이름을 싣고 두 자리가 한 번에 낫는다.
+   *
+   * 카탈로그에 없으면 `null` 이고 화면은 `item` 을 그대로 그린다. 라벨이 없다고 집계를
+   * 멈추지 않는다.
+   */
+  itemName: string | null;
   /** 오해율 0~1. `masked` 면 null. */
   misrate: number | null;
   /** 표본 수. 마스킹돼도 내려준다. */

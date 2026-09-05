@@ -59,8 +59,10 @@
     실패는 후보를 남기는 쪽으로 떨어진다   예외 · 응답 타입 불일치 (P5 0.2절)
     틀린 판정에는 그 방어가 안 걸린다      그래서 아래를 실측으로 잰다
 
-    게이트가 만든 미탐   dev set 후보 10건 · 3회 반복 **30/30 keep**
+    게이트가 만든 미탐   dev set 후보 **10건** · 3회 반복 **30/30 keep**
                         데모 발화 4건도 3/3
+                        ❗**표본이 10건이다.** `#283` 에서 11건으로 방법을 확정했다가
+                          M11 에서 무너진 전례가 있다 — 이 숫자를 크게 읽지 않는다
 
 ❗**「지금 30/30」이지 결정론이 아니다.** 결정론을 요구하는 자리는 1·2단계다.
 
@@ -75,12 +77,27 @@
 같은 값). 즉 **오해 판정은 지금 전적으로 LLM 이 하고**, `apply_misconception_floor` 는 패턴을
 그대로 담은 발화에서만 운다 — `#284` 가 가리키는 공백이 그것이다.
 
+❗**현재 이 층은 실측 코퍼스에서 한 번도 안 돈다** — 1·2단계가 U4 19건에서 후보를 0건
+만들기 때문이다(`#284`). **게이트의 위험도 효과도 아직 실측되지 않았다.** 라이브러리가
+실제 화법을 물기 시작하면 그때 이 층이 처음으로 값을 갖는다 — 그때를 위해 지금 잠가 둔다
+(`#397` 리뷰, 정세현).
+
+원인은 임계값이 아니라 **패턴의 화법 폭**이다. 패턴이 데모 대본 한 줄에서 나왔고 조정례의
+화법 폭이 아니라서, 같은 오해를 한 겹 돌려 말하면 떨어진다.
+
+    데모 발화  "은행에서 파니까 원금은 보장되는 거죠"                      pattern 1.00
+    els-0004   "그래도 은행 창구에서 파는 건데, 최소한 넣은 돈은 지켜 주는…"  ngram  0.179
+
+`#377`(표본의 화법 폭이 좁아 종결어미가 라벨을 흘린다)과 **같은 뿌리, 반대 방향**이다.
+임계값을 내리면 `#203` 이 잡은 오탐이 돌아오므로 답이 아니다 — 데이터는 정세현 소유이고
+`#284` 로 갔다.
+
 `escalate`는 라이브러리 데이터의 필드를 **읽어서** 판단한다. M08-TYING을 코드에
 하드코딩하지 않는다 — 데이터 소유는 정세현이고, 유형이 늘어도 코드가 안 바뀌어야 한다.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -291,6 +308,64 @@ _POLARITY_SYSTEM = (
 )
 
 
+@dataclass
+class PolarityMeter:
+    """3단계 게이트가 **무엇을 했는지**의 누적. 프로세스와 함께 사라진다 — 운영 관측값이다.
+
+    ❗**발화를 안 담는다.** 유형ID 만 센다 — `#397` 리뷰 ①에서 로그의 발화를 뺀 것과 같은
+    이유다(P3 · F-GTE-004 보존 정책 밖에 사본이 생긴다).
+
+    ## 왜 필요한가 — `#160` 의 반대 방향이다
+
+    `#160` 에서 세운 규칙이 *"조용히 등급만 바뀌면 감사 시점에 왜 U4 였는지 설명할 수 없다"*
+    였다. **U4 가 「안 된」 경우에도 똑같다**(`#398` 리뷰, 정세현).
+
+        floor 가 울면    reason 에 상향 사실 · misconception_type   → evidence 에 남는다
+        게이트가 빼면    평범한 U1~U3 · 필드 없음 · INFO 한 줄       → 아무 데도 안 남는다
+
+    로그는 evidence 가 아니다(ADR-003 — append-only · 해시 체인 · 정규화 직렬화). 그래서
+    최소한 **계량기**는 있어야 한다. 집계·리포트는 `#326`·`#327` 에서 정세현이 붙인다.
+
+    ## `not_run` 이 `dropped == 0` 과 다른 것이 요점이다
+
+    `shadow.ShadowMeter.failed` 와 같은 자리다(결정 5.40 *"못 잰 값은 0 이 아니라 「모른다」로
+    적는다"*). 게이트가 **조용히 영구히 안 도는** 경로가 둘 있는데(LLM 예외 · 클라이언트가
+    `model_cls` 를 안 지킴) 둘 다 후보를 남기므로 **판정만 보면 게이트가 없는 것과 같다.**
+    """
+
+    asked: int = 0
+    kept: int = 0
+    dropped: int = 0
+    #: ❗`holds=True` 인데 `polarity` 가 긍정이 아닌 자기모순. 실측에서 3회 중 1회 나왔다.
+    contradicted: int = 0
+    #: ❗**못 돈 건수.** 0 건과 「모른다」를 가르는 유일한 자리 — 위 docstring 참조.
+    not_run: int = 0
+    by_type: dict[str, int] = field(default_factory=dict)
+
+    def record_kept(self) -> None:
+        self.asked += 1
+        self.kept += 1
+
+    def record_dropped(self, type_id: str, *, contradicted: bool) -> None:
+        self.asked += 1
+        self.dropped += 1
+        if contradicted:
+            self.contradicted += 1
+        self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
+
+    def record_not_run(self) -> None:
+        """게이트가 못 돌았다. 후보는 남는다 — 판정만 보면 게이트가 없는 것과 같다."""
+        self.asked += 1
+        self.not_run += 1
+
+    def summary(self) -> str:
+        return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
+                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건")
+
+
+METER = PolarityMeter()
+
+
 def _polarity_holds(client, misconception_text: str, utterance: str, type_id: str) -> bool:
     """이 발화가 그 오해를 **실제로 담고 있는가**. 못 물으면 `True`(후보 유지).
 
@@ -324,6 +399,7 @@ def _polarity_holds(client, misconception_text: str, utterance: str, type_id: st
             "F-DET-001 극성 게이트 실패: %s — 후보를 그대로 둔다(P5 0.2절). type_id=%s",
             type(exc).__name__, type_id,
         )
+        METER.record_not_run()
         return True
     if not isinstance(verdict, PolarityVerdict):
         # ❗**타입이 다르면 게이트가 안 돈 것으로 본다.** 클라이언트가 `model_cls` 를
@@ -334,6 +410,7 @@ def _polarity_holds(client, misconception_text: str, utterance: str, type_id: st
             "F-DET-001 극성 게이트가 %s 를 받았다 — PolarityVerdict 가 아니다. "
             "후보를 그대로 둔다. type_id=%s", type(verdict).__name__, type_id,
         )
+        METER.record_not_run()
         return True
 
     holds = verdict.holds and verdict.polarity == "positive"
@@ -346,6 +423,10 @@ def _polarity_holds(client, misconception_text: str, utterance: str, type_id: st
         "F-DET-001 극성 게이트: type_id=%s holds=%s polarity=%s → %s",
         type_id, verdict.holds, verdict.polarity, holds,
     )
+    if holds:
+        METER.record_kept()
+    else:
+        METER.record_dropped(type_id, contradicted=verdict.holds)
     return holds
 
 

@@ -135,6 +135,85 @@ def test_the_stage_still_says_where_it_was_found() -> None:
     assert got[0].stage == "pattern", f"stage 가 덮였다: {got[0].stage}"
 
 
+# ── 계량기: 게이트가 **무엇을 했는지**가 남는다 (#398 리뷰 ①②) ────────────────
+#
+# ❗`#160` 에서 내가 세운 규칙의 반대 방향이다 — *"조용히 등급만 바뀌면 감사 시점에 왜 U4
+# 였는지 설명할 수 없다"*. **U4 가 「안 된」 경우에도 똑같다.** floor 가 울면 `reason` 과
+# `misconception_type` 이 evidence 에 남는데, 게이트가 빼면 평범한 U1~U3 에 INFO 한 줄뿐이라
+# **아무 데도 안 남는다.** 로그는 evidence 가 아니다(ADR-003).
+#
+# 계량기는 evidence 가 아니라 **운영 관측값**이다. 집계·리포트는 `#326`·`#327`(정세현).
+@pytest.fixture(autouse=True)
+def _reset_meter():
+    """계량기는 모듈 전역이라 테스트끼리 샌다. 매번 새로 만든다."""
+    before = misconception.METER
+    misconception.METER = misconception.PolarityMeter()
+    yield misconception.METER
+    misconception.METER = before
+
+
+def test_the_meter_counts_a_kept_candidate() -> None:
+    _matched(UTTERANCE_YES, client=_Stub(holds=True, polarity="positive"))
+    m = misconception.METER
+    assert (m.asked, m.kept, m.dropped, m.not_run) == (1, 1, 0, 0), m.summary()
+
+
+def test_the_meter_counts_a_dropped_candidate() -> None:
+    _matched(UTTERANCE_NO, client=_Stub(holds=False, polarity="negative"))
+    m = misconception.METER
+    assert (m.asked, m.kept, m.dropped) == (1, 0, 1), m.summary()
+    assert m.contradicted == 0, "자기모순이 아닌데 그렇게 셌다"
+    assert m.by_type == {"M11-DEPOSIT-INSURANCE-SCOPE": 1}, m.by_type
+
+
+def test_the_meter_separates_a_self_contradiction() -> None:
+    """자기모순으로 뺀 것은 따로 센다 — 프롬프트가 흔들리는 신호다."""
+    _matched(UTTERANCE_YES, client=_Stub(holds=True, polarity="neutral"))
+    m = misconception.METER
+    assert (m.dropped, m.contradicted) == (1, 1), m.summary()
+
+
+class _WrongType:
+    """`model_cls` 를 안 지키는 클라이언트 — 실제로 있을 수 있는 실패다."""
+
+    def complete_json(self, **kwargs):
+        return "PolarityVerdict 가 아니다"
+
+
+@pytest.mark.parametrize("make_client,why",
+                         [(_Dead, "예외"), (_WrongType, "타입 불일치")])
+def test_a_gate_that_did_not_run_is_not_counted_as_zero(make_client, why: str) -> None:
+    """★ **`not_run` 이 `dropped == 0` 과 달라야 한다** (결정 5.40 · `shadow.failed` 와 같은 자리).
+
+    게이트가 조용히 영구히 안 도는 경로가 둘이다 — LLM 예외, 클라이언트가 `model_cls` 를
+    안 지킴. 둘 다 후보를 남기므로 **판정만 보면 게이트가 없는 것과 구별되지 않는다.**
+    그래서 세는 자리가 없으면 *"뺀 게 0 건"* 과 *"한 번도 안 돌았다"* 가 같아 보인다.
+    """
+    kept = _matched(UTTERANCE_YES, client=make_client())
+    m = misconception.METER
+    assert [x.type_id for x in kept] == ["M11-DEPOSIT-INSURANCE-SCOPE"], "후보를 남겨야 한다(P5)"
+    assert (m.not_run, m.dropped, m.kept) == (1, 0, 0), (
+        f"{why} 인데 못 돈 것으로 안 셌다 — 0 건과 「모른다」가 같아 보인다. {m.summary()}")
+
+
+def test_the_meter_is_not_called_when_there_is_no_candidate() -> None:
+    """후보가 없으면 게이트가 안 불리므로 계량기도 안 는다 — 분모가 부풀지 않는다."""
+    _matched("만기가 언제인지 알려주세요", client=_Stub(holds=True, polarity="positive"))
+    assert misconception.METER.asked == 0, misconception.METER.summary()
+
+
+def test_the_meter_never_holds_an_utterance() -> None:
+    """❗**발화를 안 담는다** — 로그에서 뺀 것과 같은 이유다(`#397` 리뷰 ①).
+
+    `by_type` 의 키가 유형ID 인 것을 잠근다. 발화를 키로 쓰면 P3 밖에 사본이 생기고
+    F-GTE-004 보존 정책도 안 걸린다.
+    """
+    _matched(UTTERANCE_NO, client=_Stub(holds=False, polarity="negative"))
+    joined = " ".join(misconception.METER.by_type) + misconception.METER.summary()
+    assert UTTERANCE_NO not in joined, "계량기에 발화가 들어갔다"
+    assert all(k.startswith("M") for k in misconception.METER.by_type), misconception.METER.by_type
+
+
 # ── 배선: 채점 경로에서 실제로 도는가 ─────────────────────────────────────────
 class _ScoringAndGate:
     """채점과 극성 게이트를 **둘 다** 받는 스텁. 실제 클라이언트가 하는 일이다.

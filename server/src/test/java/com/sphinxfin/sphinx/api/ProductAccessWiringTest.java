@@ -1,17 +1,27 @@
 package com.sphinxfin.sphinx.api;
 
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.domain.ParsedDocument;
+import com.sphinxfin.sphinx.domain.RiskItem;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -37,6 +47,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProductAccessWiringTest {
 
     @Autowired private MockMvc mvc;
+
+    /**
+     * extract 가 실배선(#355)이라 컨트롤러까지 닿으면 ai-service 를 부른다 — 이 파일이
+     * 재는 것은 접근통제이지 추출이 아니므로 목으로 대신한다. 403 경로는 컨트롤러에
+     * 안 닿아 스텁이 필요 없다.
+     */
+    @MockBean private AiServiceClient aiServiceClient;
+
+    @Autowired private ExtractedRiskItemRepository extractedRiskItems;
+
+    @AfterEach
+    void cleanUpExtraction() {
+        // 관리자 테스트가 스냅샷을 영속한다 — 같은 컨텍스트(H2)를 쓰는 다른 테스트가
+        // 폴백 대신 이 스냅샷을 읽지 않도록 지운다.
+        extractedRiskItems.deleteAll();
+    }
 
     private static RequestPostProcessor as(String id, String role) {
         return user(id).roles(role);
@@ -80,6 +106,16 @@ class ProductAccessWiringTest {
     @Test
     @DisplayName("관리자는 등록·추출을 한다 — 막기만 하는 구현도 위 단정들을 통과한다")
     void theAdminCanRegister() throws Exception {
+        ParsedDocument parsed = new ParsedDocument("doc-els-kiwoom-4181", "ELS", null, "v1",
+                null, 1, List.of(new ParsedDocument.Page(1, "원문", 2)), List.of(), List.of());
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed);
+        when(aiServiceClient.extract(anyString(), any(ParsedDocument.class)))
+                .thenReturn(new AiServiceClient.ExtractResult(List.of(
+                        RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",
+                                "원금손실 조건", "required",
+                                new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
+                        List.of()));
+
         mvc.perform(post("/products/{id}/extract", "doc-els-kiwoom-4181").with(as("admin-01", "ADMIN")))
                 .andExpect(status().isOk());
     }
