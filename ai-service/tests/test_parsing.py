@@ -288,9 +288,13 @@ ELS_P8_CLAUSES = [
 ]
 
 
+#: ⑧행 수익률 칸의 줄들. **다른 y** 에 있어서 본문 줄 사이로 끼어들던 것들이다.
+_STRAYS = ["-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
+
+
 @pytest.mark.parametrize("tag,head,tail", ELS_P8_CLAUSES, ids=[c[0] for c in ELS_P8_CLAUSES])
 def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, head, tail):
-    """★ 조건절부터 결론까지 **남의 칸 글자 없이** 이어진다 (`#436` 합격 기준).
+    """★ 조건절부터 결론까지 **다른 항목이 끼지 않고** 이어진다 (`#436` 합격 기준).
 
     ⑧ 은 고치기 전 사이에 수익률 칸 조각이 100자 끼어 있었다. ⑦ 은 `#452` 의 첫 판이
     끊김을 **없앤 게 아니라 옮겨** 놓아서, *"⑤ 5차 조기상환 27.50% … 하락한 적이 없는
@@ -298,12 +302,23 @@ def test_an_els_clause_runs_unbroken_from_condition_to_conclusion(els_doc, tag, 
 
     ❗그래서 이 그물은 ⑧ 하나로는 부족하다 — `#446` 도 `#452` 첫 판도 **고친 자리 옆에서**
     깨졌다. 한 항목만 재는 그물은 옮겨 간 끊김을 구조적으로 못 본다.
+
+    ## ❗이 그물이 재지 **않는** 것 — 같은 y 로 이미 합쳐진 조각
+
+    `_STRAYS` 는 **다른 y 에 있던 칸 줄**만 본다. `extract_text` 가 같은 y 의 칸들을 이미
+    한 줄로 합쳐 온 것은 줄 재정렬로 못 가르므로 그대로 남는다. ⑦ 이 그 경우다.
+
+        도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로 33.00%    ← 33.00% 가 붙어 있다
+        만기 하락한 적이 없는 경우(…                (연 11.00%)     ← 라벨·수익률이 붙어 있다
+
+    그래서 ⑦ 에 대해 이 단정이 참인 것은 **"칸 조각이 없다"** 가 아니라 **"항목이 끊기지
+    않는다"** 다(`#452` 리뷰, 윤지석). 그 구간은 `main` 과 바이트 동일이라 이 변경의 몫이
+    아니고, 가르려면 줄이 아니라 **낱말 단위**로 읽어야 한다 — 별도 사안이다.
     """
     text = els_doc["pages"][7]["text"]
     start, end = text.index(head), text.index(tail) + len(tail)
     clause = text[start:end]
-    strays = ["-100% ~-30%", "(기초자산 중 하", "락폭이 큰 종목의", "수익률)"]
-    assert [s for s in strays if s in clause] == [], f"{tag}: {clause}"
+    assert [s for s in _STRAYS if s in clause] == [], f"{tag}: {clause}"
 
 
 def test_cell_ordering_only_permutes_lines(real_case):
