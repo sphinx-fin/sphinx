@@ -18,6 +18,8 @@ PDF → `contracts/parsed_document.schema.json` (ParsedDocument).
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
 import unicodedata
@@ -26,6 +28,12 @@ from pathlib import Path
 import pdfplumber
 
 from .config import settings
+
+log = logging.getLogger(__name__)
+
+#: `parsed_document.schema.json` 의 parse_warnings 코드. 파서가 아니라 사람이 만들었다는 표식이고,
+#: `ParsedDocument.is_manual` 이 이 값을 본다 — 성능 수치를 인용할 때 걸러야 하는 자리다(#409).
+MANUAL_OVERRIDE_CODE = "MANUAL_OVERRIDE"
 
 #: 출력이 달라지면 올린다. 파싱 파라미터(_X_TOLERANCE 등) 변경도 출력 변경이다.
 PARSER_VERSION = "0.1.0"
@@ -389,6 +397,67 @@ def resolve_document_path(document_path: str, *, root: str | Path | None = None)
     return resolved
 
 
+
+def _manual_override(path: Path, *, product_type: str,
+                     document_id: str | None, parsed_at: str | None) -> dict:
+    """옆에 놓인 파스 출력 JSON 을 그대로 쓴다 (이슈 #436 · 윤지석 #436 코멘트).
+
+    ## 왜 추출 결과가 아니라 파스 출력인가
+
+    ``MANUAL_OVERRIDE`` 는 **파스 층의 개념**이다 — `parsed_document.schema.json` 의
+    `parse_warnings` 코드이고 `ParsedDocument.is_manual` 이 그걸 읽는다. 추출 결과를 손으로
+    채우면 그 표식이 닿지 않는 층에 생기고, `#409`(model.jsonl)·F-EXT-003(추출 재현율)이
+    나중에 *"이 문서는 사람이 만들었다"* 로 걸러야 할 자리가 거기다.
+
+    그리고 추출 결과를 채우면 **같은 문서를 다시 추출할 때 또 실패한다.** 파스 출력을 고치면
+    추출이 정상 경로로 성공하고 **그 성공이 재현된다.**
+
+    ## ❗조용히 갈아치우지 않는다
+
+    이 경로는 **암묵적**이다(요청은 여전히 `.pdf` 를 가리킨다). 그래서 셋을 강제한다.
+
+        MANUAL_OVERRIDE 경고를 반드시 싣는다   없으면 여기서 붙인다 — 출력만 보고 알 수 있어야 한다
+        상품유형이 다르면 거부한다             #427 과 같은 종류의 조용한 오답을 막는다
+        JSON 이 깨지면 PDF 로 안 흘러내린다    폴백하면 "고쳤는데 안 고쳐진" 상태가 조용히 산다
+
+    되돌리는 것은 이 파일을 지우는 것뿐이다 — PDF 는 그대로 있다.
+    """
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        # ❗PDF 로 폴백하지 않는다. 사람이 고쳐 둔 것이 안 읽히는데 파싱이 성공하면,
+        # 그 사람은 고쳤다고 믿고 우리는 옛 결과를 쓴다.
+        raise DocumentUnreadable(f"수동 파스 출력을 못 읽는다: {path.name} — {exc}") from exc
+    if not isinstance(doc, dict) or not doc.get("pages"):
+        raise DocumentUnreadable(f"수동 파스 출력이 ParsedDocument 모양이 아니다: {path.name}")
+
+    got = doc.get("product_type")
+    if got and got != product_type:
+        # 요청 상품유형과 다른 문서를 내주면 화면·추출이 다른 상품을 본다 (#427 과 같은 종류).
+        raise DocumentPathRejected(
+            f"수동 파스 출력의 product_type 이 요청과 다르다: {got} != {product_type}")
+
+    doc["product_type"] = product_type
+    if document_id:
+        doc["document_id"] = document_id
+    elif not doc.get("document_id"):
+        doc["document_id"] = derive_document_id(path)
+    if parsed_at:
+        doc["parsed_at"] = parsed_at
+
+    warnings = list(doc.get("parse_warnings") or [])
+    if not any(w.get("code") == MANUAL_OVERRIDE_CODE for w in warnings):
+        warnings.append({
+            "page": None,
+            "code": MANUAL_OVERRIDE_CODE,
+            "message": f"파서가 아니라 사람이 만든 파스 출력이다: {path.name}",
+        })
+    doc["parse_warnings"] = warnings
+
+    log.info("F-EXT-001 수동 파스 출력을 사용한다: %s (페이지 %d)", path.name, len(doc["pages"]))
+    return doc
+
+
 def parse_upload(
     document_path: str,
     *,
@@ -406,6 +475,11 @@ def parse_upload(
     path = resolve_document_path(document_path, root=root)
     if not path.is_file():
         raise DocumentNotFound(f"문서가 없다: {document_path!r}")
+
+    override = path.with_suffix(".json")
+    if override.is_file():
+        return _manual_override(override, product_type=product_type,
+                                document_id=document_id, parsed_at=parsed_at)
 
     try:
         return parse_document(
