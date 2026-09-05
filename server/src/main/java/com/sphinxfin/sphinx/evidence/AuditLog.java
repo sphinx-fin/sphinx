@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * F-CMN-002 접근 감사 로그. 소유: 정세현
@@ -125,5 +127,114 @@ public class AuditLog {
     /** 감사 스트림 검증. {@code audit:verify} 의 구현 지점 — 꼬리 절단까지 본다. */
     public HashChain.Verification verify() {
         return store.verify(STREAM);
+    }
+
+    /**
+     * 기간별 접근 집계. <b>개인 식별자를 담지 않는다</b> (이슈 #326 파트2 결정).
+     *
+     * <p>{@code actorId} 와 {@code resource} 는 <b>일부러 빠져 있다.</b> alpha 가 개방
+     * 모드로 뜨고(결정 10.57) nginx 가 경로를 보고 {@code compl-01} 을 실어 주므로, 원시
+     * 엔트리를 계약에 열면 <b>레포도 공개·주소도 공개·인증도 없는 상태에서 "누가 무엇을
+     * 했는가" 가 전부 읽힌다.</b> 심사에서 필요한 것은 <i>"이번 주 SELLER 의 집계 접근
+     * 차단 12건"</i> 이지 <i>"seller-02 가 14:03 에 /dashboard 를 눌렀다"</i> 가 아니다.
+     *
+     * <p>원시 조회({@code audit:read}, {@code [COMPL org]})는 <b>정책에 이미 있다.</b>
+     * 잠금 모드에서 COMPL 로 로그인해 보는 경로라 엔드포인트만 나중에 붙이면 된다 —
+     * 여기서 정책을 건드리지 않는다.
+     *
+     * <h2>비용</h2>
+     *
+     * <p>스트림을 통째로 재생해서 센다. 감사 스트림은 <b>모든 감사 대상 요청</b>이 쌓이는
+     * 곳이라 이 비용은 건수에 비례한다. 데모 규모(수백 건)에서는 문제가 아니지만, 이 경로가
+     * 대시보드에서 주기적으로 불리게 되면 <b>기간으로 좁힌 조회를 저장소에 내려야 한다</b> —
+     * 지금 {@link ImmutableStore} 에는 그 질의가 없고, 넣으면 append-only 계약이 넓어지므로
+     * 필요해지는 시점에 별도로 판단한다.
+     *
+     * @param from 포함. {@code null} 이면 처음부터
+     * @param to   <b>제외</b>. {@code null} 이면 끝까지 — 경계를 반열림으로 두면 이어지는
+     *             두 기간을 합쳤을 때 겹치는 건이 없다
+     */
+    public AccessSummary summary(Instant from, Instant to) {
+        Map<String, Long> byAction = new TreeMap<>();
+        Map<String, Long> byResultCode = new TreeMap<>();
+        Map<String, Long> deniedByRole = new TreeMap<>();
+        long total = 0;
+        long unreadable = 0;
+
+        for (HashChain.ChainEntry chained : replay()) {
+            if (!(chained.payload() instanceof Map<?, ?> payload)) {
+                unreadable++;
+                continue;
+            }
+            Instant at = instantOf(payload.get("occurredAt"));
+            if (at == null) {
+                unreadable++;
+                continue;
+            }
+            if ((from != null && at.isBefore(from)) || (to != null && !at.isBefore(to))) {
+                continue;
+            }
+            total++;
+            bump(byAction, text(payload.get("action")));
+            String resultCode = text(payload.get("resultCode"));
+            bump(byResultCode, resultCode);
+            if (isDenial(resultCode)) {
+                bump(deniedByRole, text(payload.get("role")));
+            }
+        }
+        return new AccessSummary(from, to, total, unreadable,
+                byAction, byResultCode, deniedByRole);
+    }
+
+    /**
+     * 한 기간의 접근 집계. 개인 식별자가 없다 — 위 {@link #summary} 주석 참고.
+     *
+     * <p>{@code unreadable} 을 <b>따로 센다.</b> 못 읽은 항목을 조용히 버리면
+     * {@code total} 이 "그 기간에 접근이 이만큼이었다" 가 아니라 "우리가 읽을 수 있었던
+     * 것이 이만큼이었다" 가 되는데, 둘이 화면에서 같아 보인다. 감사에서 그 차이가 곧
+     * 신뢰도다 — {@code #364} 리뷰에서 그림자 계량기에 같은 지적이 있었다.
+     *
+     * @param unreadable   payload 를 못 읽었거나 시각이 없어 어느 기간에도 못 넣은 건수
+     * @param deniedByRole 401·403 으로 끝난 접근의 역할별 건수. 이것이 기획서 7-4
+     *                     (역이용 방지)의 실물 숫자다
+     */
+    public record AccessSummary(Instant from, Instant to, long total, long unreadable,
+                                Map<String, Long> byAction,
+                                Map<String, Long> byResultCode,
+                                Map<String, Long> deniedByRole) {}
+
+    /** 차단으로 셀 상태코드. 인증(401)과 권한(403)을 <b>같이</b> 센다 — 둘 다 막힌 시도다. */
+    private static boolean isDenial(String resultCode) {
+        return "401".equals(resultCode) || "403".equals(resultCode);
+    }
+
+    private static void bump(Map<String, Long> counts, String key) {
+        counts.merge(key == null ? UNKNOWN : key, 1L, Long::sum);
+    }
+
+    /**
+     * 기록되지 않은 값의 자리표. {@code null} 을 키로 쓰면 {@link TreeMap} 이 던지고,
+     * 빈 문자열은 화면에서 안 보인다 — <b>안 남은 것이 안 보이면 안 남았다는 사실도 사라진다.</b>
+     */
+    static final String UNKNOWN = "(미기록)";
+
+    /**
+     * 재생된 payload 의 시각. {@link CanonicalJson} 이 ADR-008 대로 찍은 문자열이라
+     * {@link Instant#parse} 로 되돌아온다. 못 되돌리면 {@code null} 을 내고 호출자가
+     * {@code unreadable} 로 센다 — 여기서 던지면 <b>한 건 때문에 집계 전체가 죽는다.</b>
+     */
+    private static Instant instantOf(Object value) {
+        if (value instanceof CharSequence text) {
+            try {
+                return Instant.parse(text.toString());
+            } catch (java.time.format.DateTimeParseException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static String text(Object value) {
+        return value instanceof CharSequence text ? text.toString() : null;
     }
 }
