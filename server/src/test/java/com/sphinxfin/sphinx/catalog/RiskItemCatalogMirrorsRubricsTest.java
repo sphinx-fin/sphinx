@@ -48,6 +48,12 @@ class RiskItemCatalogMirrorsRubricsTest {
     private static final Pattern PRODUCT_TYPE = Pattern.compile("^product_type:\\s*(\\S+)\\s*$", Pattern.MULTILINE);
     private static final Pattern NAME = Pattern.compile("^name:\\s*(.+?)\\s*$", Pattern.MULTILINE);
 
+    /** {@code required_elements:} 블록 — 뒤따르는 {@code "  - …"} 줄들만 문다. */
+    private static final Pattern REQUIRED_ELEMENTS =
+            Pattern.compile("^required_elements:\\s*$\\n((?:[ \\t]*-[ \\t].*(?:\\n|$))+)", Pattern.MULTILINE);
+    private static final Pattern LIST_ITEM =
+            Pattern.compile("^[ \\t]*-[ \\t]+(.*?)\\s*$", Pattern.MULTILINE);
+
     private final RiskItemCatalog catalog = new RiskItemCatalog();
 
     @Test
@@ -108,6 +114,42 @@ class RiskItemCatalogMirrorsRubricsTest {
     }
 
     /**
+     * ★ <b>「무엇을 재는 항목인가」도 글자 그대로 같다.</b>
+     *
+     * <p>대시보드 ⓘ 가 이 문장들을 그대로 편다. 요약본을 카탈로그에 적으면 <b>화면이 채점
+     * 기준과 다른 말을 하게 되는데</b>, 그 어긋남은 이름이 갈리는 것보다 나쁘다 — 이름은
+     * 눈에 띄지만 설명은 그럴듯하게 틀린다. 그래서 리스트를 <b>순서까지</b> 통째로 견준다.
+     */
+    @Test
+    @DisplayName("★ 필수 요소가 루브릭 required_elements 와 순서까지 같다 — 요약본은 그럴듯하게 틀린다")
+    void everyRequirementListMatchesTheRubric() throws IOException {
+        Map<String, Rubric> rubrics = rubrics();
+        Map<String, String> mismatched = new TreeMap<>();
+
+        catalog.itemRequirements().forEach((itemId, requires) -> {
+            Rubric rubric = rubrics.get(itemId);
+            if (rubric != null && !rubric.requires().equals(requires)) {
+                mismatched.put(itemId, "루브릭 " + rubric.requires() + " · 카탈로그 " + requires);
+            }
+        });
+
+        assertThat(mismatched)
+                .as("**정본은 루브릭 쪽이다** — 채점이 그 파일을 읽는다. 카탈로그를 루브릭에 "
+                        + "맞춘다. 고쳐 쓰거나 줄이지 않는다")
+                .isEmpty();
+    }
+
+    /** ❗리스트가 통째로 비면 위 대조는 빈 것끼리 견주고 통과한다. */
+    @Test
+    @DisplayName("★ 필수 요소가 실제로 읽혔다 — 전부 한 개 이상")
+    void everyRubricActuallyHasRequirements() throws IOException {
+        assertThat(rubrics())
+                .as("required_elements 를 하나도 못 읽었다 — 정규식이나 루브릭 형식을 본다")
+                .allSatisfy((itemId, rubric) ->
+                        assertThat(rubric.requires()).as(itemId).isNotEmpty());
+    }
+
+    /**
      * ❗<b>루브릭을 실제로 읽었는지 잰다.</b>
      *
      * <p>경로가 틀리거나 정규식이 낡으면 위 단정들은 <b>빈 맵과 빈 맵을 견주고 통과</b>한다.
@@ -122,7 +164,7 @@ class RiskItemCatalogMirrorsRubricsTest {
                 .hasSizeGreaterThanOrEqualTo(17);
     }
 
-    private record Rubric(String productType, String name) {}
+    private record Rubric(String productType, String name, List<String> requires) {}
 
     private static Map<String, Rubric> rubrics() throws IOException {
         Map<String, Rubric> parsed = new TreeMap<>();
@@ -137,11 +179,26 @@ class RiskItemCatalogMirrorsRubricsTest {
                 Matcher type = PRODUCT_TYPE.matcher(text);
                 Matcher name = NAME.matcher(text);
                 if (id.find() && type.find() && name.find()) {
-                    parsed.put(id.group(1), new Rubric(type.group(1), unquoted(name.group(1))));
+                    parsed.put(id.group(1), new Rubric(type.group(1), unquoted(name.group(1)),
+                            requiredElements(text)));
                 }
             }
         }
         return parsed;
+    }
+
+    /** {@code required_elements} 항목들. 없으면 빈 목록 — 카탈로그 쪽과 같은 규칙이다. */
+    private static List<String> requiredElements(String text) {
+        Matcher block = REQUIRED_ELEMENTS.matcher(text);
+        if (!block.find()) {
+            return List.of();
+        }
+        List<String> out = new java.util.ArrayList<>();
+        Matcher item = LIST_ITEM.matcher(block.group(1));
+        while (item.find()) {
+            out.add(unquoted(item.group(1)));
+        }
+        return List.copyOf(out);
     }
 
     /** 루브릭은 이름을 따옴표 없이 쓰지만, 붙었을 때 조용히 갈리지 않게 벗긴다. */

@@ -14,27 +14,116 @@
 #   값이라 상품을 넘어 합치는 축에 쓰면 **같은 항목이 두 줄**이 된다. 여기 있는 것은 회차를
 #   안 가리는 채점 기준 쪽 이름이다.
 #
+# ❗**`requires` 는 루브릭 `required_elements` 를 글자 그대로 옮긴 것이다.** 이름만으로는
+#   대시보드에서 「전액손실 사례」가 *무엇을 재는 항목인지* 가 안 읽힌다 — 심사위원이 축을
+#   보고 "이게 뭔가" 에서 멈춘다(이 파일이 고치려던 ID 원문 노출의 다음 층이다). 요약하거나
+#   고쳐 쓰지 않는다: 요약하면 화면이 채점 기준과 **다른 말**을 하게 되고, 그때 화면 쪽이
+#   틀렸다는 것을 아무도 못 알아챈다. 글자 그대로라야 `RiskItemCatalogMirrorsRubricsTest`
+#   가 리스트를 통째로 대조할 수 있고, 루브릭이 바뀌면 CI 가 빨개진다.
+#
 # 카탈로그 상품(`doc-els-kiwoom-4181` 등)의 항목을 채우는 것은 이 파일이 아니다 — `#355`
 # (결정 8.23). `MockData.RISK_ITEMS` 를 늘리면 면담이 2문항에서 17문항이 된다.
 
 items:
-  ELS-EARLY-REDEMPTION-CONDITION: { product-type: ELS,               name: "조기상환 조건" }
-  ELS-ISSUER-CREDIT-RISK:         { product-type: ELS,               name: "발행사 신용위험" }
-  ELS-KNOCKIN-BARRIER:            { product-type: ELS,               name: "낙인 배리어" }
-  ELS-LOSS-SIMULATION:            { product-type: ELS,               name: "과거 데이터 수익률 모의실험" }
-  ELS-MATURITY-LOSS-CONDITION:    { product-type: ELS,               name: "만기 손실조건" }
-  ELS-MIDWAY-REDEMPTION-COST:     { product-type: ELS,               name: "중도상환 원금손실" }
-  ELS-NO-DEPOSIT-INSURANCE:       { product-type: ELS,               name: "예금자보호 비대상" }
-  ELS-NO-LISTING:                 { product-type: ELS,               name: "환금성 제약(비상장)" }
-  ELS-PRINCIPAL-LOSS-WARNING:     { product-type: ELS,               name: "원금손실 가능성 고지" }
-  ELS-TOTAL-LOSS-SCENARIO:        { product-type: ELS,               name: "전액손실 사례" }
-  VAR-EARLY-SURRENDER-RATIO:      { product-type: VARIABLE_INSURANCE, name: "조기해지 환급률" }
-  VAR-FEE-DEDUCTION:              { product-type: VARIABLE_INSURANCE, name: "월공제액 차감 구조" }
-  VAR-NOT-BANK-SAVINGS:           { product-type: VARIABLE_INSURANCE, name: "은행 저축과 다름" }
-  VAR-PARTIAL-DEPOSIT-INSURANCE:  { product-type: VARIABLE_INSURANCE, name: "예금자보호 범위" }
-  VAR-PERFORMANCE-LINKED:         { product-type: VARIABLE_INSURANCE, name: "실적배당형 성격" }
-  VAR-PRINCIPAL-LOSS:             { product-type: VARIABLE_INSURANCE, name: "원금손실 가능성" }
-  VAR-SURRENDER-BELOW-PREMIUM:    { product-type: VARIABLE_INSURANCE, name: "해약환급금이 납입보험료보다 적을 수 있음" }
+  ELS-EARLY-REDEMPTION-CONDITION:
+    product-type: ELS
+    name: "조기상환 조건"
+    requires:
+      - "조기상환은 평가일에 기초자산이 모두 기준가격 이상일 때만 발생"
+      - "조건 미충족 시 다음 평가일 또는 만기까지 유지됨"
+  ELS-ISSUER-CREDIT-RISK:
+    product-type: ELS
+    name: "발행사 신용위험"
+    requires:
+      - "발행사의 신용으로 발행되는 무보증 증권이다"
+      - "발행사 부도 시 원금을 돌려받지 못할 수 있다"
+  ELS-KNOCKIN-BARRIER:
+    product-type: ELS
+    name: "낙인 배리어"
+    requires:
+      - "기초자산 종가가 낙인구간 미만으로 하락한 적이 있는지를 본다"
+      - "기초자산 중 어느 하나라도 해당하면 조건이 성립한다"
+  ELS-LOSS-SIMULATION:
+    product-type: ELS
+    name: "과거 데이터 수익률 모의실험"
+    requires:
+      - "모의실험은 과거 데이터에 기초한 것이고 미래 수익을 보장하지 않는다"
+  ELS-MATURITY-LOSS-CONDITION:
+    product-type: ELS
+    name: "만기 손실조건"
+    requires:
+      - "만기평가일에 기준가격 비율 미만이면 손실이 발생한다"
+      - "손실 규모는 기초자산 하락률에 연동된다"
+  ELS-MIDWAY-REDEMPTION-COST:
+    product-type: ELS
+    name: "중도상환 원금손실"
+    requires:
+      - "중도상환 시 공정가액에서 차감된 금액을 받는다"
+      - "그 결과 원금에 미달할 수 있다"
+  ELS-NO-DEPOSIT-INSURANCE:
+    product-type: ELS
+    name: "예금자보호 비대상"
+    requires:
+      - "예금자보호법에 따라 보호되지 않음"
+  ELS-NO-LISTING:
+    product-type: ELS
+    name: "환금성 제약(비상장)"
+    requires:
+      - "거래소에 상장되지 않아 시장에서 팔 수 없다"
+      - "만기 전 현금화는 발행사에 중도상환을 요청하는 방법뿐이다"
+  ELS-PRINCIPAL-LOSS-WARNING:
+    product-type: ELS
+    name: "원금손실 가능성 고지"
+    requires:
+      - "투자원금의 손실이 발생할 수 있음"
+  ELS-TOTAL-LOSS-SCENARIO:
+    product-type: ELS
+    name: "전액손실 사례"
+    requires:
+      - "최악의 경우 투자원금 전액을 잃을 수 있다"
+      - "본인이 넣는 금액으로 환산해 말한다"
+  VAR-EARLY-SURRENDER-RATIO:
+    product-type: VARIABLE_INSURANCE
+    name: "조기해지 환급률"
+    requires:
+      - "조기 해지 시 환급률이 납입액을 크게 밑돎"
+      - "상품요약서에 제시된 조기해지 환급률 수준을 수치로 언급"
+  VAR-FEE-DEDUCTION:
+    product-type: VARIABLE_INSURANCE
+    name: "월공제액 차감 구조"
+    requires:
+      - "보험료에서 계약체결비용·계약관리비용이 차감된 뒤 특별계정에 투입되고, 계약자적립액에서 위험보험료와 최저사망지급금·최저실적배당종신연금 보증비용이 매월 차감됨"
+      - "미상각신계약비(해약공제액)가 추가로 차감됨"
+      - "특별계정(펀드) 적립액에서 운용보수·증권거래비용·기초펀드보수가 별도로 차감됨"
+  VAR-NOT-BANK-SAVINGS:
+    product-type: VARIABLE_INSURANCE
+    name: "은행 저축과 다름"
+    requires:
+      - "위험보장과 저축을 겸비한 제도라서 낸 돈이 전부 적립되지 않는다"
+      - "은행 예금과 성격이 다르다"
+  VAR-PARTIAL-DEPOSIT-INSURANCE:
+    product-type: VARIABLE_INSURANCE
+    name: "예금자보호 범위"
+    requires:
+      - "계약 전체가 아니라 약관에서 정한 최저보증과 특약에 한하여 보호된다"
+      - "보호 한도가 있다"
+  VAR-PERFORMANCE-LINKED:
+    product-type: VARIABLE_INSURANCE
+    name: "실적배당형 성격"
+    requires:
+      - "보험금·해약환급금이 특별계정 운용실적에 따라 변동된다"
+      - "정해진 금액이 아니라 투자 결과에 달려 있다"
+  VAR-PRINCIPAL-LOSS:
+    product-type: VARIABLE_INSURANCE
+    name: "원금손실 가능성"
+    requires:
+      - "중도해지 시 해약환급금에 최저보증이 없음"
+      - "원금손실이 발생할 수 있고 그 손실은 계약자에게 귀속됨"
+  VAR-SURRENDER-BELOW-PREMIUM:
+    product-type: VARIABLE_INSURANCE
+    name: "해약환급금이 납입보험료보다 적을 수 있음"
+    requires:
+      - "중도해지 시 해약환급금이 납입한 보험료보다 적거나 없을 수 있음"
 
 # `product_type` 표시명. 히트맵 상품 축은 합성 세션에서 `productId` 자리에 상품 **유형**이
 # 들어와 있어서(`data/synth_sessions/distribution.yaml`) `GET /products` 의 상품명과 한 번도

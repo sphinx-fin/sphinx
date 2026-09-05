@@ -60,7 +60,7 @@
  * 어긋나는 날 화면이 서버가 하지 않은 판단을 말한다(P1 과 같은 결). 그래서 `reason`
  * 문장을 그대로 낸다. 색으로 소리치지도 않는다 — 이상치는 **판정이 아니다.**
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiRequestError, get } from "../api/client";
 import type {
   ContrastResponse, ContrastRow, DecisionResponse, GradeDistribution, HeatmapCell,
@@ -81,6 +81,19 @@ import "./S08_Dashboard.css";
  * 범례 눈금도 **같은 상한**을 쓴다. 다르면 눈금이 거짓말을 한다.
  */
 const INK_MAX = 60;
+
+/**
+ * 툴팁을 **위로 띄울 때 필요한 세로 자리**(px). 트리거 위에 이만큼이 없으면 아래로 뒤집는다.
+ *
+ * 예전에는 `140` 이었는데, 그건 툴팁이 두세 줄짜리 문장 하나였을 때의 값이다. 항목의 뜻을
+ * 목록으로 펴면서(채점 요구 요소 2건 + 출처 줄) 실측 높이가 **152px** 이 됐고, 그 순간
+ * 임계값이 높이보다 작아졌다 — 화면 위쪽 1/5 안의 트리거는 *"위에 자리가 있다"* 로 판정된
+ * 뒤 **잘린 채로 뜬다.** 표 머리(항목 이름 17칸)가 정확히 그 구간이라 흔한 자리다.
+ *
+ * 값은 가장 높은 툴팁 + 여백이다. 툴팁이 더 길어지면 이 값도 같이 올린다 — 렌더 전에는
+ * 높이를 알 수 없어서 상수로 잡는 자리이고, 그래서 왜 이 숫자인지를 적어 둔다.
+ */
+const TIP_FLIP_ABOVE = 172;
 
 /**
  * 「설명 자료 개선 대상」 표시의 **개수 상한** (이슈 #321 의 5번).
@@ -210,7 +223,7 @@ export default function S08Dashboard() {
     if (!el) return;
     const r = el.getBoundingClientRect();
     // 표 맨 윗줄·첫 타일은 위로 띄우면 화면 밖으로 나간다. 자리가 없으면 아래로 뒤집는다.
-    const below = r.top < 140;
+    const below = r.top < TIP_FLIP_ABOVE;
     setTip({ x: r.left + r.width / 2, y: below ? r.bottom : r.top, below, node });
   }, []);
   const hideTip = useCallback(() => setTip(null), []);
@@ -297,7 +310,8 @@ export default function S08Dashboard() {
   /* ── 표 축 ──────────────────────────────────────────────────────────────
    * 셀 목록에서 축을 뽑는다. 서버가 축을 따로 주지 않고, 축을 화면에 하드코딩하면
    * 상품·항목이 늘 때 조용히 빠진다.                                              */
-  const { products, items, byKey, itemNames, cellProductNames, stats, ranked } = useMemo(() => {
+  const { products, items, byKey, itemNames, itemRequires, cellProductNames, stats, ranked }
+    = useMemo(() => {
     const cells = data?.cells ?? [];
     const ps: string[] = [];
     const its: string[] = [];
@@ -316,11 +330,16 @@ export default function S08Dashboard() {
      *
      * 이름이 없는 항목(`null`)은 키를 그대로 그린다 — 라벨이 없다고 표를 멈추지 않는다. */
     const itemNames: Record<string, string> = {};
+    /* 이름의 **다음 층**이다 — 「전액손실 사례」로 고쳐 놔도 축을 처음 보는 사람은 그 칸이
+       무엇을 센 것인지 모른다. 채점이 요구하는 요소를 서버가 루브릭 원문으로 싣고
+       (계약 `HeatmapCell.itemRequires`) 화면은 ⓘ 로 편다. 고쳐 쓰지 않는다. */
+    const itemRequires: Record<string, string[]> = {};
     const cellProductNames: Record<string, string> = {};
     for (const c of cells) {
       if (!ps.includes(c.product)) ps.push(c.product);
       if (!its.includes(c.item)) its.push(c.item);
       if (c.itemName) itemNames[c.item] = c.itemName;
+      if (c.itemRequires?.length) itemRequires[c.item] = c.itemRequires;
       if (c.productName) cellProductNames[c.product] = c.productName;
       map.set(`${c.product}\u0000${c.item}`, c);
     }
@@ -377,7 +396,7 @@ export default function S08Dashboard() {
     const ranked = sorted.map((r) => ({ ...r, focus: focused.has(r.item) }));
 
     return {
-      products: ps, items: its, byKey: map, itemNames, cellProductNames,
+      products: ps, items: its, byKey: map, itemNames, itemRequires, cellProductNames,
       stats: { weighted, nAll, nShown, maskedCells: cells.filter((c) => c.masked).length,
                cellCount: cells.length },
       ranked,
@@ -393,6 +412,38 @@ export default function S08Dashboard() {
    * 둘 다 없으면 키를 그대로 그린다.
    */
   const productLabel = (p: string) => cellProductNames[p] ?? names[p] ?? p;
+
+  /**
+   * 이해항목 한 칸이 **무엇인지** 를 말하는 툴팁.
+   *
+   * ❗이 화면의 축은 `ELS-TOTAL-LOSS-SCENARIO` 같은 **채점 루브릭 ID** 다. 표시명을 서버가
+   * 싣게 되면서 ID 원문은 사라졌지만(#346), 「전액손실 사례」라고 적어 놔도 *그 칸이 무엇을
+   * 센 것인지* 는 여전히 화면 어디에도 없었다 — 심사위원이 축에서 멈추는 자리가 한 칸
+   * 옮겨졌을 뿐이다. 여기서 두 가지를 같이 답한다: **무엇을 재는가**(채점이 요구하는 요소,
+   * 루브릭 원문)와 **어디서 온 값인가**(루브릭 ID).
+   *
+   * 문면을 만들어 쓰지 않는다 — 요약하면 화면이 채점 기준과 다른 말을 하게 되고, 그건
+   * 이름이 갈리는 것보다 나쁘다(이름은 눈에 띄지만 설명은 그럴듯하게 틀린다).
+   */
+  const itemTip = (id: string) => {
+    const requires = itemRequires[id] ?? [];
+    return (
+      <>
+        <b>{itemNames[id] ?? id}</b>
+        {requires.length > 0 ? (
+          <>
+            <span className="s08__tip-val">고객이 이걸 자기 말로 말해야 「이해」로 봅니다</span>
+            <ul className="s08__tip-list">
+              {requires.map((r) => <li key={r}>{r}</li>)}
+            </ul>
+          </>
+        ) : (
+          <span className="s08__tip-val">채점 기준에 등록된 이해항목입니다</span>
+        )}
+        <span className="s08__tip-src">채점 루브릭 <code>{id}</code></span>
+      </>
+    );
+  };
 
 
 
@@ -417,12 +468,31 @@ export default function S08Dashboard() {
     return { rows: sorted, periods: longest.map((p) => p.period), outlierKeys: keys };
   }, [indicator]);
 
+  /* ── 갈아탈 때 화면을 비우지 않는다 ──────────────────────────────────────
+     `view` 는 **사용자가 고른 것**이고 `rendered` 는 **그릴 데이터가 있는 것**이다. 둘을
+     가르기 전에는 뷰를 누를 때마다 `loading` 이 참이 되면서 화면 전체가 "불러오는 중"
+     한 줄로 바뀌었다 — 표가 사라졌다 다시 서고 그 사이 페이지 높이가 접혔다 펴진다.
+     그게 깜빡임의 정체였고, 축·필터를 바꿀 때도 같은 일이 났다.
+
+     새 데이터가 올 때까지 **직전 뷰를 그대로 두고** 흐리게만 만든다. 탭의 `aria-pressed`
+     는 `view` 를 그대로 쓰므로 누른 즉시 반응한다 — 눌린 것과 그려진 것이 잠깐 다른 것이
+     맞다. 그 사이를 메우는 것이 얇은 진행 막대다.                                    */
+  const lastRendered = useRef<View>("heatmap");
+  const rendered: View = (view === "heatmap" ? data : indicator) ? view : lastRendered.current;
+  useEffect(() => { lastRendered.current = rendered; }, [rendered]);
+
+  /* 축 라벨은 **받아 온 데이터의 축**으로 그린다. 축을 바꾸는 동안 표에는 아직 옛 축의
+     행이 있는데 머리말만 새 축 이름이면 화면이 자기 말을 뒤집는다. 계열이 비면 고른 값을
+     쓴다 — 그때는 표도 없어서 어긋날 자리가 없다. */
+  const shownAxis: IndicatorAxis = indicator?.series[0]?.groupBy ?? axis;
+
   /* 범위·합성 표식은 두 뷰가 같이 쓴다 — 뜻이 같은 필드이고, 표식을 뷰마다 따로 그리면
      한쪽에서 워터마크가 빠지는 사고가 난다(그게 F-DSH-003 이 막으려는 것이다). */
   const shown: { scope: HeatmapResponse["scope"]; synthetic: boolean } | null =
-    view === "heatmap" ? data : indicator;
+    rendered === "heatmap" ? data : indicator;
 
-  if (loading) {
+  /* 전면 로더는 **아무것도 받은 적이 없을 때만**이다. 그 뒤로는 남길 내용이 있다. */
+  if (loading && data === null && indicator === null && !blocked) {
     return <main className="s08"><p className="s08__loading">집계를 불러오는 중입니다…</p></main>;
   }
 
@@ -480,22 +550,58 @@ export default function S08Dashboard() {
           히트맵은 단면, 선행지표는 추이다. 두 질문이 다르므로 화면을 겹쳐 그리지 않고
           자리를 바꾼다 — 한 화면에 표 두 개를 세우면 어느 수치를 읽고 있는지 흐려진다.
           `aria-pressed` 로 낸다: 누르는 동작이 상태를 바꾸는 버튼 두 개다. */}
-      <div className="s08__views" role="group" aria-label="뷰 선택">
-        <button
-          type="button" className="s08__view" aria-pressed={view === "heatmap"}
-          onClick={() => setView("heatmap")}
-        >
-          오해 지도
-        </button>
-        <button
-          type="button" className="s08__view" aria-pressed={view === "indicator"}
-          onClick={() => setView("indicator")}
-        >
-          선행지표
-        </button>
+      <div className="s08__viewrow">
+        <div className="s08__views" role="group" aria-label="뷰 선택">
+          <button
+            type="button" className="s08__view" aria-pressed={view === "heatmap"}
+            onClick={() => setView("heatmap")}
+          >
+            오해 지도
+          </button>
+          <button
+            type="button" className="s08__view" aria-pressed={view === "indicator"}
+            onClick={() => setView("indicator")}
+          >
+            선행지표
+          </button>
+        </div>
+        {/* ❗**「선행지표」는 설명 없이는 안 읽히는 말이다.** 탭 이름만 보고 무엇을 여는
+            버튼인지 아는 사람이 없었다 — 그런데 이 뷰가 이 제품의 논지 절반이다(사고가
+            난 뒤 세는 것이 아니라 나기 전에 본다). 두 뷰의 차이를 여기서 한 번 말한다. */}
+        <Info
+          id="tip-views" label="두 뷰" show={showTip} hide={hideTip}
+          tip={
+            <>
+              <b>오해 지도</b>는 <b>지금</b>의 단면입니다 — 어느 상품의 어느 항목에서
+              고객이 오해하고 있는지를 한 장으로 봅니다.
+              <br />
+              <b>선행지표</b>는 <b>추이</b>입니다. 「선행」은 <b>결과가 터지기 전에 먼저
+              움직이는 수치</b>라는 뜻입니다 — 민원·분쟁·불완전판매는 사고가 난 뒤에야
+              세지지만, 이해도가 무너지는 것은 그보다 먼저 나타납니다. 같은 오해율을 주
+              단위로 8주 늘어놓아 <b>어느 지점·판매자·항목이 지난주보다 나빠졌는가</b>에
+              답합니다. 단면인 오해 지도로는 그 질문을 아예 물을 수 없습니다.
+            </>
+          }
+        />
       </div>
 
-      {view === "heatmap" && (<>
+      {/* 요청이 도는 동안 남기는 유일한 표식. 내용을 지우지 않으므로 이것이 없으면
+          "흐려졌다" 말고는 아무 신호가 없다. 화면 낭독에는 아래 라이브 리전이 말한다. */}
+      {loading && <div className="s08__progress" aria-hidden="true" />}
+      <p className="sr-only" role="status" aria-live="polite">
+        {loading ? "집계를 불러오는 중입니다." : ""}
+      </p>
+
+      {/* ❗`key` 가 뷰다 — 갈아탈 때만 다시 마운트돼 진입 모션이 한 번 돈다. 축·필터가
+          바뀔 때는 같은 키라 자리를 지키고 흐려지기만 한다. 두 경우를 가르는 것이 이
+          한 줄이다. 안쪽 간격은 `.s08` 의 gap 을 여기서 다시 준다 — 이 래퍼가 flex
+          자식 하나가 되므로 안 주면 섹션들이 붙는다. */}
+      <div
+        key={rendered}
+        className={`s08__body${loading ? " s08__body--busy" : ""}`}
+        aria-busy={loading || undefined}
+      >
+      {rendered === "heatmap" && (<>
       {/* 자유 입력이 아니라 선택이다. "60대" 와 "60세" 를 손으로 치면 후자는 아무 셀도
           안 걸리는데 화면은 그냥 빈 표를 보여준다 — 오타와 "해당 없음" 이 구분되지 않는다.
           허용값은 세션이 실제로 보내는 값과 **같은 곳**(lib/sessionAttrs)에서 온다. */}
@@ -562,7 +668,10 @@ export default function S08Dashboard() {
           show={showTip} hide={hideTip}
           label="최다 오해 항목"
           value={ranked[0] ? `${Math.round(ranked[0].rate * 100)}%` : "—"}
-          sub={ranked[0] ? (itemNames[ranked[0].item] ?? ranked[0].item) : "값이 있는 칸 없음"}
+          sub={ranked[0]
+            ? <Term text={itemNames[ranked[0].item] ?? ranked[0].item}
+                    tip={itemTip(ranked[0].item)} show={showTip} hide={hideTip} />
+            : "값이 있는 칸 없음"}
           tipId="tip-top"
           tip="값이 있는 칸만 놓고 항목별로 합쳤을 때 오해율이 가장 높은 항목입니다."
         />
@@ -580,7 +689,20 @@ export default function S08Dashboard() {
           `aria-hidden` 이고 사실은 그 밑 문장에 있다. */}
       {(decisions || decisionsFailed) && (
         <section className="s08__decide" aria-label="게이트 결정">
-          <h2 className="s08__panel-title">게이트가 무엇을 결정했는가</h2>
+          <PanelTitle
+            id="tip-decide" show={showTip} hide={hideTip}
+            tip={
+              <>
+                신호 분포는 <b>판정이 끝난 세션만</b> 셉니다 — 진행 중인 세션은 아직 결정이
+                아니라서 넣으면 분모가 부풀고 모든 비율이 낮아집니다. 비율이 <b>0 이 아니라
+                「가려짐」</b>인 칸은 표본이 30건에 못 미쳐 값을 감춘 것이고,
+                <b> 「데이터 없음」</b>은 해당하는 건이 아예 없는 것입니다 — 둘은 다른
+                사실입니다.
+              </>
+            }
+          >
+            게이트가 무엇을 결정했는가
+          </PanelTitle>
           {decisions ? (<>
             <GateBar gate={decisions.gate} />
             <div className="s08__dstats">
@@ -588,12 +710,6 @@ export default function S08Dashboard() {
               <OverrideStat count={decisions.override} />
               <UnmeasuredStat count={decisions.unmeasured} />
             </div>
-            <p className="s08__panel-note">
-              신호 분포는 <b>판정이 끝난 세션만</b> 셉니다 — 진행 중인 세션은 아직 결정이
-              아니라서 넣으면 분모가 부풀고 모든 비율이 낮아집니다. 비율이 <b>0 이 아니라
-              「가려짐」</b>인 칸은 표본이 30건에 못 미쳐 값을 감춘 것이고,
-              <b> 「데이터 없음」</b>은 해당하는 건이 아예 없는 것입니다 — 둘은 다른 사실입니다.
-            </p>
           </>) : (
             /* 대비 패널과 같은 규칙이다 — 권한이 같은 엔드포인트라 히트맵이 떴는데 이쪽만
                죽는 것은 정상 상태가 아니고, 빈 자리는 "결정이 없었다" 로 읽힌다. */
@@ -610,12 +726,34 @@ export default function S08Dashboard() {
           같은 데이터를 한 축(항목)으로 접어 막대로 세운다. */}
       {ranked.length > 0 && (
         <section className="s08__rank" aria-label="항목별 오해율">
-          <h2 className="s08__panel-title">항목별 오해율</h2>
+          <PanelTitle
+            id="tip-rank" show={showTip} hide={hideTip}
+            tip={
+              <>
+                항목 이름에 <b>마우스를 올리면</b> 그 항목이 무엇을 재는지 나옵니다.
+                {stats.weighted != null && (
+                  <>
+                    <br />
+                    전체 오해율(<b>{Math.round(stats.weighted * 100)}%</b>)을 넘는 항목 중
+                    <b> 상위 {FOCUS_MAX}개</b>를 <b>설명 자료 개선 대상</b>으로 표시합니다.
+                    기준은 이 화면의 오해율 그대로라 데이터가 바뀌면 같이 움직이고, 개수
+                    상한은 <b>먼저 볼 것을 좁히려는 것</b>이지 나머지가 괜찮다는 뜻이
+                    아닙니다 — 표시가 없는 항목도 오해율은 옆에 그대로 적혀 있습니다.
+                    <b> 가려진 칸은 순위에 들어가지 않습니다</b> — 여기 있는 항목은 모두
+                    표본 30건 이상을 근거로 합니다.
+                  </>
+                )}
+              </>
+            }
+          >
+            항목별 오해율
+          </PanelTitle>
           <ol className="s08__rank-list">
             {ranked.map((r) => (
               <li key={r.item} className={`s08__rank-row${r.focus ? " s08__rank-row--focus" : ""}`}>
                 <span className="s08__rank-name">
-                  {itemNames[r.item] ?? r.item}
+                  <Term text={itemNames[r.item] ?? r.item} tip={itemTip(r.item)}
+                        show={showTip} hide={hideTip} />
                   {/* 표식은 색이 아니라 **말**이다. 이 화면에서 3색은 판정 전용이고
                       (tokens.css 규칙 1) 이건 판정이 아니라 우선순위다 — 색을 쓰면
                       집계가 게이트 신호처럼 읽힌다. */}
@@ -629,18 +767,6 @@ export default function S08Dashboard() {
               </li>
             ))}
           </ol>
-          {/* 기준선을 문면이 그대로 적는다 — 적지 않으면 그게 조용한 정책이 된다.
-              선이 없는 경우(전부 가려짐)는 표식도 없으므로 이 문장도 안 낸다. */}
-          {stats.weighted != null && (
-            <p className="s08__panel-note">
-              전체 오해율(<b>{Math.round(stats.weighted * 100)}%</b>)을 넘는 항목 중
-              <b> 상위 {FOCUS_MAX}개</b>를 <b>설명 자료 개선 대상</b>으로 표시했습니다.
-              기준은 이 화면의 오해율 그대로라 데이터가 바뀌면 같이 움직이고, 개수 상한은
-              <b> 먼저 볼 것을 좁히려는 것</b>이지 나머지가 괜찮다는 뜻이 아닙니다 — 표시가
-              없는 항목도 오해율은 옆에 그대로 적혀 있습니다. <b>가려진 칸은 순위에
-              들어가지 않습니다</b> — 여기 있는 항목은 모두 표본 30건 이상을 근거로 합니다.
-            </p>
-          )}
         </section>
       )}
 
@@ -650,7 +776,19 @@ export default function S08Dashboard() {
           매기는지가 화면에서 증명되지 않았다. 두 줄을 나란히 놓는 것이 그 증명이다. */}
       {(contrast || contrastFailed) && (
         <section className="s08__contrast" aria-label="취약 고객 대비">
-          <h2 className="s08__panel-title">취약 고객 대비</h2>
+          <PanelTitle
+            id="tip-contrast" show={showTip} hide={hideTip}
+            tip={
+              <>
+                취약 여부는 <b>서버가 정합니다</b> — 연령대만이 아니라 가입금액대·투자경험·
+                채널까지 네 요인의 합입니다(<code>vulnerability_weights.yaml</code>). 같은
+                연령대 안에서도 두 줄이 갈립니다. 위 필터는 <b>두 줄에 똑같이</b> 걸리고,
+                표본 30건 미만인 줄은 히트맵 칸과 같은 규칙으로 가려집니다.
+              </>
+            }
+          >
+            취약 고객 대비
+          </PanelTitle>
           {contrast ? (<>
             <div className="s08__contrast-rows">
               {contrast.rows.map((row) => (
@@ -658,12 +796,6 @@ export default function S08Dashboard() {
               ))}
             </div>
             <ContrastGap rows={contrast.rows} />
-            <p className="s08__panel-note">
-              취약 여부는 <b>서버가 정합니다</b> — 연령대만이 아니라 가입금액대·투자경험·
-              채널까지 네 요인의 합입니다(<code>vulnerability_weights.yaml</code>). 같은
-              연령대 안에서도 두 줄이 갈립니다. 위 필터는 <b>두 줄에 똑같이</b> 걸리고,
-              표본 30건 미만인 줄은 히트맵 칸과 같은 규칙으로 가려집니다.
-            </p>
           </>) : (
             /* 조용히 사라지게 두지 않는다 — 히트맵과 권한이 같은 엔드포인트라 여기만
                죽는 것은 정상 상태가 아니다. 빈 자리는 "데이터가 없다" 로 읽힌다. */
@@ -679,7 +811,20 @@ export default function S08Dashboard() {
         <p className="s08__empty">집계된 셀이 없습니다.</p>
       ) : (
         <section className="s08__matrix" aria-label="상품별 이해항목 오해율">
-          <h2 className="s08__panel-title">상품 × 이해항목</h2>
+          <PanelTitle
+            id="tip-matrix" show={showTip} hide={hideTip}
+            tip={
+              <>
+                칸의 진하기가 그 조합의 오해율입니다. <b>표 머리의 항목 이름에 마우스를
+                올리면</b> 그 항목이 무엇을 재는지 나옵니다 — 이름은 채점 루브릭에서
+                옵니다. 칸에 올리면 표본 수까지 나옵니다. <b>「가려짐」과 「—」는 다릅니다</b>:
+                앞은 표본이 30건에 못 미쳐 값을 감춘 것이고, 뒤는 해당하는 판정이 아예 없는
+                것입니다.
+              </>
+            }
+          >
+            상품 × 이해항목
+          </PanelTitle>
           <div className="s08__table-wrap">
           <table className="s08__table">
             <thead>
@@ -687,8 +832,11 @@ export default function S08Dashboard() {
                 <th scope="col">상품 \ 이해항목</th>
                 {items.map((it) => (
                   <th key={it} scope="col">
-                    {itemNames[it] ?? it}
-                    {itemNames[it] && <span className="s08__row-id">{it}</span>}
+                    {/* ID 원문을 부제로 달던 것을 걷었다 — 이름을 서버가 싣게 된 뒤로 그
+                        줄은 축을 두 배로 높이기만 했다. 필요한 사람(감사·심사)에게는 ⓘ 가
+                        루브릭 ID 를 그대로 보여준다. */}
+                    <Term text={itemNames[it] ?? it} tip={itemTip(it)}
+                          show={showTip} hide={hideTip} />
                   </th>
                 ))}
               </tr>
@@ -786,7 +934,7 @@ export default function S08Dashboard() {
       </>)}
 
       {/* ── 선행지표 뷰 (F-DSH-002) ───────────────────────────────────────── */}
-      {view === "indicator" && (<>
+      {rendered === "indicator" && (<>
         <section className="s08__filters">
           <label>
             <span>집계 축</span>
@@ -802,47 +950,74 @@ export default function S08Dashboard() {
           </label>
           {/* 축과 범위를 화면이 먼저 갈라 말한다 — 계약이 이름을 가른 이유가 이것이고,
               둘을 같은 것으로 읽으면 MGR 이 지점 추이를 전사 추이로 본다. */}
-          <p className="s08__axis-note">
-            상품·연령대·채널 필터는 오해 지도에만 걸립니다. 여기서 고르는 것은
-            <b> 집계 축</b>이고, 보이는 <b>범위</b>는 역할이 정합니다.
-          </p>
+          <Info
+            id="tip-axis" label="집계 축" show={showTip} hide={hideTip}
+            tip={
+              <>
+                상품·연령대·채널 필터는 오해 지도에만 걸립니다. 여기서 고르는 것은
+                <b> 집계 축</b>(무엇을 한 줄로 볼 것인가)이고, 보이는 <b>범위</b>(어느
+                세션까지 셀 것인가)는 역할이 정합니다 — 관리자는 자기 지점, 준법감시는
+                전사입니다. 둘은 다른 개념이라 화면도 말을 갈라 씁니다.
+              </>
+            }
+          />
         </section>
 
         {/* 이상치 — 서버가 판단한 것만. 화면은 임계값을 다시 계산하지 않는다. */}
         {(indicator?.outliers.length ?? 0) > 0 && (
           <section className="s08__outliers" aria-label="이상치">
-            <h2 className="s08__panel-title">
+            <PanelTitle
+              id="tip-outlier" show={showTip} hide={hideTip}
+              tip={
+                <>
+                  직전 구간 평균과 견준 값입니다. <b>가려진 구간으로는 이상치를 말하지
+                  않습니다</b> — 표본이 모자란 주는 판단에서 빠집니다. 판단은 <b>서버가</b>
+                  합니다: 화면이 임계값을 다시 계산하면 두 벌이 되고, 어긋나는 날 화면이
+                  서버가 하지 않은 판단을 말하게 됩니다. 사유 문장도 서버 것 그대로입니다.
+                </>
+              }
+            >
               이상치 <span className="s08__count">{indicator?.outliers.length}건</span>
-            </h2>
+            </PanelTitle>
             <ul className="s08__out-list">
               {/* 키 구분자는 데이터에 못 들어가는 문자라야 겹치지 않는다. 다만 리터럴 NUL 을
                   파일에 박으면 rg·grep 이 이 파일을 바이너리로 보고 통째로 건너뛴다 — 검색이
                   0건을 내고, 에러가 아니라 침묵으로 틀린다(이슈 #318). 같은 값을 이스케이프로 적는다. */}
               {indicator?.outliers.map((o) => (
                 <li key={`${o.groupBy}\u0000${o.key}`} className="s08__out-row">
-                  <span className="s08__out-key">{o.key}</span>
+                  {/* ❗**여기가 사람이 제일 먼저 읽는 자리다.** 추이 표에만 이름을 붙이면
+                      「먼저 봐야 하는 줄」인 이상치가 ID 원문으로 남는다. 규칙은 표와 같다. */}
+                  <span className="s08__out-key">{o.itemName ?? o.key}</span>
                   {/* 사유 문장은 서버 것을 그대로 낸다 — 화면이 고쳐 쓰면 근거가 갈린다. */}
                   <span className="s08__out-reason">{o.reason}</span>
                 </li>
               ))}
             </ul>
-            <p className="s08__panel-note">
-              직전 구간 평균과 견준 값입니다. <b>가려진 구간으로는 이상치를 말하지 않습니다</b> —
-              표본이 모자란 주는 판단에서 빠집니다.
-            </p>
           </section>
         )}
 
         {rows.length === 0 ? (
           <p className="s08__empty">집계된 계열이 없습니다.</p>
         ) : (
-          <section className="s08__trend" aria-label={`${AXIS_LABEL[axis]}별 주간 오해율 추이`}>
-            <h2 className="s08__panel-title">{AXIS_LABEL[axis]}별 주간 추이</h2>
+          <section className="s08__trend" aria-label={`${AXIS_LABEL[shownAxis]}별 주간 오해율 추이`}>
+            <PanelTitle
+              id="tip-trend" show={showTip} hide={hideTip}
+              tip={
+                <>
+                  막대 높이가 그 주의 오해율입니다. <b>값이 없는 주는 막대를 그리지
+                  않습니다</b> — 판정이 없었던 주와 표본이 모자라 가린 주는 0% 와 다릅니다.
+                  숫자는 가장 최근 주에만 적습니다. 오른쪽 끝이 이번 주이고, 왼쪽으로 갈수록
+                  과거입니다.
+                </>
+              }
+            >
+              {AXIS_LABEL[shownAxis]}별 주간 추이
+            </PanelTitle>
             <div className="s08__table-wrap">
               <table className="s08__table s08__trend-table">
                 <thead>
                   <tr>
-                    <th scope="col">{AXIS_LABEL[axis]} \ 주</th>
+                    <th scope="col">{AXIS_LABEL[shownAxis]} \ 주</th>
                     {periods.map((p, i) => (
                       <th
                         key={p}
@@ -863,7 +1038,16 @@ export default function S08Dashboard() {
                     return (
                       <tr key={s.key}>
                         <th scope="row">
-                          {s.key}
+                          {/* 이름은 **서버가 푼다**(`itemName`). 오해 지도 응답에서 이름표를
+                              주워 오던 방식은 이 탭으로 바로 들어오거나 히트맵에 필터가
+                              걸리면 비어서 조용히 ID 원문으로 되돌아갔다 — 두 뷰가 같은
+                              항목을 다른 이름으로 부를 자리도 같이 없앤다.
+                              항목 축이 아니면(지점·판매자) `itemName` 이 null 이라 키를
+                              그대로 그린다. 판매자 키는 비식별 대체키라 그게 맞다. */}
+                          {s.itemName ? (
+                            <Term text={s.itemName} tip={itemTip(s.key)}
+                                  show={showTip} hide={hideTip} />
+                          ) : s.key}
                           {/* 이상치 표식은 색이 아니라 **말**이다 — 신호등 3색은 판정
                               전용이고(tokens.css 규칙 1) 이건 판정이 아니다. */}
                           {outlierKeys.has(s.key) && (
@@ -887,14 +1071,10 @@ export default function S08Dashboard() {
                 </tbody>
               </table>
             </div>
-            <p className="s08__panel-note">
-              막대 높이가 그 주의 오해율입니다. <b>값이 없는 주는 막대를 그리지 않습니다</b> —
-              판정이 없었던 주와 표본이 모자라 가린 주는 0% 와 다릅니다. 숫자는 가장 최근
-              주에만 적습니다.
-            </p>
           </section>
         )}
       </>)}
+      </div>
 
       {/* 화면 좌표에 뜨는 단 하나의 툴팁. `position: fixed` 라 카드의 스태킹 컨텍스트도,
           표의 overflow 도 통과한다. 트리거가 여럿이어도 실체는 하나다. */}
@@ -940,34 +1120,94 @@ function Tag({ text, tip, id, strong, show, hide }: {
 }
 
 /**
- * 요약 타일. 값이 주인공이고 라벨은 작다 — 대시보드는 문장이 아니라 수치를 읽는 곳이다.
+ * ⓘ 한 개. **이 화면의 설명은 전부 이 모양으로만 나온다.**
  *
- * 정의·주의는 ⓘ 에 붙인다. hover 와 **키보드 포커스** 둘 다에서 열려야 해서 버튼이고,
- * `aria-describedby` 로 묶어 스크린리더에서는 열지 않아도 읽힌다.
+ * 대시보드는 수치를 읽는 곳인데 패널마다 서너 줄짜리 안내문이 깔려 있어서, 표와 표
+ * 사이가 문단으로 메워지고 **정작 값이 화면 밖으로 밀렸다.** 규칙·정의·주의는 지울 것이
+ * 아니라(지우면 조용한 정책이 된다) 접을 것이라, 문면을 그대로 이 ⓘ 안으로 옮겼다.
+ *
+ * hover 와 **키보드 포커스** 둘 다에서 열려야 해서 `span` 이 아니라 `button` 이고,
+ * `aria-describedby` 로 묶여 스크린리더에서는 열지 않아도 읽힌다 — 즉 **접었지만 아무도
+ * 못 읽게 되지는 않는다.** 눈에 보이는 툴팁은 화면 좌표에 `fixed` 로 따로 뜬다(카드의
+ * 스태킹 컨텍스트와 표의 overflow 를 통과해야 해서다. 파일 상단 `tip` 주석).
+ */
+function Info({ id, label, tip, show, hide }: {
+  id: string; label: string; tip: ReactNode;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className="s08__info"
+        aria-describedby={id}
+        onMouseEnter={(e) => show(e.currentTarget, tip)}
+        onMouseLeave={hide}
+        onFocus={(e) => show(e.currentTarget, tip)}
+        onBlur={hide}
+      >
+        <span aria-hidden="true">i</span>
+        <span className="sr-only">{label} 설명</span>
+      </button>
+      <span id={id} className="sr-only">{tip}</span>
+    </>
+  );
+}
+
+/**
+ * 패널 제목 + ⓘ. 제목마다 손으로 엮으면 한 패널에서 빠뜨리고, **설명이 없는 패널이
+ * 「설명할 것이 없는 패널」로 읽힌다.**
+ */
+function PanelTitle({ children, tip, id, show, hide }: {
+  children: ReactNode; tip: ReactNode; id: string;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+}) {
+  return (
+    <h2 className="s08__panel-title">
+      {children}
+      <Info id={id} label="이 패널" tip={tip} show={show} hide={hide} />
+    </h2>
+  );
+}
+
+/**
+ * 뜻이 붙은 말. 이해항목 이름처럼 **여러 번 반복되는 자리**에 쓴다.
+ *
+ * 여기에 ⓘ 를 달지 않는 이유는 개수다 — 표 머리 17칸과 순위 17줄에 아이콘이 붙으면
+ * 그 자체가 잡음이 되고, 정작 봐야 할 값에서 눈을 뺏는다. 대신 **말 자체를 트리거로**
+ * 두고 점선 밑줄로만 표시한다. `tabIndex` 가 있어 키보드로도 닿는다.
+ */
+function Term({ text, tip, show, hide }: {
+  text: string; tip: ReactNode;
+  show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
+}) {
+  return (
+    <span
+      className="s08__term"
+      tabIndex={0}
+      onMouseEnter={(e) => show(e.currentTarget, tip)}
+      onMouseLeave={hide}
+      onFocus={(e) => show(e.currentTarget, tip)}
+      onBlur={hide}
+    >
+      {text}
+    </span>
+  );
+}
+
+/**
+ * 요약 타일. 값이 주인공이고 라벨은 작다 — 대시보드는 문장이 아니라 수치를 읽는 곳이다.
+ * 정의·주의는 ⓘ 에 붙인다.
  */
 function Kpi({ label, value, sub, tip, tipId, show, hide }: {
-  label: string; value: string; sub: string; tip: string; tipId: string;
+  label: string; value: string; sub: ReactNode; tip: string; tipId: string;
   show: (el: HTMLElement | null, node: ReactNode) => void; hide: () => void;
 }) {
   return (
     <article className="s08__kpi">
       <p className="s08__kpi-label">
         {label}
-        <button
-          type="button"
-          className="s08__info"
-          aria-describedby={tipId}
-          onMouseEnter={(e) => show(e.currentTarget, tip)}
-          onMouseLeave={hide}
-          onFocus={(e) => show(e.currentTarget, tip)}
-          onBlur={hide}
-        >
-          <span aria-hidden="true">i</span>
-          <span className="sr-only">{label} 설명</span>
-        </button>
-        {/* 눈에 보이는 툴팁은 화면 좌표로 따로 뜬다(가려짐 방지). 이건 스크린리더용 —
-            `aria-describedby` 가 가리키는 실체라 hover 없이도 읽힌다. */}
-        <span id={tipId} className="sr-only">{tip}</span>
+        <Info id={tipId} label={label} tip={tip} show={show} hide={hide} />
       </p>
       <p className="s08__kpi-value">{value}</p>
       <p className="s08__kpi-sub">{sub}</p>

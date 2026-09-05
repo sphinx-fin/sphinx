@@ -1197,6 +1197,16 @@ components:
             값이라 상품을 넘어 합치는 축에 쓰면 같은 항목이 두 줄이 된다(결정 5.42).
             카탈로그에 없으면 null 이고 화면은 item 을 그대로 그린다 — 라벨이 없다고 집계를
             멈추지 않는다. required 가 아닌 이유가 그것이다.
+        itemRequires:
+          type: array
+          items: {type: string}
+          description: >
+            **이 항목이 무엇을 재는가** — 고객이 말할 수 있어야 채점이 「이해」로 보는 요소들.
+            채점 루브릭(ai-service/app/rubrics/*.yaml)의 required_elements 를 **글자 그대로**
+            싣는다. itemName 의 다음 층이다: 이름(「전액손실 사례」)은 항목을 가리키기만 하고
+            그 칸이 무엇을 센 것인지는 말하지 않아서, 축을 처음 보는 사람이 거기서 멈춘다.
+            요약본을 실으면 화면이 채점 기준과 다른 말을 하게 되므로 원문 그대로다.
+            카탈로그에 없으면 빈 배열 — 그때 화면은 이름만 그린다.
         misrate: {type: number, nullable: true, minimum: 0, maximum: 1, description: "오해율. masked 면 null"}
         n:       {type: integer, minimum: 0, description: "표본 수. 마스킹돼도 내려준다"}
         masked:
@@ -1304,6 +1314,17 @@ components:
       properties:
         groupBy: {type: string, enum: [branch, seller, item], description: "집계 축. 데이터 범위(scope)가 아니다"}
         key:     {type: string, description: "지점·판매자·항목 식별자. 판매자는 비식별 대체키"}
+        itemName:
+          type: string
+          nullable: true
+          description: >
+            사람이 읽는 이름. **`groupBy: item` 에서만 찬다** — 나머지 축은 null 이고 화면이
+            `key` 를 그대로 그린다. 값은 채점 루브릭의 항목명이고 HeatmapCell.itemName 과
+            **같은 출처·같은 규칙**이다(결정 5.42 — 추출 이름은 회차 값이라 상품을 넘어
+            합치는 축에 쓰면 같은 항목이 두 줄이 된다).
+            ❗**판매자 축에는 이름이 있으면 안 된다.** `key` 가 비식별 대체키인 이유가
+            그것이라, 그 자리에 이름을 실으면 계약이 대체키를 쓰는 뜻이 사라진다.
+            카탈로그에 없으면 null 이다 — 라벨이 없다고 집계를 멈추지 않는다.
         points: {type: array, items: {$ref: '#/components/schemas/IndicatorPoint'}}
     IndicatorOutlier:
       type: object
@@ -1311,6 +1332,17 @@ components:
       properties:
         groupBy: {type: string, enum: [branch, seller, item], description: "집계 축. 데이터 범위(scope)가 아니다"}
         key:     {type: string}
+        itemName:
+          type: string
+          nullable: true
+          description: >
+            사람이 읽는 이름. **`groupBy: item` 에서만 찬다** — 나머지 축은 null 이고 화면이
+            `key` 를 그대로 그린다. 값은 채점 루브릭의 항목명이고 HeatmapCell.itemName 과
+            **같은 출처·같은 규칙**이다(결정 5.42 — 추출 이름은 회차 값이라 상품을 넘어
+            합치는 축에 쓰면 같은 항목이 두 줄이 된다).
+            ❗**판매자 축에는 이름이 있으면 안 된다.** `key` 가 비식별 대체키인 이유가
+            그것이라, 그 자리에 이름을 실으면 계약이 대체키를 쓰는 뜻이 사라진다.
+            카탈로그에 없으면 null 이다 — 라벨이 없다고 집계를 멈추지 않는다.
         reason: {type: string, description: "사람이 읽는 사유(예: 직전 4주 대비 +18%p)"}
         delta:  {type: number, nullable: true, description: "기계 판독용 변화량"}
     LeadingIndicatorResponse:

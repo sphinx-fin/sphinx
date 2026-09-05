@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -71,6 +72,24 @@ public class RiskItemCatalog {
         return productTypes.get(productTypeOrId);
     }
 
+    /**
+     * 이 항목이 <b>무엇을 재는가</b> — 고객이 말할 수 있어야 하는 요소들. 모르는 키면 빈 목록.
+     *
+     * <p>루브릭 {@code required_elements} 를 <b>글자 그대로</b> 옮긴 것이다. 이름
+     * (「전액손실 사례」)만으로는 대시보드 축이 무엇을 세는 칸인지 안 읽히는데, 요약해서
+     * 적으면 화면이 채점 기준과 다른 말을 하게 되고 <b>그게 틀렸다는 것을 아무도 못
+     * 알아챈다.</b> 글자 그대로라야 {@code RiskItemCatalogMirrorsRubricsTest} 가 통째로
+     * 대조한다.
+     *
+     * <p>{@link #itemName} 과 같은 규칙으로 <b>예외를 던지지 않는다</b> — 다만 여기서는
+     * {@code null} 이 아니라 빈 목록이다. 화면이 이 값을 그대로 순회하므로, 없는 것과 빈 것을
+     * 가를 이유가 없는 자리에서 {@code null} 을 내보내면 호출부마다 분기가 하나씩 생긴다.
+     */
+    public List<String> itemRequires(String itemId) {
+        Entry entry = items.get(itemId);
+        return entry == null || entry.requires() == null ? List.of() : entry.requires();
+    }
+
     /** 항목ID → 표시명 전량. 대조 테스트가 읽는다. */
     public Map<String, String> itemNames() {
         Map<String, String> flat = new LinkedHashMap<>();
@@ -82,6 +101,14 @@ public class RiskItemCatalog {
     public Map<String, String> itemProductTypes() {
         Map<String, String> flat = new LinkedHashMap<>();
         items.forEach((id, entry) -> flat.put(id, entry.productType()));
+        return Map.copyOf(flat);
+    }
+
+    /** 항목ID → 필수 요소 전량. 대조 테스트가 읽는다. */
+    public Map<String, List<String>> itemRequirements() {
+        Map<String, List<String>> flat = new LinkedHashMap<>();
+        items.forEach((id, entry) -> flat.put(id, entry.requires() == null
+                ? List.of() : List.copyOf(entry.requires())));
         return Map.copyOf(flat);
     }
 
@@ -107,7 +134,8 @@ public class RiskItemCatalog {
     }
 
     /** risk_item_catalog.yaml 의 한 항목. */
-    private record Entry(@JsonProperty("product-type") String productType, String name) {}
+    private record Entry(@JsonProperty("product-type") String productType, String name,
+                         List<String> requires) {}
 
     /** risk_item_catalog.yaml 역직렬화 형태. */
     private record Config(
