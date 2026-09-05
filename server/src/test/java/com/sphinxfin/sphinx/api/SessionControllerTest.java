@@ -105,6 +105,12 @@ class SessionControllerTest {
                         .content("""
                                 {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"낙인 하회하면 원금 손실 난다고 들었어요"}"""))
                 .andExpect(status().isOk());
+        // 두 번째 이해항목도 U1 로 채워 분모를 닫는다(#405) — 안 그러면 미측정 R-00(RED)이
+        // R-02b 를 가려 이 테스트가 재려는 "확인 못 함 → YELLOW"가 안 보인다.
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"예금자보호가 안 된다고 들었어요"}"""))
+                .andExpect(status().isOk());
 
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())          // 502 로 판매를 멈추지 않는다
@@ -266,6 +272,14 @@ class SessionControllerTest {
         mvc.perform(get("/sessions/" + sid))
                 .andExpect(jsonPath("$.data.state").value("IN_PROGRESS"));
 
+        // 두 번째 이해항목도 답변한다 — 게이트 분모는 그 상품의 추출 항목 집합이라(#405)
+        // 한 항목만 판정하면 나머지가 미측정으로 잡혀 R-00 이 먼저 문다. 여기서 재는 것은
+        // U4 → R-01 이므로 기대 항목을 전부 채워 분모를 닫는다(둘 다 U4).
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk());
+
         // 게이트 판정 — U4 있으니 RED, 세션은 JUDGED로
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(status().isOk())
@@ -295,6 +309,11 @@ class SessionControllerTest {
                                 {"itemId":"ELS-PRINCIPAL-LOSS-WARNING","text":"은행에서 파니까 원금은 지켜지죠"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grade").value("U4"));
+        // 기대 항목을 전부 채워 분모를 닫는다(#405) — 안 그러면 미측정 R-00 이 먼저 문다.
+        mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"ELS-NO-DEPOSIT-INSURANCE","text":"은행에서 파니까 원금은 지켜지죠"}"""))
+                .andExpect(status().isOk());
 
         mvc.perform(post("/sessions/" + sid + "/judge"))
                 .andExpect(jsonPath("$.data.signal").value("RED"));

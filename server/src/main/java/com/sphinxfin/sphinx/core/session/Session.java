@@ -424,15 +424,6 @@ public class Session extends BaseEntity {
     }
 
     /**
-     * 질문을 보냈는데 <b>판정이 없는</b> 항목 수 (이슈 #280 ②).
-     *
-     * <p>게이트가 분모를 알아야 하는데 <b>"몇 항목이어야 하는가"(추출 결과)가 아직 목</b>이라,
-     * 실제로 물어본 것과 대조한다. 채점이 502 로 죽었거나 고객이 답을 안 한 항목이 여기 잡힌다.
-     *
-     * <p>둘 다 <b>판정할 수 없는 상태</b>다 — 게이트가 그 둘을 가릴 필요는 없다. 가려야 하는
-     * 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00} 이 한다.
-     */
-    /**
      * 질문 생성에 넘길 면담 맥락 (F-INT-002).
      *
      * <p>❗<b>정답이 될 값을 안 담는다.</b> 등급과 오해 유형 ID 뿐이고 발화·루브릭·조건
@@ -460,10 +451,28 @@ public class Session extends BaseEntity {
                 .toList();
     }
 
-    public int unmeasuredItemCount() {
+    /**
+     * <b>기대 항목 중 판정이 없는 항목 수</b> (이슈 #280 ② · #405). {@code R-00} 의 분모다.
+     *
+     * <p>분모({@code expectedItemIds})는 <b>그 상품의 추출 항목 집합</b>이다 —
+     * {@code ProductRiskItems.riskItemsOf(productId)} 가 낸다(저장된 추출 우선, 없으면 MockData
+     * 폴백). 세션은 그 목록을 모르므로 <b>호출부가 넣어 준다</b>({@code SessionService}). 세션은
+     * "무엇을 판정했나" 만 알고, "몇 항목이어야 하나" 는 상품 쪽이 안다 — 둘을 여기서 맞춘다.
+     *
+     * <p>❗<b>전에는 분모가 "질문을 보낸 항목" 이었다.</b> 추출이 아직 목이던 시절의 우회다
+     * (#405). 그러면 <b>아예 안 물어본 항목</b>(질문 생성 실패·항목 누락·순회 중단)이 분모에서
+     * 같이 빠져 안 잡혔다 — 13항목 중 3개에 질문을 못 보냈으면 게이트는 10개만 보고 그 10개가
+     * U1 이면 R-06 이 GREEN 을 냈다. 이제 기대 집합으로 세므로 <b>안 물어본 항목도 미측정으로
+     * 잡힌다.</b> 물어봤는데 못 잰 것(채점 502·무응답)은 이 집합의 부분집합이라 그대로 걸린다.
+     *
+     * <p>가려야 하는 것은 <i>"쟀는데 통과"</i> 와 <i>"못 쟀는데 통과"</i> 이고 그건 {@code R-00}
+     * 이 한다 — 게이트는 왜 못 쟀는지(안 물음·채점 실패·무응답)를 가릴 필요가 없다.
+     */
+    public int unmeasuredItemCount(java.util.Collection<String> expectedItemIds) {
         java.util.Set<String> judged = judgments().stream()
                 .map(Judgment::itemId).collect(java.util.stream.Collectors.toSet());
-        return (int) askedQuestionsByItem.keySet().stream().filter(id -> !judged.contains(id)).count();
+        return (int) expectedItemIds.stream().distinct()
+                .filter(id -> !judged.contains(id)).count();
     }
 
     /** 그 항목에 마지막으로 보여준 질문의 출처. 보여준 적이 없으면 {@code null}. */

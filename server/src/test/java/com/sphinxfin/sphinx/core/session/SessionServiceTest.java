@@ -40,6 +40,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.domain.GateResult;
 import com.sphinxfin.sphinx.core.gate.GateEngine;
 import com.sphinxfin.sphinx.core.persistence.BaseEntity;
@@ -67,6 +68,15 @@ class SessionServiceTest {
 
     private AiServiceClient aiClient;
 
+    /**
+     * 게이트 분모(R-00)의 출처 — 그 상품의 기대 항목 집합(#405).
+     *
+     * <p>기본 스텁은 <b>빈 목록</b>이다: 대부분의 테스트는 등급 조합만 보고 미측정을 재지
+     * 않으므로 분모 제약을 두지 않는다(빈 기대 집합 − 판정 = 0 → R-00 안 뭄). 불완전성을
+     * 실제로 재는 테스트는 각자 {@code riskItemsOf} 를 실 항목 집합으로 재스텁한다.
+     */
+    private ProductRiskItems productRiskItems;
+
     /** ai-service 재설명 콘텐츠 기본값 — 테스트별로 필요하면 재스텁한다. */
     private static final String AI_REEXPLAIN = "[ai-service 재설명 콘텐츠]";
 
@@ -85,8 +95,10 @@ class SessionServiceTest {
         when(aiClient.question(any(RiskItem.class), anyList(), anyString(), anyString(),
                         nullable(AiServiceClient.InterviewContext.class)))
                 .thenReturn(new AiServiceClient.Question(AI_REVERIFY, "situation", false));
+        productRiskItems = mock(ProductRiskItems.class);
+        when(productRiskItems.riskItemsOf(anyString())).thenReturn(List.of());
         service = new SessionService(repository, new GateEngine(), new CoachingScoreService(),
-                Optional.of(evidence), aiClient, events);
+                Optional.of(evidence), aiClient, events, productRiskItems);
     }
 
     /** 서비스의 3-arg reExplain 을 감싼다 — 항목 id 로 목 risk_item 을 만들어 넘긴다. */
@@ -495,13 +507,16 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("❗물어봤는데 판정이 없으면 RED — 차집합이 실제로 도는 경로다 (이슈 #280 ②)")
+    @DisplayName("❗기대 항목인데 판정이 없으면 RED — 차집합이 실제로 도는 경로다 (이슈 #280 ② · #405)")
     void anAskedButUnjudgedItemBlocksTheVerdict() {
         // ❗GateEngineTest 는 미측정 수를 **손으로 넣는다**(engine.judge(…, 1)). 그래서 룰은
         // 잠기는데 **그 룰에 들어가는 숫자는 아무도 안 지나간다** — unmeasuredItemCount() 가
         // return 0 이어도 전건 초록이었다(#291 리뷰, 윤지석 실측).
         //
-        // 여기서는 askedQuestionsByItem 과 judgments 를 실제로 갈라 놓고 judge() 를 부른다.
+        // 분모는 그 상품의 기대 항목 집합이다(#405) — 여기선 {A,B}. B 는 채점이 실패해
+        // 판정이 없다. 물어봤든 안 물어봤든, 기대 항목인데 판정이 없으면 미측정으로 잡힌다.
+        when(productRiskItems.riskItemsOf(anyString()))
+                .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -510,7 +525,7 @@ class SessionServiceTest {
         GateResult r = service.judge(s.id());
 
         assertThat(r.signal())
-                .as("A 가 U1 이라 R-06 이 GREEN 을 냈다 — 물어본 B 를 못 쟀는데도. "
+                .as("A 가 U1 이라 R-06 이 GREEN 을 냈다 — 기대 항목 B 를 못 쟀는데도. "
                         + "이 경로를 안 지나가면 계산이 0 을 돌려줘도 아무도 모른다")
                 .isEqualTo(Signal.RED);
         assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-00");
@@ -521,8 +536,56 @@ class SessionServiceTest {
     }
 
     @Test
+    @DisplayName("❗아예 안 물어본 기대 항목도 미측정으로 잡힌다 — 물어본 것만 U1 이라고 GREEN 이 아니다 (#405)")
+    void aNeverAskedExpectedItemBlocksGreen() {
+        // 이 우회의 진짜 사각(#405): 분모가 "질문을 보낸 항목" 이던 시절엔, 질문 생성이 실패했거나
+        // 순회가 중단돼 **아예 안 물어본** 항목이 분모에서 통째로 빠졌다. 추출 항목이 3개(A·B·C)인데
+        // C 에 질문을 못 보냈고 A·B 만 U1 이면, 옛 분모(물어본 A·B)로는 미측정 0 → R-06 이 GREEN.
+        //
+        // 분모를 추출 항목 집합으로 되돌리면(#405) C 가 판정 없는 기대 항목으로 잡혀 R-00 이 문다.
+        // ❗C 에는 recordAskedQuestion 을 부르지 않는다 — 옛 분모라면 여기가 GREEN 이다.
+        when(productRiskItems.riskItemsOf(anyString()))
+                .thenReturn(List.of(riskItem("A"), riskItem("B"), riskItem("C")));
+        Session s = service.create(cmd(null));
+        service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordJudgment(s.id(), j("B", Grade.U1));   // 물어본 것은 전부 U1 이다
+
+        GateResult r = service.judge(s.id());
+
+        assertThat(r.signal())
+                .as("물어본 A·B 가 전부 U1 이라 옛 분모로는 GREEN 이었다 — 안 물어본 C 가 "
+                        + "분모에서 빠졌기 때문. 추출 항목 집합을 분모로 쓰면 C 가 미측정으로 잡힌다")
+                .isEqualTo(Signal.RED);
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-00");
+        assertThat(r.unmeasured())
+                .as("안 물어본 C 하나가 미측정이다 — 분모가 기대 집합(3) − 판정(2) 로 도는지 본다")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("기대 항목 전부를 판정하고 U1 이면 GREEN — 분모가 맞으면 통과도 그대로 난다 (#405)")
+    void allExpectedItemsJudgedU1_isGreen() {
+        // R-00 이 늘 RED 를 내면 게이트가 아무것도 안 가른다 — 분모가 채워지면 통과가 나와야 한다.
+        when(productRiskItems.riskItemsOf(anyString()))
+                .thenReturn(List.of(riskItem("A"), riskItem("B")));
+        Session s = service.create(cmd(null));
+        service.recordJudgment(s.id(), j("A", Grade.U1));
+        service.recordJudgment(s.id(), j("B", Grade.U1));
+
+        GateResult r = service.judge(s.id());
+
+        assertThat(r.signal()).isEqualTo(Signal.GREEN);
+        assertThat(r.ruleTrace()).extracting(RuleRef::id).contains("R-06");
+        assertThat(r.unmeasured()).isZero();
+    }
+
+    @Test
     @DisplayName("❗판정 뒤에 마저 채점해도 기록된 미측정 수는 그때의 값이다 — 재계산값이 아니다")
     void theRecordedGateKeepsTheNumberItWasJudgedWith() {
+        when(productRiskItems.riskItemsOf(anyString()))
+                .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -542,6 +605,8 @@ class SessionServiceTest {
     @Test
     @DisplayName("❗미리보기도 같은 답을 낸다 — 미리보기가 더 낙관적이면 재설명 루프를 건너뛴다")
     void thePreviewAgreesWithTheVerdict() {
+        when(productRiskItems.riskItemsOf(anyString()))
+                .thenReturn(List.of(riskItem("A"), riskItem("B")));
         Session s = service.create(cmd(null));
         service.recordAskedQuestion(s.id(), "A", "A 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
         service.recordAskedQuestion(s.id(), "B", "B 질문", "situation", EvidenceRecorder.QuestionSource.DISPLAYED);
@@ -698,7 +763,7 @@ class SessionServiceTest {
     @DisplayName("evidence 구현이 없어도(NO_OP) 세션 루프는 그대로 돈다")
     void worksWithoutEvidenceRecorder() {
         SessionService bare = new SessionService(repository, new GateEngine(),
-                new CoachingScoreService(), Optional.empty(), aiClient, events);
+                new CoachingScoreService(), Optional.empty(), aiClient, events, productRiskItems);
         Session s = bare.create(cmd(null));
         bare.recordJudgment(s.id(), j("A", Grade.U1));
         assertThat(bare.judge(s.id()).signal()).isEqualTo(Signal.GREEN);
