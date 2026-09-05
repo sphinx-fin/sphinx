@@ -51,10 +51,18 @@
  *    있는지(페이지·오프셋)** 를 보여준다 — 판매자가 손에 든 설명서와 눈으로 대조할 수 있는
  *    최소 단위다. 추출 실패 항목도 숨기지 않는다(E-EXT-03).
  *
- *    **PDF 원본은 아직 안 그린다.** 계약에 문서 조회 엔드포인트가 없다(`openapi.yaml` 에
- *    `POST /products/documents` 업로드만 있다). 없는 링크를 그려 두면 눌러 보고 깨진 것을
- *    보게 되므로, S-07 이 PDF 미리보기에 한 것과 같은 선택을 한다 — 자리가 생기면 그리고,
- *    그 전에는 무엇이 없는지만 적는다.
+ *    **PDF 원본은 아직 안 그린다 — 다만 이유가 바뀌었다.** 예전에는 *"계약에 문서 조회
+ *    엔드포인트가 없다"* 였는데 그건 낡은 문면이다(이슈 #417). 지금은 있다.
+ *
+ *        openapi.yaml:66            GET /products/{id}/document        (#412 · #428)
+ *        ProductController:128      @GetMapping("/{productId}/document")
+ *
+ *    ❗**막는 것은 이제 계약이 아니라 배포다.** `docker-compose` 가 server 에 `data/documents`
+ *    를 안 물려서 alpha 에서 그 라우트가 실패한다(이슈 #433 — 컨테이너에 파일이 없다).
+ *    링크를 지금 그리면 판매자가 눌러 보고 깨진 것을 보게 되는데, 그게 이 자리가 원래
+ *    피하려던 것이다. S-07 이 PDF 미리보기에 한 선택과 같다 — **닿는 것이 확인되면 그린다.**
+ *    조건은 문면이 아니라 사건이다: `#433` 이 닫히면(마운트 두 줄) 이 문단을 지우고
+ *    `${BASE}/products/${productId}/document` 를 모달에 붙인다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -582,8 +590,8 @@ function ProductDocumentModal({
           {/* S-07 과 같은 선택 — 없는 것은 안 그리고, 무엇이 없는지만 적는다. */}
           {items && items.length > 0 && (
             <p className="ss__hint ss__modal-note">
-              문서 원본(PDF) 보기는 아직 없습니다. 계약에 문서 조회 엔드포인트가 생기면 이
-              자리에 붙습니다.
+              문서 원본(PDF) 보기는 아직 없습니다. 조회 경로는 생겼지만 배포에 원본 파일이
+              올라가 있지 않아, 닿는 것이 확인되면 이 자리에 붙습니다.
             </p>
           )}
         </div>

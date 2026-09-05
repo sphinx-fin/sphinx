@@ -34,21 +34,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
-import type { GatePreview, SessionResponse } from "../api/types";
+import type { GatePreview, OverrideResponse, SessionResponse } from "../api/types";
 import ErrorNote from "../components/ErrorNote";
 import { describeError, type ShownError } from "../lib/errorText";
 import "./S06_Override.css";
 
 /** ADR-002 견제 장치. 서버가 400 으로 막는 값과 같아야 한다 — 화면이 더 느슨하면 의미가 없다. */
 const MIN_REASON = 30;
-
-/** 계약 `OverrideResponse`. types.ts 에 아직 없어 여기서 좁게 선언한다(계약 추가는 강희진 몫). */
-interface OverrideResponse {
-  status: "PENDING_APPROVAL" | "APPROVED";
-  reason: string;
-  approver?: string | null;
-  decidedAt?: string | null;
-}
 
 export default function S06Override() {
   const { sid = "" } = useParams();

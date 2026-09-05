@@ -45,16 +45,10 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { get, post, postForm } from "../api/client";
-import type { RiskItem } from "../api/types";
+import type { RiskItem, UploadResponse } from "../api/types";
 import ErrorNote from "../components/ErrorNote";
 import { describeError, type ShownError } from "../lib/errorText";
 import "./S01_Upload.css";
-
-/** 계약 `UploadResponse`. types.ts 에 아직 없어 여기서 좁게 선언한다(계약 타입 추가는 강희진 몫). */
-interface UploadResponse {
-  productId: string;
-  status: "parsed" | "parse_failed";
-}
 
 export default function S01Upload() {
   const navigate = useNavigate();
