@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.sphinxfin.sphinx.aggregate.AggregateService;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.evidence.AuditLog;
+import com.sphinxfin.sphinx.evidence.HashChain;
 import org.springframework.format.annotation.DateTimeFormat;
 import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.security.AccessGuard;
@@ -66,6 +67,21 @@ public class DashboardController {
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
         return ApiResponse.ok(auditLog.summary(from, to));
+    }
+
+    /**
+     * 감사 체인 무결성 검증 (F-CMN-002 · 이슈 #326 파트2). 해시 체인을 재계산해 이어져 있는지
+     * (꼬리 절단까지) 본다. S-07 이 {@code contentHash} 를 보여주지만 <b>그 해시가 속한 체인이
+     * 실제로 온전한지</b>는 이것이 답한다 — 감사 무결성이 "주장" 에서 "확인된 사실" 로 바뀐다.
+     *
+     * <p>권한: {@code audit:verify} (COMPL org). 조회({@code audit:read})와 <b>가른다</b> —
+     * "몇 건 있었나"(집계)와 "그 기록이 변조되지 않았나"(무결성)는 다른 질문이라 감사에서도
+     * 갈려야 한다. 응답에 개인 식별자는 없다({@code ok}·검사 건수·끊긴 지점·사유뿐).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:verify')")
+    @GetMapping("/audit-verify")
+    public ApiResponse<HashChain.Verification> auditVerify() {
+        return ApiResponse.ok(auditLog.verify());
     }
 
     /**

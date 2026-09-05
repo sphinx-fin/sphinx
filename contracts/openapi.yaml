@@ -609,6 +609,27 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /dashboard/audit-verify:
+    get:
+      summary: 감사 체인 무결성 검증 (F-CMN-002 · 이슈 #326 파트2)
+      description: >
+        권한: `audit:verify` — COMPL=org 뿐이다. 해시 체인을 재계산해 이어져 있는지(꼬리 절단까지)
+        본다. 조회(`audit:read`)와 가른다 — "몇 건 있었나"(집계)와 "변조되지 않았나"(무결성)는
+        다른 질문이다. 응답에 개인 식별자는 없다: `ok`(온전한가)·`checked`(검사 건수)·`brokenAt`/
+        `brokenSeq`(끊긴 지점, ok 면 -1)·`reason`(사유, ok 면 빈 문자열).
+      responses:
+        '200':
+          description: 체인 검증 결과 (개인 식별자 없음)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditVerifyApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. COMPL 만 감사 체인을 검증할 수 있다(ADR-001 · 기획서 7-4).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /dashboard/vulnerability-contrast:
     get:
       summary: 취약 고객 대비 (F-DSH-001 · 이슈 #321)
@@ -1427,6 +1448,23 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/AuditSummary'}
+        error:   {type: object, nullable: true}
+    AuditVerify:
+      type: object
+      required: [ok, checked, brokenAt, brokenSeq, reason]
+      description: "감사 해시 체인 검증 결과 (#326 파트2). 개인 식별자 없음."
+      properties:
+        ok:        {type: boolean, description: "체인이 온전한가"}
+        checked:   {type: integer, description: "검사한 항목 수"}
+        brokenAt:  {type: integer, description: "끊긴 인덱스. ok 면 -1"}
+        brokenSeq: {type: integer, format: int64, description: "끊긴 seq. ok 면 -1"}
+        reason:    {type: string, description: "끊긴 사유. ok 면 빈 문자열"}
+    AuditVerifyApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/AuditVerify'}
         error:   {type: object, nullable: true}
     IndicatorPoint:
       type: object

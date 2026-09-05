@@ -70,6 +70,22 @@ class DashboardEndpointWiringTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @DisplayName("❗감사 체인 검증은 COMPL 만 — 무결성 결과만 낸다 (#326 파트2)")
+    void auditVerifyIsComplOnly() throws Exception {
+        mvc.perform(get("/dashboard/audit-verify").with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.ok").exists())
+                .andExpect(jsonPath("$.data.checked").exists())
+                // 개인 식별자 없음
+                .andExpect(jsonPath("$.data.actorId").doesNotExist());
+
+        // audit:verify 도 COMPL 전용 — 조회(audit:read)와 다른 action 이지만 범위는 같다
+        mvc.perform(get("/dashboard/audit-verify").with(user("seller-01").roles("SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
     // 계약이 소문자 enum [branch, org] 이고 서비스의 label() 이 그대로 낸다.
     // 대문자로 적으면 이 테스트가 계약이 아니라 자바 enum 이름을 재게 된다.
     @Test

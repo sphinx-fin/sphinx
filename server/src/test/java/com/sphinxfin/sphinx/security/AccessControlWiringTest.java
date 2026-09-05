@@ -212,14 +212,12 @@ class AccessControlWiringTest {
         // signal:unfair:read 를 뺐다 — GET /signals/unfair 에 붙었다(이슈 #63).
         // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         //
-        // audit:read 를 뺐다 — GET /dashboard/audit-summary 에 붙었다(이슈 #326 파트2).
-        // 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
+        // audit:read·audit:verify 를 뺐다 — GET /dashboard/audit-summary·/audit-verify 에
+        // 붙었다(이슈 #326 파트2). 목록이 줄어드는 것이 진척이라는 위 문장 그대로다.
         //
-        // ❗남은 둘은 성격이 같다 — **엔드포인트가 아직 없다.** audit:verify 는 체인 검증 화면이,
-        // admin:role:assign 은 역할별 계정 설계(결정 10.5)가 서야 붙는다. 기능이 생기면
-        // 여기서 빼는 것이 순서다.
+        // ❗남은 하나 — **엔드포인트가 아직 없다.** admin:role:assign 은 역할별 계정 설계
+        // (결정 10.5)가 서야 붙는다. 기능이 생기면 여기서 빼는 것이 순서다.
         List<String> notYetImplemented = List.of(
-                "audit:verify",
                 "admin:role:assign");
         assertThat(unreachable)
                 .as("감사 대상 action인데 어느 엔드포인트에도 안 붙어 있다 — 로그 0건이 "
