@@ -15,8 +15,12 @@ import java.util.Optional;
  */
 public interface FallbackCatalog {
 
-    /** 저장된 추출이 없는 상품의 이해항목. */
-    List<RiskItem> riskItems(String productId);
+    /**
+     * 저장된 추출이 없는 상품의 이해항목. <b>모르는 상품이면 empty</b> — 아무 목록이나
+     * 지어내지 않는다({@link #productType} 과 같은 규약, 결정 10.81). 없는 상품ID 에도
+     * 같은 목록을 내주면 카탈로그가 둘 이상이 되는 순간 조용히 틀린 목록이 된다.
+     */
+    Optional<List<RiskItem>> riskItems(String productId);
 
     /** 카탈로그가 아는 상품유형. 모르는 상품이면 empty — 기본값을 지어내지 않는다. */
     Optional<String> productType(String productId);

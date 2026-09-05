@@ -194,6 +194,13 @@ def score(body: ScoreRequest) -> Judgment:
 def detect_misconception(body: MisconceptionRequest) -> MisconceptionResponse:
     assert_clean(body.text, "misconception.text")
     try:
+        # ❗**여기는 게이트를 안 태운다.** 이 엔드포인트는 재분석·큐 조회용이고, 답하는
+        # 질문이 *"이 발화가 어느 오해 패턴과 겹치는가"* 라는 **결정론적 측정**이다.
+        # 기획서 5절이 재현성을 그 성질로 설명한다 — LLM 을 끼우면 같은 입력이 회차마다
+        # 갈릴 수 있고, 조회하는 사람이 그걸 구분할 방법이 없다.
+        #
+        # 게이트는 **판정 입력**에만 건다(`/score`) — 거기서만 `apply_misconception_floor`
+        # 가 U4 를 확정하고, 오탐의 값이 거기서만 발생한다.
         return misconception.match(body.text, body.product_type)
     except NotImplementedError:
         raise _not_implemented("F-DET-001 오해 탐지")

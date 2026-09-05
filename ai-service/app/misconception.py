@@ -5,21 +5,108 @@
 
   1) pattern — 정규화 후 포함 검사. 완전 결정론적.
   2) ngram   — 문자 바이그램 포함도. 어미·조사 변형을 덮으면서 여전히 결정론적.
-  3) llm     — 위 둘이 못 잡은 변형만. (미구현 — 임베딩 유사도로 붙일 예정)
+  3) llm     — **극성 게이트.** 위 둘이 만든 후보 중 「그 오해를 부정·제한하는 발화」를
+               떨어뜨린다. 후보를 **만들지 않고 지우기만 한다.**
 
-데모 메인 시나리오(기획서 7-2 ③)의 발화가 2)까지에서 잡혀야 한다. LLM 응답에 의존하면
-데모의 임계 경로가 비결정적이 된다.
+❗**3단계는 「변형을 더 잡는 층」이 아니라 「잘못 잡은 것을 빼는 층」이다.** docstring 이
+전에 *"임베딩 유사도로 붙일 예정"* 이라고 적었는데 **실측으로 반증됐다**(아래).
+
+## 왜 임베딩이 아닌가 — 세 번째 같은 실패다
+
+한국어는 부정·양보가 **어미에 붙는다.** 그래서 오해와 그 부정은 주제가 같고, 주제를 재는
+수단은 전부 같은 곳에서 무너진다.
+
+    #203  n-gram        어간까지만 자른 조각이 오해와 부정을 못 가른다
+    #283  임베딩 코사인  부정이 벡터를 안 옮긴다 — M09 에서 정답(0.621)이 어미변형(0.560)보다 높다
+    9/5   대조 앵커      M09 는 갈리는데(간격 +0.104) **M11 은 겹친다(간격 -0.006)**
+
+**대조 앵커가 M09 에서 된 이유는 오해와 정답의 *내용* 이 달라서였다**(팔 수 있다 ↔ 상장이
+안 됐다). M11 은 **같은 명제의 부정만** 다르다 — `전액 보호된다` ↔ `전액 보호되는 건 아니다`.
+그때는 pro·anti 앵커가 둘 다 같은 주제라 margin 이 잡음(±0.05)이 된다.
+
+→ **주제를 재는 어떤 수단으로도 극성은 안 갈린다.** 극성을 직접 묻는 수밖에 없다.
+
+## 실측 (2026-09-05 · gpt-5-mini · 3회 반복)
+
+    대조 앵커  M11 부호 오류 2/5 · 간격 -0.006     ← 임계값이 존재할 수 없다
+    극성 게이트 9/9 · 3회 전부 동일               ← M11 부정 4건 · M09 부정 1건 포함
+
+## 안전 방향 — 실패하면 후보를 남긴다
+
+게이트가 못 돌면(LLM 장애·미설정) **후보를 그대로 둔다.** 지우는 쪽이 미탐이고 P5(0.2절)가
+미탐을 과탐보다 비싸게 다룬다 — 게이트는 과탐을 줄이는 장치이지 판정을 만드는 장치가 아니다.
+`client=None` 이면 3단계가 아예 안 돈다(기존 동작 그대로).
+
+## ❗3단계가 붙은 뒤로 임계 경로는 게이트를 지난다 — 약속을 낮춘다
+
+전에는 *"데모 메인 시나리오(기획서 7-2 ③)의 발화가 2)까지에서 잡혀야 한다. LLM 응답에
+의존하면 데모의 임계 경로가 비결정적이 된다"* 고 적혀 있었다. **이 층이 생기면서 그 문장이
+거짓이 됐다**(`#397` 리뷰, 정세현). 데모 발화는 `pattern 1.0` 으로 잡히는데도 이제 게이트를
+한 번 지나야 살아남는다.
+
+`ngram` 단계에만 게이트를 걸어 결정론을 지키는 안을 재 봤고 **실측으로 반증됐다.**
+
+    "…원금은 보장된다고 생각했는데 아니라면서요"      M01  pattern 1.00
+    "…팔면 되는 거 아닌가요? 아니라고 하셨죠"         M09  pattern 1.00
+    "낸 돈은 다 돌려받는 거죠? 아니라고 방금 들었어요"  M06  pattern 1.00
+                                                    → 게이트가 셋 다 3/3 으로 뺀다
+
+**부정하는 발화일수록 패턴을 축자로 담는다** — 부정이 어미에 붙으니 앞부분이 그대로 남는다.
+즉 `pattern` 이 오탐이 제일 잘 나는 자리이고, 거기를 빼면 이 층을 만든 이유가 없어진다.
+
+### 그래서 낮춘 자리를 명시한다
+
+    실패는 후보를 남기는 쪽으로 떨어진다   예외 · 응답 타입 불일치 (P5 0.2절)
+    틀린 판정에는 그 방어가 안 걸린다      그래서 아래를 실측으로 잰다
+
+    게이트가 만든 미탐   dev set 후보 **10건** · 3회 반복 **30/30 keep**
+                        데모 발화 4건도 3/3
+                        ❗**표본이 10건이다.** `#283` 에서 11건으로 방법을 확정했다가
+                          M11 에서 무너진 전례가 있다 — 이 숫자를 크게 읽지 않는다
+
+❗**「지금 30/30」이지 결정론이 아니다.** 결정론을 요구하는 자리는 1·2단계다.
+
+❗**공식 코퍼스에서는 이 층이 아예 안 돈다.** 합의 U4 19건(`eval/` 라벨, 리포트 4절의
+`4/19` 와 같은 집합)을 1·2단계에 태우면 **후보가 0건**이다 — `pattern` 0 · `ngram` 0,
+최고 점수 0.02~0.28 로 임계(`ngram_match` 0.62)에 못 미친다. 그러니 위 `30/30` 을
+*"미탐 0"* 으로 읽으면 안 된다. **「잴 자리가 없다」이지 「안전하다」가 아니다** — dev set 은
+패턴에서 유도된 표본이라 후보가 잘 생기는 쪽으로 치우친다.
+
+그리고 그 0건은 이 파일보다 넓은 사실을 말한다. **강제되는 라이브러리 9종이 공식 코퍼스에서
+한 번도 발동하지 않는다**(`MISCONCEPTION-DETECTION.md` 의 *"어휘 매칭 51건 중 발동 0건"* 과
+같은 값). 즉 **오해 판정은 지금 전적으로 LLM 이 하고**, `apply_misconception_floor` 는 패턴을
+그대로 담은 발화에서만 운다 — `#284` 가 가리키는 공백이 그것이다.
+
+❗**현재 이 층은 실측 코퍼스에서 한 번도 안 돈다** — 1·2단계가 U4 19건에서 후보를 0건
+만들기 때문이다(`#284`). **게이트의 위험도 효과도 아직 실측되지 않았다.** 라이브러리가
+실제 화법을 물기 시작하면 그때 이 층이 처음으로 값을 갖는다 — 그때를 위해 지금 잠가 둔다
+(`#397` 리뷰, 정세현).
+
+원인은 임계값이 아니라 **패턴의 화법 폭**이다. 패턴이 데모 대본 한 줄에서 나왔고 조정례의
+화법 폭이 아니라서, 같은 오해를 한 겹 돌려 말하면 떨어진다.
+
+    데모 발화  "은행에서 파니까 원금은 보장되는 거죠"                      pattern 1.00
+    els-0004   "그래도 은행 창구에서 파는 건데, 최소한 넣은 돈은 지켜 주는…"  ngram  0.179
+
+`#377`(표본의 화법 폭이 좁아 종결어미가 라벨을 흘린다)과 **같은 뿌리, 반대 방향**이다.
+임계값을 내리면 `#203` 이 잡은 오탐이 돌아오므로 답이 아니다 — 데이터는 정세현 소유이고
+`#284` 로 갔다.
 
 `escalate`는 라이브러리 데이터의 필드를 **읽어서** 판단한다. M08-TYING을 코드에
 하드코딩하지 않는다 — 데이터 소유는 정세현이고, 유형이 늘어도 코드가 안 바뀌어야 한다.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
+
+import logging
+from typing import Literal
+
+from pydantic import BaseModel
 
 from . import textsim, thresholds
 from .config import DATA_DIR_ENV, settings
@@ -45,6 +132,8 @@ def library_path() -> Path:
 # ❗**값은 `scoring_thresholds.yaml` 에서 온다.** 여기 숫자를 적지 않는다 — 그 파일이
 # 「무엇에 반응하는가 · 왜 이 값인가」를 같이 들고 있고, 그게 있어야 심사에서 설명이 되고
 # 튜닝이 코드 변경이 아니게 된다(기획서 5절: 라이브러리 기반 재현성).
+log = logging.getLogger(__name__)
+
 NGRAM_THRESHOLD = thresholds.get("ngram_match")
 REVIEW_THRESHOLD = thresholds.get("ngram_review")
 
@@ -204,8 +293,179 @@ def library_version() -> int:
     return int(_read_library().get("version", 0))
 
 
-def match(text: str, product_type: str = "ELS") -> MisconceptionResponse:
-    """발화 → 오해 유형 매칭. 유형별 최고점 1건만 남긴다."""
+class PolarityVerdict(BaseModel):
+    """3단계 게이트의 출력. **측정값이다** — 판정은 게이트가 아니라 룰이 한다(P1)."""
+
+    holds: bool
+    polarity: Literal["positive", "negative", "neutral"]
+
+
+_POLARITY_SYSTEM = (
+    "당신은 금융 상담 발화의 **극성**만 판정한다. 주제가 같은지는 묻지 않는다.\n"
+    "발화가 주어진 오해 문장과 **같은 것을 주장하면** holds=true,\n"
+    "그 오해를 **부정하거나 범위를 제한하면** holds=false 다.\n"
+    "부정·양보는 어미에 붙는다 — '~는 아니다', '~건 아니군요', '~만 된다' 는 부정이다."
+)
+
+
+@dataclass
+class PolarityMeter:
+    """3단계 게이트가 **무엇을 했는지**의 누적. 프로세스와 함께 사라진다 — 운영 관측값이다.
+
+    ❗**발화를 안 담는다.** 유형ID 만 센다 — `#397` 리뷰 ①에서 로그의 발화를 뺀 것과 같은
+    이유다(P3 · F-GTE-004 보존 정책 밖에 사본이 생긴다).
+
+    ## 왜 필요한가 — `#160` 의 반대 방향이다
+
+    `#160` 에서 세운 규칙이 *"조용히 등급만 바뀌면 감사 시점에 왜 U4 였는지 설명할 수 없다"*
+    였다. **U4 가 「안 된」 경우에도 똑같다**(`#398` 리뷰, 정세현).
+
+        floor 가 울면    reason 에 상향 사실 · misconception_type   → evidence 에 남는다
+        게이트가 빼면    평범한 U1~U3 · 필드 없음 · INFO 한 줄       → 아무 데도 안 남는다
+
+    로그는 evidence 가 아니다(ADR-003 — append-only · 해시 체인 · 정규화 직렬화). 그래서
+    최소한 **계량기**는 있어야 한다. 집계·리포트는 `#326`·`#327` 에서 정세현이 붙인다.
+
+    ## `not_run` 이 `dropped == 0` 과 다른 것이 요점이다
+
+    `shadow.ShadowMeter.failed` 와 같은 자리다(결정 5.40 *"못 잰 값은 0 이 아니라 「모른다」로
+    적는다"*). 게이트가 **조용히 영구히 안 도는** 경로가 둘 있는데(LLM 예외 · 클라이언트가
+    `model_cls` 를 안 지킴) 둘 다 후보를 남기므로 **판정만 보면 게이트가 없는 것과 같다.**
+    """
+
+    asked: int = 0
+    kept: int = 0
+    dropped: int = 0
+    #: ❗`holds=True` 인데 `polarity` 가 긍정이 아닌 자기모순. 실측에서 3회 중 1회 나왔다.
+    contradicted: int = 0
+    #: ❗**못 돈 건수.** 0 건과 「모른다」를 가르는 유일한 자리 — 위 docstring 참조.
+    not_run: int = 0
+    by_type: dict[str, int] = field(default_factory=dict)
+
+    def record_kept(self) -> None:
+        self.asked += 1
+        self.kept += 1
+
+    def record_dropped(self, type_id: str, *, contradicted: bool) -> None:
+        self.asked += 1
+        self.dropped += 1
+        if contradicted:
+            self.contradicted += 1
+        self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
+
+    def record_not_run(self) -> None:
+        """게이트가 못 돌았다. 후보는 남는다 — 판정만 보면 게이트가 없는 것과 같다."""
+        self.asked += 1
+        self.not_run += 1
+
+    def summary(self) -> str:
+        return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
+                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건")
+
+
+METER = PolarityMeter()
+
+
+def _polarity_holds(client, misconception_text: str, utterance: str, type_id: str) -> bool:
+    """이 발화가 그 오해를 **실제로 담고 있는가**. 못 물으면 `True`(후보 유지).
+
+    ❗**실패는 후보를 남기는 쪽으로 떨어진다.** 지우면 미탐이고 P5(0.2절)가 미탐을 과탐보다
+    비싸게 다룬다. 게이트는 과탐을 줄이는 장치이지 판정을 만드는 장치가 아니다.
+
+    ## ❗두 필드가 합의할 때만 참으로 본다
+
+    `holds` 하나만 보면 **비결정적이었다.** 같은 입력 3회에 1회가 갈렸고, 갈린 회차의 출력이
+    `polarity="negative"` 인데 `holds=True` 라는 **자기모순**이었다(2026-09-05 실측).
+
+        holds 만                  1/9 · 0/9 · 0/9      ← 회차마다 다르다
+        holds AND polarity        0/9 · 0/9 · 0/9      ← 3회 동일
+
+    같은 호출 안의 두 출력이 어긋나면 그 판정은 못 쓴다 — *"모델 출력을 그대로 믿지 않는다"*
+    를 **한 응답 안에서** 적용하는 자리다. 합의를 요구하면 어긋난 회차가 `False` 로 떨어지고,
+    `False` 는 후보를 빼는 쪽이라 **과탐을 줄이는 이 게이트의 방향과 같다.**
+
+    덕분에 **오해 문장을 따로 데이터로 만들 필요가 없다** — 매칭된 패턴을 그대로 쓴다.
+    명제형 문장을 쓰면 `holds` 만으로도 3회 0/9 였지만, 그건 라이브러리에 `claim` 필드를
+    새로 만들어야 하고 그 파일은 정세현 소유다.
+    """
+    try:
+        verdict = client.complete_json(
+            prompt=f"오해 문장: {misconception_text}\n발화: {utterance}",
+            model_cls=PolarityVerdict, schema_name="PolarityVerdict",
+            system=_POLARITY_SYSTEM,
+        )
+    except Exception as exc:                       # LLM 계열 예외를 여기서 좁히지 않는다
+        log.info(
+            "F-DET-001 극성 게이트 실패: %s — 후보를 그대로 둔다(P5 0.2절). type_id=%s",
+            type(exc).__name__, type_id,
+        )
+        METER.record_not_run()
+        return True
+    if not isinstance(verdict, PolarityVerdict):
+        # ❗**타입이 다르면 게이트가 안 돈 것으로 본다.** 클라이언트가 `model_cls` 를
+        # 안 지키는 경우다(테스트 스텁이 그렇다). 여기서 예외를 올리면 게이트가 채점을
+        # 죽이는데, 게이트는 **과탐을 줄이는 장치이지 판정을 만드는 장치가 아니다**(P1).
+        # 그래서 실패와 같은 방향으로 — 후보를 남긴다(P5 0.2절).
+        log.info(
+            "F-DET-001 극성 게이트가 %s 를 받았다 — PolarityVerdict 가 아니다. "
+            "후보를 그대로 둔다. type_id=%s", type(verdict).__name__, type_id,
+        )
+        METER.record_not_run()
+        return True
+
+    holds = verdict.holds and verdict.polarity == "positive"
+    if verdict.holds and not holds:
+        log.info(
+            "F-DET-001 극성 게이트 자기모순: holds=True 인데 polarity=%s — 뺀다. type_id=%s",
+            verdict.polarity, type_id,
+        )
+    log.info(
+        "F-DET-001 극성 게이트: type_id=%s holds=%s polarity=%s → %s",
+        type_id, verdict.holds, verdict.polarity, holds,
+    )
+    if holds:
+        METER.record_kept()
+    else:
+        METER.record_dropped(type_id, contradicted=verdict.holds)
+    return holds
+
+
+def apply_polarity_gate(
+    response: MisconceptionResponse, text: str, *, client
+) -> MisconceptionResponse:
+    """**3단계.** 후보 중 그 오해를 부정·제한하는 발화를 뺀다. 후보를 만들지 않는다.
+
+    `stage` 는 그 후보를 **찾은** 단계 그대로 둔다 — 발견 경로와 확인 경로는 다른 사실이고,
+    하나로 덮으면 재현성 논의에서 둘이 섞인다.
+
+    ❗**`escalate` 를 다시 계산한다.** 게이트가 `M08-TYING` 후보를 빼면 그 신호도 같이
+    사라져야 한다 — 안 그러면 *"오해는 없는데 꺾기 신호는 있다"* 가 되고, 그 상태는
+    `F-GTE-003` 에서 설명할 수가 없다.
+    """
+    if not response.matches:
+        return response
+    kept = [
+        m for m in response.matches
+        if _polarity_holds(client, m.matched_pattern, text, m.type_id)
+    ]
+    if len(kept) == len(response.matches):
+        return response
+    log.info(
+        "F-DET-001 극성 게이트가 후보 %d 건 중 %d 건을 뺐다",
+        len(response.matches), len(response.matches) - len(kept),
+    )
+    return response.model_copy(update={
+        "matches": kept,
+        "escalate": any(_escalates(m.type_id) for m in kept),
+    })
+
+
+def match(text: str, product_type: str = "ELS", *, client=None) -> MisconceptionResponse:
+    """발화 → 오해 유형 매칭(1·2단계). 유형별 최고점 1건만 남긴다.
+
+    `client` 를 주면 이어서 3단계 게이트까지 돈다. 채점 경로는 **판정 직전**에
+    `apply_polarity_gate` 를 따로 부른다 — 순서가 중요하다(아래).
+    """
     norm = _normalize(text)
     matches: list[MisconceptionMatch] = []
     near_miss = False
@@ -235,11 +495,14 @@ def match(text: str, product_type: str = "ELS") -> MisconceptionResponse:
 
     matches.sort(key=lambda m: m.score, reverse=True)
     escalate = any(_escalates(m.type_id) for m in matches)
-    return MisconceptionResponse(
+    response = MisconceptionResponse(
         matches=matches,
         escalate=escalate,
         unclassified_candidate=(not matches) and near_miss,
     )
+    if client is not None:
+        response = apply_polarity_gate(response, text, client=client)
+    return response
 
 
 def _escalates(type_id: str) -> bool:

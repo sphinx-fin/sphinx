@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import com.sphinxfin.sphinx.core.EvidenceRecorder;
@@ -317,8 +318,33 @@ public class SessionService {
         // 아무도 의심하지 않는다.
         session.recordAskedQuestion(itemId, reverify.question(), reverify.questionType(),
                 EvidenceRecorder.QuestionSource.REVERIFY);
+        // 보여준 문면을 세션에 남긴다(#415) — GET /re-explanations/current 가 이걸 돌려줘야
+        // 화면이 저장소 인계에 안 기댄다. 재생성은 비결정(P1)이라 안 쓴다.
+        session.recordReExplanation(itemId, content, reverify.question());
         repository.save(session);
         return new ReExplanation(itemId, content, session.vulnerable(), reverify.question());
+    }
+
+    /**
+     * 지금 진행 중인 재설명을 돌려준다(F-INT-004 R · 이슈 #415). 재설명 사이클
+     * (RE_EXPLAIN·RE_VERIFY) 밖이거나 남긴 문면이 없으면 빈 값 — 컨트롤러가 404 로 옮긴다.
+     *
+     * <p>❗<b>ai-service 를 다시 부르지 않는다.</b> 재설명은 LLM 산출물이라 비결정(P1)이라,
+     * 재생성하면 판매자가 실제로 띄운 문장과 달라진다. POST /re-explain 이 남긴
+     * {@link Session#recordReExplanation} 저장값을 그대로 읽는다 — 새 창·새로고침·다른 기기
+     * 어디서 읽어도 판매자 화면과 <b>같은 문면·같은 재검증 질문</b>이다.
+     */
+    public Optional<ReExplanation> currentReExplanation(String sessionId) {
+        Session session = get(sessionId);
+        Map<String, Object> stored = session.currentReExplanation();
+        if (!session.inReExplainCycle() || stored == null || stored.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new ReExplanation(
+                (String) stored.get("itemId"),
+                (String) stored.get("content"),
+                session.vulnerable(),
+                (String) stored.get("reverifyQuestion")));
     }
 
     /**
