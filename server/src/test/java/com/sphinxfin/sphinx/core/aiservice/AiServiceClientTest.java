@@ -4,6 +4,7 @@ import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.ParsedDocument;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 
@@ -461,5 +462,170 @@ class AiServiceClientTest {
         } finally {
             logger.detachAppender(captured);
         }
+    }
+
+    // ── F-EXT-001 /internal/parse ───────────────────────────────────────────
+
+    @Test
+    @DisplayName("parse: 요청은 snake_case(document_path·product_type), 응답은 ParsedDocument로 역직렬화")
+    void parseSendsSnakeCaseAndParsesResponse() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andExpect(jsonPath("$.document_path").value("data/documents/els-sample.pdf"))
+                .andExpect(jsonPath("$.product_type").value("ELS"))
+                .andRespond(withSuccess("""
+                        {
+                          "document_id": "doc-els-001",
+                          "product_type": "ELS",
+                          "source_file": "els-sample.pdf",
+                          "parser_version": "p-2026.09",
+                          "parsed_at": "2026-09-01T09:00:00Z",
+                          "page_count": 2,
+                          "pages": [
+                            {"page": 1, "text": "제1조 원금손실 …", "char_count": 12},
+                            {"page": 2, "text": "만기평가일에 …", "char_count": 9}
+                          ],
+                          "tables": [
+                            {"page": 2, "caption": "기초자산", "rows": [["종목","가중치"],["A","50%"]]}
+                          ],
+                          "parse_warnings": [
+                            {"page": null, "code": "MANUAL_OVERRIDE", "message": "사람이 만든 샘플"}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        ParsedDocument doc = client.parse("data/documents/els-sample.pdf", "ELS");
+
+        assertThat(doc.documentId()).isEqualTo("doc-els-001");
+        assertThat(doc.productType()).isEqualTo("ELS");
+        assertThat(doc.parserVersion()).isEqualTo("p-2026.09");
+        assertThat(doc.pageCount()).isEqualTo(2);
+        assertThat(doc.pages()).hasSize(2);
+        assertThat(doc.pages().get(0).page()).isEqualTo(1);
+        assertThat(doc.pages().get(0).charCount()).isEqualTo(12);
+        assertThat(doc.tables()).hasSize(1);
+        assertThat(doc.tables().get(0).caption()).isEqualTo("기초자산");
+        assertThat(doc.tables().get(0).rows().get(1)).containsExactly("A", "50%");
+        assertThat(doc.parseWarnings()).hasSize(1);
+        assertThat(doc.parseWarnings().get(0).code()).isEqualTo("MANUAL_OVERRIDE");
+        assertThat(doc.parseWarnings().get(0).page()).isNull();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("parse: 상류 5xx → AiServiceException")
+    void parseUpstreamErrorRaisesAiServiceException() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.parse("data/documents/x.pdf", "ELS"))
+                .isInstanceOf(AiServiceException.class);
+        server.verify();
+    }
+
+    // ── F-EXT-002 /internal/extract ─────────────────────────────────────────
+
+    private static final ParsedDocument PARSED = new ParsedDocument(
+            "doc-els-001", "ELS", "els-sample.pdf", "p-2026.09", "2026-09-01T09:00:00Z", 1,
+            List.of(new ParsedDocument.Page(3, "만기평가일에 원금손실 …", 20)),
+            List.of(), List.of());
+
+    @Test
+    @DisplayName("extract: 요청은 product_id + 중첩 parsed_document(snake_case), 응답은 items+warnings로 파싱")
+    void extractSendsNestedSnakeCaseAndParsesResponse() {
+        server.expect(requestTo(BASE + "/internal/extract"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andExpect(jsonPath("$.product_id").value("mock-els-001"))
+                // 중첩 parsed_document 도 같은 매퍼가 snake_case 로 바꾼다
+                .andExpect(jsonPath("$.parsed_document.document_id").value("doc-els-001"))
+                .andExpect(jsonPath("$.parsed_document.product_type").value("ELS"))
+                .andExpect(jsonPath("$.parsed_document.parser_version").value("p-2026.09"))
+                .andExpect(jsonPath("$.parsed_document.pages[0].page").value(3))
+                .andExpect(jsonPath("$.parsed_document.pages[0].char_count").value(20))
+                .andRespond(withSuccess("""
+                        {
+                          "items": [
+                            {
+                              "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                              "product_id": "mock-els-001",
+                              "name": "원금손실 조건",
+                              "importance": "required",
+                              "condition": {
+                                "value_text": "만기평가일에 원금손실",
+                                "source_span": {"page": 3, "start": 0, "end": 12}
+                              },
+                              "status": "extracted",
+                              "failure_reason": null
+                            },
+                            {
+                              "item_id": "ELS-KNOCK-IN",
+                              "product_id": "mock-els-001",
+                              "name": "낙인 배리어",
+                              "importance": "recommended",
+                              "condition": null,
+                              "status": "extraction_failed",
+                              "failure_reason": "문서에서 못 찾음"
+                            }
+                          ],
+                          "warnings": [
+                            {"code": "ITEM_NOT_FOUND", "item_id": "ELS-KNOCK-IN", "message": "템플릿 항목 미발견"}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.ExtractResult result = client.extract("mock-els-001", PARSED);
+
+        assertThat(result.items()).hasSize(2);
+        assertThat(result.items().get(0).itemId()).isEqualTo("ELS-PRINCIPAL-LOSS-WARNING");
+        assertThat(result.items().get(0).status()).isEqualTo("extracted");
+        assertThat(result.items().get(0).condition().sourceSpan().page()).isEqualTo(3);
+        assertThat(result.items().get(1).status()).isEqualTo("extraction_failed");
+        assertThat(result.items().get(1).condition()).isNull();
+        assertThat(result.warnings()).hasSize(1);
+        assertThat(result.warnings().get(0).code()).isEqualTo("ITEM_NOT_FOUND");
+        assertThat(result.warnings().get(0).itemId()).isEqualTo("ELS-KNOCK-IN");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("extract: warnings가 없어도 빈 리스트로 온다")
+    void extractDefaultsEmptyWarnings() {
+        server.expect(requestTo(BASE + "/internal/extract"))
+                .andRespond(withSuccess("""
+                        {
+                          "items": [
+                            {
+                              "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                              "product_id": "mock-els-001",
+                              "name": "원금손실 조건",
+                              "importance": "required",
+                              "condition": {
+                                "value_text": "만기평가일에 원금손실",
+                                "source_span": {"page": 3, "start": 0, "end": 12}
+                              },
+                              "status": "extracted",
+                              "failure_reason": null
+                            }
+                          ],
+                          "warnings": []
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.ExtractResult result = client.extract("mock-els-001", PARSED);
+
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.warnings()).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("extract: 상류 5xx → AiServiceException")
+    void extractUpstreamErrorRaisesAiServiceException() {
+        server.expect(requestTo(BASE + "/internal/extract"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.extract("mock-els-001", PARSED))
+                .isInstanceOf(AiServiceException.class);
+        server.verify();
     }
 }

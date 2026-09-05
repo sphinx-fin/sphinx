@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
 import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
+import com.sphinxfin.sphinx.domain.ParsedDocument;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
@@ -317,8 +318,102 @@ public class AiServiceClient {
         return new ReExplanation(response.content(), response.citedSpans());
     }
 
+    /**
+     * F-EXT-001 파싱 — 업로드된 상품 문서 경로를 넘겨 {@link ParsedDocument}(F-EXT-002 입력)를
+     * 받는다. ai-service {@code POST /internal/parse}(ParseRequest → ParsedDocument).
+     *
+     * <p>❗<b>PiiGateway.mask() 를 거치지 않는다.</b> 이 경로가 나르는 것은 <b>고객 텍스트가
+     * 아니라 상품 문서(약관·설명서) 텍스트</b>다. P3 경계는 "고객 텍스트가 ai-service 로 나가는
+     * 유일한 경로"에만 걸리고(CLAUDE.md P3), 문서 텍스트는 그 대상이 아니다 — score()·
+     * detectMismatch() 가 마스킹하고 question()·이 메서드가 안 하는 것이 같은 규칙의 두 면이다.
+     * ai-service 의 입구 PII 재검사가 두 번째 방어선으로 남는다.
+     *
+     * <p>⚠ ai-service {@code /internal/parse} 는 아직 스텁이다(정세현 배선 예정). 이 클라이언트는
+     * 호출 능력만 추가할 뿐 목 데모 흐름(ProductController)을 바꾸지 않는다 — 실제 배선
+     * (업로드→parse→저장)은 스텁이 구현된 뒤 별도 단계다.
+     *
+     * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
+     */
+    public ParsedDocument parse(String documentPath, String productType) {
+        ParseRequest request = new ParseRequest(documentPath, productType);
+        ParsedDocument parsed;
+        try {
+            parsed = restClient.post()
+                    .uri("/internal/parse")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, failure("/internal/parse"))
+                    .body(ParsedDocument.class);
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (parsed == null) {
+            throw new AiServiceException("ai-service /internal/parse 응답이 비었다");
+        }
+        return parsed;
+    }
+
+    /**
+     * F-EXT-002 추출 — 파싱된 문서에서 상품유형 템플릿에 맞는 {@link RiskItem} 목록을 뽑는다.
+     * ai-service {@code POST /internal/extract}(ExtractRequest → ExtractResponse).
+     *
+     * <p>상품유형은 요청에서 따로 받지 않는다 — {@code parsedDocument.productType()} 가 들고 있다.
+     * 따로 받으면 두 값이 어긋날 수 있어서다(ai-service ExtractRequest.product_type 도 같은 이유로
+     * 문서에서 유도한다).
+     *
+     * <p>parse() 와 같은 이유로 PiiGateway.mask() 를 거치지 않는다 — 나르는 것이 상품 문서
+     * 텍스트다.
+     *
+     * <p>{@code warnings} 는 추출 실패·부분 성공을 은폐하지 않고 노출한다(E-EXT-03). 항목이
+     * {@code status=extraction_failed} 로 온 것과 짝을 이룬다 — 코드셋은 ai-service 의
+     * {@code ExtractionWarning}(ITEM_NOT_FOUND·SPAN_UNRESOLVED·LOOSE_MATCH·AMBIGUOUS_SPAN·
+     * PAGE_CORRECTED·QUOTE_NARROWED·NARROWING_REFUSED·UNKNOWN_ITEM_ID·IMPORTANCE_PLACEHOLDER).
+     * 이 클라이언트는 코드를 문자열로 실어 나르기만 하고 해석은 배선 단계가 한다.
+     *
+     * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
+     */
+    public ExtractResult extract(String productId, ParsedDocument parsed) {
+        ExtractRequest request = new ExtractRequest(productId, parsed);
+        ExtractResponse response;
+        try {
+            response = restClient.post()
+                    .uri("/internal/extract")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, failure("/internal/extract"))
+                    .body(ExtractResponse.class);
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new AiServiceException("ai-service /internal/extract 응답이 비었다");
+        }
+        List<RiskItem> items = response.items() == null ? List.of() : response.items();
+        List<Warning> warnings = response.warnings() == null ? List.of() : response.warnings();
+        return new ExtractResult(items, warnings);
+    }
+
     /** 채점 결과 — 측정값과 그때 실제로 나간 마스킹 발화를 함께 돌려준다. */
     public record Scored(Judgment judgment, String maskedAnswer) {}
+
+    /**
+     * F-EXT-002 추출 결과 — 뽑힌 항목과 경고를 함께 돌려준다. 경고는 추출 실패·부분 성공을
+     * 은폐하지 않고 노출하는 자리다(E-EXT-03).
+     */
+    public record ExtractResult(List<RiskItem> items, List<Warning> warnings) {}
+
+    /**
+     * 추출 경고 한 건. ai-service ExtractionWarning(code, item_id?, message)와 1:1 —
+     * snake_case 매퍼가 item_id → itemId 로 (역)직렬화한다. itemId 는 항목별 경고가 아니면
+     * (예: 문서 전역 경고) null 이다.
+     */
+    public record Warning(String code, String itemId, String message) {}
 
     /** F-INT-002 질문 생성 결과. question_type ∈ {situation, amount, condition}. */
     /**
@@ -488,4 +583,23 @@ public class AiServiceClient {
      */
     record ReExplainResponse(String itemId, String content,
                              List<RiskItem.SourceSpan> citedSpans) {}
+
+    /**
+     * /internal/parse 요청 본문. snake_case 매퍼로 직렬화되어 ai-service ParseRequest
+     * (document_path, product_type)와 1:1이다.
+     */
+    record ParseRequest(String documentPath, String productType) {}
+
+    /**
+     * /internal/extract 요청 본문. snake_case 매퍼로 직렬화되어 ai-service ExtractRequest
+     * (product_id, parsed_document)와 1:1이다. parsedDocument 는 통째로 중첩 직렬화되며
+     * 그 안의 필드도 같은 매퍼가 snake_case 로 바꾼다(document_id·product_type·…).
+     */
+    record ExtractRequest(String productId, ParsedDocument parsedDocument) {}
+
+    /**
+     * /internal/extract 응답. ai-service ExtractResponse(items, warnings)와 1:1이다.
+     * 결과는 공개 {@link ExtractResult} 로 옮겨 돌려준다(다른 응답 DTO들과 같은 패턴).
+     */
+    record ExtractResponse(List<RiskItem> items, List<Warning> warnings) {}
 }
