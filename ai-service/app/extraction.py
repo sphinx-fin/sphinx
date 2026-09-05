@@ -90,6 +90,19 @@ def extract(
     template = templates.get(product_type)
     doc = parsed_document
 
+    warnings: list[ExtractionWarning] = []
+    # ❗**파스 출력이 사람이 만든 것이면 그 사실을 추출 출력에도 싣는다** (#436·#441).
+    # 추출은 `parse_warnings` 를 안 보므로, 안 실으면 그 문서에서 나온 RiskItem 이
+    # *"수동 파스에서 왔다"* 를 잃은 채 서버·evidence·게이트로 간다.
+    # `ParsedDocument.is_manual` 이 *"성능 수치를 인용할 때 구분해야 한다"* 고 적어 뒀는데
+    # 읽는 쪽이 `app/` 에 하나도 없었다 — 그 자리가 여기다.
+    if any(w.get("code") == "MANUAL_OVERRIDE" for w in (doc.get("parse_warnings") or [])):
+        warnings.append(ExtractionWarning(
+            code="MANUAL_SOURCE",
+            message="파스 출력이 사람이 만든 것이다(MANUAL_OVERRIDE) — 이 문서에서 나온 "
+                    "항목은 파서 성능 수치의 분모에 넣지 않는다",
+        ))
+
     total = sum(len(p["text"]) for p in doc["pages"])
     if total > MAX_DOCUMENT_CHARS:
         raise DocumentTooLarge(
@@ -109,7 +122,6 @@ def extract(
     )
 
     known = {i.item_id: i for i in template.items}
-    warnings: list[ExtractionWarning] = []
     resolved: dict[str, RiskItem] = {}
 
     for candidate in draft.candidates:

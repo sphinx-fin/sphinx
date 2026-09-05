@@ -370,8 +370,14 @@ public class AiServiceClient {
      * <p>{@code warnings} 는 추출 실패·부분 성공을 은폐하지 않고 노출한다(E-EXT-03). 항목이
      * {@code status=extraction_failed} 로 온 것과 짝을 이룬다 — 코드셋은 ai-service 의
      * {@code ExtractionWarning}(ITEM_NOT_FOUND·SPAN_UNRESOLVED·LOOSE_MATCH·AMBIGUOUS_SPAN·
-     * PAGE_CORRECTED·QUOTE_NARROWED·NARROWING_REFUSED·UNKNOWN_ITEM_ID·IMPORTANCE_PLACEHOLDER).
+     * PAGE_CORRECTED·QUOTE_NARROWED·NARROWING_REFUSED·UNKNOWN_ITEM_ID·IMPORTANCE_PLACEHOLDER·
+     * <b>MANUAL_SOURCE</b>).
      * 이 클라이언트는 코드를 문자열로 실어 나르기만 하고 해석은 배선 단계가 한다.
+     *
+     * <p>❗{@code MANUAL_SOURCE} 만 <b>문서 단위</b>다 — {@code itemId} 가 비어서 온다.
+     * 파스 출력이 사람이 만든 것이라는 뜻이고(ai-service {@code parse_warnings} 의
+     * {@code MANUAL_OVERRIDE} 에서 옮겨 실린다), 사람이 만든 것은 개별 항목이 아니라
+     * <b>그 파스 출력 전체</b>이기 때문이다. 배선 단계가 항목별로 짝지으려 하면 안 맞는다.
      *
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
