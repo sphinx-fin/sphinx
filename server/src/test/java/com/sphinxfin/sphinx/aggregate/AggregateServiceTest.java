@@ -393,6 +393,84 @@ class AggregateServiceTest {
             assertThat(AggregateService.outlier("item", ITEM, points)).isEmpty();
         }
 
+        @Test
+        @DisplayName("★ 항목 축의 계열이 표시명을 싣는다 — 선행지표도 ID 원문으로 안 뜬다")
+        void theItemAxisCarriesDisplayNames() {
+            seed(PRODUCT, "BR-1", "seller-1", "60대", Channel.FACE_TO_FACE, ITEM, Grade.U4);
+            em.flush();
+            em.clear();
+
+            assertThat(aggregate.leadingIndicators(AccessPolicy.Scope.ORG, null,
+                    AggregateService.GroupBy.ITEM, 8, Instant.now()).series())
+                    .singleElement()
+                    .satisfies(series -> {
+                        assertThat(series.key()).isEqualTo(ITEM);
+                        assertThat(series.itemName())
+                                .as("이름이 없으면 추이 표의 행 머리가 %s 로 뜬다 — 히트맵은 "
+                                        + "#382 로 나았는데 이 뷰는 그대로였다", ITEM)
+                                .isEqualTo("원금손실 가능성 고지");
+                    });
+        }
+
+        @Test
+        @DisplayName("❗판매자 축에는 표시명이 없다 — 대체키를 쓰는 이유가 사라진다")
+        void theSellerAxisHasNoDisplayName() {
+            seed(PRODUCT, "BR-1", "seller-kim-01", "60대", Channel.FACE_TO_FACE, ITEM, Grade.U4);
+            em.flush();
+            em.clear();
+
+            assertThat(aggregate.leadingIndicators(AccessPolicy.Scope.ORG, null,
+                    AggregateService.GroupBy.SELLER, 8, Instant.now()).series())
+                    .singleElement()
+                    .satisfies(series -> {
+                        assertThat(series.key()).startsWith("S-");
+                        assertThat(series.itemName())
+                                .as("대체키 옆에 이름이 붙으면 비식별이 아니게 된다. 지점 축도 "
+                                        + "같다 — 카탈로그에 없는 키다")
+                                .isNull();
+                    });
+        }
+
+        @Test
+        @DisplayName("지점 축도 이름이 없다 — 항목 축에서만 찬다")
+        void theBranchAxisHasNoDisplayName() {
+            seed(PRODUCT, "BR-1", "seller-1", "60대", Channel.FACE_TO_FACE, ITEM, Grade.U4);
+            em.flush();
+            em.clear();
+
+            assertThat(aggregate.leadingIndicators(AccessPolicy.Scope.ORG, null,
+                    AggregateService.GroupBy.BRANCH, 8, Instant.now()).series())
+                    .singleElement()
+                    .satisfies(series -> {
+                        assertThat(series.key()).isEqualTo("BR-1");
+                        assertThat(series.itemName()).isNull();
+                    });
+        }
+
+        @Test
+        @DisplayName("❗이상치에도 이름이 붙는다 — 사람이 제일 먼저 읽는 자리다")
+        void theOutlierCarriesTheNameToo() {
+            List<AggregateService.Point> points = List.of(
+                    point("2026-W28", "0.10", 40), point("2026-W29", "0.10", 40),
+                    point("2026-W30", "0.10", 40), point("2026-W31", "0.10", 40),
+                    point("2026-W32", "0.30", 40));
+
+            assertThat(AggregateService.outlier("item", ITEM, points))
+                    .as("판단 함수는 이름을 모른다 — 통계 판정이 표시 데이터에 의존하면 "
+                            + "안 되기 때문이다. 붙이는 것은 축을 아는 호출부다")
+                    .hasValueSatisfying(out -> assertThat(out.itemName()).isNull());
+
+            assertThat(AggregateService.outlier("item", ITEM, points)
+                    .orElseThrow().withItemName("원금손실 가능성 고지"))
+                    .satisfies(named -> {
+                        assertThat(named.itemName()).isEqualTo("원금손실 가능성 고지");
+                        assertThat(named.reason())
+                                .as("이름만 얹고 판단은 그대로다")
+                                .contains("직전 4구간");
+                        assertThat(named.delta()).isEqualByComparingTo("0.2000");
+                    });
+        }
+
         private static AggregateService.Point point(String period, String misrate, long n) {
             return new AggregateService.Point(period, new BigDecimal(misrate), n, false);
         }
