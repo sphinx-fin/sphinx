@@ -67,15 +67,6 @@
   font-weight: 700;
 }
 
-.gd__navlink {
-  font-size: calc(14px * var(--scale));
-  font-weight: 600;
-  color: var(--accent);
-  text-decoration: none;
-}
-.gd__navlink:hover { text-decoration: underline; }
-.gd__navlink::after { content: " →"; }
-
 /* ── 카드 (시작 전에 · 자주 막히는 곳) ───────────────────────────────────── */
 .gd__card {
   background: var(--surface);
