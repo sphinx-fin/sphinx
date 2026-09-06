@@ -318,8 +318,32 @@ public class Session extends BaseEntity {
                 .sellerId(cmd.sellerId())
                 .branchId(cmd.branchId())
                 .surveySchemaVersion(cmd.surveySchemaVersion())
-                .surveyResult(cmd.surveyResult() == null ? Map.of() : Map.copyOf(cmd.surveyResult()))
+                .surveyResult(nfcSurvey(cmd.surveyResult()))
                 .build();
+    }
+
+    /**
+     * 설문 결과의 문자열 값을 NFC 로 고정한다 (정본 경계, 결정 10.2.1 · 이슈 #466 NFC 축).
+     *
+     * <p>❗<b>surveyResult 는 발화와 달리 여기서 정규화한다.</b> 발화(answerText)는 {@code Session}
+     * 에 원문을 안 남기고 {@code AiServiceClient} 로 나가는 경계에서 NFC 를 걸지만(#469), surveyResult
+     * 는 <b>세션에 저장</b>되고 그대로 불변 기록(appendMismatch)까지 내려간다. 10.2.1 이 정한
+     * 대로 <i>"Spring 안에 원문을 저장하면 정규화를 요청 진입점으로 올린다"</i> — 이 도메인 진입
+     * choke point 가 그 자리다. 안 하면 조합형(NFD) 설문 답이 그대로 해시되고, 영속 DB(#445)
+     * 이후엔 같은 답이 환경마다 다른 contentHash 를 내 교차검증이 깨진다(못 고친다).
+     *
+     * <p>값의 <b>표현만</b> 바꾸는 #482(Double→BigDecimal, recorder)와 달리 이건 내용(바이트)을
+     * 바꾸므로 recorder 가 아니라 <b>입력 경계</b>에서 한다 — CanonicalJson 이 정규화를 일부러
+     * 안 하는 이유와 같은 결이다. 문자열 아닌 값(숫자·불리언)은 그대로 둔다.
+     */
+    private static Map<String, Object> nfcSurvey(Map<String, Object> survey) {
+        if (survey == null || survey.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        survey.forEach((k, v) -> out.put(k,
+                v instanceof String s ? java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC) : v));
+        return Map.copyOf(out);
     }
 
     /** 상태 전이. 불법 전이면 SessionFsm이 예외를 던진다. */
