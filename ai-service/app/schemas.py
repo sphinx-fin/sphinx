@@ -551,3 +551,74 @@ class MismatchRequest(Strict):
         description="[{item_id, text}] — 세션 내 발화. Spring PiiGateway 통과분만 (P3)"
     )
     survey_schema_version: str | None = None
+
+
+# ── 루브릭 후보 생성 (이슈 #474 ①) ──────────────────────────────────────────────
+class RubricProposeRequest(Strict):
+    """문서에서 루브릭 후보를 낸다. **파일을 쓰지 않는다 — 제안만 낸다.**
+
+    ❗승인 산출물은 `ai-service/app/rubrics/*.yaml` **파일**이다. 루브릭을 DB 에 넣고
+    채점이 거기서 읽으면 `verify_rubric_clause_is_published` 가 순환한다(P4) — 근거로
+    적힌 조항을 **그 자리에서 만든 기준**과 대조하게 되고, 공개 의무·재현성이 같이 무너진다.
+    `#358` 에서 검색 스택을 채점 시점에 안 붙인 이유와 같은 자리다.
+    """
+
+    parsed_document: ParsedDocument = Field(description="F-EXT-001 출력")
+    item_ids: list[str] | None = Field(
+        default=None,
+        description="후보를 낼 항목. 안 주면 그 상품유형 템플릿의 항목 전부",
+    )
+
+    @property
+    def product_type(self) -> str:
+        """상품유형은 문서가 들고 있다 — `ExtractRequest` 와 같은 규약이다."""
+        return self.parsed_document.product_type
+
+
+class RubricEvidence(Strict):
+    """후보 조항의 근거 원문. **스팬을 든다** (P6 · 1절).
+
+    문자열만 주면 사람이 승인할 때 *"이게 정말 이 문서에 있나"* 를 눈으로 찾아야 한다.
+    스팬이 있으면 화면이 원문에 표시할 수 있고, `pages[page].text[start:end] == text` 로
+    기계가 대조할 수 있다 — `RiskItem.condition` 이 같은 규약을 쓰는 이유와 같다.
+    """
+
+    text: str
+    spans: list[SourceSpan] = Field(
+        default_factory=list,
+        description="원문 위치. 여러 조각이면 이어붙인 것이 text 다(페이지를 걸치는 문장)",
+    )
+
+
+class RubricProposal(Strict):
+    """항목 하나의 후보. **사람이 고치고 승인해서 YAML 이 된다.**"""
+
+    item_id: str
+    name: str
+    required_elements: list[str] = Field(description="이해로 인정되려면 말해야 하는 것 — 후보")
+    misconception_conditions: list[str] = Field(
+        default_factory=list, description="말하면 오해로 보는 것 — 후보"
+    )
+    evidence: list[RubricEvidence] = Field(
+        default_factory=list, description="후보의 근거가 된 문서 원문"
+    )
+    already_covered: list[str] = Field(
+        default_factory=list,
+        description="기존 루브릭 조항과 겹치는 후보 — 사람이 새것과 헷갈리지 않게 갈라 준다",
+    )
+    #: ❗`u1_requires` 를 **안 낸다.** 문턱은 문서에서 유도할 수 없는 **규범**이다 —
+    #: `#367` 이 그 필드를 만든 이유가 "요소 수와 다를 수 있다" 였고, 몇 개면 이해로
+    #: 볼지는 파는 쪽이 정해서 공개하는 판단이다. 모델이 채우면 그 판단이 숨는다.
+    has_existing_rubric: bool = Field(
+        default=False, description="이미 루브릭 파일이 있는 항목인가 (있으면 사각 보완용이다)"
+    )
+
+
+class RubricProposeResponse(Strict):
+    document_id: str
+    product_type: str
+    proposals: list[RubricProposal]
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="후보를 못 낸 항목 등. 은폐하지 않고 노출한다 (E-EXT-03 과 같은 규약)",
+    )

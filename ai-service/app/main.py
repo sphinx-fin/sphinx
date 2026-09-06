@@ -119,7 +119,13 @@ class PiiGuardMiddleware:
     #:
     #: **고객 텍스트가 오는 경로는 여기 넣지 않는다.** 나머지 전부가 strict 범위임을
     #: 테스트로 고정했다.
-    PUBLIC_DOCUMENT_PATHS = frozenset({"/internal/parse", "/internal/extract"})
+    #: `/internal/rubric/propose` 도 여기 든다 (이슈 #474 ①) — 본문이
+    #: `parsed_document` + `item_ids` 뿐이고 **고객 텍스트를 받는 필드가 없다.**
+    #: 그 사실을 `test_only_document_paths_relax_broad_pii_heuristics` 가 스키마에서
+    #: 유도해 잠근다 — 목록에 손으로 더하는 것만으로는 다음 사람이 왜 안전한지 모른다.
+    PUBLIC_DOCUMENT_PATHS = frozenset({
+        "/internal/parse", "/internal/extract", "/internal/rubric/propose",
+    })
 
     def _scope(self, path: str) -> str:
         return "public_document" if path in self.PUBLIC_DOCUMENT_PATHS else "customer"

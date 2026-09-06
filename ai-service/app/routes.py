@@ -16,8 +16,9 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from . import (extraction, misconception, mismatch, parsing, question_gen, reexplain,
+               rubricgen,
                rubrics, scoring, templates)
-from .llm_client import LlmError, LlmNotConfigured
+from .llm_client import LlmError, LlmNotConfigured, client as default_client
 from .pii import PiiDetected, assert_clean
 from .schemas import (
     ConditionNotExtracted,
@@ -34,6 +35,8 @@ from .schemas import (
     ReexplainResponse,
     SuitabilityMismatch,
     ScoreRequest,
+    RubricProposeRequest,
+    RubricProposeResponse,
 )
 
 log = logging.getLogger(__name__)
@@ -245,6 +248,51 @@ def do_reexplain(body: ReexplainRequest) -> ReexplainResponse:
         raise _not_implemented("F-INT-004 재설명")
     except LlmError as exc:
         raise _llm_unavailable(exc)
+
+
+# ── 루브릭 후보 생성 (이슈 #474 ①) ────────────────────────────────────────────
+@router.post("/rubric/propose", response_model=RubricProposeResponse)
+def propose_rubric(body: RubricProposeRequest) -> RubricProposeResponse:
+    """문서에서 루브릭 후보를 낸다. **파일을 쓰지 않는다 — 제안만 낸다.**
+
+    ❗승인 산출물은 `app/rubrics/*.yaml` **파일**이다. 채점(`rubrics.get()`)은 그 파일만
+    읽고 이 경로를 안 지난다 — 채점이 런타임 생성 기준을 쓰면
+    `verify_rubric_clause_is_published` 가 순환한다(P4 · `#358` 과 같은 자리).
+
+    항목 하나가 실패해도 나머지를 낸다. **실패를 은폐하지 않고 `warnings` 로 노출한다**
+    (E-EXT-03 과 같은 규약) — 조용히 빠지면 사람이 "이 항목은 후보가 없구나" 와
+    "이 항목이 죽었구나" 를 못 가른다.
+    """
+    doc = body.parsed_document
+    try:
+        known = [i.item_id for i in templates.get(doc.product_type).items]
+    except Exception as exc:  # noqa: BLE001 — 모르는 상품유형은 400 이 맞다
+        raise HTTPException(status_code=400, detail=f"상품유형 템플릿이 없다: {doc.product_type} — {exc}")
+
+    wanted = body.item_ids or known
+    unknown = [i for i in wanted if i not in known]
+    targets = [i for i in wanted if i in known]
+
+    client = default_client()
+    proposals, warnings = [], [f"템플릿에 없는 항목: {i}" for i in unknown]
+    for item_id in targets:
+        try:
+            proposals.append(rubricgen.propose_one(item_id, doc, client))
+        except LlmError as exc:
+            # 하나가 죽어도 나머지를 낸다 — 전부 실패면 아래에서 502 로 올린다.
+            warnings.append(f"{item_id}: 후보 생성 실패 ({type(exc).__name__})")
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{item_id}: 후보 생성 실패 ({type(exc).__name__}: {exc})")
+
+    if targets and not proposals:
+        raise _llm_unavailable(LlmError("루브릭 후보를 하나도 못 냈다: " + "; ".join(warnings)))
+
+    return RubricProposeResponse(
+        document_id=doc.document_id,
+        product_type=doc.product_type,
+        proposals=proposals,
+        warnings=warnings,
+    )
 
 
 __all__ = ["router", "PiiDetected"]
