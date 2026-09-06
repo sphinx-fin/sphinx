@@ -1,0 +1,277 @@
+/* 사용 가이드 (`/guide`). 소유: 오준서.
+
+   ── 이 화면은 읽는 화면이다 ───────────────────────────────────────────────
+   창구에서 조작하는 화면이 아니라 시작 전에 한 번 훑는 문서다. S-00 과 같은 예외를
+   하나 갖는다: **손가락이 아니라 눈이 기준**이라 컨트롤을 `--control-h`(52px) 로 키우지
+   않는다. 대신 본문 폭을 좁게 잡는다 — 캡처가 1518px 짜리라 액자를 화면 끝까지 늘리면
+   설명 문장이 한 줄에 80자를 넘어 읽는 속도가 떨어진다.
+
+   ── 어기지 않는 것 ────────────────────────────────────────────────────────
+   **판정 3색을 쓰지 않는다**(토큰 규칙 1). 캡처 안에는 녹·황·적이 들어 있지만 그건 그
+   화면의 판정이고, 이 화면에는 판정이 없다. 액자·번호·배지는 전부 무채색 + 라피스
+   하나로 둔다 — 가이드가 색을 쓰기 시작하면 캡처 안의 색과 섞여서 어느 쪽이 판정인지
+   구분되지 않는다.
+
+   px 고정값을 안 쓰는 이유는 다른 화면과 같다. 큰 글씨를 켠 채로 이 화면에 돌아와도
+   레이아웃이 깨지지 않아야 한다. */
+
+.gd { min-height: 100%; display: flex; justify-content: center; padding: var(--space-6) var(--space-4) var(--space-8); }
+.gd__shell { width: 100%; max-width: 52rem; display: flex; flex-direction: column; gap: var(--space-5); }
+
+/* 껍데기 하나만 올라온다 — 단계마다 지연을 주면 스크롤할 때 카드가 뒤늦게 튀어나온다. */
+.gd__shell { animation: ui-rise var(--dur) var(--ease) both; }
+
+/* ── 머리말 ───────────────────────────────────────────────────────────────── */
+.gd__head { display: flex; flex-direction: column; gap: var(--space-2); }
+.gd__eyebrow {
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.45 * var(--leading-scale));
+  font-weight: 700; letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.gd__title {
+  font-size: calc(34px * var(--scale));
+  line-height: calc(1.3 * var(--leading-scale));
+  letter-spacing: -0.03em; font-weight: 700;
+}
+.gd__lede {
+  max-width: 40rem;
+  font-size: calc(16px * var(--scale));
+  line-height: calc(1.65 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.gd__lede b { color: var(--text); font-weight: 600; }
+
+.gd__headrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+
+/* 큰 글씨 토글 — 상태를 색만으로 말하지 않는다(토큰 규칙 3). 문면에 켜짐/꺼짐이 있다. */
+.gd__toggle {
+  min-height: var(--control-h-sm);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: calc(14px * var(--scale));
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring),
+              background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
+}
+.gd__toggle:active { transform: scale(0.96); }
+.gd__toggle--on {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+
+.gd__navlink {
+  font-size: calc(14px * var(--scale));
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.gd__navlink:hover { text-decoration: underline; }
+.gd__navlink::after { content: " →"; }
+
+/* ── 카드 (시작 전에 · 자주 막히는 곳) ───────────────────────────────────── */
+.gd__card {
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+/* 마지막 카드는 필요할 때 찾아 읽는 것이라 지면에 가라앉힌다 — 단계와 층을 가른다. */
+.gd__card--note { background: var(--surface-sunken); box-shadow: none; }
+
+.gd__section {
+  font-size: calc(19px * var(--scale));
+  line-height: calc(1.4 * var(--leading-scale));
+  letter-spacing: -0.02em; font-weight: 700;
+}
+
+.gd__list {
+  margin: 0; padding-left: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-3);
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.gd__list b { color: var(--text); font-weight: 600; }
+.gd__list a, .gd__faq a { color: var(--accent); font-weight: 600; }
+
+/* ── 단계 ─────────────────────────────────────────────────────────────────── */
+.gd__steps {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: var(--space-5);
+}
+
+.gd__step {
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+
+.gd__step-head { display: flex; align-items: flex-start; gap: var(--space-3); }
+
+/* 번호는 원 안의 숫자다. 스크롤이 길어 "몇 번째까지 왔나"가 유일한 위치 감각이라
+   제목보다 먼저 눈에 들어와야 한다. 강조색을 면으로 쓰는 몇 안 되는 자리. */
+.gd__step-num {
+  flex: none;
+  width: calc(32px * var(--scale)); height: calc(32px * var(--scale));
+  display: grid; place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent); color: var(--text-inverse);
+  font-size: calc(15px * var(--scale));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.gd__step-heading { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+
+.gd__step-meta {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(12px * var(--scale));
+  color: var(--text-muted);
+}
+/* 대상 배지는 무채색이다 — 역할마다 색을 주면 색이 뜻을 갖기 시작하고, 그 뜻이 캡처
+   안의 판정색과 같은 화면에서 경쟁한다. */
+.gd__badge {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: calc(12px * var(--scale));
+  line-height: calc(1.9 * var(--leading-scale));
+  font-weight: 600;
+  white-space: nowrap;
+}
+.gd__step-meta .gd__badge { font-family: "Pretendard", sans-serif; }
+
+.gd__step-title {
+  font-size: calc(22px * var(--scale));
+  line-height: calc(1.38 * var(--leading-scale));
+  letter-spacing: -0.025em; font-weight: 700;
+}
+/* 화면 이름은 제목이 아니라 꼬리표다 — 심사자가 명세와 대조할 때만 쓴다. */
+.gd__step-name {
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+/* ── 캡처 ─────────────────────────────────────────────────────────────────── */
+.gd__shots { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.gd__shot { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* 액자. 캡처의 지면(석회암 97)이 카드 면(석회암 99)과 거의 같은 색이라, 테두리가 없으면
+   캡처가 어디서 시작하는지 안 보인다. 그림자가 아니라 **머리카락 선**으로 가르는 이유는
+   그림자를 쓰면 카드 위에 카드가 뜬 것처럼 보여 층이 하나 더 생기기 때문이다. */
+.gd__shot-img {
+  display: block;
+  width: 100%; height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.gd__shot-cap {
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+/* ── 할 일 ────────────────────────────────────────────────────────────────── */
+.gd__step-body { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.gd__todo-title {
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.45 * var(--leading-scale));
+  font-weight: 700;
+}
+
+/* 번호를 브라우저 기본 마커에 맡기지 않는다 — 기본 마커는 본문색이라 문장과 섞이고,
+   여기서는 "몇 번째로 누르는가" 가 문장만큼 중요하다. */
+.gd__todo {
+  margin: 0; padding: 0; list-style: none;
+  counter-reset: gd-todo;
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.gd__todo li {
+  position: relative;
+  padding-left: calc(28px * var(--scale));
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+.gd__todo li::before {
+  counter-increment: gd-todo;
+  content: counter(gd-todo);
+  position: absolute; left: 0; top: calc(2px * var(--scale));
+  width: calc(20px * var(--scale)); height: calc(20px * var(--scale));
+  display: grid; place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent-bg); color: var(--accent);
+  font-size: calc(12px * var(--scale));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 미리 알려주는 말. 경고가 아니라 안내라서 **노란 면을 쓰지 않는다** — 오커는 판정이다.
+   왼쪽 머리카락 선으로만 본문과 가른다(S-00 의 `prereq` 와 같은 장치). */
+.gd__note {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-strong);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+.gd__step-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding-top: var(--space-1); }
+
+.gd__open {
+  min-height: var(--control-h-sm);
+  display: inline-flex; align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--accent); color: var(--text-inverse);
+  font-size: calc(14px * var(--scale));
+  font-weight: 700; text-decoration: none;
+  transition: transform var(--dur-press) var(--ease-spring), background var(--dur) var(--ease);
+}
+.gd__open:hover { background: var(--accent-hover); }
+.gd__open:active { transform: scale(0.97); }
+/* 세션이 없어 목차로 보내는 링크. 같은 자리에 같은 크기로 서지만 **다른 곳으로 간다** —
+   면을 낮춰 그 차이를 보이게 한다. 비활성이 아니다: 누르면 세션을 만들 수 있다. */
+.gd__open--ghost { background: var(--surface-sunken); color: var(--text-muted); }
+.gd__open--ghost:hover { background: var(--border); color: var(--text); }
+
+.gd__route {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(12px * var(--scale));
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* ── 자주 막히는 곳 ───────────────────────────────────────────────────────── */
+.gd__faq { margin: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.gd__faq dt {
+  font-size: calc(15px * var(--scale));
+  line-height: calc(1.45 * var(--leading-scale));
+  font-weight: 700;
+  margin-bottom: var(--space-1);
+}
+.gd__faq dd {
+  margin: 0;
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted);
+}

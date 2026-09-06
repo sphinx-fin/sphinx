@@ -263,10 +263,19 @@ export default function S02SessionStart() {
               열린다. 이 자리인 이유는 두 가지다 — ① 브랜드 바에 달 수 없다. 그건 전
               화면에 뜨고 그중 S-03 은 고객이 답변 도중이라, 습관적으로 눌렀다가 세션 밖으로
               나가는 사고가 정확히 BrandBar 가 링크를 안 거는 이유다. ② S-02 는 태블릿을
-              넘기기 **전**의 판매자 화면이라 그 사고가 없다. 그래서 목차 진입은 여기 하나다. */}
-          <Link className="ss__navlink" to="/admin">
-            심사용 화면 목록
-          </Link>
+              넘기기 **전**의 판매자 화면이라 그 사고가 없다. 그래서 목차 진입은 여기 하나다.
+
+              사용 가이드(`/guide`)를 그 옆에 둔 것도 ② 때문이다 — 처음 여는 사람이 멈추는
+              자리가 바로 이 화면이라, 가이드를 찾으려고 이미 막힌 화면을 뒤지게 두면 안 된다.
+              가이드는 세션을 만들지 않으므로 여기서 나갔다 돌아와도 잃는 것이 없다. */}
+          <div className="ss__navrow">
+            <Link className="ss__navlink" to="/guide">
+              처음이신가요? 사용 가이드
+            </Link>
+            <Link className="ss__navlink" to="/admin">
+              심사용 화면 목록
+            </Link>
+          </div>
         </header>
 
         <section className="ss__card">
