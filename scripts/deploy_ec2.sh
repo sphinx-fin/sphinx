@@ -307,6 +307,47 @@ log_unhealthy() {
 log_unhealthy sphinx-data
 log_unhealthy sphinx-edge
 
+# ── 옛 단일 프로젝트(`sphinx`) 철거 — 스택을 셋으로 가르기 전의 잔재다 ────────────
+#
+# 머리말이 말한 "예전엔 다섯 서비스가 프로젝트 하나(`sphinx`)였다" 의 뒤처리다. 새 배치의
+# 파일들은 그 시절 **볼륨 이름**을 그대로 물려받게 써 뒀지만(`name: sphinx_letsencrypt` 등),
+# 그 시절 **컨테이너**가 박스에 살아 있는 경우는 아무도 안 내렸다. 그러면 새 스택이 못 뜬다
+# — 겹치는 것이 둘이다:
+#
+#   ① 옛 `sphinx-web-1` 이 0.0.0.0:80·443 을 쥐고 있다. edge 의 `web` 이 같은 포트를
+#      요구하므로 `Bind for 0.0.0.0:443 failed: port is already allocated` 로 죽는다.
+#      PR #513 머지 직후 alpha 배포가 정확히 이걸로 실패했다(런 34035273642).
+#   ② 옛 `sphinx-mysql-1` 이 `sphinx_mysql-data` 를 물고 있다. data 스택의 mysql 이
+#      **같은 볼륨**을 마운트하므로 mysqld 둘이 한 데이터 디렉토리를 잡는다.
+#
+# ❗**컨테이너만 지운다 — 볼륨은 손대지 않는다.** 인증서(`sphinx_letsencrypt`)와
+# DB(`sphinx_mysql-data`)가 그 안에 있고, 새 스택이 이름으로 그대로 물려받는 것이 이
+# 이관의 전제다. `docker rm` 은 named volume 을 지우지 않는다 — 여기에 `down -v` 를 쓰면
+# 인증서와 DB 가 같이 날아간다(재발급은 Let's Encrypt 발급 한도가 걸린다).
+#
+# 라벨 필터는 **정확히 일치**라 `sphinx-edge`·`sphinx-data`·`sphinx-blue` 는 안 걸린다.
+# 이관이 끝난 박스에서는 걸리는 컨테이너가 0개라 이 블록은 아무 일도 안 한다 — 그게 정상
+# 상태다. 지우려면 alpha·prod **두 박스가 모두** 새 배치로 한 번씩 돈 것을 확인하고 지운다.
+#
+# 이 한 번의 배포에만 **짧은 단절이 있다.** 80/443 을 쥔 쪽이 바뀌는 순간이라 피할 수 없다
+# — 옛 web 을 내려야 새 web 이 그 포트를 잡는다. 그 창을 줄이려고 edge 이미지를 **먼저**
+# 빌드해 둔다(빌드는 포트를 안 쓴다). 두 번째 배포부터는 여기 걸리는 것이 없어 평소의
+# 무중단 경로 그대로다.
+legacy_cids=$(docker ps -aq --filter "label=com.docker.compose.project=sphinx" 2>/dev/null || true)
+if [ -n "$legacy_cids" ]; then
+  echo "::warning::옛 단일 프로젝트(sphinx) 컨테이너가 있다 — 내리고 새 배치로 이관한다. 이 배포에만 짧은 단절이 있다."
+  docker ps -a --filter "label=com.docker.compose.project=sphinx" \
+    --format '  {{.Names}}  {{.Status}}  {{.Ports}}' || true
+  echo "edge 이미지 선빌드 — 단절 창을 빌드 시간만큼 줄인다"
+  compose_edge build
+  echo "옛 컨테이너 제거 (볼륨은 그대로 둔다)"
+  # shellcheck disable=SC2086  # 공백으로 갈린 ID 목록이라 쪼개지는 것이 맞다
+  docker rm -f $legacy_cids
+  # 컨테이너가 없으면 옛 네트워크는 빈 껍데기다. 아직 붙은 것이 있으면 실패하는데, 그때는
+  # 지워지지 않는 쪽이 맞으므로 무시한다.
+  docker network rm sphinx_default >/dev/null 2>&1 || true
+fi
+
 # ── data·edge 스택 — 상시 유지, 설정이 안 바뀌면 compose 가 아무것도 안 건드린다 ──
 echo "data 스택(mysql) 기동"
 compose_data up -d
