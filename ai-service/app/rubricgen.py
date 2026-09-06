@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 
 from . import retrieval, rubrics, templates, textsim
 from .llm_client import LlmClient
@@ -128,16 +129,42 @@ def _already_covered(candidate: str, existing: tuple[str, ...]) -> bool:
     return any(textsim.containment(e, candidate) >= ALREADY_COVERED for e in existing)
 
 
-def propose_one(
-    item_id: str, doc: ParsedDocument, client: LlmClient
-) -> RubricProposal:
-    """항목 하나의 후보. 검색으로 근거 청크를 모으고 조항 초안을 낸다."""
-    item = next(i for i in templates.get(doc.product_type).items if i.item_id == item_id)
+@dataclass(frozen=True)
+class DocumentPrep:
+    """**문서 단위** 검색 준비물. 항목이 바뀌어도 같은 값이다 (`#476` 리뷰).
+
+    항목마다 다시 만들면 ELS 13항목에서 임베딩이 **450여 텍스트 · 왕복 13회**가 된다
+    (청크 30~40개 × 13). `llm_client.embed` 에 캐시가 없어 전부 실제 호출이고,
+    `pii.assert_clean` 도 청크마다 13번 더 돈다. `retrieval.Dense` 가 docstring 에
+    *"문서가 안 바뀌면 다시 부르지 않는다"* 고 적어 둔 의도와도 어긋난다.
+    """
+
+    chunks: list[retrieval.Chunk]
+    bm: retrieval.Bm25
+    dense: retrieval.Dense
+
+
+def prepare(doc: ParsedDocument, client: LlmClient) -> DocumentPrep:
+    """문서 하나를 한 번만 청킹·색인한다. 여러 항목이 이것을 공유한다."""
     chunks = retrieval.chunk_document(doc.model_dump())
+    return DocumentPrep(chunks=chunks, bm=retrieval.Bm25(chunks),
+                        dense=retrieval.Dense.embed(chunks, client))
+
+
+def propose_one(
+    item_id: str, doc: ParsedDocument, client: LlmClient, *, prep: DocumentPrep | None = None
+) -> RubricProposal:
+    """항목 하나의 후보. 검색으로 근거 청크를 모으고 조항 초안을 낸다.
+
+    `prep` 을 주면 문서 준비물을 공유한다 — 안 주면 이 항목만을 위해 한 번 만든다.
+    **기본값을 남겨 둔 이유**는 단독 호출(도구·테스트)이 안 깨지게 하려는 것이다.
+    """
+    item = next(i for i in templates.get(doc.product_type).items if i.item_id == item_id)
+    if prep is None:
+        prep = prepare(doc, client)
+    chunks, bm, dense = prep.chunks, prep.bm, prep.dense
 
     query = f"{item.name} {item.cue}"
-    bm = retrieval.Bm25(chunks)
-    dense = retrieval.Dense.embed(chunks, client)
     qvec = client.embed([query])[0]
     hits = retrieval.search(query, chunks, bm, dense, qvec, client=client, top_n=TOP_N)
     context = retrieval.with_neighbors(hits, chunks)

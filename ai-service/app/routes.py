@@ -266,8 +266,13 @@ def propose_rubric(body: RubricProposeRequest) -> RubricProposeResponse:
     doc = body.parsed_document
     try:
         known = [i.item_id for i in templates.get(doc.product_type).items]
-    except Exception as exc:  # noqa: BLE001 — 모르는 상품유형은 400 이 맞다
-        raise HTTPException(status_code=400, detail=f"상품유형 템플릿이 없다: {doc.product_type} — {exc}")
+    except templates.TemplateNotFound as exc:
+        # 템플릿 없는 상품유형은 후보 범위가 정의되지 않았다 — 위 `/extract`·`/question` 과
+        # **같은 422** 다(#476 리뷰). ❗`except Exception` 으로 접으면 `_all()` 의 YAML 파싱
+        # 오류(item_id 누락·중복·importance 불량)까지 400 이 되어, 부른 쪽은 자기 요청이
+        # 잘못된 줄 알고 진짜 원인은 detail 문자열에만 남는다. 나머지 예외는 안 잡는다 —
+        # 500 이 "판정을 못 했다" 의 옳은 표현이다.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     wanted = body.item_ids or known
     unknown = [i for i in wanted if i not in known]
@@ -275,9 +280,24 @@ def propose_rubric(body: RubricProposeRequest) -> RubricProposeResponse:
 
     client = default_client()
     proposals, warnings = [], [f"템플릿에 없는 항목: {i}" for i in unknown]
+
+    # ❗**문서 단위 준비물은 한 번만 만든다** (#476 리뷰).
+    #
+    # `chunk_document`·`Bm25`·`Dense.embed` 는 항목이 바뀌어도 같은 값이다. 항목마다
+    # 바뀌는 것은 `query`(name+cue)와 그 아래 `qvec`·`search`·리랭킹뿐이다.
+    # 항목마다 다시 만들면 ELS 13항목에서 **임베딩이 450여 텍스트 · 왕복 13회**가 된다
+    # (청크 30~40개 × 13). `llm_client.embed` 에 캐시가 없어 전부 실제 호출이고,
+    # `pii.assert_clean` 도 청크마다 13번 더 돈다.
+    prep = None
+    if targets:
+        try:
+            prep = rubricgen.prepare(doc, client)
+        except LlmError as exc:
+            raise _llm_unavailable(exc)
+
     for item_id in targets:
         try:
-            proposals.append(rubricgen.propose_one(item_id, doc, client))
+            proposals.append(rubricgen.propose_one(item_id, doc, client, prep=prep))
         except LlmError as exc:
             # 하나가 죽어도 나머지를 낸다 — 전부 실패면 아래에서 502 로 올린다.
             warnings.append(f"{item_id}: 후보 생성 실패 ({type(exc).__name__})")

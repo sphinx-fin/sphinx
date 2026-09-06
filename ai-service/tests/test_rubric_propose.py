@@ -184,15 +184,23 @@ def test_a_failing_item_is_reported_not_hidden() -> None:
     calls: list[str] = []
     original = routes.rubricgen.propose_one          # ❗패치 **전에** 잡는다
 
-    def flaky(item_id, doc, client_):
+    def flaky(item_id, doc, client_, *, prep=None):
         # 패치 뒤에 `rubricgen.propose_one` 을 부르면 자기 자신이라 재귀한다 —
         # 실제로 그렇게 썼다가 RecursionError 가 502 로 나왔다.
         calls.append(item_id)
         if item_id == "ELS-NO-DEPOSIT-INSURANCE":
             raise LlmError("모델이 죽었다")
-        return original(item_id, doc, _StubLlm(_draft(["이 경우 원금 손실이 발생합니다."])))
+        return original(item_id, doc, _StubLlm(_draft(["이 경우 원금 손실이 발생합니다."])), prep=prep)
 
     routes.rubricgen.propose_one = flaky
+    # ❗`prepare` 도 같이 막는다 — 라우트가 준비물을 루프 밖에서 만들게 되면서(#476 리뷰 ①)
+    # `propose_one` 만 스텁하면 **실제 임베딩 API 를 부른다.** 테스트가 네트워크를 타면
+    # 안 된다는 규약이 이 자리에서 한 번 더 걸린다(#207 — 한 번 그래서 65초가 걸렸다).
+    stub_prep = routes.rubricgen.prepare
+    routes.rubricgen.prepare = lambda doc, client_: stub_prep(
+        doc, _StubLlm(_draft([])))
+    original_client = routes.default_client
+    routes.default_client = lambda: _StubLlm(_draft([]))
     try:
         r = _client().post("/internal/rubric/propose", json={
             "parsed_document": _doc().model_dump(mode="json"),
@@ -200,8 +208,10 @@ def test_a_failing_item_is_reported_not_hidden() -> None:
         })
     finally:
         routes.rubricgen.propose_one = original
+        routes.rubricgen.prepare = stub_prep
+        routes.default_client = original_client
 
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
     assert [p["item_id"] for p in body["proposals"]] == ["ELS-MATURITY-LOSS-CONDITION"]
     assert any("ELS-NO-DEPOSIT-INSURANCE" in w for w in body["warnings"]), \
@@ -241,3 +251,105 @@ def test_scoring_does_not_import_the_generator() -> None:
         )
     assert "verify_rubric_clause_is_published" in src, \
         "양성 대조 — 이 파일을 읽고 있는 것이 맞는지"
+
+
+# ── #476 리뷰 ① 문서 준비물을 항목마다 다시 만들지 않는다 ──────────────────────
+def test_document_prep_is_built_once_for_many_items() -> None:
+    """❗**문서 임베딩이 항목 수만큼 반복되면 안 된다** (`#476` 리뷰).
+
+    `chunk_document`·`Bm25`·`Dense.embed` 는 **문서 단위** 준비물이라 항목이 바뀌어도
+    같은 값이다. 항목마다 다시 만들면 ELS 13항목에서 임베딩이 **450여 텍스트 · 왕복
+    13회**가 된다(청크 30~40개 × 13). `llm_client.embed` 에 캐시가 없어 전부 실제
+    호출이고 `pii.assert_clean` 도 청크마다 13번 더 돈다.
+
+    **호출 수가 아니라 「몇 번 준비했나」를 잰다** — 호출 수만 세면 항목이 늘 때
+    자연스럽게 느는 것과 구별이 안 된다.
+    """
+    import app.routes as routes
+
+    llm = _StubLlm(_draft(["이 경우 원금 손실이 발생합니다."]))
+    seen: list[int] = []
+    original = routes.rubricgen.prepare
+
+    def counting(doc, client):
+        seen.append(1)
+        return original(doc, client)
+
+    routes.rubricgen.prepare = counting
+    try:
+        import app.llm_client as lc
+        real = lc.client
+        lc.client = lambda: llm
+        routes.default_client = lambda: llm
+        r = _client().post("/internal/rubric/propose", json={
+            "parsed_document": _doc().model_dump(mode="json"),
+            "item_ids": ["ELS-MATURITY-LOSS-CONDITION", "ELS-NO-DEPOSIT-INSURANCE"],
+        })
+        lc.client = real
+    finally:
+        routes.rubricgen.prepare = original
+
+    assert r.status_code == 200, r.text
+    assert len(r.json()["proposals"]) == 2
+    assert len(seen) == 1, (
+        f"문서 준비물을 {len(seen)}번 만들었다 — 항목마다 다시 만들면 임베딩이 항목 수만큼 곱해진다"
+    )
+
+
+def test_propose_one_still_works_without_prep() -> None:
+    """`prep` 기본값을 남겨 둔 이유 — 도구·테스트의 단독 호출이 안 깨진다."""
+    out = rubricgen.propose_one(
+        "ELS-MATURITY-LOSS-CONDITION", _doc(), _StubLlm(_draft(["이 경우 원금 손실이 발생합니다."]))
+    )
+    assert out.evidence[0].spans, "단독 호출에서 준비물이 안 만들어졌다"
+
+
+# ── #476 리뷰 ② 모르는 상품유형과 설정 오류를 갈라 낸다 ────────────────────────
+def test_an_unknown_product_type_is_422_like_the_other_routes() -> None:
+    """❗`except Exception` 으로 접으면 **템플릿 YAML 파싱 오류까지 400** 이 된다.
+
+    부른 쪽은 자기 요청이 잘못된 줄 알고, 진짜 원인(설정 오류)은 detail 문자열에만 남는다.
+    `CLAUDE.md` 의 `api/` 절이 Spring 쪽에서 같은 모양을 금지한다 — *"범용 예외를 통째로
+    400에 매핑하면 서버 설정 오류까지 「잘못된 요청」이 된다"*.
+
+    같은 파일의 `/extract`·`/question` 이 `TemplateNotFound` 를 **422** 로 내므로
+    거기에 맞춘다. 나머지 예외는 안 잡아 500 으로 올린다 — 그게 *"판정을 못 했다"* 다.
+    """
+    doc = _doc().model_dump(mode="json")
+    doc["product_type"] = "VARIABLE_INSURANCE"     # 계약상 유효하지만 템플릿을 바꿔 본다
+
+    import app.templates as templates_mod
+
+    original = templates_mod.get
+
+    def missing(product_type):
+        raise templates_mod.TemplateNotFound(f"상품유형 템플릿 없음: {product_type}")
+
+    import app.routes as routes
+    routes.templates.get = missing
+    try:
+        r = _client().post("/internal/rubric/propose", json={"parsed_document": doc})
+    finally:
+        routes.templates.get = original
+
+    assert r.status_code == 422, f"{r.status_code} — /extract·/question 과 같은 422 여야 한다"
+    assert "템플릿" in r.json()["detail"]
+
+
+def test_a_broken_template_file_is_not_reported_as_a_bad_request() -> None:
+    """❗설정 오류(YAML 파싱 실패)는 **400 이 아니다.** 잡지 않아 500 으로 올린다."""
+    import app.routes as routes
+    import app.templates as templates_mod
+
+    original = templates_mod.get
+
+    def broken(product_type):
+        raise ValueError("templates/ELS.yaml: item_id 중복")
+
+    routes.templates.get = broken
+    try:
+        with pytest.raises(ValueError, match="중복"):
+            _client().post("/internal/rubric/propose",
+                           json={"parsed_document": _doc().model_dump(mode="json")})
+    finally:
+        routes.templates.get = original
