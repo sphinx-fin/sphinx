@@ -622,3 +622,47 @@ class RubricProposeResponse(Strict):
         default_factory=list,
         description="후보를 못 낸 항목 등. 은폐하지 않고 노출한다 (E-EXT-03 과 같은 규약)",
     )
+
+
+# ── 루브릭 «열람» (이슈 #474 ③) ──────────────────────────────────────────────
+#
+# ❗**공개 의무 대상이다.** 루브릭은 *"고객이 무엇을 말해야 이해로 보는가"* 라는 판정
+# 기준이고, 파는 쪽이 정해서 **공개**하는 규범이다. 그래서 이 응답은 파일에 있는 것을
+# 그대로 낸다 — 요약하거나 골라 내지 않는다.
+#
+# 이것이 P4 의 실물 근거이기도 하다. 채점의 `evidence.rubric_clause` 는
+# `verify_rubric_clause_is_published` 로 **이 파일들 안에 실재하는 문장**임이 강제된다
+# (`scoring.py`). 화면이 그 목록을 보일 수 있으면 *"판정 근거가 어디서 왔는가"* 를
+# 심사자가 직접 대조할 수 있다.
+class RubricView(Strict):
+    """루브릭 하나. `app/rubrics/<item_id>.yaml` 의 내용 그대로다."""
+
+    item_id: str
+    product_type: str
+    name: str
+    status: str = Field(description="confirmed | draft — draft 는 아직 사람이 확정 안 한 것")
+    required_elements: list[str] = Field(
+        description="이해로 인정되려면 고객이 «자기 말로» 언급해야 하는 것"
+    )
+    #: ❗**요소 «개수»가 아니라 이 값이 U1 문턱이다** (`#367`). 화면이 요소 목록만 보이고
+    #: 이 값을 안 보이면 *"이 전부를 말해야 한다"* 로 읽힌다 — `#450` 이 정확히 그 결함이었고
+    #: `VAR-PARTIAL-DEPOSIT-INSURANCE` 는 요소 2 · 문턱 **1** 이다(부분적으로 참인 항목).
+    u1_requires: int = Field(description="required_elements 중 몇 개를 충족해야 U1 인가")
+    misconception_conditions: list[str] = Field(
+        default_factory=list, description="고객이 말하면 오해(U4)로 보는 것"
+    )
+    related_misconceptions: list[str] = Field(
+        default_factory=list, description="오해 라이브러리 유형ID"
+    )
+    #: 링크가 «비어 있는 이유». 빈 목록이 「해당 없음」인지 「아직 못 걸었다」인지 가른다
+    #: (`#284`·`#396` — 침묵이 정상으로 읽히는 자리를 문면으로 가른다).
+    unlinked_until: list[str] | None = Field(
+        default=None, description="[근거, 빼는 조건] — 관련 오해가 비어 있는 이유"
+    )
+
+
+class RubricListResponse(Strict):
+    rubrics: list[RubricView]
+    #: 전체 개수. 필터를 걸어도 «분모» 를 화면이 알 수 있게 같이 낸다 — 걸러진 목록만
+    #: 보이면 *"이게 전부"* 로 읽힌다(`R-00` 이 분모를 지키는 것과 같은 이유).
+    total: int
