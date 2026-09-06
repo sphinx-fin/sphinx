@@ -340,6 +340,111 @@ class StoredEvidenceRecorderTest {
                             "utterance", "원금은 지켜지죠")));
         }
 
+        /**
+         * ❗<b>설문 값이 숫자인 경우</b>(이슈 #466). 계약이 허용한다 —
+         * {@code openapi.yaml} 의 {@code surveyResult} 는 {@code additionalProperties: true} 다.
+         *
+         * <p>지금 안 터지는 이유는 화면 관례 하나다: {@code web/src/lib/survey.ts} 가 값을
+         * <i>등급이 아니라 문장으로</i> 보낸다. 그건 F-DET-002 를 위한 선택이지 이 크래시를
+         * 막으려던 것이 아니라, 설문 세트가 바뀌거나 다른 클라이언트가 붙으면 그날 터진다.
+         */
+        private static final Map<String, Object> NUMERIC_SURVEY = Map.of(
+                "SUIT-LOSS-TOLERANCE", 20.0,              // 전역 Jackson 이 Double 로 만든다
+                "SUIT-HOLDING-YEARS", 3,                  // 정수는 원래 통과한다
+                "SUIT-ASSET-RATIO", 0.35f,                // Float 도 같은 자리에서 죽는다
+                "SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다");
+
+        @Test
+        @DisplayName("❗설문 값이 숫자여도 적재가 죽지 않는다 (이슈 #466 · #453 과 같은 크래시)")
+        void aNumericSurveyValueDoesNotKillTheAppend() {
+            // ❗**타입 단정만으로는 부족하다**(#461 리뷰). 실제로 직렬화까지 가 봐야 한다 —
+            //   CanonicalJson 은 Double 을 만나면 그 자리에서 던지고, 그 예외가
+            //   /sessions/{id}/judge 를 INTERNAL_ERROR 로 만들고 전이가 미커밋이라
+            //   **세션이 IN_PROGRESS 에 갇힌다**(#453 과 같은 증상·같은 엔드포인트).
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", NUMERIC_SURVEY, T0);
+
+            assertThat(CanonicalJson.serialize(payloads().get(0)))
+                    .as("적재가 됐는데 해시 대상 직렬화가 죽으면 감사 시점에야 드러난다")
+                    .isNotEmpty();
+        }
+
+        @Test
+        @DisplayName("❗숫자 설문이 담긴 사슬이 verify 를 통과한다 — 왕복이 타입에 안 걸린다")
+        void aChainWithNumericSurveyStillVerifies() {
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", NUMERIC_SURVEY, T0);
+            em.flush();
+            em.clear();
+
+            // ❗**이것이 진짜 불변식이다.** verify 는 저장된 payload 를 되읽어 **다시 직렬화해**
+            //   해시를 재계산한다. 그래서 「적재는 됐다」와 「검증이 된다」가 다르고, 둘이
+            //   갈리면 증상은 *"테스트 초록 + 감사 시점 verify 실패"* 다(#327 에 적어 둔 자리).
+            //
+            //   되읽기는 JpaImmutableStore 의 replayMapper 가 하고 거기에도
+            //   USE_BIG_DECIMAL_FOR_FLOATS 가 켜져 있다 — 이 단정은 **그 둘이 같이 서 있어야**
+            //   통과한다. 한쪽만 있으면 여기서 깨진다.
+            assertThat(store.verify(StoredEvidenceRecorder.streamOf(SID)).ok())
+                    .as("숫자 설문이 든 사슬이 재검증에서 깨진다 — append 만 고치면 이 자리가 남는다")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("❗바꾸는 것은 표현뿐이다 — 수의 값과 문자열 문면은 그대로다")
+        void onlyTheRepresentationChangesNotTheValue() {
+            // 변환 자체를 직접 잰다. 저장을 한 번 지나면 CanonicalJson 이 ADR-008 대로
+            // stripTrailingZeros 를 적용하므로(20.0 → 20) **적재 시점의 타입**은 그쪽에서
+            // 안 보인다. 두 가지는 다른 성질이라 따로 잰다.
+            assertThat(StoredEvidenceRecorder.hashable(20.0))
+                    .as("Double 은 해시 대상에 담을 수 없다(ADR-008)")
+                    .isEqualTo(new BigDecimal("20.0"));
+            assertThat(StoredEvidenceRecorder.hashable(0.35f))
+                    .as("Float 도 같은 자리에서 죽는다. toString 이 최단 왕복이라 0.35 가 보존된다")
+                    .isEqualTo(new BigDecimal("0.35"));
+
+            assertThat(StoredEvidenceRecorder.hashable(3))
+                    .as("정수는 원래 통과한다 — 손대지 않는다")
+                    .isEqualTo(3);
+            assertThat(StoredEvidenceRecorder.hashable("원금 손실은 감수할 수 있다"))
+                    .as("이 기록의 목적이 '왜 모순인가' 를 읽는 것이라 문면이 바뀌면 안 된다")
+                    .isEqualTo("원금 손실은 감수할 수 있다");
+
+            // 저장을 지난 뒤에도 **수의 값**은 같다. 표기만 ADR-008 규약을 따른다.
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", NUMERIC_SURVEY, T0);
+            Map<String, Object> survey = child(payloads().get(0), "surveyResult");
+            assertThat(((Number) survey.get("SUIT-LOSS-TOLERANCE")).doubleValue()).isEqualTo(20.0);
+            assertThat(((Number) survey.get("SUIT-ASSET-RATIO")).doubleValue())
+                    .isCloseTo(0.35, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat(survey).containsEntry("SUIT-RISK-TOLERANCE", "원금 손실은 감수할 수 있다");
+        }
+
+        @Test
+        @DisplayName("❗NaN·Infinity 는 «거부되는 것이 맞다» — 조용히 바꾸지 않는다")
+        void nonFiniteNumbersAreStillRejected() {
+            assertThat(StoredEvidenceRecorder.hashable(Double.NaN))
+                    .as("BigDecimal 로 못 옮긴다. 무엇보다 ADR-008 이 거부하기로 한 값이다 — "
+                            + "여기서 삼키면 CanonicalJson 의 진단 문면이 사라진다")
+                    .isEqualTo(Double.NaN);
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                            recorder.appendMismatch(SID, detected(), "s02-survey-v2",
+                                    Map.of("SUIT-RATIO", Double.POSITIVE_INFINITY), T0))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("❗중첩된 값도 본다 — 설문은 additionalProperties: true 라 모양이 안 정해져 있다")
+        void nestedNumbersAreConvertedToo() {
+            Map<String, Object> nested = Map.of(
+                    "SUIT-PORTFOLIO", Map.of("주식", 60.5, "채권", 39.5),
+                    "SUIT-PAST-LOSSES", List.of(12.5, "없음"));
+
+            recorder.appendMismatch(SID, detected(), "s02-survey-v2", nested, T0);
+
+            assertThat(CanonicalJson.serialize(payloads().get(0)))
+                    .as("한 겹만 훑으면 중첩된 Double 이 그대로 남아 같은 자리에서 죽는다")
+                    .isNotEmpty();
+            assertThat(store.verify(StoredEvidenceRecorder.streamOf(SID)).ok()).isTrue();
+        }
+
         @Test
         @DisplayName("❗왜 모순인지가 기록에 남는다 — 전에는 게이트의 ruleTrace 뿐이었다")
         void theBasisIsStored() {
