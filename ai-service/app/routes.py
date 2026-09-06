@@ -341,7 +341,11 @@ def _view(r: rubrics.Rubric) -> RubricView:
         u1_requires=r.u1_requires,
         misconception_conditions=list(r.misconception_conditions),
         related_misconceptions=list(r.related_misconceptions),
-        unlinked_until=list(r.unlinked_until) if r.unlinked_until else None,
+        # ❗`is not None` 이다 (`#493` 리뷰, 정세현). 빈 값을 `None` 으로 접으면
+        #   **이 필드의 존재 이유**(빈 것과 없는 것을 가른다 — `#284`·`#396`)가
+        #   그 자리에서 사라진다. 지금 빈 튜플은 도달 불가하지만(`rubrics._parse` 가
+        #   `reason`·`until` 둘 다 없으면 던진다) **그 불변식을 여기서 끌어오지 않는다.**
+        unlinked_until=list(r.unlinked_until) if r.unlinked_until is not None else None,
     )
 
 
