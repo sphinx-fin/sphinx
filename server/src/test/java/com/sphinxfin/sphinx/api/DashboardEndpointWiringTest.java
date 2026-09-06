@@ -84,6 +84,24 @@ class DashboardEndpointWiringTest {
     }
 
     @Test
+    @DisplayName("❗실세션 운영 지표는 COMPL 만 — unreadable 을 따로 낸다 (#479)")
+    void evidenceMetricsIsComplOnlyAndKeepsUnreadable() throws Exception {
+        mvc.perform(get("/dashboard/evidence-metrics").with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.sessions").exists())
+                .andExpect(jsonPath("$.data.questionSource").exists())
+                .andExpect(jsonPath("$.data.confidence").exists())
+                .andExpect(jsonPath("$.data.sessionDuration").exists())
+                // ❗못 잰 것과 0 을 가르는 자리(결정 5.40) — 필드가 있어야 한다
+                .andExpect(jsonPath("$.data.unreadable").exists());
+
+        // SELLER 는 운영 지표 접근 불가 — audit:read 는 COMPL 전용
+        mvc.perform(get("/dashboard/evidence-metrics").with(user("seller-01").roles("SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("❗감사 체인 검증은 COMPL 만 — 무결성 결과만 낸다 (#326 파트2)")
     void auditVerifyIsComplOnly() throws Exception {
         mvc.perform(get("/dashboard/audit-verify").with(user("compl-01").roles("COMPL")))

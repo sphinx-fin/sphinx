@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.sphinxfin.sphinx.aggregate.AggregateService;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.evidence.AuditLog;
+import com.sphinxfin.sphinx.evidence.EvidenceMetrics;
 import com.sphinxfin.sphinx.evidence.HashChain;
 import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.security.AccessGuard;
@@ -41,6 +42,30 @@ public class DashboardController {
     private final AccessGuard accessGuard;
     private final CurrentActor currentActor;
     private final AuditLog auditLog;
+    private final EvidenceMetrics evidenceMetrics;
+
+    /**
+     * 실세션 운영 지표 (F-CMN-002 · 이슈 #327 · #479). 폴백률·confidence 분포·소요시간·
+     * 재설명 전후 전환 — {@code EvidenceMetrics.summary()} 를 그대로 낸다.
+     *
+     * <p>❗<b>실세션만 센다 — 합성 세션은 여기 없다.</b> 합성 세션은 집계용이라 불변 기록을
+     * 안 쌓으므로(결정 5.16), 이 집계는 자동으로 실세션 전용이고 합성/실이 섞일 수가 없다.
+     * 오해 지도(합성, {@code synthetic=true} 상수)와 <b>성질이 정반대</b>라, 시연에서 합성
+     * 옆에 "방금 돌린 실세션" 을 한 화면에 세울 수 있다.
+     *
+     * <p>❗<b>{@code unreadable} 을 0 으로 접으면 안 된다</b>(결정 5.40 · AuditLog 와 같은 규약)
+     * — 못 잰 것과 0 은 다르다. 그리고 evidence 는 프로세스 수명이라 이 값은 "이 프로세스가
+     * 뜬 뒤로" 다 — 화면이 그렇게 말해야 오해가 없다.
+     *
+     * <p>권한: {@code audit:read} 를 재사용한다(COMPL org). 상품×항목 축(aggregate:*)이 아니라
+     * <b>운영 지표</b>라 성격이 audit-summary(#468)와 같은 자리다 — 같은 자료(불변 기록)를
+     * org 범위로 읽는다. 새 action 을 만들면 같은 성질에 그랜트가 둘이 된다.
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:read')")
+    @GetMapping("/evidence-metrics")
+    public ApiResponse<EvidenceMetrics.Summary> evidenceMetrics() {
+        return ApiResponse.ok(evidenceMetrics.summary());
+    }
 
     /**
      * 접근 감사 집계 (F-CMN-002 · 이슈 #326 파트2). 기간별 action·resultCode·차단 역할별 건수.
