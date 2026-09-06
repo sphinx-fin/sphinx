@@ -50,6 +50,23 @@
  *    `REVERIFY`(고객이 다시 답함)와 `ABORT` 뿐이라 **판정으로 갈 수 없다.** 그래서 화면은
  *    누르기 전에 그 사실을 적고, 진행 중에는 확정 버튼을 잠근다 — 설계 판단 ③과 같은
  *    논리다. 눌러서 409 를 받는 것보다 눌리지 않는 게 낫다.
+ *
+ * ⑧ **판매자 창은 고객이 답하는 것을 볼 수 없다 — 그래서 스스로 되읽는다**
+ *    S-02 가 고객 화면과 이 화면을 **각각 새 창**으로 연다(그쪽 설계 판단 ④). 그래서
+ *    재설명을 시작한 뒤 고객이 다른 창에서 다시 답해도 이 화면에서는 아무 일도 일어나지
+ *    않았다 — 판매자가 「새로고침」을 눌러야 재검증이 보였고, 안 누르면 **낡은 판정을 보며
+ *    확정을 판단**한다. 그건 이 화면이 존재하는 이유와 정면으로 어긋난다.
+ *
+ *    되읽기는 **기다리는 상태에서만** 돈다(`RE_EXPLAIN`). 그 상태에서 나가는 길이 고객의
+ *    재답변 하나뿐이라(설계 판단 ⑦), 상태가 거기서 벗어나는 순간이 곧 *"재검증이
+ *    기록됐다"* 다. 그때 한 번만 전체를 다시 읽는다 — `/gate-preview` 는 부를 때마다
+ *    계산이라 주기적으로 두드릴 자리가 아니다.
+ *
+ * ⑨ **등급은 색이 아니라 무게로 갈린다** (피드백 9번)
+ *    네 등급 배지가 전부 같은 회색이라 「이해」와 「오해」가 한눈에 안 갈렸다. 그렇다고
+ *    신호등 3색을 쓸 수는 없다(설계 판단 ② · tokens.css 규칙 1). 그래서 **먹 한 색의 채움
+ *    단계**로 무게를 준다 — 오해가 가장 진하고 이해가 가장 조용하다. 등급기호(U4)를
+ *    라벨과 같이 내서 명도를 못 읽는 조건에서도 갈리게 한다.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -63,6 +80,12 @@ import ErrorNote from "../components/ErrorNote";
 import { describeError, type ShownError } from "../lib/errorText";
 import "./S05_Judgment.css";
 
+/**
+ * 재검증을 기다리는 동안의 되읽기 간격(설계 판단 ⑧). 사람이 답을 쓰는 시간 척도라 초
+ * 단위면 충분하다 — 더 짧게 잡아도 빨라지는 것은 없고 세션 조회만 늘어난다.
+ */
+const WATCH_MS = 4000;
+
 /** 등급 라벨. 명세서 0.5 의 4단계 — 색이 아니라 말로 읽힌다. */
 const GRADE_LABEL: Record<Grade, string> = {
   U1: "이해",
@@ -70,6 +93,15 @@ const GRADE_LABEL: Record<Grade, string> = {
   U3: "미이해",
   U4: "오해",
 };
+
+/**
+ * 요약 줄에서의 순서 — **무거운 것부터**. 판매자가 이 화면에서 하는 일이 «무엇을 다시
+ * 설명할지 고르는 것» 이라 오해·미이해가 먼저 읽혀야 한다.
+ *
+ * ❗카드 목록의 순서는 **안 건드린다.** 그쪽은 서버가 itemId 순으로 고정해 둔 것이고
+ * (`JudgmentsResponse`), 화면이 다시 정렬하면 되읽기마다 카드가 자리를 바꿀 수 있다.
+ */
+const GRADE_ORDER: readonly Grade[] = ["U4", "U3", "U2", "U1"];
 
 /** 신호등 라벨. 색과 **반드시** 함께 나간다(tokens.css 규칙 3). */
 const SIGNAL_LABEL: Record<Signal, string> = {
@@ -147,8 +179,12 @@ export default function S05Judgment() {
   /* ── 적재 ────────────────────────────────────────────────────────────────
    * 세션·판정·항목명을 함께 받는다. 항목명이 필요한 이유는 판정이 `itemId` 만 들고
    * 오기 때문이다 — 화면에 `ELS-KNOCK-IN` 을 그대로 보이면 판매자가 못 읽는다.       */
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    // ❗**조용한 되읽기가 따로 필요하다.** 아래 렌더는 `loading` 이면 화면을 통째로
+    // «판정을 불러오고 있어요» 한 줄로 바꾼다. 자동 갱신(설계 판단 ⑧)이 그 길로 가면
+    // 판매자가 보고 있던 판정이 몇 초마다 사라졌다 돌아온다 — 손으로 누른 새로고침과
+    // 스스로 도는 되읽기는 **같은 데이터를 받아도 덮개를 씌우는지가 다르다.**
+    if (!silent) setLoading(true);
     try {
       const s = await get<SessionResponse>(`/sessions/${sid}`);
       const [js, ri] = await Promise.all([
@@ -166,13 +202,55 @@ export default function S05Judgment() {
       setGate(previewView(g));
       setError(null);
     } catch (e) {
-      setError(describeError(e));
+      // ❗**조용한 되읽기는 에러도 조용해야 한다.** 여기를 안 가르면 폴링·복귀 되읽기가
+      // 실패할 때 판매자가 **아무것도 안 누른 자리에서** 에러 배너를 본다 — 그건 고칠 것을
+      // 알려주는 게 아니라 화면의 잡음이고, 사람이 지금 하던 판단(무엇을 다시 설명할지)을
+      // 끊는다. 실패해도 화면은 직전 값을 그대로 들고 있고, 다음 주기가 회복하며, 끝내
+      // 안 되면 「새로고침」이 그대로 있다 — 그때는 사람이 누른 것이라 에러가 나가야 한다.
+      if (!silent) setError(describeError(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [sid]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* ── 재검증을 기다리는 동안 스스로 되읽는다 (설계 판단 ⑧) ─────────────────
+   * 보는 것은 **세션 상태 하나뿐**이다. 판정 목록·게이트까지 주기적으로 부르면 화면이
+   * 하는 일이 «표시» 에서 «상시 재계산» 으로 바뀐다.                                */
+  const awaitingReverify = session?.state === "RE_EXPLAIN";
+  useEffect(() => {
+    if (!awaitingReverify) return;
+    let alive = true;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const s = await get<SessionResponse>(`/sessions/${sid}`);
+          // 아직 고객이 답하지 않았다. 아무것도 안 하는 것이 맞다.
+          if (!alive || s.state === "RE_EXPLAIN") return;
+          await load(true);
+        } catch {
+          /* 폴링 실패는 화면에 올리지 않는다 — 판매자가 아무것도 안 한 자리에서 뜨는
+             에러는 잡음이고, 다음 주기가 다시 시도한다. 끝내 안 되면 「새로고침」이
+             그대로 있다. */
+        }
+      })();
+    }, WATCH_MS);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [awaitingReverify, sid, load]);
+
+  /* ── 창이 다시 앞에 오면 한 번 되읽는다 ──────────────────────────────────
+   * 팝업이 막혀 **한 탭을 번갈아 쓰는** 경로에서는 위 폴링이 돌 새가 없다 — 이 화면이
+   * 아예 뒤에 있다. 확정 전에만, 조용히 한 번. 확정된 판정은 더 변하지 않는다.       */
+  const settled = gate?.settled ?? false;
+  useEffect(() => {
+    if (settled) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [settled, load]);
 
   /* ── 확정 ────────────────────────────────────────────────────────────────
    * 되돌릴 수 없으므로 확인 단계를 거친다(설계 판단 ③).                          */
@@ -301,6 +379,31 @@ export default function S05Judgment() {
         </section>
       )}
 
+      {/* ── 재설명 문면을 만드는 중 (피드백 4번) ──────────────────────────────
+          `POST /re-explain` 은 ai-service 를 거치는 LLM 왕복이라 몇 초 걸린다. 그동안
+          화면에서 움직이는 것이 **버튼 라벨 한 줄**뿐이었고, 응답이 오면 화면이 통째로
+          고객 화면으로 바뀌었다 — 판매자는 자기가 무엇을 눌렀는지 확인할 새가 없다.
+          그래서 «무엇을 만들고 있는지» 를 항목 이름과 함께 적고, 올 문면의 자리를 미리
+          비워 둔다. 스켈레톤은 장식이 아니라 **다음에 올 것의 모양**이다.
+
+          ❗등급도 재설명 사유도 여기 안 적는다 — 이 자리는 곧 고객에게 넘길 화면이고,
+          고객에게 판정을 보이지 않는 것이 S-03 설계 판단 ①이다. */}
+      {reExplaining && (
+        <section className="s05__pending" role="status" aria-live="polite">
+          <p className="s05__pending-title">
+            <b>{nameOf(reExplaining)}</b> 항목을 다시 설명할 문면을 만들고 있어요.
+          </p>
+          <div className="s05__skeleton" aria-hidden="true">
+            <span className="s05__skeleton-line" />
+            <span className="s05__skeleton-line" />
+            <span className="s05__skeleton-line s05__skeleton-line--short" />
+          </div>
+          <p className="s05__pending-note">
+            준비되면 고객 화면으로 넘어가요. 그때 화면을 고객님께 넘겨 주세요.
+          </p>
+        </section>
+      )}
+
       {/* ── 룰 트레이스. 감사 대상이라 접어두지 않는다(설계 판단 ④) ────────────── */}
       {gate && gate.ruleTrace.length > 0 && (
         <section className="s05__trace">
@@ -326,6 +429,26 @@ export default function S05Judgment() {
       <section className="s05__items">
         <h2>항목별 이해도 <span className="s05__count">{judgments.length}건</span></h2>
 
+        {/* ── 등급 요약 (설계 판단 ⑨) ───────────────────────────────────────
+            이 화면에서 판매자가 하는 일은 «무엇을 다시 설명할지 고르는 것» 이다. 분포를
+            보려고 카드를 매번 다 훑게 두지 않는다. 무거운 등급부터 적고, **0 건인 등급은
+            아예 안 적는다** — 「오해 0」 은 정보가 아니라 잡음이다.
+            ❗이건 측정값의 집계지 판정이 아니다. 신호등 3색을 쓰지 않는다(설계 판단 ②). */}
+        {judgments.length > 0 && (
+          <ul className="s05__tally">
+            {GRADE_ORDER.map((g) => {
+              const n = judgments.filter((j) => j.grade === g).length;
+              if (n === 0) return null;
+              return (
+                <li key={g} className={`s05__tally-item s05__tally-item--${g.toLowerCase()}`}>
+                  <span className="s05__tally-label">{GRADE_LABEL[g]}</span>
+                  <b className="s05__tally-count">{n}</b>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
         {/* 누르기 전에 결과를 적는다 — 재설명은 상태를 바꾸고, 그 상태에서는 확정이
             막힌다(설계 판단 ⑦). 누른 뒤에 알게 되면 그건 화면이 숨긴 것이다. */}
         {reExplainOpen && judgments.some((j) => j.grade !== "U1") && (
@@ -345,7 +468,14 @@ export default function S05Judgment() {
               <li key={j.itemId} className={`s05__item s05__item--${j.grade.toLowerCase()}`}>
                 <div className="s05__item-head">
                   <h3>{nameOf(j.itemId)}</h3>
-                  <span className="s05__grade">{GRADE_LABEL[j.grade]}</span>
+                  {/* 등급 배지 — 판정 3색을 못 쓰므로(설계 판단 ②) **먹 한 색의 채움
+                      단계**로 무게를 준다: 오해가 가장 진하고 이해가 가장 조용하다.
+                      등급기호를 라벨 옆에 같이 낸다 — 명도를 못 읽는 조건에서도 갈리고,
+                      명세서 0.5 의 4단계와 화면이 같은 어휘를 쓰게 된다(설계 판단 ⑨). */}
+                  <span className={`s05__grade s05__grade--${j.grade.toLowerCase()}`}>
+                    {GRADE_LABEL[j.grade]}
+                    <span className="s05__grade-code">{j.grade}</span>
+                  </span>
                 </div>
 
                 <p className="s05__reason">{j.reason}</p>
@@ -440,6 +570,18 @@ export default function S05Judgment() {
           {gate?.settled && (
             <button type="button" className="s05__btn" onClick={() => navigate(`/report/${sid}`)}>
               이해 기록 리포트
+            </button>
+          )}
+
+          {/* 오해 지도 대시보드로 가는 길 (피드백 5번). 이 화면에는 없었다 — 닿는 길이
+              S-02 → 심사용 목차 하나뿐이었다. **확정한 뒤에만** 그린다: 그 전의 다음
+              행동은 재설명이거나 확정이지 집계가 아니고, 확정 전에 집계로 새면 이 화면이
+              «판정을 마치라» 고 말하는 힘이 약해진다.
+              ❗여는 것은 화면이지 권한이 아니다 — 집계 API 는 `rbac_policy.yaml` 에서
+              COMPL·MGR 로 좁혀져 있고 SELLER 계정이 열면 서버가 막는다(기획 7-4). */}
+          {gate?.settled && (
+            <button type="button" className="s05__btn" onClick={() => navigate("/dashboard")}>
+              오해 지도 대시보드
             </button>
           )}
 

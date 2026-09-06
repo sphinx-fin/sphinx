@@ -6,7 +6,10 @@ __pycache__/
 .env.*
 !.env.example
 .venv/
-node_modules/
+# ❗슬래시를 붙이지 않는다. `node_modules/` 는 **디렉토리만** 매치해서, 워크트리가
+# 설치를 아끼려고 만드는 심볼릭 링크(wt-*/web/node_modules -> 본체)를 안 거른다 —
+# 그 링크가 실제로 커밋됐다(PR #509). 링크는 절대경로라 다른 사람 머신에서는 깨진다.
+node_modules
 dist/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
