@@ -400,13 +400,15 @@ def coverage_gaps(body: CoverageGapRequest) -> CoverageGapResponse:
     except templates.TemplateNotFound as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     limit = coveragegap.COVERED_MIN if body.limit is None else body.limit
-    gaps = coveragegap.find_gaps(doc, product_type, limit=limit)
+    # ❗분모를 **한 번의 훑기에서** 받는다 — 다시 세면 「실제로 본 수」가 아니라
+    #   「다시 부르면 나오는 수」가 된다 (`#499` 리뷰 · `Scan` docstring 참조).
+    result = coveragegap.scan(doc, product_type, limit=limit)
     return CoverageGapResponse(
         product_type=product_type,
         gaps=[CoverageGap(page=g.page, start=g.start, end=g.end, text=g.text,
                           best_overlap=g.best_overlap, covered_by=g.covered_by)
-              for g in gaps],
-        sentences_scanned=len(coveragegap.sentences(doc)),
-        anchors_used=len(coveragegap.anchors(product_type)),
+              for g in result.gaps],
+        sentences_scanned=result.sentences_scanned,
+        anchors_used=result.anchors_used,
         limit=limit,
     )

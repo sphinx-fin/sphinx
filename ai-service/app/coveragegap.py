@@ -114,9 +114,36 @@ def sentences(doc: ParsedDocument) -> list[tuple[int, int, int, str]]:
     return out
 
 
-def find_gaps(doc: ParsedDocument, product_type: str, *, limit: float = COVERED_MIN) -> list[Gap]:
+@dataclass(frozen=True)
+class Scan:
+    """한 번의 훑기 — 사각 **과 그 분모**.
+
+    ❗**분모를 따로 다시 세지 않는다** (`#499` 리뷰, 정세현). 라우트가
+    `len(sentences(doc))` 를 다시 부르면 *"`find_gaps` 가 실제로 몇 개를 봤나"* 가 아니라
+    *"같은 함수를 한 번 더 부르면 몇 개가 나오나"* 를 말하게 된다. 오늘은 순수 함수라
+    값이 같지만, `find_gaps` 가 나중에 문장을 걸러내면(표 셀 제외 같은 것) **분모만 옛
+    값으로 남고 그 사실이 안 보인다** — 사각 0건인데 분모가 91 로 찍히면 *"91개를 다
+    봤는데 깨끗하다"* 로 읽힌다.
+
+    **분모를 지키려고 만든 값이 분모를 못 지키는 자리**라 한 번의 훑기가 셋을 같이 낸다.
+    """
+
+    gaps: list[Gap]
+    sentences_scanned: int
+    anchors_used: int
+
+
+def scan(doc: ParsedDocument, product_type: str, *, limit: float = COVERED_MIN) -> Scan:
     """겹침이 낮은 것부터. **필터가 없다** — 무엇이 위험인지는 사람이 판단한다."""
-    return find_gaps_with_anchors(doc, anchors(product_type), limit=limit)
+    anc = anchors(product_type)
+    seen = sentences(doc)
+    return Scan(gaps=_gaps_from(seen, anc, limit), sentences_scanned=len(seen),
+                anchors_used=len(anc))
+
+
+def find_gaps(doc: ParsedDocument, product_type: str, *, limit: float = COVERED_MIN) -> list[Gap]:
+    """사각만. 분모가 필요하면 `scan()` 을 쓴다."""
+    return scan(doc, product_type, limit=limit).gaps
 
 
 def find_gaps_with_anchors(
@@ -129,8 +156,13 @@ def find_gaps_with_anchors(
     "사각이 65건이나 된다" 로 읽으면 정반대 결론이 난다). 실물 데이터에만 기대면 그
     경로가 영영 안 돈다 — `#396`·`#493` 에서 두 번 밟은 자리라 처음부터 갈라 둔다.
     """
+    return _gaps_from(sentences(doc), anc, limit)
+
+
+def _gaps_from(seen: list[tuple[int, int, int, str]], anc: list[tuple[str, str]],
+               limit: float) -> list[Gap]:
     found: list[Gap] = []
-    for page, start, end, text in sentences(doc):
+    for page, start, end, text in seen:
         best, src = 0.0, "-"
         for source, anchor in anc:
             score = textsim.containment(anchor, text)

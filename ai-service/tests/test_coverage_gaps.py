@@ -64,6 +64,31 @@ def test_the_denominators_are_served() -> None:
     assert len(body["gaps"]) <= body["sentences_scanned"]
 
 
+def test_the_denominator_comes_from_the_scan_not_a_second_count() -> None:
+    """★ 라우트가 분모를 **다시 세지 않는다** (`#499` 리뷰, 정세현).
+
+    ❗**값으로는 못 잰다** — `sentences()` 가 순수 함수라 다시 불러도 오늘은 같은 수가
+    나온다. 그래서 라우트가 `scan()` 이 «낸» 값을 그대로 싣는지를 직접 잰다. `#449` 에서
+    「결과」와 「자리」를 갈라 잰 것과 같은 모양이다.
+
+    이게 왜 중요한가: `find_gaps` 가 나중에 문장을 걸러내면 **분모만 옛 값으로 남고 그
+    사실이 안 보인다** — 사각 0건인데 분모가 91 로 찍히면 *"91개를 다 봤는데 깨끗하다"*
+    로 읽힌다.
+    """
+    from app import routes
+
+    original = coveragegap.scan
+    fake = coveragegap.Scan(gaps=[], sentences_scanned=7, anchors_used=3)
+    routes.coveragegap.scan = lambda *a, **k: fake
+    try:
+        body = _post(_doc())
+    finally:
+        routes.coveragegap.scan = original
+
+    assert body["sentences_scanned"] == 7, "라우트가 문장 수를 다시 센다"
+    assert body["anchors_used"] == 3, "라우트가 앵커 수를 다시 센다"
+
+
 def test_no_anchors_makes_every_sentence_a_gap() -> None:
     """★ 앵커가 비면 **모든 문장이 사각**이 된다 — 그래서 `anchors_used` 를 같이 낸다.
 

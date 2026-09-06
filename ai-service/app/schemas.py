@@ -692,7 +692,11 @@ class CoverageGap(Strict):
     end: int
     text: str
     best_overlap: float = Field(description="가장 많이 덮는 앵커와의 겹침 (0~1)")
-    covered_by: str = Field(description="그 앵커의 출처 — template:<id> 또는 rubric:<id>")
+    #: ❗`"-"` 는 **어느 앵커와도 안 겹친다**(겹침 0.0)는 뜻이다. 그런데 `anchors_used=0`
+    #: 일 때도 같은 값이 나온다 — 한 행만 보면 *"아무도 안 덮는다"* 와 *"덮을 것이 애초에
+    #: 없다"* 가 구별되지 않는다(`#499` 리뷰). **두 값을 같이 봐야 갈린다** — 화면은
+    #: `anchors_used` 를 먼저 읽는다.
+    covered_by: str = Field(description="그 앵커의 출처 — template:<id> · rubric:<id> · '-'(겹침 0)")
 
 
 class CoverageGapResponse(Strict):
