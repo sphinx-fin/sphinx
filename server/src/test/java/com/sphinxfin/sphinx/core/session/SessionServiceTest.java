@@ -445,6 +445,20 @@ class SessionServiceTest {
     }
 
     @Test
+    @DisplayName("설문 문자열 값이 조합형(NFD)이어도 세션엔 NFC 로 저장된다 (결정 10.2.1 · #466 NFC 축)")
+    void surveyResultIsNormalizedToNfcOnCreate() {
+        String nfc = "최저사망지급금까지만 보호된다고 들었어요";
+        String nfd = java.text.Normalizer.normalize(nfc, java.text.Normalizer.Form.NFD);
+        assertThat(nfd).isNotEqualTo(nfc);   // 전제: 둘은 코드포인트가 다르다
+
+        Session s = service.create(cmd(Map.of("SUIT-LOSS-TOLERANCE", nfd)));
+
+        // 저장·해시로 굳는 값이 NFC 여야 한다 — NFD 로 새면 같은 답이 다른 contentHash 를 낸다
+        // (surveyResult 는 appendMismatch 로 불변 기록까지 내려간다). 숫자값은 안 건드린다.
+        assertThat((String) s.surveyResult().get("SUIT-LOSS-TOLERANCE")).isEqualTo(nfc);
+    }
+
+    @Test
     @DisplayName("없는 세션 조회 → NoSuchElementException")
     void getMissingThrows() {
         assertThatThrownBy(() -> service.get("nope"))
