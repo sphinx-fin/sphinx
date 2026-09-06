@@ -433,7 +433,7 @@ export default function S05Judgment() {
               오인하지 않게 하는 것이고(결정 2.6), 여기가 정확히 그 자리다. */}
           {gate?.signal === "RED" && gate.settled && (
             <button type="button" className="s05__btn" onClick={() => navigate(`/override/${sid}`)}>
-              적색 진행 요청(오버라이드)
+              예외 승인 요청
             </button>
           )}
 
@@ -478,10 +478,10 @@ export default function S05Judgment() {
         {gate?.signal === "RED" && !gate.settled && (
           <p className="s05__action-note">
             {judgments.length === 0 ? (
-              <>아직 채점된 응답이 없어요. <b>인터뷰를 진행한 뒤</b> 판정을 확정하면 적색
-                진행 요청을 할 수 있습니다.</>
+              <>아직 채점된 응답이 없어요. <b>인터뷰를 진행한 뒤</b> 판정을 확정하면 예외 승인
+                요청을 할 수 있습니다.</>
             ) : (
-              <>적색 진행 요청은 <b>판정을 확정한 뒤</b>에 할 수 있어요.</>
+              <>예외 승인 요청은 <b>판정을 확정한 뒤</b>에 할 수 있어요.</>
             )}
           </p>
         )}

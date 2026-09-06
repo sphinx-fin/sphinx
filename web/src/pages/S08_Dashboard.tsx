@@ -1179,7 +1179,7 @@ function OverrideStat({ count }: { count: OverrideCount }) {
   const pending = count.requested - count.approved;
   return (
     <article className="s08__dstat">
-      <p className="s08__dstat-label">적색 오버라이드</p>
+      <p className="s08__dstat-label">예외 승인</p>
       {count.judged === 0 ? (<>
         <p className="s08__dstat-value s08__cband-value--none">데이터 없음</p>
         <p className="s08__cband-sub">이 필터에 해당하는 판정이 없어요</p>

@@ -125,7 +125,7 @@ public class ReportPdf {
      */
     private static final String EMPTY_ITEMS = "판정 이력 없음";
     private static final String EMPTY_GATE = "게이트 기록 없음";
-    private static final String EMPTY_OVERRIDES = "오버라이드 승인 없음";
+    private static final String EMPTY_OVERRIDES = "예외 승인 없음";
 
     /** ❗"모순이 없었다" 가 아니라 "그 판정이 이 문서에 없다" 다 — 둘을 가른다. */
     static final String EMPTY_SUITABILITY = "적합성 모순 판정 기록이 없습니다.";
@@ -198,7 +198,7 @@ public class ReportPdf {
             }
 
             p.gap(8);
-            p.text(SIZE_HEAD, "오버라이드 승인");
+            p.text(SIZE_HEAD, "예외 승인");
             List<Map<String, Object>> overrides = list(content.get("overrides"));
             if (overrides.isEmpty()) {
                 p.indented(SIZE_BODY, EMPTY_OVERRIDES);

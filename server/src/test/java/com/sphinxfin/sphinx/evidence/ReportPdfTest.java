@@ -311,7 +311,7 @@ class ReportPdfTest {
         assertThat(text)
                 .contains("판정 이력 없음")
                 .contains("게이트 기록 없음")
-                .contains("오버라이드 승인 없음");
+                .contains("예외 승인 없음");
     }
 
     @Test

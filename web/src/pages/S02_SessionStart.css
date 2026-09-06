@@ -22,8 +22,12 @@
 /* 심사용 목차(S-00) 진입. **작게 둔다** — 이 화면의 주인공은 세션을 여는 일이고 목차는
    심사자·발표자만 쓴다. 밑줄을 기본으로 두지 않는 이유도 같다(hover 에서만 그린다).
    그래도 `--accent` 를 주는 것은 토큰 규칙 2 그대로다 — 누를 수 있는 것이므로. */
+/* 두 링크(가이드·목차)는 한 줄로 선다. 세로로 쌓으면 제목 밑에 링크 두 개가 문단처럼
+   보이고, 이 화면의 주인공인 「상품」 카드가 그만큼 아래로 밀린다. 좁은 화면에서는
+   접힌다 — `align-self` 를 이 줄이 대신 갖는다. */
+.ss__navrow { align-self: flex-start; display: flex; flex-wrap: wrap; gap: var(--space-4); }
+
 .ss__navlink {
-  align-self: flex-start;
   font-size: calc(13px * var(--scale));
   font-weight: 600;
   color: var(--accent);
@@ -346,4 +350,18 @@ select.ss__control {
   font-size: calc(12px * var(--scale));
   font-variant-numeric: tabular-nums;
 }
-.ss__modal-note { margin-top: var(--space-2); }
+/* 원본 원문의 그 페이지로 바로 여는 링크(#page=N 앵커) — 옅은 회색 사이에서도 눌러야
+   할 자리로 보이게 강조색을 쓴다. */
+.ss__doc-link { color: var(--accent); text-decoration: underline; }
+.ss__doc-link:hover { color: var(--accent-hover); }
+
+/* 모달에서 원본 PDF 전체를 여는 링크 — .ss__navlink 와 같은 모양이되 화살표 접미사는
+   뺀다(그건 "다음 화면으로" 를 뜻하는데 이건 새 탭으로 여는 파일이다). */
+.ss__modal-doclink {
+  align-self: flex-start;
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ss__modal-doclink:hover { text-decoration: underline; }
