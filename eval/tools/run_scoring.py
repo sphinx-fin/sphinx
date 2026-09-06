@@ -169,6 +169,20 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with OUT.open("w", encoding="utf-8") as f:
         f.write(f"# 자동 생성 — eval/tools/run_scoring.py · {started.isoformat(timespec='seconds')} · {cfg.llm_model}\n")
+        # ❗**어느 문맥 판으로 잰 수치인가**를 같이 찍는다 (이슈 #409).
+        #
+        # 이 파일의 등급은 `eval/data/context/*.json` 의 `condition.value_text` 를
+        # `[상품 조건 원문]` 으로 넣어 나온 것이다. 그 문맥은 파서 산출물에서 뽑으므로
+        # **파서가 바뀌면 낡는데, 지금까지 그 사실이 이 파일 어디에도 안 남았다.**
+        #
+        # 실제로 `#458`(parser 0.2.0 → 0.3.0)이 샘플 여섯 쪽을 바꿨을 때 문맥이 3시간 전
+        # 판으로 굳어 있었고, 그대로 돌렸으면 7행이 잘린 인용에 대고 채점될 뻔했다.
+        # `#477` 이 그 대조를 `eval/tests` 에 두었고, 여기는 **결과물 쪽 짝**이다 —
+        # 수치를 나중에 보는 사람이 파일 하나만 열어도 판을 알 수 있어야 한다.
+        for product_type in sorted(contexts):
+            ctx = contexts[product_type]
+            f.write(f"# 문맥 {product_type} — parser {ctx.get('parser_version', '(미기록)')}"
+                    f" · built {ctx.get('built_at', '(미기록)')}\n")
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     SKIPPED.write_text(json.dumps({"run_at": started.isoformat(timespec="seconds"),

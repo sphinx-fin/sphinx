@@ -111,6 +111,40 @@ def load_jsonl(path: Path, who: str) -> "OrderedDict[tuple[str, str], str]":
     return out
 
 
+#: 이 회차 수치에 붙는 **알려진 단서**. 각 줄은 열린 이슈 하나를 가리킨다.
+#:
+#: ❗**리포트가 이걸 안 찍으면 다음 사람이 낮은 등급을 「고객 이해도」로 읽는다.** 숫자 옆에
+#: 재현 경로를 둔다(`#388`)와 같은 자리이고, `model_provenance` 가 *"어느 판으로 쟀나"* 를
+#: 답하는 것과 짝이다 — 이쪽은 *"그 판에 무엇이 덜 실렸나"* 를 답한다.
+#:
+#: 여기 손으로 적는 이유는 **기계가 못 재기 때문**이다. "인용이 루브릭 필수요소를 덮는가" 는
+#: 의미 판단이고, 그것을 재는 그물을 만드는 것이 `#456` 자신의 과제다. 그때까지는 사람이
+#: 적고, **이슈가 닫히면 이 줄도 같이 지운다.**
+KNOWN_CAVEATS: tuple[str, ...] = (
+    "`ELS-MATURITY-LOSS-CONDITION`(표본 8행) — 고정 문맥의 인용이 루브릭 "
+    "`required_elements` 2개 중 1개만 덮는다(`u1_requires: 2`). 근거가 반쪽이라 "
+    "**U1 이 안 나오는 쪽으로 기운다** — 이 항목의 낮은 등급을 고객 이해도로 읽지 않는다. "
+    "추출이 회차마다 조건절·결론 중 한쪽만 집는 것이 원인이다 (`#456`).",
+)
+
+
+def context_provenance(path: Path) -> list[str]:
+    """모델 출력이 **어느 문맥 판**으로 나온 값인지. `run_scoring.py` 가 헤더에 찍는다.
+
+    ❗`model_provenance` 와 같은 이유로 필요하다. 등급의 입력은 (루브릭, 이해항목, 질문,
+    발화) 넷인데 프롬프트 버전만 찍으면 **이해항목이 어느 파서 판에서 나왔는지**가 안 남는다.
+    실제로 `#458`(parser 0.2.0 → 0.3.0) 뒤에 문맥이 옛 판으로 굳어 있었고, 그 사실이
+    산출물 어디에도 없었다(`#409`). 지금은 `run_scoring.py` 가 헤더에 적고 여기가 옮긴다.
+
+    옛 판 파일에는 그 줄이 없다 — **없으면 없다고 적는다.** 조용히 비우면 *"찍혔는데 같다"*
+    와 *"안 찍혔다"* 가 같아 보인다(결정 5.40).
+    """
+    marks = [raw.strip().lstrip("#").strip()
+             for raw in path.read_text(encoding="utf-8").splitlines()
+             if raw.strip().startswith("# 문맥 ")]
+    return marks or ["(문맥 판 미기록 — run_scoring.py 를 다시 돌리면 찍힌다)"]
+
+
 def model_provenance(path: Path) -> str:
     """모델 출력이 **어느 프롬프트·어느 모델**로 나온 값인지. 없으면 그렇게 적는다.
 
@@ -221,7 +255,18 @@ def main() -> int:
     lines: list[str] = ["# F-CMN-003 채점 성능 평가", ""]
     lines.append(f"모델 출력 {len(model)}건 · 라벨러 {len(names)}명 ({', '.join(names)})")
     lines.append(f"채점: {model_provenance(MODEL_FILE)}")
+    for mark in context_provenance(MODEL_FILE):
+        lines.append(mark)
     lines.append("")
+    if KNOWN_CAVEATS:
+        lines.append("## 0. 이 수치에 붙는 단서")
+        lines.append("")
+        lines.append("아래는 **닫히지 않은 이슈** 때문에 이 회차 수치에 붙는 조건이다.")
+        lines.append("숫자만 떼어 인용하지 않는다.")
+        lines.append("")
+        for caveat in KNOWN_CAVEATS:
+            lines.append(f"- {caveat}")
+        lines.append("")
 
     # ── 1. 평가자 간 일치도 = 상한 ────────────────────────────────────────────
     lines.append("## 1. 평가자 간 일치도 — 이것이 상한이다")
