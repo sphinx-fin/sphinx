@@ -51,22 +51,21 @@
  *    있는지(페이지·오프셋)** 를 보여준다 — 판매자가 손에 든 설명서와 눈으로 대조할 수 있는
  *    최소 단위다. 추출 실패 항목도 숨기지 않는다(E-EXT-03).
  *
- *    **PDF 원본은 아직 안 그린다 — 다만 이유가 바뀌었다.** 예전에는 *"계약에 문서 조회
- *    엔드포인트가 없다"* 였는데 그건 낡은 문면이다(이슈 #417). 지금은 있다.
+ *    **PDF 원본을 이제 그린다** (#433 닫힘 — `docker-compose` 가 server 에 `data/documents`
+ *    를 물렸다). alpha 에서 `GET /products/{id}/document` 가 200·`application/pdf` 로
+ *    확인됐다(2026-09-06). 그 전 상태(계약은 있는데 배포가 안 닿던 것)는 #417 → #433
+ *    커밋 이력에 남아 있다 — 다시 안 막히면 여기서 더 안 적는다.
  *
- *        openapi.yaml:66            GET /products/{id}/document        (#412 · #428)
- *        ProductController:128      @GetMapping("/{productId}/document")
- *
- *    ❗**막는 것은 이제 계약이 아니라 배포다.** `docker-compose` 가 server 에 `data/documents`
- *    를 안 물려서 alpha 에서 그 라우트가 실패한다(이슈 #433 — 컨테이너에 파일이 없다).
- *    링크를 지금 그리면 판매자가 눌러 보고 깨진 것을 보게 되는데, 그게 이 자리가 원래
- *    피하려던 것이다. S-07 이 PDF 미리보기에 한 선택과 같다 — **닿는 것이 확인되면 그린다.**
- *    조건은 문면이 아니라 사건이다: `#433` 이 닫히면(마운트 두 줄) 이 문단을 지우고
- *    `${BASE}/products/${productId}/document` 를 모달에 붙인다.
+ *    응답이 공통 봉투가 아니라 **PDF 바이트 그대로**라(`openapi.yaml:66`), `<a href>` 가
+ *    `client.ts` 를 안 타는 자리다 — S-07 미리보기와 같은 이유로 `BASE` 를 화면이 직접
+ *    붙인다(`client.ts` 의 `BASE` javadoc). `inline` 응답이라 `#page=N` 앵커로 브라우저
+ *    PDF 뷰어가 그 페이지로 바로 연다 — 서버가 페이지별 엔드포인트를 따로 낼 필요가 없다.
+ *    그래서 항목별 "p.N" 표시를 그 항목의 `sourceSpan.page` 로 앵커를 건 링크로 바꾼다 —
+ *    판매자가 조건 하나하나를 원본 그 페이지와 바로 대조하게, 문서 앞장부터 찾게 두지 않는다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiRequestError, get, post } from "../api/client";
+import { ApiRequestError, BASE, get, post } from "../api/client";
 import type {
   Channel,
   CreateSessionRequest,
@@ -263,10 +262,19 @@ export default function S02SessionStart() {
               열린다. 이 자리인 이유는 두 가지다 — ① 브랜드 바에 달 수 없다. 그건 전
               화면에 뜨고 그중 S-03 은 고객이 답변 도중이라, 습관적으로 눌렀다가 세션 밖으로
               나가는 사고가 정확히 BrandBar 가 링크를 안 거는 이유다. ② S-02 는 태블릿을
-              넘기기 **전**의 판매자 화면이라 그 사고가 없다. 그래서 목차 진입은 여기 하나다. */}
-          <Link className="ss__navlink" to="/admin">
-            심사용 화면 목록
-          </Link>
+              넘기기 **전**의 판매자 화면이라 그 사고가 없다. 그래서 목차 진입은 여기 하나다.
+
+              사용 가이드(`/guide`)를 그 옆에 둔 것도 ② 때문이다 — 처음 여는 사람이 멈추는
+              자리가 바로 이 화면이라, 가이드를 찾으려고 이미 막힌 화면을 뒤지게 두면 안 된다.
+              가이드는 세션을 만들지 않으므로 여기서 나갔다 돌아와도 잃는 것이 없다. */}
+          <div className="ss__navrow">
+            <Link className="ss__navlink" to="/guide">
+              처음이신가요? 사용 가이드
+            </Link>
+            <Link className="ss__navlink" to="/admin">
+              심사용 화면 목록
+            </Link>
+          </div>
         </header>
 
         <section className="ss__card">
@@ -548,6 +556,19 @@ function ProductDocumentModal({
             기준이 이 원문에서 나오므로, 설명서와 다르면 세션을 열기 전에 잡아야 합니다.
           </p>
 
+          {/* 원본 전체 보기. 항목별 링크(아래)가 각 조건의 페이지로 바로 열어 주지만,
+              항목이 전부 추출 실패이거나 그냥 문서 전체를 훑고 싶을 때를 위해 따로 둔다. */}
+          {product && (
+            <a
+              className="ss__modal-doclink"
+              href={`${BASE}/products/${product.productId}/document`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              원본 PDF 열기
+            </a>
+          )}
+
           {loading && <p className="ss__hint">불러오는 중…</p>}
           {error && <p className="ss__alert ss__alert--error" role="alert">{error}</p>}
 
@@ -568,8 +589,22 @@ function ProductDocumentModal({
               </div>
               <blockquote className="ss__doc-quote">{it.condition.valueText}</blockquote>
               <p className="ss__doc-span">
-                {it.itemId} · p.{it.condition.sourceSpan.page} · 위치{" "}
-                {it.condition.sourceSpan.start}–{it.condition.sourceSpan.end}
+                {it.itemId} ·{" "}
+                {/* #page=N 앵커 — inline PDF 라 브라우저 뷰어가 그 페이지로 바로 연다
+                    (서버가 페이지별 엔드포인트를 따로 낼 필요가 없다, openapi.yaml:66). */}
+                {product ? (
+                  <a
+                    className="ss__doc-link"
+                    href={`${BASE}/products/${product.productId}/document#page=${it.condition.sourceSpan.page}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    p.{it.condition.sourceSpan.page}
+                  </a>
+                ) : (
+                  `p.${it.condition.sourceSpan.page}`
+                )}
+                {" "}· 위치 {it.condition.sourceSpan.start}–{it.condition.sourceSpan.end}
               </p>
             </article>
           ))}
@@ -586,14 +621,6 @@ function ProductDocumentModal({
               </p>
             </article>
           ))}
-
-          {/* S-07 과 같은 선택 — 없는 것은 안 그리고, 무엇이 없는지만 적는다. */}
-          {items && items.length > 0 && (
-            <p className="ss__hint ss__modal-note">
-              문서 원본(PDF) 보기는 아직 없습니다. 조회 경로는 생겼지만 배포에 원본 파일이
-              올라가 있지 않아, 닿는 것이 확인되면 이 자리에 붙습니다.
-            </p>
-          )}
         </div>
       </div>
     </div>

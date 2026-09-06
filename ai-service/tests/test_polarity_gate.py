@@ -45,7 +45,7 @@ class _Stub:
 
     def complete_json(self, **kwargs):
         self.calls.append(kwargs)
-        return misconception.PolarityVerdict(holds=self._holds, polarity=self._polarity)
+        return misconception.PolarityVerdict(belief="(스텁)", holds=self._holds, polarity=self._polarity)
 
 
 class _Dead:
@@ -230,6 +230,7 @@ class _ScoringAndGate:
         self.schemas.append(kwargs.get("schema_name", "?"))
         if kwargs.get("model_cls") is misconception.PolarityVerdict:
             return misconception.PolarityVerdict(
+                belief="(스텁)",
                 holds=self._holds, polarity="positive" if self._holds else "negative")
         return self._j.model_copy()
 
@@ -292,7 +293,40 @@ def test_the_gate_runs_after_scoring_not_before() -> None:
     assert llm.schemas[0] == "Judgment", f"채점보다 먼저 게이트가 돌았다: {llm.schemas}"
 
 
-# ── ⑦ 후보가 «여럿» 일 때 (이슈 #498) ────────────────────────────────────────
+# ── ⑦ 판정 스키마는 strict 자격이어야 한다 (이슈 #503) ──────────────────────────
+def test_the_verdict_schema_is_strict_eligible() -> None:
+    """★ `PolarityVerdict` 가 `Strict` 라 `llm_client` 가 `strict: true` 를 켠다.
+
+    이게 없으면 모델이 스키마를 최선노력으로만 따르고, «예금자보호가 **안** 되는» 같은
+    정정 발화를 `holds=True` 로 3/3 결정론적으로 틀린다(alpha 재현, #503). 프롬프트 수정은
+    이 위에 아무것도 더하지 않았다 — 결함은 프롬프트가 아니라 스키마가 강제되지 않은 것이었다.
+    `BaseModel` 로 되돌리는 변이가 여기서 죽는다.
+
+    ❗그리고 `belief` 가 **첫 필드**여야 한다 — 구조화 출력은 순서대로 채우므로 «지금 믿는 것»을
+    먼저 쓰게 하는 것이 판정 절차다. Strict 만으로는 N=10 에서 6/10 오판이었다.
+    """
+    fields = list(misconception.PolarityVerdict.model_fields)
+    assert fields[0] == "belief", f"belief 가 첫 필드가 아니다: {fields}"
+    from app.llm_client import supports_strict
+
+    schema = misconception.PolarityVerdict.model_json_schema()
+    assert schema.get("additionalProperties") is False, "Strict 가 아니다 — strict 가 안 켜진다"
+    assert set(schema["required"]) == {"belief", "holds", "polarity"}, "belief 가 빠지면 정정 발화를 다시 오해로 읽는다 (6/10)"
+    assert supports_strict(schema), "llm_client 가 이 스키마에 strict 를 못 켠다"
+
+
+def test_the_system_prompt_asks_for_the_current_belief_first() -> None:
+    """★ 판정 절차가 프롬프트에 있다 — 필드만 있고 지시가 없으면 모델이 빈칸을 아무렇게 채운다.
+
+    `belief` 필드(스키마)와 «지금 믿는 것을 먼저 적으라»(프롬프트)는 한 벌이다. 한쪽만 남으면
+    N=10 에서 정정 발화 오판이 되돌아온다(#503 실측: Strict 만 6/10). 지시를 지우는 변이가 여기서 죽는다.
+    """
+    s = misconception._POLARITY_SYSTEM
+    assert "belief" in s, "프롬프트가 belief 필드를 말하지 않는다"
+    assert "지금 믿는 것" in s, "«지금» 믿는 것을 적으라는 지시가 없다 — 과거 믿음이 섞인다"
+    assert "고쳐 말한" in s, "고쳐 말한 것을 빼라는 지시가 없다 — 정정 발화가 오해로 읽힌다"
+
+# ── ⑧ 후보가 «여럿» 일 때 (이슈 #498) ────────────────────────────────────────
 #
 # ❗**이 파일의 나머지 전부가 후보 1건으로만 돈다.** 진입이 `misconception.match(발화)` 인데
 # 실발화는 후보가 최대 1개이기 때문이다 — 오늘 전수로 쟀다.
@@ -342,8 +376,11 @@ class _PerType:
         hit = next((t for t in (_M_KEEP, _M_DROP, _M_TYING) if f"패턴-{t}" in prompt), None)
         self.asked.append(hit or "?")
         holds = hit in self._holds_for
+        # ❗`belief` 는 `#504` 로 **필수**가 됐다. 안 채우면 검증 예외 → 게이트가 «못 돌았다» 로
+        #   후보를 남기고(P5 0.2절 fail-open) 테스트가 «게이트가 틀렸다» 로 읽힌다.
         return misconception.PolarityVerdict(
-            holds=holds, polarity="positive" if holds else "negative")
+            belief=f"(스텁) {hit}", holds=holds,
+            polarity="positive" if holds else "negative")
 
 
 def test_the_gate_keeps_the_right_candidate_not_just_the_right_count(_reset_meter) -> None:

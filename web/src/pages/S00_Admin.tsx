@@ -50,7 +50,7 @@
  * **`App.tsx` 의 라우트 주석에서 이 파일을 지목해 둔다.**
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { get, post } from "../api/client";
 import type {
   CreateSessionRequest,
@@ -70,8 +70,12 @@ import "./S00_Admin.css";
  *  `sessionStorage` 가 아니라 `localStorage` 인 이유는 `lib/reexplain` 과 정반대다 — 저기
  *  담기는 것은 **고객 발화에 붙는 재설명 문면**이라 창을 닫으면 사라져야 하고, 여기 담기는
  *  것은 심사자가 방금 만든 **세션 번호 하나**다. 리허설 중 브라우저를 닫았다 열 때 번호를
- *  다시 받아오지 못하면(목록 조회 엔드포인트가 계약에 없다) 세션을 새로 만들어야 한다. */
-const SID_KEY = "sphinx.admin.sessionId";
+ *  다시 받아오지 못하면(목록 조회 엔드포인트가 계약에 없다) 세션을 새로 만들어야 한다.
+ *
+ *  `export` 인 이유는 `pages/Guide.tsx` 가 같은 번호를 읽기 때문이다. 가이드의 "이 화면
+ *  열어보기" 는 여기서 만든 세션으로 가야 하고, 키 문자열을 저쪽에 다시 적으면 두 벌이
+ *  된다 — 갈리는 날 링크만 조용히 다른 세션(또는 없는 세션)을 연다. */
+export const SID_KEY = "sphinx.admin.sessionId";
 
 function readStoredSid(): string {
   try {
@@ -287,6 +291,11 @@ export default function S00Admin() {
             <p className="adm__hint">
               전 화면에 적용돼요. 고객 화면에는 토글도 있어요.
             </p>
+            {/* 목차는 **어디로 가는지**만 말한다. 가서 무엇을 하는지는 가이드가 맡는다 —
+                그 둘을 한 화면에 합치면 카드마다 설명이 길어져 목차 구실을 못 한다. */}
+            <Link className="adm__guidelink" to="/guide">
+              사용 가이드
+            </Link>
           </div>
         </header>
 
