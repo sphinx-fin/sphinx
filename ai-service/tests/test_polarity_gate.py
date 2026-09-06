@@ -325,3 +325,133 @@ def test_the_system_prompt_asks_for_the_current_belief_first() -> None:
     assert "belief" in s, "프롬프트가 belief 필드를 말하지 않는다"
     assert "지금 믿는 것" in s, "«지금» 믿는 것을 적으라는 지시가 없다 — 과거 믿음이 섞인다"
     assert "고쳐 말한" in s, "고쳐 말한 것을 빼라는 지시가 없다 — 정정 발화가 오해로 읽힌다"
+
+# ── ⑧ 후보가 «여럿» 일 때 (이슈 #498) ────────────────────────────────────────
+#
+# ❗**이 파일의 나머지 전부가 후보 1건으로만 돈다.** 진입이 `misconception.match(발화)` 인데
+# 실발화는 후보가 최대 1개이기 때문이다 — 오늘 전수로 쟀다.
+#
+#     공식 코퍼스 70행   후보 분포 {0: 70}
+#     dev set     35행   후보 분포 {0: 25, 1: 10}   최대 **1** · 2개 이상 0건
+#
+# 후보가 1개면 결과가 **전부 남거나 전부 빠지거나** 둘뿐이라, 게이트가 「일부만」 거를 때의
+# 성질이 하나도 안 잠긴다. 구조상 유형당 1건씩이라 최대 10까지 가능하므로 **경로는 실재하고
+# 데이터에만 없다** — 그래서 합성으로 태운다(`#493` 의 `unlinked_until` 과 같은 자리).
+#
+# 특히 이것이 `#498`(병렬화 제안)의 전제 조건이다: 후보를 동시에 던지고 `zip` 으로 다시
+# 짝지으면 **짝짓기가 깨지는 자리가 여기인데 그물이 없었다.**
+_M_KEEP = "M01-PRINCIPAL-GUARANTEE"
+_M_DROP = "M02-DEPOSIT-INSURANCE"
+_M_TYING = "M08-TYING"
+
+
+def _synth(*type_ids: str) -> misconception.MisconceptionResponse:
+    """후보 여럿을 손으로 만든다. 유형ID 는 라이브러리 실물이어야 `_escalates` 가 돈다."""
+    return misconception.MisconceptionResponse(
+        matches=[
+            misconception.MisconceptionMatch(
+                type_id=t, label=f"({t})", score=0.9,
+                matched_pattern=f"패턴-{t}", stage="ngram",
+            )
+            for t in type_ids
+        ],
+        escalate=any(misconception._escalates(t) for t in type_ids),
+    )
+
+
+class _PerType:
+    """유형별로 다른 판정을 준다 — 프롬프트에 실린 유형ID 로 가른다.
+
+    ❗**호출 순서로 가르지 않는다.** 순서 기반 스텁은 병렬화가 들어오는 순간 회차마다
+    갈리고, 그러면 무엇이 깨진 것인지 알 수 없다(`#454` 가 그 대가였다). 이 스텁은
+    `#498` 이 제안한 병렬화가 들어와도 그대로 쓸 수 있다.
+    """
+
+    def __init__(self, holds_for: set[str]) -> None:
+        self._holds_for = holds_for
+        self.asked: list[str] = []
+
+    def complete_json(self, **kwargs):
+        prompt = kwargs.get("prompt", "")
+        hit = next((t for t in (_M_KEEP, _M_DROP, _M_TYING) if f"패턴-{t}" in prompt), None)
+        self.asked.append(hit or "?")
+        holds = hit in self._holds_for
+        # ❗`belief` 는 `#504` 로 **필수**가 됐다. 안 채우면 검증 예외 → 게이트가 «못 돌았다» 로
+        #   후보를 남기고(P5 0.2절 fail-open) 테스트가 «게이트가 틀렸다» 로 읽힌다.
+        return misconception.PolarityVerdict(
+            belief=f"(스텁) {hit}", holds=holds,
+            polarity="positive" if holds else "negative")
+
+
+def test_the_gate_keeps_the_right_candidate_not_just_the_right_count(_reset_meter) -> None:
+    """★ 후보 셋 중 **어느 것이** 남았는가 — 개수만 맞으면 짝짓기가 틀려도 통과한다."""
+    response = _synth(_M_KEEP, _M_DROP, _M_TYING)
+    client = _PerType({_M_KEEP})
+
+    out = misconception.apply_polarity_gate(response, "아무 발화", client=client)
+
+    assert [m.type_id for m in out.matches] == [_M_KEEP], (
+        f"남은 것이 다르다 — 물어본 순서 {client.asked}"
+    )
+    assert set(client.asked) == {_M_KEEP, _M_DROP, _M_TYING}, "후보 전부에게 안 물었다"
+
+
+def test_the_surviving_order_follows_the_input(_reset_meter) -> None:
+    """★ 남은 것들의 **순서**가 입력 순서다.
+
+    지금은 리스트 컴프리헨션이라 자명하지만, `#498` 이 제안한 병렬화는 결과를 `zip` 으로
+    다시 짝짓는다 — **그때 이 단정이 짝짓기를 잠근다.**
+    """
+    response = _synth(_M_TYING, _M_KEEP, _M_DROP)
+    out = misconception.apply_polarity_gate(
+        response, "아무 발화", client=_PerType({_M_TYING, _M_DROP}))
+    assert [m.type_id for m in out.matches] == [_M_TYING, _M_DROP]
+
+
+def test_the_meter_counts_each_candidate_not_each_call(_reset_meter) -> None:
+    """★ 계량기가 **후보당** 센다 — 후보 1건으로는 「호출당」과 구별되지 않는다."""
+    misconception.apply_polarity_gate(
+        _synth(_M_KEEP, _M_DROP, _M_TYING), "아무 발화", client=_PerType({_M_KEEP}))
+
+    meter = _reset_meter
+    assert meter.asked == 3
+    assert meter.kept == 1
+    assert meter.dropped == 2
+    # `by_type` 은 유형이 둘 이상이어야 뜻이 생긴다 — 빠진 것만 유형별로 센다.
+    assert meter.by_type == {_M_DROP: 1, _M_TYING: 1}
+
+
+def test_dropping_the_tying_candidate_clears_the_signal_but_keeps_the_others(_reset_meter) -> None:
+    """★❗`escalate` 재계산 — 이 함수의 docstring 이 약속한 것인데 안 잠겨 있었다.
+
+    > `escalate` 를 다시 계산한다. 게이트가 `M08-TYING` 후보를 빼면 그 신호도 같이
+    > 사라져야 한다 — 안 그러면 *"오해는 없는데 꺾기 신호는 있다"* 가 되고, 그 상태는
+    > `F-GTE-003` 에서 설명할 수가 없다.
+
+    ❗**재미있는 경우는 「M08 은 빠지고 다른 후보는 남는」 것**인데, 후보 1건으로는 그
+    상태를 만들 수 없다(전부 빠지면 `matches` 도 비어 아무것도 구별되지 않는다).
+    """
+    response = _synth(_M_KEEP, _M_TYING)
+    assert response.escalate, "전제 — M08 이 있으면 신호가 서 있다"
+
+    out = misconception.apply_polarity_gate(
+        response, "아무 발화", client=_PerType({_M_KEEP}))
+
+    assert [m.type_id for m in out.matches] == [_M_KEEP], "다른 후보는 남아야 한다"
+    assert not out.escalate, "M08 이 빠졌는데 꺾기 신호가 남았다 — F-GTE-003 이 설명 못 한다"
+
+
+def test_keeping_the_tying_candidate_keeps_the_signal(_reset_meter) -> None:
+    """양성 대조 — 위 테스트가 «항상 끄는» 구현으로도 통과하지 않게 한다.
+
+    ❗**후보를 하나는 빼야 한다.** 전부 남으면 `apply_polarity_gate` 가
+    `len(kept) == len(matches)` 로 **원본을 그대로 돌려주고**(짧은 경로) `escalate`
+    재계산을 아예 안 지난다 — 첫 판이 그래서 `"escalate": False` 변조를 **안 물었다.**
+    양성 대조가 대조를 안 하고 있던 자리다.
+    """
+    out = misconception.apply_polarity_gate(
+        _synth(_M_KEEP, _M_DROP, _M_TYING), "아무 발화",
+        client=_PerType({_M_KEEP, _M_TYING}))
+
+    assert [m.type_id for m in out.matches] == [_M_KEEP, _M_TYING], "M02 만 빠져야 한다"
+    assert out.escalate, "M08 이 남았는데 꺾기 신호가 꺼졌다"
