@@ -700,12 +700,15 @@
 }
 .s08__dstat--lead .s08__dstat-value { font-size: calc(34px * var(--scale)); }
 
-/* 나가는 길. 이 화면은 세션에 안 매여 있어 출구가 화면 안에 없었다(#438 ③). */
+/* 나가는 길. 이 화면은 세션에 안 매여 있어 출구가 화면 안에 없었다(#438 ③).
+   --limestone-88 은 테두리·비활성 면 전용 토큰이라 배경(--bg #f7f3ea)과 거의
+   구분이 안 됐다(대비비 ~1.3:1) — 눌리는 것에는 --accent 를 쓴다(.ss__navlink 와
+   같은 규칙, tokens.css "강조 — 누를 수 있는 것에만"). */
 .s08__back {
   display: inline-block;
-  color: var(--limestone-88);
+  color: var(--accent);
   font-size: calc(13px * var(--scale));
   text-decoration: none;
   margin-bottom: var(--space-2);
 }
-.s08__back:hover { color: var(--text); text-decoration: underline; }
+.s08__back:hover { color: var(--accent-hover); text-decoration: underline; }

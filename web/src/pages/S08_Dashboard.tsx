@@ -492,9 +492,16 @@ export default function S08Dashboard() {
   const shown: { scope: HeatmapResponse["scope"]; synthetic: boolean } | null =
     rendered === "heatmap" ? data : indicator;
 
-  /* 전면 로더는 **아무것도 받은 적이 없을 때만**이다. 그 뒤로는 남길 내용이 있다. */
+  /* 전면 로더는 **아무것도 받은 적이 없을 때만**이다. 그 뒤로는 남길 내용이 있다.
+     조회가 오래 걸리거나 응답이 없으면 이 화면에 갇힌다 — 아래 두 분기와 같은 이유로
+     출구를 둔다(#438 ③ 재발 방지). */
   if (loading && data === null && indicator === null && !blocked) {
-    return <main className="s08"><p className="s08__loading">집계를 불러오고 있어요…</p></main>;
+    return (
+      <main className="s08">
+        <p><Link className="s08__back" to="/admin">← 화면 목록</Link></p>
+        <p className="s08__loading">집계를 불러오고 있어요…</p>
+      </main>
+    );
   }
 
   /* ── 차단됨 — 오류가 아니라 정상 결과다(설계 판단 ③) ────────────────────── */
