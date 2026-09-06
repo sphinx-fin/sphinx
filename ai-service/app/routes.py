@@ -16,11 +16,15 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from . import (extraction, misconception, mismatch, parsing, question_gen, reexplain,
+               coveragegap,
                rubricgen,
                rubrics, scoring, templates)
 from .llm_client import LlmError, LlmNotConfigured, client as default_client
 from .pii import PiiDetected, assert_clean
 from .schemas import (
+    CoverageGap,
+    CoverageGapRequest,
+    CoverageGapResponse,
     RubricListResponse,
     RubricView,
     ConditionNotExtracted,
@@ -375,3 +379,34 @@ def get_rubric(item_id: str) -> RubricView:
         return _view(rubrics.get(item_id))
     except rubrics.RubricNotFound:
         raise HTTPException(status_code=404, detail=f"루브릭이 없다: {item_id}") from None
+
+
+# ── 커버리지 사각 (이슈 #474 1번 칸) ─────────────────────────────────────────
+#
+# ❗**「항목을 제안」하지 않는다 — 「안 덮는 문면」만 낸다.** `tools/find_coverage_gaps.py`
+# 가 위험 어휘 필터를 두었다가 순환을 실측으로 겪었다(어휘를 앵커에서 유도하니 그 어휘를
+# 든 문장은 당연히 앵커와 겹쳤다 — ELS 는 교집합 0 이라 사각을 하나도 못 냈다).
+# **무엇이 위험 항목인지는 사람이 정한다.** `#476` 이 `u1_requires` 를 안 내는 것과 같은
+# 규율이고, `importance` 도 결정 10.1 이 근거를 요구하는 규범이라 여기서 안 정한다.
+#
+# ❗**LLM 을 안 부른다.** `textsim.containment` 뿐이라 결정론적이고 쿼터를 안 쓴다.
+@router.post("/template/gaps", response_model=CoverageGapResponse)
+def coverage_gaps(body: CoverageGapRequest) -> CoverageGapResponse:
+    """문서에서 어느 항목·조항도 안 덮는 문면을 낸다. 겹침이 낮은 것부터."""
+    doc = body.parsed_document
+    product_type = body.product_type or doc.product_type
+    try:
+        templates.get(product_type)
+    except templates.TemplateNotFound as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    limit = coveragegap.COVERED_MIN if body.limit is None else body.limit
+    gaps = coveragegap.find_gaps(doc, product_type, limit=limit)
+    return CoverageGapResponse(
+        product_type=product_type,
+        gaps=[CoverageGap(page=g.page, start=g.start, end=g.end, text=g.text,
+                          best_overlap=g.best_overlap, covered_by=g.covered_by)
+              for g in gaps],
+        sentences_scanned=len(coveragegap.sentences(doc)),
+        anchors_used=len(coveragegap.anchors(product_type)),
+        limit=limit,
+    )
