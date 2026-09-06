@@ -67,7 +67,6 @@
  *    신호등 3색을 쓸 수는 없다(설계 판단 ② · tokens.css 규칙 1). 그래서 **먹 한 색의 채움
  *    단계**로 무게를 준다 — 오해가 가장 진하고 이해가 가장 조용하다. 등급기호(U4)를
  *    라벨과 같이 내서 명도를 못 읽는 조건에서도 갈리게 한다.
-
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
