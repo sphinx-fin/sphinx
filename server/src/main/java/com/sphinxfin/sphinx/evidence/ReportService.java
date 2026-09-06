@@ -89,6 +89,7 @@ public class ReportService {
         Map<String, List<Map<String, Object>>> byItem = new TreeMap<>();
         List<Map<String, Object>> gateHistory = new ArrayList<>();
         List<Map<String, Object>> overrides = new ArrayList<>();
+        List<Map<String, Object>> suitability = new ArrayList<>();
 
         for (HashChain.ChainEntry entry : store.replay(StoredEvidenceRecorder.streamOf(sessionId))) {
             if (entry.seq() > uptoSeq) {
@@ -114,7 +115,36 @@ public class ReportService {
                         "at", payload.get("at"),
                         "approver", payload.get("approver"),
                         "reason", payload.get("reason")));
-                default -> { /* 리포트 발행 기록은 조립 대상이 아니다 — 자기를 포함하면 순환이다 */ }
+                // ❗**모순 판정도 근거와 함께 낸다** (이슈 #484). 전에는 이 kind 가 아래
+                // `default` 로 떨어져 **조용히 사라졌다** — 지면에는 게이트 라벨
+                // *"설명 내용과 투자성향이 어긋납니다"*(R-02) 한 줄만 남고 **무엇과 무엇이**
+                // 어긋났는지가 없었다. 항목 판정(R-01)은 사유가 실리는데 모순만 안 실려
+                // **대칭이 깨져 있었다.**
+                //
+                // 위 `gate` 주석의 논지가 그대로 걸린다 — *"기록에만 담고 리포트가 안 내면
+                // 감사에서 스트림을 직접 열어야 한다"*(#280). 게이트 축에서 닫은 것을 모순
+                // 축에서 한 번 더 하는 자리다.
+                //
+                // ❗**`surveyResult` 는 안 싣는다.** 기록에는 판정의 입력으로 통째로 남지만
+                // (#169), 그건 감사용이고 교부 문서는 고객이 받는 지면이다 —
+                // `EvidenceRecorder` 주석이 *"리포트에 낼지는 별개 판단이다(화이트리스트)"*
+                // 로 미뤄 둔 것이 이 자리다. **어긋난 항목의 답만** `contradictions[]` 의
+                // `survey_ref` 로 실린다. 설문 전체를 실으면 판정과 무관한 답까지 교부된다.
+                case "mismatch" -> suitability.add(ordered(
+                        "at", payload.get("at"),
+                        "status", payload.get("status"),
+                        "reason", payload.get("reason"),
+                        "confidence", payload.get("confidence"),
+                        "surveySchemaVersion", payload.get("surveySchemaVersion"),
+                        "contradictions", payload.get("contradictions")));
+                // 발행 기록은 조립 대상이 아니다 — 자기를 포함하면 순환이다.
+                case ReportService.REPORT_TYPE -> { }
+                // ❗**모르는 kind 를 조용히 버리지 않는다.** `mismatch` 가 정확히 그렇게
+                // 사라졌다(#484). 여기서 던지지 않는 것은 교부 문서를 못 내는 쪽이 더
+                // 나쁘기 때문이고, 대신 `ReportRendersEveryEvidenceKindTest` 가 CI 에서
+                // 문다 — 새 kind 는 **운영이 아니라 빌드에서** 걸려야 한다.
+                default -> log.warn("리포트 조립이 모르는 기록 종류를 건너뛴다 — session={} type={}"
+                        + " (#484 와 같은 누락일 수 있다)", sessionId, payload.get("type"));
             }
         }
 
@@ -125,6 +155,10 @@ public class ReportService {
         content.put("sessionId", sessionId);
         content.put("items", items);
         content.put("gateHistory", gateHistory);
+        // ❗게이트 **앞**이 아니라 뒤에 둔다. 순서는 지면 순서가 아니라 **해시 대상의
+        //   키 순서**이고, CanonicalJson 이 키를 정렬하므로 여기 순서는 해시에 안 걸린다.
+        //   지면 순서는 ReportPdf 가 정한다.
+        content.put("suitability", suitability);
         content.put("overrides", overrides);
         return content;
     }

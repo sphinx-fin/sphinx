@@ -126,6 +126,9 @@ public class ReportPdf {
     private static final String EMPTY_ITEMS = "판정 이력 없음";
     private static final String EMPTY_GATE = "게이트 기록 없음";
     private static final String EMPTY_OVERRIDES = "오버라이드 승인 없음";
+
+    /** ❗"모순이 없었다" 가 아니라 "그 판정이 이 문서에 없다" 다 — 둘을 가른다. */
+    static final String EMPTY_SUITABILITY = "적합성 모순 판정 기록이 없습니다.";
     private static final float SIZE_BODY = 9.5f;
     private static final float LEADING = 1.5f;
 
@@ -173,6 +176,25 @@ public class ReportPdf {
             }
             for (Map<String, Object> g : gate) {
                 p.indented(SIZE_BODY, gateLine(g));
+            }
+
+            // ❗**적합성 모순은 근거와 함께 낸다** (이슈 #484). 전에는 게이트 라벨
+            //   *"설명 내용과 투자성향이 어긋납니다"*(R-02) 한 줄만 지면에 있었고, 고객이
+            //   받는 문서에서 **어느 설문 답과 어느 발화가** 어긋났는지를 알 수 없었다.
+            //   항목 판정(R-01)은 사유가 실리므로 **대칭이 깨져 있던 자리**다.
+            p.gap(8);
+            p.text(SIZE_HEAD, "적합성 모순");
+            List<Map<String, Object>> suitability = list(content.get("suitability"));
+            if (suitability.isEmpty()) {
+                // ❗비어 있는 것과 «판정을 안 한 것»이 지면에서 같아 보이면 안 된다.
+                //   status 가 UNKNOWN 인 기록은 위 목록에 **있다** — 그때는 사유가 찍힌다.
+                p.indented(SIZE_BODY, EMPTY_SUITABILITY);
+            }
+            for (Map<String, Object> m : suitability) {
+                p.indented(SIZE_BODY, suitabilityLine(m));
+                for (Map<String, Object> c : list(m.get("contradictions"))) {
+                    p.indented(SIZE_BODY, "    " + contradictionLine(c));
+                }
             }
 
             p.gap(8);
@@ -309,6 +331,62 @@ public class ReportPdf {
      *
      * <p>교부되는 것은 종이다 — 화면은 닫히면 사라진다.
      */
+    /**
+     * 모순 판정 한 건의 머리줄. <b>사유가 없으면 그 사실을 적는다</b>(#169 와 같은 규약).
+     *
+     * <p>{@code UNKNOWN} 은 ai-service 를 못 불러 판정하지 못한 상태다 — 그때도 목록에
+     * 남고 사유가 찍힌다. <b>"모순이 없었다" 와 "확인하지 못했다" 가 지면에서 같아 보이면
+     * 안 된다</b>(E-EXT-03 과 같은 결).
+     */
+    private static String suitabilityLine(Map<String, Object> m) {
+        String reason = str(m.get("reason"));
+        return str(m.get("at")) + "  " + str(m.get("status"))
+                + (reason.isBlank() ? "  (사유 미기재)" : "  " + reason);
+    }
+
+    /**
+     * 어긋난 축 하나. <b>설문 답 ↔ 발화 인용</b>을 나란히 놓는 것이 이 줄의 전부다.
+     *
+     * <p>키가 snake_case 인 것은 ai-service 응답이 {@code List<Map<String,Object>>} 로
+     * 들어와서다 — 매퍼의 SNAKE_CASE 전략은 POJO 속성에만 걸리고 <b>맵 키는 그대로 남는다</b>.
+     * 계약({@code suitability_mismatch.schema.json} {@code $defs/contradiction})이 정본이다.
+     *
+     * <p>❗<b>없는 조각을 지어내지 않는다.</b> 계약상 {@code question_text}·{@code item_id} 는
+     * null 일 수 있다. 비면 그 자리를 비운 채 남은 것만 낸다 — 지면이 근거를 만들어 내면
+     * P4 가 요구하는 것과 반대가 된다.
+     */
+    private static String contradictionLine(Map<String, Object> c) {
+        Map<String, Object> ref = map(c.get("survey_ref"));
+        String questionId = str(ref.get("question_id"));
+        String answer = str(ref.get("recorded_answer"));
+        String quote = str(c.get("utterance_quote"));
+
+        StringBuilder line = new StringBuilder();
+        if (!str(c.get("axis")).isBlank()) {
+            line.append('[').append(str(c.get("axis"))).append("] ");
+        }
+        if (!questionId.isBlank() || !answer.isBlank()) {
+            line.append("설문 ").append(questionId.isBlank() ? "" : questionId + " ");
+            if (!answer.isBlank()) {
+                line.append('\u00ab').append(answer).append('\u00bb');
+            }
+        }
+        if (!quote.isBlank()) {
+            line.append(line.isEmpty() ? "발화 " : "  \u2194  발화 ")
+                    .append('\u00ab').append(quote).append('\u00bb');
+        }
+        String reason = str(c.get("reason"));
+        if (!reason.isBlank()) {
+            line.append("  — ").append(reason);
+        }
+        return line.isEmpty() ? "(근거 조각이 비어 있다)" : line.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
     private static String gateLine(Map<String, Object> g) {
         StringBuilder sb = new StringBuilder();
         sb.append(str(g.get("at"))).append("  ").append(str(g.get("signal")));
