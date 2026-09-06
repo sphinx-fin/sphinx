@@ -141,7 +141,7 @@ public class ReportService {
                 case ReportService.REPORT_TYPE -> { }
                 // ❗**모르는 kind 를 조용히 버리지 않는다.** `mismatch` 가 정확히 그렇게
                 // 사라졌다(#484). 여기서 던지지 않는 것은 교부 문서를 못 내는 쪽이 더
-                // 나쁘기 때문이고, 대신 `ReportRendersEveryEvidenceKindTest` 가 CI 에서
+                // 나쁘기 때문이고, 대신 `ReportRendersMismatchTest#everyRecordedKindIsAssembled` 가 CI 에서
                 // 문다 — 새 kind 는 **운영이 아니라 빌드에서** 걸려야 한다.
                 default -> log.warn("리포트 조립이 모르는 기록 종류를 건너뛴다 — session={} type={}"
                         + " (#484 와 같은 누락일 수 있다)", sessionId, payload.get("type"));

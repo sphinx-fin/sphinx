@@ -2,6 +2,9 @@ package com.sphinxfin.sphinx.evidence;
 
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,8 +12,8 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.Import;
 
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -137,6 +140,11 @@ class ReportRendersMismatchTest {
                         + "이 단정이 없으면 빈 집합이 아래를 조용히 통과시킨다")
                 .hasSizeGreaterThanOrEqualTo(4);
 
+        // ❗**이 그물이 보장하지 않는 것**: 모집단이 `StoredEvidenceRecorder` 한 파일이다.
+        //   그 밖에서 찍는 실례가 이미 있다 — `ReportService` 가 발행 기록에
+        //   `REPORT_TYPE` 을 직접 넣는다(자기 자신이라 조립 대상이 아닌 것이 맞다).
+        //   **다른 recorder 가 생기면 그 kind 는 여기서 아예 안 보인다**(#485 리뷰, 윤지석).
+        //   그때는 목록이 아니라 «어디를 읽는가» 를 고쳐야 한다.
         Set<String> assembled = new TreeSet<>();
         Matcher c = Pattern.compile("case \"([a-zA-Z]+)\" ->").matcher(reportSrc);
         while (c.find()) {
@@ -152,27 +160,58 @@ class ReportRendersMismatchTest {
                 .isEmpty();
     }
 
+    /**
+     * 지면 글자를 읽는다. {@code ReportPdfTest} · {@code ReportServiceTest} 와 <b>같은 헬퍼</b>다
+     * — 한글이 압축·서브셋 폰트라 raw 바이트로는 못 찾지만, 이 레포는 그 문제를 이미
+     * 풀어 뒀다(#485 리뷰, 윤지석).
+     */
+    private static String textOf(byte[] bytes) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(bytes)) {
+            return new PDFTextStripper().getText(doc);
+        }
+    }
+
     @Test
-    @DisplayName("PDF 가 그 절을 실제로 그린다 — 내용에만 있고 지면에 없으면 같은 결함이다")
-    void thePdfActuallyDrawsTheSection() {
+    @DisplayName("★❗PDF 지면에 그 절과 근거가 실제로 찍힌다")
+    void thePdfActuallyDrawsTheSection() throws Exception {
         renderAfterMismatch();
         reports.issue(SID, T0);
         em.flush();
         em.clear();
 
-        byte[] pdf = reports.pdf(SID);
-        assertThat(pdf).isNotEmpty();
-        assertThat(new String(pdf, java.nio.charset.StandardCharsets.ISO_8859_1))
-                .as("PDF 가 열리는지까지만 본다 — 한글은 압축·서브셋 폰트라 바이트로 못 찾는다")
-                .startsWith("%PDF-");
+        // ❗**`%PDF-` 로 시작한다** 까지만 재면 `ReportPdf` 의 그 블록을 통째로 지워도
+        //   통과한다 — 이 PR 이 한 일을 되돌리는 변이를 안 무는 테스트가 된다.
+        //   지면 글자를 읽어야 이름이 약속하는 것을 잰다.
+        String page = textOf(reports.pdf(SID));
+
+        // ❗**줄바꿈을 걷고 대조한다.** 지면은 폭에 맞춰 접히고 그 자리가 «문장 중간»이다 —
+        //   실측으로 `…감수 못 합니\n다.»` 로 갈렸다. 원문에 없는 줄바꿈이라 걷는 것이
+        //   맞고, 안 걷으면 **지면이 맞는데 단정만 깨진다.**
+        String flat = page.replace("\n", "");
+
+        assertThat(flat)
+                .as("내용(render)에만 있고 지면에 없으면 고객이 받는 문서는 그대로 "
+                        + "근거 없는 한 줄이다 — 이 이슈가 열린 이유가 그것이다")
+                .contains("적합성 모순")
+                .contains("SUIT-PRINCIPAL-LOSS")
+                .contains("손실이 나더라도 감수할 수 있다")
+                .contains("원금 손실은 저는 감수 못 합니다.");
     }
 
-    /** 컴파일 시점에 존재를 잠근다 — 절 제목 상수가 사라지면 여기서 깨진다. */
     @Test
-    @DisplayName("빈 목록 문면이 있다 — 「없음」과 「미판정」을 지면이 가른다")
-    void emptyStateHasItsOwnWording() throws Exception {
-        Method unused = ReportPdf.class.getDeclaredMethods()[0];
-        assertThat(unused).isNotNull();
-        assertThat(ReportPdf.EMPTY_SUITABILITY).isNotBlank();
+    @DisplayName("❗「모순 없음」과 「미판정」을 지면이 가른다")
+    void thePageTellsAbsenceApartFromUnknown() throws Exception {
+        // 모순 기록 없이 발행한다 — 판정 자체가 이 문서에 없는 상태다.
+        reports.issue(SID, T0);
+        em.flush();
+        em.clear();
+
+        String page = textOf(reports.pdf(SID));
+        assertThat(page)
+                .as("빈 자리에 아무 말도 없으면 「모순이 없었다」로 읽힌다")
+                .contains(ReportPdf.EMPTY_SUITABILITY);
+        assertThat(page)
+                .as("판정을 못 한 것(UNKNOWN)과 판정할 것이 없던 것은 다르다")
+                .doesNotContain("UNKNOWN");
     }
 }
