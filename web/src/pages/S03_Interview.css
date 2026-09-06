@@ -227,3 +227,57 @@
   color: var(--text);
   white-space: pre-wrap;   /* 서버 문면의 줄바꿈을 그대로 살린다 */
 }
+
+/* ── 대기 스켈레톤 (피드백 4번) ───────────────────────────────────────────────
+   다음 질문을 받는 동안 직전 질문·답변이 그대로 남아 있다가 툭 바뀌던 자리를 채운다
+   (S03_Interview.tsx 의 `InterviewSkeleton`). 질문 카드와 같은 여백을 쓰므로 높이가
+   안 튄다.
+
+   펄스는 global.css 의 reduced-motion 규약을 그대로 따른다 — 그 블록이 이 애니메이션의
+   `animation-duration` 을 0.01ms 로, `animation-iteration-count` 를 1로 덮어써서 모션을
+   끄면 한 바퀴가 사실상 순간에 끝나고 `iv__skeleton` 의 평상시 배경색(정지한 회색 면)만
+   남는다. 여기서 따로 처리할 것이 없다. */
+.iv__skeleton {
+  background: var(--border);
+  border-radius: var(--radius-sm);
+  animation: iv-skeleton-pulse 1.4s var(--ease) infinite;
+}
+.iv__skeleton--tag {
+  width: 30%;
+  height: calc(14px * var(--scale));
+  margin-bottom: var(--space-3);
+}
+.iv__skeleton--title {
+  width: 100%;
+  height: calc(26px * var(--scale));
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius);
+}
+.iv__skeleton--title-short { width: 55%; margin-bottom: var(--space-5); }
+.iv__skeleton--field {
+  width: 100%;
+  height: calc(9rem * var(--scale));
+  border-radius: var(--radius-lg);
+}
+
+@keyframes iv-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── 담당자용 링크 (설계 판단 ④ · 피드백 10번) ────────────────────────────────
+   재검증 답변 뒤에만 나오는 2차 링크라, 1차 버튼(iv__btn)과 눈에 띄게 갈라 둔다 —
+   조용한 텍스트 링크여야 "고객이 누를 만한 버튼"으로 안 읽힌다. */
+.iv__handoff-link { margin-top: var(--space-3); text-align: center; }
+.iv__link {
+  background: none;
+  border: 0;
+  padding: var(--space-2);
+  color: var(--text-subtle);
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.4 * var(--leading-scale));
+  letter-spacing: 0.0145em;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.iv__link:hover { color: var(--text-muted); }
