@@ -101,7 +101,10 @@ EXPECTED = {
     "ExtractionDraft": True,
     "Judgment": False,            # 계약(judgment.schema.json) — 선택 필드가 있다
     "MismatchDraft": False,
-    "PolarityVerdict": False,
+    #: ❗#503 으로 **False → True**. `Strict` 는 필요조건이다(strict 가 안 켜지면 스키마가 최선노력).
+    #: 충분조건은 `belief` 필드를 앞세운 것 — Strict 만으로는 N=10 에서 6/10 오판이었다.
+    #: 표를 뒤집기 전에 실제로 보내 봤다(2026-09-06).
+    "PolarityVerdict": True,
     "Reranked": False,
     "_Draft": False,              # rubricgen
 }
