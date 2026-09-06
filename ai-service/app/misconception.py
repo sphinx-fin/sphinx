@@ -106,11 +106,11 @@ import yaml
 import logging
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import textsim, thresholds
 from .config import DATA_DIR_ENV, settings
-from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse
+from .schemas import PRODUCT_TYPES, MisconceptionMatch, MisconceptionResponse, Strict
 
 #: 라이브러리 파일의 `data_dir` 기준 상대 위치. 절대경로를 여기 박지 않는다 —
 #: 결정로그 10.7. 디렉토리는 `SPHINX_DATA_DIR` 로 주입한다.
@@ -293,9 +293,49 @@ def library_version() -> int:
     return int(_read_library().get("version", 0))
 
 
-class PolarityVerdict(BaseModel):
-    """3단계 게이트의 출력. **측정값이다** — 판정은 게이트가 아니라 룰이 한다(P1)."""
+class PolarityVerdict(Strict):
+    """3단계 게이트의 출력. **측정값이다** — 판정은 게이트가 아니라 룰이 한다(P1).
 
+    ❗**필드 순서가 곧 판정 절차다** (이슈 #503). `belief` 가 **먼저** 온다 — 구조화 출력은
+    필드를 순서대로 채우므로, 모델이 *"고객이 지금 믿는 것"* 을 한 문장으로 먼저 적고 나서
+    `holds` 를 정한다. 이 한 단계가 «예금자보호가 **안** 되는 상품이군요» 같은 **정정 발화**를
+    오해로 읽는 것을 막는다 — 재설명 뒤 고객이 고쳐 말했는데 floor 가 U4 를 확정해
+    빠져나오지 못하던 자리다(alpha 재현).
+
+    ## 실측 — 무엇이 고쳤고 무엇이 아닌가 (2026-09-06 · gpt-5-mini)
+
+        문제 발화 «아, 예금자보호가 안 되는 상품이군요. …원금을 못 받을 수 있다는 뜻으로 이해했습니다.»
+        기대 holds=False.
+
+        BaseModel · 프롬프트만        N=3   3/3 오판     ← 전
+        Strict 만 (strict:true)       N=3   0/3   ❗N=10  6/10 오판   ← 3회는 운이었다
+        Strict + belief 먼저 (이것)   N=10  0/10 오판  · 진짜 오해 대조 0/10 오판
+        + 부정어 힌트 문장            N=10  0/10       ← belief 위에 아무것도 더하지 않는다
+
+    ## 잔여 — 닫히지 않은 것 하나 (정직하게)
+
+        진짜 오해 M11 반문형 «이것도 예금처럼 전액 보호되는 거 아닌가요»   기대 holds=True
+          옛 게이트          10/10 오판(전부 뺀다 — 미탐)   ← #425 가 M11 을 링크할 때 게이트 없는
+                                                        매처로만 재서 아무도 못 본 자리
+          이것(belief)       6/10 오판                    ← 줄었지만 안 닫혔다 (P5 0.2절 방향)
+          + 반문 지시(V4)    0/10 ❗대신 정정 발화 4/10 · M09 반문 8/10 → 총 12/80 (더 나쁘다)
+
+    **반문(«~아닌가요»)을 주장으로 읽게 하는 지시는 실패를 옮길 뿐이었다.** 8케이스×10 총합으로
+    V2 6/80 · V4 12/80. 남은 M11 반문형은 라이브러리에 명제형 `claim` 이 생기면 다시 잰다.
+
+    **적은 표본으로 결정론을 주장하지 않는다** — Strict 만으로 닫혔다고 3회를 보고 적었다가
+    10회에서 뒤집혔다. 남는 것은 `belief` 다. 프롬프트에 「동사 앞 부정」 지시를 더하는 것은
+    실패를 옮길 뿐이었다(4/5 ↔ 4/5). 결함은 문면이 아니라 **판정 절차에 「지금 믿는 것」을
+    말하는 단계가 없던 것**이다.
+
+    `Strict` 인 것도 필요조건이다 — `BaseModel` 이면 `additionalProperties: false` 가 없어
+    `llm_client` 가 `strict: true` 를 못 켜고(#490 과 같은 뿌리) 모델이 스키마를 최선노력으로만
+    따른다. `tests/test_structured_output_strict.py` 의 표가 이 클래스를 `True` 로 잠근다.
+
+    ❗**`belief` 는 고객 발화에서 유도된 문장이다 — 로그에 싣지 않는다** (#397 ① · P3).
+    """
+
+    belief: str = Field(description="고객이 «지금» 믿는 것 한 문장. 과거에 믿었다가 고쳐 말한 것은 뺀다")
     holds: bool
     polarity: Literal["positive", "negative", "neutral"]
 
@@ -304,7 +344,10 @@ _POLARITY_SYSTEM = (
     "당신은 금융 상담 발화의 **극성**만 판정한다. 주제가 같은지는 묻지 않는다.\n"
     "발화가 주어진 오해 문장과 **같은 것을 주장하면** holds=true,\n"
     "그 오해를 **부정하거나 범위를 제한하면** holds=false 다.\n"
-    "부정·양보는 어미에 붙는다 — '~는 아니다', '~건 아니군요', '~만 된다' 는 부정이다."
+    "부정·양보는 어미에 붙는다 — '~는 아니다', '~건 아니군요', '~만 된다' 는 부정이다.\n"
+    "먼저 `belief` 에 **고객이 지금 믿는 것**을 한 문장으로 적는다 — 과거에 믿었다가 고쳐 말한 것"
+    "('~인 줄 알았는데', '아, ~군요')은 빼고 지금 것만. 그 다음 그 문장이 오해 문장과 같은 "
+    "주장인지로 holds 를 정한다."
 )
 
 
