@@ -179,6 +179,13 @@ def test_only_document_paths_relax_broad_pii_heuristics():
     # **본문에 고객 텍스트를 받는 필드가 없다.** 그것을 요청 스키마에서 직접 잰다.
     #
     # 이 단정이 없으면, 고객 발화를 받는 경로를 목록에 넣어도 위 두 줄만 고치면 통과한다.
+    # ❗**최상위 필드명만 본다** — `parsed_document.pages[].text` 같은 중첩은 안 본다
+    # (`#476` 리뷰, 정세현). 지금은 그게 맞다: 완화 목록에 있는 경로는 전부 **공시 문서
+    # 본문**을 받고, 그 본문에 표 수치가 붙어 13자리로 읽히는 것이 완화의 이유다
+    # (기획서 7-3). 중첩까지 훑으면 `text` 라는 이름 하나로 그 설계와 충돌한다.
+    #
+    # 바뀌는 조건은 하나다 — **완화 경로가 고객 발화를 중첩으로 받게 되는 날.** 그때는
+    # 이 검사가 조용히 통과하므로, 아래 목록이 아니라 **어디를 훑는가**를 고쳐야 한다.
     CUSTOMER_TEXT_FIELDS = {"answer_text", "text", "utterances", "question"}
     schemas = spec["components"]["schemas"]
     for path in sorted(relaxed):

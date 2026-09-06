@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from . import retrieval, rubrics, templates, textsim
@@ -118,15 +119,27 @@ def _locate(text: str, chunks: list[retrieval.Chunk]) -> list[SourceSpan]:
     return []
 
 
-def _already_covered(candidate: str, existing: tuple[str, ...]) -> bool:
-    """기존 조항과 겹치는가. 사람이 새것과 헷갈리지 않게 갈라 준다."""
-    # ❗**방향이 중요하다** — `containment(기존, 후보)` 다. `tools/propose_rubric._novelty`
-    # 와 같은 방향이어야 도구로 본 것과 화면이 받는 것이 안 갈린다.
-    #
-    # 반대로 재면(후보가 기존에 얼마나 들어있나) **긴 후보가 짧은 기존 조항을 통째로
-    # 포함해도 점수가 낮다** — 후보 바이그램의 대부분이 기존에 없으니까. 실측에서
-    # `ELS-MATURITY-LOSS-CONDITION` 이 그랬다(기존 루브릭이 있는데 already_covered 0건).
-    return any(textsim.containment(e, candidate) >= ALREADY_COVERED for e in existing)
+def overlap_with_existing(
+    candidate: str, existing: Sequence[str]
+) -> tuple[bool, float, str]:
+    """후보가 기존 조항과 겹치는가. `(겹친다, 최고 겹침, 가장 가까운 기존 조항)`.
+
+    ❗**방향이 중요하다** — `containment(기존, 후보)` 다. 반대로 재면(후보가 기존에
+    얼마나 들어있나) **긴 후보가 짧은 기존 조항을 통째로 포함해도 점수가 낮다** —
+    후보 바이그램의 대부분이 기존에 없으니까. 실측에서 `ELS-MATURITY-LOSS-CONDITION`
+    이 그랬다(기존 루브릭이 있는데 `already_covered` 0건).
+
+    ❗**점수와 가장 가까운 조항을 같이 내는 것이 요점이다.** 라우트는 `bool` 만 쓰지만
+    `tools/propose_rubric.py` 는 사람에게 *"기존과 0.62 ← …"* 를 보여 준다. 그 계산을
+    도구가 따로 하면 **한쪽 방향만 바뀌어도 도구로 본 후보와 화면이 받는 후보가
+    갈리는데, 둘 다 그럴듯한 답을 낸다** — 조용히 어긋나는 자리라 한 함수로 둔다.
+    """
+    best, near = 0.0, "-"
+    for cur in existing:
+        score = textsim.containment(cur, candidate)
+        if score > best:
+            best, near = score, cur
+    return best >= ALREADY_COVERED, best, near
 
 
 @dataclass(frozen=True)
@@ -203,6 +216,7 @@ def propose_one(
         required_elements=list(draft.required_elements),
         misconception_conditions=list(draft.misconception_conditions),
         evidence=[RubricEvidence(text=t, spans=_locate(t, chunks)) for t in draft.evidence],
-        already_covered=[c for c in draft.required_elements if _already_covered(c, existing)],
+        already_covered=[c for c in draft.required_elements
+                         if overlap_with_existing(c, existing)[0]],
         has_existing_rubric=has_existing,
     )
