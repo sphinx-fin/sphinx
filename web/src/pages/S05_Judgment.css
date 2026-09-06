@@ -157,11 +157,13 @@
   border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
 }
-/* 등급이 낮을수록 왼쪽 테두리가 진해진다 — 색상이 아니라 명도다. 판정 3색과 섞이지 않는다. */
+/* 등급이 낮을수록 왼쪽 테두리가 진해진다 — 색상이 아니라 명도다. 판정 3색과 섞이지 않는다.
+   ❗**굵기도 같이 간다**(피드백 9번). 명도만으로는 「이해」와 「오해」가 한눈에 안 갈렸고,
+   저대비 화면·색각 이상에서는 명도차가 더 줄어든다. 굵기는 그 축과 무관하게 남는다. */
 .s05__item--u1 { border-left-color: var(--limestone-80); }
 .s05__item--u2 { border-left-color: var(--kohl-30); }
-.s05__item--u3 { border-left-color: var(--kohl-50); }
-.s05__item--u4 { border-left-color: var(--kohl-70); }
+.s05__item--u3 { border-left-color: var(--kohl-50); border-left-width: 6px; }
+.s05__item--u4 { border-left-color: var(--kohl-90); border-left-width: 6px; }
 
 .s05__item-head {
   display: flex;
@@ -170,16 +172,67 @@
   justify-content: space-between;
 }
 .s05__item-head h3 { font-size: calc(17px * var(--scale)); font-weight: 600; }
+/* ── 등급 배지 (피드백 9번) ─────────────────────────────────────────────────
+   네 등급이 전부 같은 회색이라 「이해」와 「오해」가 안 갈렸다. 판정 3색은 못 쓴다 —
+   신호등은 세션 배너 한 곳의 것이고(설계 판단 ②), 채도 있는 색은 판정에만 쓴다는 것이
+   브랜드 원칙 1이다. 그래서 **먹 한 색의 채움 단계**로 무게를 준다: 오해가 가장 진하고
+   이해가 가장 조용하다. 색상 축을 안 쓰므로 색각 이상에서도 그대로 갈린다. */
 .s05__grade {
   flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
   font-size: calc(13px * var(--scale));
   font-weight: 700;
-  color: var(--text-muted);
-  background: var(--surface-sunken);
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   padding: var(--space-1) var(--space-3);
+  /* 기본값은 가장 조용한 쪽이다. 아래 변형이 무게를 얹는다. */
+  color: var(--text-muted);
+  background: var(--surface-sunken);
 }
+/* 등급기호(U1~U4). 라벨보다 작고 옅다 — 근거로 붙는 것이지 제목이 아니다. */
+.s05__grade-code {
+  font-size: calc(11px * var(--scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.78;
+}
+.s05__grade--u1 { color: var(--text-muted); background: var(--surface-sunken); }
+.s05__grade--u2 { color: var(--text); background: var(--surface); border-color: var(--border-strong); }
+/* 채운 두 단계는 지면색 글자다. 실측 대비 — 먹 50 위 **6.13:1** · 먹 90 위 **17.31:1**
+   (석회암 99 글자 기준). 작은 굵은 글자 기준(4.5:1)을 둘 다 넘고, 고령자 모드에서도
+   그대로다 — 그쪽은 `--scale` 로 크기만 키우지 색을 안 바꾼다. */
+.s05__grade--u3 { color: var(--text-inverse); background: var(--kohl-50); }
+.s05__grade--u4 { color: var(--text-inverse); background: var(--kohl-90); }
+
+/* ── 등급 요약 줄 (피드백 9번) ──────────────────────────────────────────────
+   카드를 다 훑지 않고도 «지금 무엇이 걸려 있나» 를 읽게 한다. 배지와 **같은 시각 언어**를
+   쓴다 — 여기서만 다른 표현을 만들면 같은 등급이 화면에서 두 얼굴을 갖는다. */
+.s05__tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin-bottom: var(--space-3);
+}
+.s05__tally-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: calc(13px * var(--scale));
+}
+.s05__tally-count { font-weight: 700; color: var(--text); }
+.s05__tally-item--u3,
+.s05__tally-item--u4 { color: var(--text-inverse); }
+.s05__tally-item--u3 { background: var(--kohl-50); }
+.s05__tally-item--u4 { background: var(--kohl-90); }
+.s05__tally-item--u3 .s05__tally-count,
+.s05__tally-item--u4 .s05__tally-count { color: var(--text-inverse); }
 
 .s05__reason {
   margin-top: var(--space-2);
@@ -314,6 +367,44 @@
   color: var(--accent-hover);
 }
 .s05__reexplain b { display: block; color: var(--text); margin-bottom: var(--space-1); }
+
+/* ── 재설명 문면 생성 대기 (피드백 4번) ────────────────────────────────────
+   LLM 왕복이라 몇 초가 빈다. 그 사이를 «다음에 올 것의 모양» 으로 채운다 — 문면 세 줄이
+   들어올 자리다. 판정 3색도 강조색도 쓰지 않는다: 이건 상태가 아니라 대기다. */
+.s05__pending {
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4) var(--space-5);
+}
+.s05__pending-title { font-size: calc(15px * var(--scale)); line-height: calc(1.5 * var(--leading-scale)); }
+.s05__pending-note {
+  margin-top: var(--space-3);
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+.s05__skeleton {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* 모션을 끈 사람에게는 `global.css` 가 애니메이션을 멈춘다 — 그때도 회색 띠는 남으므로
+   «자리가 비어 있다» 는 사실은 그대로 전달된다. 정보를 애니메이션에 싣지 않는다. */
+.s05__skeleton-line {
+  height: calc(12px * var(--scale));
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg,
+    var(--surface-sunken) 0%, var(--limestone-88) 50%, var(--surface-sunken) 100%);
+  background-size: 200% 100%;
+  animation: s05-shimmer 1.4s linear infinite;
+}
+.s05__skeleton-line--short { width: 55%; }
+@keyframes s05-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
 .s05__reexplain p {
   font-size: calc(14px * var(--scale));
   line-height: calc(1.5 * var(--leading-scale));
