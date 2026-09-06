@@ -262,6 +262,10 @@ export default function S07Report() {
         <button type="button" className="s07__btn s07__btn--quiet" onClick={() => void load()}>
           새로고침
         </button>
+        {/* 피드백 5번 — S-08 에 닿는 길이 S-02 경유 하나뿐이라 리포트에서도 열어 준다. 1차 행동(발행)이 아니라 quiet. */}
+        <button type="button" className="s07__btn s07__btn--quiet" onClick={() => navigate("/dashboard")}>
+          오해 지도 대시보드
+        </button>
       </nav>
     </main>
   );
