@@ -60,6 +60,11 @@ import "./S03_Interview.css";
 const MIN_CHARS = 5;
 /** E-INT-03: 무응답 안내까지의 시간(고령자 모드에서는 비활성). */
 const IDLE_PROMPT_MS = 60_000;
+/** "answered" 카드와 `InterviewSkeleton` 이 같이 쓴다 — 두 곳에 문자열을 따로 적으면
+    한쪽만 고쳐진다. 자동 진행(피드백 2번)이 붙은 뒤로 "answered" 카드는 한 프레임만
+    보이고 스켈레톤으로 덮이므로, 이 한 줄이 두 화면에 걸쳐 남아 있어야 고객이 자기
+    답이 들어간 것을 확인할 수 있다. */
+const ANSWERED_TITLE = "답변을 기록했어요.";
 
 /**
  * `reexplain` = 재설명 문면을 읽는 중. 읽고 나서 `asking`(재질문)으로 간다(설계 판단 ④).
@@ -465,7 +470,7 @@ export default function S03Interview() {
         ) : phase === "answered" ? (
           <section className="iv__card" aria-live="polite">
             <h1 className="iv__question">
-              {interviewDone ? "응답이 모두 끝났어요." : "답변을 기록했어요."}
+              {interviewDone ? "응답이 모두 끝났어요." : ANSWERED_TITLE}
             </h1>
             <p className="iv__alert iv__alert--info">
               {reverifying
@@ -624,11 +629,21 @@ export default function S03Interview() {
 
     별도 컴포넌트로 뺀 이유: 재설명 문면(`phase === "reexplain"`) 진입 자리도 지금은
     서버 왕복 없이 즉시 그려지지만, 나중에 그 진입에 대기가 생기면 이 마크업을 그대로
-    옮겨 쓸 수 있어야 한다 — 인라인이면 그 자리에서 또 새로 만들게 된다. */
+    옮겨 쓸 수 있어야 한다 — 인라인이면 그 자리에서 또 새로 만들게 된다.
+
+    ❗**맨 위에 `ANSWERED_TITLE` 을 고정으로 그린다 — 조건 분기 없이.** 이 화면(렌더
+    함수의 `phase === "loading"` 분기)은 위쪽 `if (phase === "loading" && !question)`
+    조기 반환을 통과한 뒤에만 온다. 그 조기 반환이 `question` 이 없는 모든 "loading" —
+    즉 최초 로드와, 재검증 뒤 첫 질문을 기다리는 구간(`question` 이 재검증 흐름에서는
+    한 번도 채워진 적이 없다) — 을 이미 가로챈다. 그래서 여기 남는 "loading" 은 **일반
+    질문에 답한 직후, 다음 질문을 기다리는 경우뿐**이고, 그 답 뒤에 뜨던 "answered"
+    카드의 문구가 항상 맞는다 — 자동 진행(피드백 2번)이 그 카드를 한 프레임만 보여
+    주고 여기로 넘어오므로, 고객이 자기 답이 들어간 것을 확인할 자리가 이거다. */
 function InterviewSkeleton() {
   return (
     <section className="iv__card" aria-busy="true" aria-live="polite">
-      <span className="sr-only">다음 내용을 불러오는 중입니다.</span>
+      <h1 className="iv__question">{ANSWERED_TITLE}</h1>
+      <span className="sr-only">다음 질문을 불러오는 중입니다.</span>
       <div className="iv__skeleton iv__skeleton--tag" />
       <div className="iv__skeleton iv__skeleton--title" />
       <div className="iv__skeleton iv__skeleton--title iv__skeleton--title-short" />
