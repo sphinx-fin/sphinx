@@ -630,6 +630,28 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /dashboard/evidence-metrics:
+    get:
+      summary: 실세션 운영 지표 (F-CMN-002 · 이슈 #327 · #479)
+      description: >
+        권한: `audit:read` — COMPL=org 뿐이다. 폴백률·confidence 분포·소요시간·재설명 전후 전환.
+        ❗**실세션만 센다** — 합성 세션은 불변 기록을 안 쌓아(결정 5.16) 여기 없다. 오해 지도
+        (합성)와 성질이 정반대라 섞이지 않는다. `unreadable` 은 payload 를 못 읽어 못 센 건수 —
+        0 과 다르다(결정 5.40, 안 센 것과 0 을 가른다). evidence 가 프로세스 수명이라 이 값은
+        "이 프로세스가 뜬 뒤로" 다.
+      responses:
+        '200':
+          description: 실세션 지표 (합성 없음)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidenceMetricsApiResponse'}
+        '403':
+          description: >
+            범위 밖 접근. COMPL 만 운영 지표를 볼 수 있다(ADR-001 · 기획서 7-4).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /dashboard/vulnerability-contrast:
     get:
       summary: 취약 고객 대비 (F-DSH-001 · 이슈 #321)
@@ -1465,6 +1487,32 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {$ref: '#/components/schemas/AuditVerify'}
+        error:   {type: object, nullable: true}
+    EvidenceMetrics:
+      type: object
+      required: [sessions, judgments, unreadable, questionSource, confidence, sessionDuration, reexplainTransitions]
+      description: "실세션 운영 지표 (#327 · #479). 합성 세션은 없음. 프로세스 수명 값."
+      properties:
+        sessions:   {type: integer, format: int64, description: "실세션 수(불변 기록 기준)"}
+        judgments:  {type: integer, format: int64}
+        unreadable: {type: integer, format: int64, description: "payload 를 못 읽어 못 센 건수 — 0 과 다르다(결정 5.40)"}
+        questionSource: {type: object, additionalProperties: {type: integer, format: int64}, description: "llm · template_fallback · (미기록) → 건수"}
+        confidence:     {type: object, additionalProperties: {type: integer, format: int64}, description: "confidence 값 → 건수"}
+        sessionDuration:
+          type: object
+          required: [sessions]
+          properties:
+            sessions:      {type: integer, description: "소요시간을 잰 세션 수"}
+            minSeconds:    {type: integer, format: int64, nullable: true}
+            medianSeconds: {type: integer, format: int64, nullable: true}
+            maxSeconds:    {type: integer, format: int64, nullable: true}
+        reexplainTransitions: {type: object, additionalProperties: {type: integer, format: int64}, description: "재설명 전후 등급 전환 → 건수"}
+    EvidenceMetricsApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/EvidenceMetrics'}
         error:   {type: object, nullable: true}
     IndicatorPoint:
       type: object
