@@ -64,7 +64,7 @@ public class OverrideService {
         Session session = get(sessionId);
         requireRed(session);
         if (session.overrideStatus() == OverrideStatus.APPROVED) {
-            throw new OverrideNotEligibleException("이미 승인된 오버라이드다: " + sessionId);
+            throw new OverrideNotEligibleException("이미 예외 승인이 끝난 세션이다: " + sessionId);
         }
         session.requestOverride(reason);
         return repository.save(session);
@@ -117,7 +117,7 @@ public class OverrideService {
     private void requireRed(Session session) {
         if (!session.isRedGate()) {
             throw new OverrideNotEligibleException(
-                    "적색 판정 세션만 오버라이드할 수 있다(현재 신호: " + session.gateSignal() + ")");
+                    "적색 판정 세션만 예외 승인을 요청할 수 있다(현재 신호: " + session.gateSignal() + ")");
         }
     }
 }
