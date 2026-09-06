@@ -19,13 +19,32 @@
  * `global.css` 의 reduced-motion 블록은 `animation-duration` 만 죽이고 **`animation-delay`
  * 는 안 건드린다.** 그래서 CSS 에만 맡기면 모션을 끈 사람이 빈 화면을 그대로 기다린다.
  * 여기서 질의해서 **아예 안 그린다** — 스플래시는 정보가 없으므로 건너뛰어도 잃는 게 없다.
+ *
+ * ── 새 창으로 직접 열리는 세션 흐름 화면은 덮지 않는다 (피드백 2번) ─────────────
+ *
+ * S-02 가 고객 인터뷰·판정 화면을 `window.open` 으로 연다(`S02_SessionStart.tsx` 의
+ * `openAside`). 새 탭은 이 컴포넌트가 처음부터 다시 마운트되므로, 화면을 하나 열 때마다
+ * `HOLD_MS` 만큼 더 걸린다 — 데모에서 창을 여러 개 넘기면 그 시간이 누적으로 체감된다.
+ * `window.opener` 로 "새 창으로 열렸는가" 를 가르는 대신 **경로**로 가른다: 팝업이
+ * 차단되면 `openAside` 가 같은 탭으로 `navigate` 하는데, 그때도 목적지는 같은 세션 흐름
+ * 화면이라 스플래시를 안 그리는 것이 맞고, `opener` 판정으로는 이 경우를 못 잡는다.
+ * 반대로 최초 진입(`/`, `/admin` 등)은 세션 하나짜리 데모에서 실제로 처음 여는 화면이라
+ * 그대로 덮는다.
  */
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import "./Splash.css";
 import logo from "../assets/logo-mark.svg?raw";
 
 /** 덮개가 걷히는 시각. `Splash.css` 의 마지막 애니메이션(끝 700ms + 260ms)보다 뒤다. */
 const HOLD_MS = 960;
+
+/** S-02 가 `window.open` 으로 여는 세션 흐름 화면들. 새 창마다 다시 덮지 않는다. */
+const NO_SPLASH_PREFIXES = ["/interview/", "/judgment/"];
+
+function isSessionFlowEntry(pathname: string): boolean {
+  return NO_SPLASH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
 
 function prefersReducedMotion(): boolean {
   // 구형 사파리·비브라우저 환경(테스트)에서 matchMedia 가 없을 수 있다. 없으면 모션을 켠다.
@@ -35,8 +54,12 @@ function prefersReducedMotion(): boolean {
 }
 
 export default function Splash() {
-  // 초기값에서 이미 갈린다 — 모션을 끈 사람에게는 한 프레임도 안 보인다.
-  const [covering, setCovering] = useState(() => !prefersReducedMotion());
+  const location = useLocation();
+  const skip = isSessionFlowEntry(location.pathname);
+  // 초기값에서 이미 갈린다 — 모션을 끈 사람과 세션 흐름 화면으로 직접 열린 창에는
+  // 한 프레임도 안 보인다. `skip` 은 마운트 시점의 경로만 보면 충분하다 — 이 컴포넌트가
+  // 같은 탭에서 경로를 바꾸며 다시 덮을 일은 없다(다른 라우트로 가도 재마운트되지 않는다).
+  const [covering, setCovering] = useState(() => !skip && !prefersReducedMotion());
 
   useEffect(() => {
     if (!covering) return;
