@@ -119,7 +119,8 @@ public class SessionController {
     @PreAuthorize("@accessGuard.can('session:judgment:read', #sid)")
     @GetMapping("/{sid}/judgments")
     public ApiResponse<JudgmentsResponse> judgments(@PathVariable String sid) {
-        return ApiResponse.ok(JudgmentsResponse.of(sessionService.get(sid)));
+        return ApiResponse.ok(JudgmentsResponse.of(
+                sessionService.get(sid), sessionService.reverifyThreshold()));
     }
 
     @PreAuthorize("@accessGuard.can('session:interview', #sid)")

@@ -361,6 +361,14 @@ public class Session extends BaseEntity {
         return reverifyCounts.getOrDefault(itemId, 0);
     }
 
+    /**
+     * 항목별 재검증 사용 횟수(불변 사본). 재설명 소진 여부를 화면이 «눌러 봐야» 알던 것을
+     * 응답으로 노출하는 데 쓴다(이슈 #506) — 재검증한 적 없는 항목은 키가 없다.
+     */
+    public Map<String, Integer> reverifyCounts() {
+        return Map.copyOf(reverifyCounts);
+    }
+
     /** 항목이 재검증 상한에 도달했는지 — 도달 시 재설명 루프 대신 판정으로 가야 한다. */
     public boolean reverifyExhausted(String itemId, int max) {
         return reverifyCount(itemId) >= max;

@@ -104,6 +104,14 @@ public class SessionService {
     }
 
     /**
+     * 항목별 재검증 상한(gate_rules R-03). 응답에 소진 여부를 실을 때 쓴다(#506) — 임계값
+     * 자체는 응답에 안 나가고 {@code exhausted} 계산에만 쓴다(7-4 역이용 방지).
+     */
+    public int reverifyThreshold() {
+        return maxReverify;
+    }
+
+    /**
      * 항목별 판정(AI 측정값)을 세션에 기록한다. 상태에 따라:
      * - CREATED: 첫 답변이므로 인터뷰 시작(→IN_PROGRESS)
      * - RE_EXPLAIN: 재설명 후 재답변이므로 재검증(재검증 횟수 +1, →RE_VERIFY).
