@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 import pytest
 
 from fastapi.testclient import TestClient
@@ -353,3 +354,61 @@ def test_a_broken_template_file_is_not_reported_as_a_bad_request() -> None:
                            json={"parsed_document": _doc().model_dump(mode="json")})
     finally:
         routes.templates.get = original
+
+
+# ── 두 벌 금지 ───────────────────────────────────────────────────────────────
+#
+# `#476` 을 낼 때 `tools/propose_rubric.py` 의 프롬프트·`_SYSTEM`·임계값(0.45)·페이지
+# 표시 정규식·출력 모델을 **그대로 복사해** `app/rubricgen.py` 를 만들었다. 내가 리뷰
+# 재촉 코멘트에 스스로 적어 놓고도 그 상태로 머지됐다.
+#
+# ❗**갈렸을 때 증상이 조용한 것이 문제다.** 도구로 본 후보와 관리자 화면이 받는 후보가
+# 달라지는데 **둘 다 그럴듯한 답을 낸다** — 사람이 도구로 승인 후보를 고르고, 화면은
+# 다른 후보를 보여 준다. 어느 쪽도 실패로 안 보인다.
+#
+# 그래서 「같은 값인가」를 재지 않는다. **애초에 값이 하나뿐인가**를 잰다 —
+# 두 벌 대조는 복사를 허용하고 그 순간부터 「같게 유지하기」가 사람 몫이 된다.
+TOOL = Path(__file__).resolve().parents[1] / "tools" / "propose_rubric.py"
+
+
+def test_the_tool_does_not_hold_a_second_generator() -> None:
+    """도구가 후보를 **자기가** 만들지 않는다 — 모듈을 부른다."""
+    src = TOOL.read_text(encoding="utf-8")
+    body = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+
+    assert "complete_json" not in body, (
+        "tools/propose_rubric.py 가 LLM 을 직접 부른다 — 프롬프트가 두 벌이 된다. "
+        "app.rubricgen.propose_one() 을 쓴다"
+    )
+    for name in ("ALREADY_COVERED", "_PAGE_MARK", "_SYSTEM"):
+        assert f"{name} =" not in body and f"{name}=" not in body, (
+            f"tools/propose_rubric.py 가 {name} 를 다시 정의한다 — "
+            f"app.rubricgen 의 것과 갈리면 **도구로 본 후보와 화면이 받는 후보가 달라지는데 "
+            f"둘 다 그럴듯하다.** app.rubricgen.{name} 를 쓴다"
+        )
+
+    # ❗양성 대조 — 위 셋이 「없다」는 것만 재면 도구가 통째로 비어도 통과한다.
+    assert "rubricgen.propose_one(" in body, "도구가 모듈의 생성기를 안 부른다"
+    assert "rubricgen.overlap_with_existing(" in body, (
+        "도구가 겹침 판정을 따로 한다 — 방향이 갈리면 조용히 어긋난다"
+    )
+
+
+def test_the_overlap_helper_is_the_one_both_sides_use() -> None:
+    """겹침 판정이 한 곳이다. 라우트는 `bool` 만, 도구는 점수까지 쓴다."""
+    existing = ("투자원금의 손실이 발생할 수 있음",)
+
+    covered, best, near = rubricgen.overlap_with_existing(
+        "이 상품은 투자원금의 손실이 발생할 수 있음을 고객이 말해야 한다", existing)
+    assert covered and best >= rubricgen.ALREADY_COVERED and near == existing[0]
+
+    covered, best, near = rubricgen.overlap_with_existing("발행사가 파산하면 못 받는다", existing)
+    assert not covered and best < rubricgen.ALREADY_COVERED
+
+    # ❗방향을 잠근다 — `containment(기존, 후보)` 다. 뒤집으면 **긴 후보가 짧은 기존
+    # 조항을 통째로 품어도** 점수가 낮게 나와 `already_covered` 가 0건이 된다
+    # (`ELS-MATURITY-LOSS-CONDITION` 에서 실측한 모양).
+    long_candidate = ("이 상품은 투자원금의 손실이 발생할 수 있음을 뜻하며 만기평가가격이 "
+                      "최초기준가격의 45% 미만으로 하락한 적이 있는 경우 손실이 확정된다")
+    covered, best, _ = rubricgen.overlap_with_existing(long_candidate, existing)
+    assert covered, f"긴 후보가 기존 조항을 품는데 새것으로 나온다 (겹침 {best:.2f})"

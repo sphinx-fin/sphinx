@@ -43,16 +43,15 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import retrieval, rubrics, templates, textsim  # noqa: E402
+from app import rubricgen, rubrics, templates  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.llm_client import LlmClient  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from app.schemas import ParsedDocument  # noqa: E402
 
 CONTRACT_SAMPLES = Path(__file__).resolve().parents[2] / "contracts" / "samples"
 SAMPLE_BY_PRODUCT = {
@@ -60,94 +59,24 @@ SAMPLE_BY_PRODUCT = {
     "VARIABLE_INSURANCE": "parsed_variable_sample.json",
 }
 
-#: 후보가 기존 조항과 이만큼 겹치면 **이미 있는 것**으로 본다.
+#: 생성은 `app/rubricgen.py` 가 한다 — **이 도구는 표시만 한다.**
 #:
-#: `find_coverage_gaps.COVERED_MIN`(0.25)보다 **높게** 잡는다. 목적이 반대다 — 거기서는
-#: *"이미 누가 덮고 있다"* 를 넓게 봐야 목록이 조용하고, 여기서는 *"이건 새 조항이다"* 를
-#: 좁게 봐야 사람이 볼 후보가 진짜 새것이다. 놓치는 쪽(새것을 기존으로 봄)이 실패 모드다.
-ALREADY_COVERED = 0.45
-
-
-class Proposal(BaseModel):
-    """생성기 출력. **문서 문면에서 유도한 것만** 낸다."""
-
-    required_elements: list[str] = Field(
-        description="이해로 인정되려면 고객이 언급해야 하는 것. 문서 조항에서 유도한다"
-    )
-    misconception_conditions: list[str] = Field(
-        default_factory=list,
-        description="고객이 말하면 오해로 보는 것. 위 조항의 반대다",
-    )
-    evidence: list[str] = Field(
-        default_factory=list,
-        description="각 required_elements 의 근거가 된 문서 원문. 요약하지 말고 그대로",
-    )
-
-
-def propose(item_id: str, product_type: str, client: LlmClient) -> tuple[Proposal, list[retrieval.Chunk]]:
-    """검색으로 후보 청크를 모으고 조항 초안을 낸다."""
-    item = next(i for i in templates.get(product_type).items if i.item_id == item_id)
-    doc = json.loads((CONTRACT_SAMPLES / SAMPLE_BY_PRODUCT[product_type]).read_text("utf-8"))
-    chunks = retrieval.chunk_document(doc)
-
-    query = f"{item.name} {item.cue}"
-    bm = retrieval.Bm25(chunks)
-    dense = retrieval.Dense.embed(chunks, client)
-    qvec = client.embed([query])[0]
-    hits = retrieval.search(query, chunks, bm, dense, qvec, client=client, top_n=3)
-    context = retrieval.with_neighbors(hits, chunks)
-
-    listing = "\n\n".join(
-        f"[{i}] (p{c.page}) {' '.join(c.text.split())}" for i, c in enumerate(context)
-    )
-    out = client.complete_json(
-        prompt=(
-            f"[항목]\n{item.item_id} — {item.name}\n{item.cue}\n\n"
-            f"[문서 조각]\n{listing}\n\n"
-            "위 조각에서 이 항목의 **채점 기준**을 만들라. 고객이 무엇을 말해야 이 항목을 "
-            "이해한 것인가. 조각에 없는 것을 만들지 말고, `evidence` 에는 근거가 된 원문을 "
-            "그대로 옮긴다. JSON만 출력한다."
-        ),
-        model_cls=Proposal,
-        schema_name="Proposal",
-        system=(
-            "당신은 금융상품 공시문서에서 고객 이해도 채점 기준을 만드는 사람이다. "
-            "문서에 적힌 것만 쓴다. 일반적인 금융 지식을 보태지 않는다. "
-            "각 기준은 한 문장이고, 고객이 그것을 말했는지 사람이 판단할 수 있어야 한다."
-        ),
-        pii_scope="public_document",
-    )
-    return out, context
-
-
-#: 모델이 베껴 오는 페이지 표시. **내가 프롬프트에 넣은 것이다.**
+#: 예전에는 프롬프트·`_SYSTEM`·`ALREADY_COVERED`(0.45)·`_PAGE_MARK` 정규식·출력 모델이
+#: 여기와 `app/rubricgen.py` 에 **두 벌** 있었다(`#476` 에서 내가 만들었고 리뷰 재촉
+#: 코멘트에 스스로 적었다). 두 벌이면 갈렸을 때 **증상이 조용하다** — 이 도구로 본 후보와
+#: 관리자 화면이 받는 후보가 달라지는데 **둘 다 그럴듯한 답을 낸다.**
 #:
-#: 문맥을 `[0] (p12) 본문…` 으로 주니 모델이 `evidence` 에 `(p12) ` 를 그대로 붙여 왔고,
-#: 그러면 원문 대조가 **전건 실패**한다(실측: 5/5 가 "지어냄" 으로 나왔다). 지어낸 것이
-#: 아니라 내가 준 접두어다 — **그물이 내가 만든 노이즈에 걸린 것**이라 여기서 벗긴다.
-#:
-#: 접두어를 아예 안 주는 선택도 있는데, 사람이 후보를 볼 때 몇 페이지인지가 필요하다.
-_PAGE_MARK = re.compile(r"^\s*\(?\s*p\s*\d+\s*\)?\s*")
+#: 그래서 후보 생성·근거 대조·겹침 판정을 전부 모듈에서 가져오고, 여기 남는 것은
+#: **사람이 보는 문면**뿐이다. `tests/test_rubric_propose.py` 가 이 파일에 생성 코드가
+#: 다시 생기면 문다.
+def _load(product_type: str) -> ParsedDocument:
+    """계약 샘플을 파스 출력으로 읽는다. **도구 전용 문서 출처다.**
 
-
-def _is_verbatim(evidence: str, context: list[retrieval.Chunk]) -> bool:
-    """근거가 문맥 원문에 실재하는가. **요약했으면 근거가 아니다.**
-
-    F-EXT-002 가 인용을 원문에서 재계산하는 것과 같은 규칙이다 — 모델이 근거라고 말한
-    것을 그대로 믿으면, 사람이 승인할 때 볼 것이 모델의 요약이 된다.
+    라우트는 요청이 준 `parsed_document` 를 쓴다(`#476`). 여기가 샘플을 읽는 것은
+    개발용이고, 그 차이가 이 도구와 화면의 **유일한** 갈림이어야 한다.
     """
-    needle = textsim.normalize(_PAGE_MARK.sub("", evidence))
-    return any(needle in c.norm for c in context) if needle else False
-
-
-def _novelty(candidate: str, existing: tuple[str, ...]) -> tuple[bool, float, str]:
-    """후보가 새것인가. (새것인가, 최고 겹침, 가장 가까운 기존 조항)"""
-    best, near = 0.0, "-"
-    for cur in existing:
-        score = textsim.containment(cur, candidate)
-        if score > best:
-            best, near = score, cur
-    return best < ALREADY_COVERED, best, near
+    raw = json.loads((CONTRACT_SAMPLES / SAMPLE_BY_PRODUCT[product_type]).read_text("utf-8"))
+    return ParsedDocument.model_validate(raw)
 
 
 def main() -> int:
@@ -166,14 +95,22 @@ def main() -> int:
         item_ids = [target]
 
     client = LlmClient(settings())
+    doc = _load(product_type)
+    # 문서 준비물은 **문서 단위**다 — 항목마다 다시 만들면 ELS 13항목에서 임베딩이
+    # 450여 텍스트 · 왕복 13회가 된다 (`#476` 리뷰 ①).
+    prep = rubricgen.prepare(doc, client)
+
     for item_id in item_ids:
         current = rubrics.get(item_id)
-        out, context = propose(item_id, product_type, client)
+        out = rubricgen.propose_one(item_id, doc, client, prep=prep)
 
         print("=" * 78)
         print(f"{item_id}  —  {current.name}   [{current.status}]")
-        print(f"  문맥 청크 {len(context)}개"
-              f" (페이지 걸친 것 {sum(c.crosses_pages for c in context)})")
+        # ❗**문서 전체**의 청크다 — 예전 문면("문맥 청크")은 그 항목이 실제로 검색해 온
+        # 조각 수였는데, 준비물을 문서 단위로 공유하면서 세는 대상이 바뀌었다. 같은
+        # 이름을 두면 다른 것을 재고도 안 보인다. 항목별 근거는 아래 스팬으로 나온다.
+        print(f"  문서 청크 {len(prep.chunks)}개"
+              f" (페이지 걸친 것 {sum(c.crosses_pages for c in prep.chunks)})")
         print("=" * 78)
 
         print("\n  현재 required_elements")
@@ -182,16 +119,18 @@ def main() -> int:
 
         print("\n  제안")
         for e in out.required_elements:
-            new, best, near = _novelty(e, current.required_elements)
-            mark = "★새것" if new else f"기존과 {best:.2f}"
-            print(f"    {'★' if new else ' '} {e}")
-            print(f"        {mark}" + (f"  ← {near[:46]}" if not new else ""))
+            covered, best, near = rubricgen.overlap_with_existing(e, current.required_elements)
+            mark = f"기존과 {best:.2f}" if covered else "★새것"
+            print(f"    {' ' if covered else '★'} {e}")
+            print(f"        {mark}" + (f"  ← {near[:46]}" if covered else ""))
 
         if out.evidence:
+            # ❗**스팬이 비면 원문에 없다는 뜻이다** — `rubricgen._locate` 가 요약을
+            # 지어내지 않고 빈 목록을 낸다(P4 와 같은 방향). 화면도 같은 값을 받는다.
             print("\n  근거 (문서 원문)")
             for ev in out.evidence:
-                found = _is_verbatim(ev, context)
-                print(f"    {'✅' if found else '❗지어냄'} {ev[:110]}")
+                where = f"p{ev.spans[0].page}" if ev.spans else "❗지어냄"
+                print(f"    {'✅ ' + where if ev.spans else where} {ev.text[:106]}")
         print()
     return 0
 
