@@ -346,4 +346,18 @@ select.ss__control {
   font-size: calc(12px * var(--scale));
   font-variant-numeric: tabular-nums;
 }
-.ss__modal-note { margin-top: var(--space-2); }
+/* 원본 원문의 그 페이지로 바로 여는 링크(#page=N 앵커) — 옅은 회색 사이에서도 눌러야
+   할 자리로 보이게 강조색을 쓴다. */
+.ss__doc-link { color: var(--accent); text-decoration: underline; }
+.ss__doc-link:hover { color: var(--accent-hover); }
+
+/* 모달에서 원본 PDF 전체를 여는 링크 — .ss__navlink 와 같은 모양이되 화살표 접미사는
+   뺀다(그건 "다음 화면으로" 를 뜻하는데 이건 새 탭으로 여는 파일이다). */
+.ss__modal-doclink {
+  align-self: flex-start;
+  font-size: calc(13px * var(--scale));
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.ss__modal-doclink:hover { text-decoration: underline; }
