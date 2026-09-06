@@ -137,7 +137,7 @@ const SCREENS: readonly Screen[] = [
   },
   {
     id: "S-06",
-    name: "적색 승인",
+    name: "예외 승인",
     audience: "관리자",
     route: "/override/:sid",
     note: "판매자가 사유를 적어 요청하고, 관리자가 승인해요.",
@@ -353,7 +353,7 @@ export default function S00Admin() {
                   <dd>{STATE_LABEL[session.state]}</dd>
                 </div>
                 <div>
-                  <dt>오버라이드</dt>
+                  <dt>예외 승인</dt>
                   <dd>{OVERRIDE_LABEL[session.overrideStatus]}</dd>
                 </div>
                 <div>

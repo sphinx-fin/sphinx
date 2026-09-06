@@ -116,7 +116,7 @@ export default function S06Override() {
   if (forbidden) {
     return (
       <main className="s06">
-        <h1>적색 승인</h1>
+        <h1>예외 승인</h1>
         <p className="s06__error" role="alert">
           이 세션을 열 권한이 없습니다. 승인자 계정에 세션 조회 권한이 없는 상태로 보입니다
           (이슈 #124). 권한이 붙기 전까지는 승인할 수 없습니다.
@@ -135,7 +135,7 @@ export default function S06Override() {
   return (
     <main className="s06">
       <header className="s06__head">
-        <h1>적색 승인</h1>
+        <h1>예외 승인</h1>
         <p className="s06__sid">
           세션 <code>{sid}</code>
           {session?.contractRef && <> · 계약건 <code>{session.contractRef}</code></>}
@@ -146,8 +146,8 @@ export default function S06Override() {
 
       {/* ── 상태 ──────────────────────────────────────────────────────────── */}
       <section className={`s06__state s06__state--${status.toLowerCase().replace(/_/g, "-")}`}>
-        {status === "NONE" && <p><strong>오버라이드 요청 없음</strong></p>}
-        {status === "PENDING_APPROVAL" && <p><strong>승인 대기</strong> — 판매자가 적색 진행을 요청했어요.</p>}
+        {status === "NONE" && <p><strong>예외 승인 요청 없음</strong></p>}
+        {status === "PENDING_APPROVAL" && <p><strong>승인 대기</strong> — 판매자가 예외 승인을 요청했어요.</p>}
         {status === "APPROVED" && (
           <p>
             <strong>승인됨</strong>
@@ -161,7 +161,7 @@ export default function S06Override() {
       {status === "NONE" && (
         isRed ? (
           <section className="s06__request">
-            <h2>적색 진행 요청</h2>
+            <h2>예외 승인 요청</h2>
             <p className="s06__warn">
               적색은 고객이 상품을 이해하지 못했다는 판정입니다. 그럼에도 진행하려는 사유를
               적어 주세요. <strong>이 사유는 기록으로 남고 준법감시(COMPL)에 통보됩니다.</strong>
@@ -190,7 +190,7 @@ export default function S06Override() {
           /* 설계 판단 ④ — 적색이 아니면 요청 UI 자체를 안 보인다 */
           <section className="s06__ineligible">
             <p>
-              적색 판정 세션이 아닙니다. 오버라이드는 적색에서만 요청할 수 있습니다.
+              적색 판정 세션이 아닙니다. 예외 승인은 적색에서만 요청할 수 있습니다.
               {gate && <> 현재 신호: <strong>{gate.signal}</strong></>}
             </p>
           </section>
