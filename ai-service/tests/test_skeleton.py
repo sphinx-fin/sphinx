@@ -162,14 +162,37 @@ def test_only_document_paths_relax_broad_pii_heuristics():
     from app.main import PiiGuardMiddleware
 
     relaxed = set(PiiGuardMiddleware.PUBLIC_DOCUMENT_PATHS)
-    assert relaxed == {"/internal/parse", "/internal/extract"}
+    assert relaxed == {"/internal/parse", "/internal/extract", "/internal/rubric/propose"}
 
-    paths = set(client.get("/openapi.json").json()["paths"])
+    spec = client.get("/openapi.json").json()
+    paths = set(spec["paths"])
     customer_paths = {p for p in paths if p.startswith("/internal/")} - relaxed
     assert customer_paths == {
         "/internal/question", "/internal/score",
         "/internal/misconception", "/internal/mismatch", "/internal/reexplain",
     }
+
+    # ❗**왜 안전한지를 목록이 아니라 스키마에서 유도한다** (이슈 #474 ①).
+    #
+    # 위 두 단정은 트립와이어다 — 목록이 늘면 사람이 멈춰서 생각하게 만든다. 그런데
+    # 「생각했다」와 「안전하다」는 다르다. 완화된 경로가 안전한 조건은 하나다:
+    # **본문에 고객 텍스트를 받는 필드가 없다.** 그것을 요청 스키마에서 직접 잰다.
+    #
+    # 이 단정이 없으면, 고객 발화를 받는 경로를 목록에 넣어도 위 두 줄만 고치면 통과한다.
+    CUSTOMER_TEXT_FIELDS = {"answer_text", "text", "utterances", "question"}
+    schemas = spec["components"]["schemas"]
+    for path in sorted(relaxed):
+        body = spec["paths"][path]["post"].get("requestBody")
+        if body is None:
+            continue
+        ref = body["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
+        fields = set(schemas[ref].get("properties", {}))
+        leaked = fields & CUSTOMER_TEXT_FIELDS
+        assert not leaked, (
+            f"{path} 는 넓은 PII 휴리스틱이 꺼진 경로인데 고객 텍스트 필드 {sorted(leaked)} 를 "
+            "받는다 — 그 경로로 온 발화의 계좌·카드번호가 조용히 통과한다 (기획서 7-3)"
+        )
+    assert len(relaxed) >= 3, "완화 목록이 비면 위 루프가 0회 돌고 조용히 통과한다"
 
 
 def test_rrn_is_blocked_even_on_document_paths():

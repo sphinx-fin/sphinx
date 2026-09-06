@@ -16,8 +16,9 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from . import (extraction, misconception, mismatch, parsing, question_gen, reexplain,
+               rubricgen,
                rubrics, scoring, templates)
-from .llm_client import LlmError, LlmNotConfigured
+from .llm_client import LlmError, LlmNotConfigured, client as default_client
 from .pii import PiiDetected, assert_clean
 from .schemas import (
     ConditionNotExtracted,
@@ -34,6 +35,8 @@ from .schemas import (
     ReexplainResponse,
     SuitabilityMismatch,
     ScoreRequest,
+    RubricProposeRequest,
+    RubricProposeResponse,
 )
 
 log = logging.getLogger(__name__)
@@ -245,6 +248,71 @@ def do_reexplain(body: ReexplainRequest) -> ReexplainResponse:
         raise _not_implemented("F-INT-004 재설명")
     except LlmError as exc:
         raise _llm_unavailable(exc)
+
+
+# ── 루브릭 후보 생성 (이슈 #474 ①) ────────────────────────────────────────────
+@router.post("/rubric/propose", response_model=RubricProposeResponse)
+def propose_rubric(body: RubricProposeRequest) -> RubricProposeResponse:
+    """문서에서 루브릭 후보를 낸다. **파일을 쓰지 않는다 — 제안만 낸다.**
+
+    ❗승인 산출물은 `app/rubrics/*.yaml` **파일**이다. 채점(`rubrics.get()`)은 그 파일만
+    읽고 이 경로를 안 지난다 — 채점이 런타임 생성 기준을 쓰면
+    `verify_rubric_clause_is_published` 가 순환한다(P4 · `#358` 과 같은 자리).
+
+    항목 하나가 실패해도 나머지를 낸다. **실패를 은폐하지 않고 `warnings` 로 노출한다**
+    (E-EXT-03 과 같은 규약) — 조용히 빠지면 사람이 "이 항목은 후보가 없구나" 와
+    "이 항목이 죽었구나" 를 못 가른다.
+    """
+    doc = body.parsed_document
+    try:
+        known = [i.item_id for i in templates.get(doc.product_type).items]
+    except templates.TemplateNotFound as exc:
+        # 템플릿 없는 상품유형은 후보 범위가 정의되지 않았다 — 위 `/extract`·`/question` 과
+        # **같은 422** 다(#476 리뷰). ❗`except Exception` 으로 접으면 `_all()` 의 YAML 파싱
+        # 오류(item_id 누락·중복·importance 불량)까지 400 이 되어, 부른 쪽은 자기 요청이
+        # 잘못된 줄 알고 진짜 원인은 detail 문자열에만 남는다. 나머지 예외는 안 잡는다 —
+        # 500 이 "판정을 못 했다" 의 옳은 표현이다.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    wanted = body.item_ids or known
+    unknown = [i for i in wanted if i not in known]
+    targets = [i for i in wanted if i in known]
+
+    client = default_client()
+    proposals, warnings = [], [f"템플릿에 없는 항목: {i}" for i in unknown]
+
+    # ❗**문서 단위 준비물은 한 번만 만든다** (#476 리뷰).
+    #
+    # `chunk_document`·`Bm25`·`Dense.embed` 는 항목이 바뀌어도 같은 값이다. 항목마다
+    # 바뀌는 것은 `query`(name+cue)와 그 아래 `qvec`·`search`·리랭킹뿐이다.
+    # 항목마다 다시 만들면 ELS 13항목에서 **임베딩이 450여 텍스트 · 왕복 13회**가 된다
+    # (청크 30~40개 × 13). `llm_client.embed` 에 캐시가 없어 전부 실제 호출이고,
+    # `pii.assert_clean` 도 청크마다 13번 더 돈다.
+    prep = None
+    if targets:
+        try:
+            prep = rubricgen.prepare(doc, client)
+        except LlmError as exc:
+            raise _llm_unavailable(exc)
+
+    for item_id in targets:
+        try:
+            proposals.append(rubricgen.propose_one(item_id, doc, client, prep=prep))
+        except LlmError as exc:
+            # 하나가 죽어도 나머지를 낸다 — 전부 실패면 아래에서 502 로 올린다.
+            warnings.append(f"{item_id}: 후보 생성 실패 ({type(exc).__name__})")
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"{item_id}: 후보 생성 실패 ({type(exc).__name__}: {exc})")
+
+    if targets and not proposals:
+        raise _llm_unavailable(LlmError("루브릭 후보를 하나도 못 냈다: " + "; ".join(warnings)))
+
+    return RubricProposeResponse(
+        document_id=doc.document_id,
+        product_type=doc.product_type,
+        proposals=proposals,
+        warnings=warnings,
+    )
 
 
 __all__ = ["router", "PiiDetected"]
