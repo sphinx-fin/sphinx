@@ -74,6 +74,15 @@ def _load(product_type: str) -> ParsedDocument:
 
     라우트는 요청이 준 `parsed_document` 를 쓴다(`#476`). 여기가 샘플을 읽는 것은
     개발용이고, 그 차이가 이 도구와 화면의 **유일한** 갈림이어야 한다.
+
+    ❗**이 도구만 `extra="ignore"` 에 의존한다** (`#486` 리뷰, 정세현). 계약 샘플은
+    `_source`·`_expected_risk_items` 를 들고 있는데(ADR-006), `ParsedDocument` 가
+    `Strict`(=`extra="forbid"`)를 `model_config = ConfigDict(extra="ignore")` 로
+    덮기 때문에 통과한다(`schemas.py:179`).
+
+    그 줄이 사라지면 **라우트는 멀쩡하고 이 도구만 죽는다** — 요청이 주는
+    `parsed_document` 에는 그 키가 없다. 그리고 **CI 가 이 도구를 실행하지 않으므로**
+    회귀는 사람이 도구를 돌리는 날에나 보인다.
     """
     raw = json.loads((CONTRACT_SAMPLES / SAMPLE_BY_PRODUCT[product_type]).read_text("utf-8"))
     return ParsedDocument.model_validate(raw)
