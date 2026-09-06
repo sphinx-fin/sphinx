@@ -302,6 +302,45 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("재검증 소진이 /judgments 봉투에 뜬다 — 눌러 봐야 알던 것을 서버가 낸다 (#506)")
+    void reverifyExhaustionShowsInJudgments() throws Exception {
+        String item = "ELS-PRINCIPAL-LOSS-WARNING";
+        String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andReturn().getResponse().getContentAsString();
+        String sid = JsonPath.read(created, "$.data.sessionId");
+
+        // U4(default stub) → 재설명 → 재답변 을 상한(2회)까지 몰아 소진시킨다.
+        java.util.function.Consumer<String> answer = text -> {
+            try {
+                mvc.perform(post("/sessions/" + sid + "/answers").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + item + "\",\"text\":\"" + text + "\"}"))
+                        .andExpect(status().isOk());
+            } catch (Exception e) { throw new RuntimeException(e); }
+        };
+        Runnable reExplain = () -> {
+            try {
+                mvc.perform(post("/sessions/" + sid + "/re-explain").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"itemId\":\"" + item + "\"}")).andExpect(status().isOk());
+            } catch (Exception e) { throw new RuntimeException(e); }
+        };
+        answer.accept("잘 모르겠어요");   // IN_PROGRESS
+        reExplain.run();                  // RE_EXPLAIN
+        answer.accept("아직도 모르겠어요"); // 재검증 1
+        reExplain.run();                  // RE_EXPLAIN (1 < 상한)
+        answer.accept("여전히요");          // 재검증 2 = 소진
+
+        mvc.perform(get("/sessions/" + sid + "/judgments"))
+                .andExpect(status().isOk())
+                // ❗상한 N 은 안 나온다 — used·exhausted 까지만(7-4 역이용 방지)
+                .andExpect(jsonPath("$.data.reverify[?(@.itemId=='" + item + "')].used").value(hasItem(2)))
+                .andExpect(jsonPath("$.data.reverify[?(@.itemId=='" + item + "')].exhausted").value(hasItem(true)));
+
+        extractedRiskItems.deleteAll();
+    }
+
+    @Test
     @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
     void unknownProductTypeFailsLoudly() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)

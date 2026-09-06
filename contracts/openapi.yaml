@@ -1008,7 +1008,7 @@ components:
 
     JudgmentsResponse:
       type: object
-      required: [sessionId, state, judgments]
+      required: [sessionId, state, judgments, reverify]
       properties:
         sessionId: {type: string}
         state:     {type: string, enum: [CREATED, IN_PROGRESS, RE_EXPLAIN, RE_VERIFY, JUDGED, CLOSED, ABORTED]}
@@ -1016,6 +1016,20 @@ components:
           type: array
           description: 항목 ID 오름차순. 항목별 최신 판정만 담긴다(재검증 시 덮어씀)
           items: {$ref: '#/components/schemas/JudgmentView'}
+        reverify:
+          type: array
+          description: >
+            항목별 재검증 사용 상태 (#506). 재검증한 적 있는 항목만·ID 오름차순. 소진 여부를
+            화면이 「눌러 봐야」 알던 것을 서버가 낸다 — sessionStorage/탭에 안 기댄다.
+            ❗상한 N 은 안 싣는다(7-4 역이용 방지) — exhausted 불리언까지만.
+          items: {$ref: '#/components/schemas/ReverifyStatus'}
+    ReverifyStatus:
+      type: object
+      required: [itemId, used, exhausted]
+      properties:
+        itemId:    {type: string}
+        used:      {type: integer, description: "이 항목에 쓴 재검증 횟수"}
+        exhausted: {type: boolean, description: "상한 도달 — 재설명 불가, 판정으로 진행. 상한 값 자체는 안 실린다"}
     JudgmentsApiResponse:
       type: object
       required: [success, data]
