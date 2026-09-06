@@ -1,0 +1,102 @@
+# SphinX 배포 — 데이터 스택(mysql). 소유: 오준서 (인프라 R)
+#
+# 이 파일은 `docker-compose.app.yml`(blue/green, 배포마다 새 프로젝트로 뜬다)과
+# `docker-compose.edge.yml`(nginx, 절대 재생성되지 않는다)에서 분리됐다 — 이슈
+# "무중단 배포" 리라이트, 결정로그 7.39 의 후속. 예전엔 이 셋이 한 compose 프로젝트
+# (`sphinx`)였고, 배포마다 `--force-recreate` 로 전부 같이 재생성됐다. `mysql` 은
+# 리포 트리를 bind mount 하지 않고 named volume 만 쓰므로(아래 참조) 배포가 트리를
+# 갈아끼워도 재생성될 이유가 원래 없었다 — 그런데도 매번 같이 내려갔다 올라와서
+# 배포 도중 DB 재기동(healthcheck start_period 60s)이 다운타임에 얹혔다.
+#
+# ❗**이 프로젝트는 blue/green 과 무관하게 상시 유지된다.** 배포 스크립트가 매번
+# `docker compose -f docker-compose.data.yml -p sphinx-data up -d` 를 부르지만,
+# 이 파일의 설정이 안 바뀌는 한 compose 가 실제로는 아무 컨테이너도 안 건드린다.
+#
+# 쓰는 법:
+#   docker compose -f docker-compose.data.yml -p sphinx-data up -d
+#
+# 자세한 배포 절차는 `docs/deployment.md`.
+
+name: sphinx-data
+
+services:
+  # ── mysql (MySQL 8.4 LTS) — 외부 노출 없음, server(blue/green 양쪽)만 닿는다 ─
+  #
+  # H2 인메모리를 대체한다. 인메모리는 **재기동마다 세션·감사 기록이 사라져서**
+  # 결정 10.73 이 적은 *"감사 로그를 오프라인으로 못 읽는다"* 가 그대로였다.
+  #
+  # ❗**`ports:` 를 붙이지 않는다.** 3306 이 퍼블릭에 뜨면 비밀번호 하나로 판정
+  # 기록과 해시 체인을 직접 고칠 수 있고, F-GTE-004(교부 문서)·F-CMN-002(감사 로그)의
+  # 전제가 그 순간 거짓이 된다. 보안그룹도 3306 을 안 연다(infra/network.tf).
+  #
+  # ❗**blue/green 이 이 mysql 하나를 공유한다 — 스택마다 따로 안 만든다.** 나눠 두면
+  # 세션·감사 기록이 두 갈래로 갈리고, `mysql-data` 볼륨을 스택 색깔로 나눌 방법이
+  # 없다(append-only 기록은 실물이 하나여야 한다). 대가는 **DB 마이그레이션이
+  # blue/green 겹침 구간과 호환돼야 한다는 것** — green 이 뜨면서 Flyway 가 새
+  # 마이그레이션을 적용하는 순간에도 blue 는 여전히 옛 스키마 가정으로 라이브
+  # 트래픽을 받고 있다. 컬럼 삭제·타입 변경처럼 옛 코드가 못 견디는 변경은 한
+  # 배포에 넣지 않는다 — expand(추가)를 먼저 배포하고, blue 가 완전히 물러난 다음
+  # 배포에서 contract(제거)한다. `docs/deployment.md` §DB 마이그레이션 참조.
+  mysql:
+    image: mysql:8.4
+    # ports: 없다. 위 주석 참조.
+    environment:
+      MYSQL_DATABASE: ${SPHINX_DB_NAME:-sphinx}
+      MYSQL_USER: ${SPHINX_DB_USER:-sphinx}
+      # server 가 받는 것과 **같은 변수**다. 출처가 SSM 하나라 두 컨테이너가 갈릴 수 없다
+      # (SPHINX_INTERNAL_TOKEN 과 같은 구조). 미설정이면 여기서 기동을 거부한다.
+      MYSQL_PASSWORD: ${SPHINX_DB_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
+      # ❗root 비밀번호를 SSM 에 두지 않는다. 이 앱이 root 로 붙지 않고, 위 계정이
+      # sphinx 스키마에 ALL 권한을 갖고 있어서 **운영자가 root 로 할 일이 없다.**
+      # 관리할 비밀이 하나 느는 대가에 비해 얻는 것이 없다. 값은 첫 기동 로그에 한 번
+      # 찍히고 그 뒤로는 아무도 모른다 — 그게 의도다.
+      MYSQL_RANDOM_ROOT_PASSWORD: "1"
+    # ❗한글이 이 DB 를 통과한다(발화 마스킹본·근거 인용·룰 문면). 서버 기본 문자셋을
+    # 안 잡으면 이미지 기본값에 기대게 되고, 판본이 바뀌는 날 조용히 깨진다.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    # ❗**메모리 캡.** blue/green 겹침 구간에 server(JVM)가 둘 뜨는데
+    # `-XX:MaxRAMPercentage=75`(server/Dockerfile)는 컨테이너 cgroup 한도가 없으면
+    # 호스트 전체(8GB, m7i-flex.large) 기준으로 풀린다. mysql 도 캡을 걸어 둬야
+    # blue+green 겹침 순간 셋 다 무한정 커지는 그림을 피한다. 수치는 추정 —
+    # alpha 실측 후 조정한다(docs/deployment.md).
+    mem_limit: 1024m
+    volumes:
+      # ❗**이 볼륨이 데이터 그 자체다. 지우면 세션·감사 기록이 전부 사라지고 되돌릴 수
+      # 없다** — `docker compose down -v` 가 그것을 한다(`-v` 없이는 안 지운다).
+      # bind mount 가 아니라 named volume 인 것이 중요하다: 배포가 트리를 통째로
+      # 갈아끼워도(`rm -rf /opt/sphinx`) 이건 docker 가 들고 있어서 산다(#240).
+      #
+      # ❗**이름을 옛 프로젝트(`sphinx`)의 볼륨으로 고정 핀다.** 이 파일의 프로젝트명은
+      # `sphinx-data` 라 `name:` 을 안 주면 Compose 가 `sphinx-data_mysql-data` 라는
+      # **새 빈 볼륨**을 만든다 — 세션·판정·감사 기록이 전부 "사라진 것처럼" 보인다
+      # (실제로 지워지진 않지만 앱은 빈 DB 로 뜬다). 옛 `docker-compose.yml`(`name: sphinx`)
+      # 이 만든 실제 볼륨 이름이 `sphinx_mysql-data` 였으므로 그대로 잇는다.
+      - mysql-data:/var/lib/mysql
+    networks: [data]
+    restart: unless-stopped
+    healthcheck:
+      # `-h 127.0.0.1` 이 있어야 한다. 빼면 유닉스 소켓으로 붙는데, **첫 기동의 초기화
+      # 단계에서 임시 서버가 그 소켓에 이미 떠 있어서** 스키마가 준비되기 전에 healthy 가
+      # 된다. TCP 는 진짜 서버가 뜬 뒤에만 열린다.
+      # CMD 가 아니라 CMD-SHELL 인 이유: 아래 $$VAR 확장에 셸이 필요하다.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # 첫 기동은 데이터 디렉토리를 초기화하느라 오래 걸린다. 짧게 잡으면 재시작 고리에 든다.
+      start_period: 60s
+
+volumes:
+  mysql-data:
+    name: sphinx_mysql-data
+
+networks:
+  # ❗**고정 이름이 필요하다.** blue/green(`docker-compose.app.yml`)이 다른 compose
+  # 프로젝트에서 `external: true` 로 이 네트워크를 참조하므로, Compose 의 기본
+  # 프로젝트-접두 네트워크 이름(`sphinx-data_data`)이 아니라 여기서 고정한 이름을
+  # 그대로 알아야 한다.
+  data:
+    driver: bridge
+    name: sphinx-data-net

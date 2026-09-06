@@ -1,44 +1,36 @@
-# SphinX 배포 — AWS EC2 + docker compose. 소유: 오준서 (인프라 R)
+# SphinX 배포 — app 스택(ai-service + server, blue/green). 소유: 오준서 (인프라 R)
 #
-# 이슈 #41(배포 전 보안) · #37(data/ 전제) · 결정로그 10.3.
+# 이슈 #41(배포 전 보안) · #37(data/ 전제) · 결정로그 10.3 · 7.39("무중단 배포"
+# 리라이트로 갱신 — docs/decision-log.md 참조).
 #
-# ── 이 파일이 지키는 것 하나 ────────────────────────────────────────────────
+# ── 이 파일만으로는 안 뜬다 ──────────────────────────────────────────────────
 #
-# **`ai-service` 를 외부에 열지 않는다.** 아래에서 `ports:` 를 가진 서비스는 `web` 뿐이다.
-# 포트를 게시하지 않은 서비스는 같은 compose 네트워크 안에서만 닿는다 — EC2 호스트에서도,
-# 인터넷에서도 안 보인다.
+# 예전엔 이 파일 하나가 `web`·`mysql`·`certbot` 까지 5 서비스를 다 가진 프로젝트
+# (`name: sphinx`)였다. 지금은 셋으로 갈렸다:
 #
-# 이게 가장 싸고 효과가 큰 조치인 이유는 #41 에 적혀 있다. :8100 이 퍼블릭에 뜨는 순간
-# **PII 마스킹을 건너뛰고 LLM 에 직접 프롬프트를 넣을 수 있고**, CLAUDE.md 가 P3 로 못박은
-# *"고객 텍스트가 ai-service 로 나가는 유일한 경로는 PiiGateway.mask() → AiServiceClient"* 가
-# 그 순간 거짓이 된다. 노출을 안 하면 `permitAll` 상태여도 외부에서 못 부른다.
+#   docker-compose.data.yml   mysql          — 상시 유지, 프로젝트 `sphinx-data`
+#   docker-compose.edge.yml   web·certbot    — 상시 유지, 프로젝트 `sphinx-edge`
+#   docker-compose.yml (이 파일)  ai-service·server — **배포마다 blue/green 번갈아
+#                                                      뜨고 옛 색은 내려간다**
 #
-# 네트워크를 **셋으로** 가른 것은 그 위의 2차 방어다. `ai-service` 는 `internal` 에만 있어서
-# `web` 컨테이너가 뚫려도 거기서 :8100 으로 직접 못 간다 — 반드시 `server` 를 거친다.
-# 같은 이유로 `mysql` 은 `data` 에만 있다: `web` 도 `ai-service` 도 DB 에 닿는 경로가 없고,
-# 세 네트워크 전부에 있는 것은 `server` 하나다. 지금 안 부르는 것과 못 부르는 것은 다르다.
+# 이 파일이 참조하는 `edge`·`data` 네트워크는 위 두 프로젝트가 만들어 둔 것을
+# `external: true` 로 붙는다 — 그 프로젝트들이 먼저 떠 있어야 한다.
 #
-# 마지막 겹이 `/internal/*` 공유 시크릿이다(`SPHINX_INTERNAL_TOKEN`, 결정 10.4). 앞의 둘은
-# **이 파일의 설정**이라 여기서 한 줄 잘못 쓰면 같이 무너진다 — `ports:` 를 하나 추가하거나
-# `ai-service` 를 `edge` 에 올리는 것으로 충분하다. 시크릿은 그 실수 위에 남는 방어선이고,
-# `SPHINX_REQUIRE_INTERNAL_AUTH` 가 **꺼진 채로 뜨는 것 자체를 막는다.**
+# `server`가 `web`(다른 프로젝트)에 보이려면 `STACK` 환경변수로 자기 색을 알아야
+# 한다 — `edge` 네트워크에 `server-blue`/`server-green` 별명으로 등록되고, `web`
+# 은 그 이름으로 지금 라이브인 쪽에 `proxy_pass` 한다(web/app.conf 참조).
+# blue/green 이 같은 별명("server")을 등록하면 Docker DNS 가 둘을 라운드로빈해서
+# 요청이 옛/새 버전에 무작위로 섞이므로, 별명은 반드시 색으로 갈라야 한다.
 #
-# ❗**세는 단위가 문서마다 다르다.** 여기서 가른 앞의 둘(포트 미게시 · 네트워크 분리)을
-# `ai-service/tests/test_internal_auth.py` 와 `docs/deployment.md` 는 묶어서 "네트워크 격리
-# 1차" 로 세고 시크릿을 "2차" 라 부른다. **같은 것을 가리킨다** — 겹이 다른 게 아니라 세는
-# 방식이 다르다. 그래서 아래에서는 번호 대신 이름으로 부른다(#212 리뷰).
-#
-# ── 쓰는 법 ────────────────────────────────────────────────────────────────
-#
-#   scripts/deploy_ec2.sh            # SSM 에서 비밀을 받아 아래를 띄운다(권장)
-#   docker compose up -d --build     # 환경변수를 직접 넣었을 때
+# 쓰는 법(배포는 scripts/deploy_ec2.sh 가 이 순서를 대신한다):
+#   docker compose -f docker-compose.data.yml -p sphinx-data up -d
+#   docker compose -f docker-compose.edge.yml -p sphinx-edge up -d --build
+#   STACK=blue docker compose -f docker-compose.yml -p sphinx-blue up -d --build
 #
 # 비밀을 `.env` 평문으로 두지 않는다(#41 ④). 아래 `${VAR:?}` 문법이 **미설정이면 기동을
 # 거부**하므로, 키 없이 뜬 채로 데모 중에 LLM 호출만 실패하는 상황이 생기지 않는다.
 #
 # 자세한 배포 절차·리전·보안그룹은 `docs/deployment.md`.
-
-name: sphinx
 
 services:
   # ── ai-service (FastAPI) — 외부 노출 없음 ─────────────────────────────────
@@ -47,6 +39,7 @@ services:
       context: ./ai-service
       dockerfile: Dockerfile
     # ports: 없다. 의도적이다 — 위 주석 참조. 추가하려면 #41 을 먼저 읽는다.
+    mem_limit: 512m
     environment:
       # 오해 라이브러리(M01~M08)를 여기서 읽는다. 못 읽으면 매칭이 통째로 안 돌고
       # apply_misconception_floor 가 U4 를 못 올린다 — 기획서 7-2 데모 메인 판정 경로다.
@@ -75,6 +68,13 @@ services:
       # data/ 를 이미지에 굽지 않는다. timeseries/ 18,089줄을 한 벌 더 두면 VERSION 의
       # sha256 으로 고정한 원본과 조용히 갈라지고, 시뮬레이터 출력이 달라진 원인이 코드인지
       # 데이터인지 구분할 수단이 없어진다(P2 · #37).
+      #
+      # ❗**이 bind mount 가 지금 색(blue 또는 green)이 뜬 시점의 트리를 가리킨다.**
+      # 배포 스크립트는 이 스택이 완전히 내려가기 전까지 그 트리를 지우지 않는다 —
+      # 예전엔(#240) `rm -rf /opt/sphinx && mv` 가 떠 있는 컨테이너 밑에서 트리를
+      # 통째로 갈아치워 이 mount 가 지워진 inode 를 가리키게 됐다. 지금은 순서를
+      # 바꿔서, **이 스택을 내리고 나서야** 그 트리를 지운다 — 떠 있는 동안은 절대
+      # 안전하다(scripts/deploy_ec2.sh 참조).
       - ./data:/data:ro
       # ❗ contracts/ 도 런타임 의존이다. templates.py 의 assert_matches_contract() 가
       # contracts/samples/parsed_*.json 을 읽어 상품유형 템플릿과 대조하는데, **파일이 없으면
@@ -92,66 +92,14 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── mysql (MySQL 8.4 LTS) — 외부 노출 없음, server 만 닿는다 ──────────────
-  #
-  # H2 인메모리를 대체한다. 인메모리는 **재기동마다 세션·감사 기록이 사라져서**
-  # 결정 10.73 이 적은 *"감사 로그를 오프라인으로 못 읽는다"* 가 그대로였다.
-  #
-  # ❗**`ports:` 를 붙이지 않는다.** ai-service 와 같은 이유이고 여기서는 더하다 —
-  # 3306 이 퍼블릭에 뜨면 비밀번호 하나로 판정 기록과 해시 체인을 직접 고칠 수 있고,
-  # F-GTE-004(교부 문서)·F-CMN-002(감사 로그)의 전제가 그 순간 거짓이 된다.
-  # 보안그룹도 3306 을 안 연다(infra/network.tf — 거기에 규칙을 추가하지 않는다).
-  #
-  # ❗**`internal` 이 아니라 `data` 네트워크에 둔다.** internal 에 얹으면 ai-service 가
-  # DB 에 닿는다 — 지금은 안 부르지만, 닿을 수 있는 것과 안 부르는 것은 다르다. P3 의
-  # 논지가 *"경로가 아예 없어야 한다"* 인 것과 같은 결이다. server 만 두 네트워크에 있다.
-  mysql:
-    image: mysql:8.4
-    # ports: 없다. 위 주석 참조.
-    environment:
-      MYSQL_DATABASE: ${SPHINX_DB_NAME:-sphinx}
-      MYSQL_USER: ${SPHINX_DB_USER:-sphinx}
-      # server 가 받는 것과 **같은 변수**다. 출처가 SSM 하나라 두 컨테이너가 갈릴 수 없다
-      # (SPHINX_INTERNAL_TOKEN 과 같은 구조). 미설정이면 여기서 기동을 거부한다.
-      MYSQL_PASSWORD: ${SPHINX_DB_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
-      # ❗root 비밀번호를 SSM 에 두지 않는다. 이 앱이 root 로 붙지 않고, 위 계정이
-      # sphinx 스키마에 ALL 권한을 갖고 있어서 **운영자가 root 로 할 일이 없다.**
-      # 관리할 비밀이 하나 느는 대가에 비해 얻는 것이 없다. 값은 첫 기동 로그에 한 번
-      # 찍히고 그 뒤로는 아무도 모른다 — 그게 의도다.
-      MYSQL_RANDOM_ROOT_PASSWORD: "1"
-    # ❗한글이 이 DB 를 통과한다(발화 마스킹본·근거 인용·룰 문면). 서버 기본 문자셋을
-    # 안 잡으면 이미지 기본값에 기대게 되고, 판본이 바뀌는 날 조용히 깨진다.
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_0900_ai_ci
-    volumes:
-      # ❗**이 볼륨이 데이터 그 자체다. 지우면 세션·감사 기록이 전부 사라지고 되돌릴 수
-      # 없다** — `docker compose down -v` 가 그것을 한다(`-v` 없이는 안 지운다).
-      # bind mount 가 아니라 named volume 인 것이 중요하다: 배포가
-      # `rm -rf /opt/sphinx && mv $NEW /opt/sphinx` 로 트리를 통째로 갈아끼우는데(#240),
-      # bind mount 였으면 그 순간 데이터도 같이 날아간다.
-      - mysql-data:/var/lib/mysql
-    networks: [data]
-    restart: unless-stopped
-    healthcheck:
-      # `-h 127.0.0.1` 이 있어야 한다. 빼면 유닉스 소켓으로 붙는데, **첫 기동의 초기화
-      # 단계에서 임시 서버가 그 소켓에 이미 떠 있어서** 스키마가 준비되기 전에 healthy 가
-      # 된다. TCP 는 진짜 서버가 뜬 뒤에만 열린다.
-      # CMD 가 아니라 CMD-SHELL 인 이유: 아래 $$VAR 확장에 셸이 필요하다.
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      # 첫 기동은 데이터 디렉토리를 초기화하느라 오래 걸린다. 짧게 잡으면 재시작 고리에 든다.
-      start_period: 60s
-
-  # ── server (Spring Boot) — 외부 노출 없음, web 이 프록시한다 ───────────────
+  # ── server (Spring Boot) — 외부 노출 없음, web(다른 프로젝트)이 프록시한다 ──
   server:
     build:
       context: ./server
       dockerfile: Dockerfile
     # ports: 없다. 화면은 web 컨테이너의 nginx 가 /api 로 넘긴다.
     # 직접 열어야 할 일이 생기면 IP 제한이나 basic auth 를 먼저 건다(#41).
+    mem_limit: 1536m
     environment:
       # prod 프로파일이 H2 콘솔을 끄고(ddl-auto: create), permitAll 대신 인증을 요구한다.
       # 이걸 안 켜면 브라우저에서 세션 테이블을 직접 고칠 수 있고 F-GTE-004·F-CMN-002 의
@@ -160,7 +108,9 @@ services:
       # ── DB (MySQL) ────────────────────────────────────────────────────────
       #
       # `application-prod.yml` 이 이 넷으로 JDBC URL 을 조립한다. 호스트는 compose 서비스
-      # 이름이라 `data` 네트워크 안에서만 풀린다.
+      # 이름이라 `data` 네트워크 안에서만 풀린다. `data`·`mysql` 이름은
+      # `docker-compose.data.yml`(별도 프로젝트, `external: true` 로 참조)이 만든다 —
+      # blue/green 둘 다 이 mysql 하나를 공유한다.
       #
       # ❗**비밀번호는 mysql 서비스가 받는 것과 같은 변수다.** 출처가 SSM 하나라 갈릴 수
       # 없다 — SPHINX_INTERNAL_TOKEN 을 server 와 ai-service 가 나눠 쓰는 것과 같은 구조다.
@@ -214,19 +164,28 @@ services:
       # dispute_cases/ 는 어떤 코드도 읽지 않는다(#37). 읽기 전용이라 컨테이너가 원본을
       # 건드릴 수 없다. documents/ 는 #412·#428 의 원본 조회가 실제로 읽는다 — 예전 주석이
       # "런타임에 안 쓴다" 로 남아 이 결손을 정당해 보이게 했다(#433).
+      #
+      # ❗위 ai-service 주석과 같은 이유로 이 mount 도 안전하다 — 지우기 전에 이 스택을
+      # 먼저 내린다(scripts/deploy_ec2.sh).
       - ./data/timeseries:/data/timeseries:ro
       - ./data/documents:/data/documents:ro
       # 위 합성 세션의 산출물. 추적하지 않는 생성물이라 배포 때 만들어진다.
       - ./data/synth_sessions:/data/synth_sessions:ro
-    networks: [internal, edge, data]
+    networks:
+      internal: {}
+      # web(다른 프로젝트, sphinx-edge)이 이 이름으로 찾아온다. blue/green 이 같은
+      # 별명("server")을 등록하면 Docker DNS 라운드로빈으로 요청이 섞이므로, 반드시
+      # `${STACK}` 로 갈라 등록한다 — `STACK=blue|green` 은 배포 스크립트가 넘긴다.
+      # (`external`·`name` 은 서비스가 아니라 아래 top-level `networks:` 의 속성이다.)
+      edge:
+        aliases: ["server-${STACK:?STACK 환경변수(blue 또는 green)가 필요하다}"]
+      data: {}
     depends_on:
       ai-service:
         condition: service_healthy
-      # ❗`service_started` 가 아니라 `service_healthy` 다. MySQL 은 첫 기동에 데이터
-      # 디렉토리를 초기화하느라 컨테이너가 뜬 뒤로도 한참 연결을 안 받는데, started 로
-      # 두면 server 가 그 사이에 붙으러 갔다가 Flyway 단계에서 죽는다.
-      mysql:
-        condition: service_healthy
+      # mysql 은 이제 다른 프로젝트(docker-compose.data.yml)라 여기서 depends_on 으로
+      #못 묶는다 — 배포 스크립트가 app 스택을 올리기 전에 data 스택을 먼저 healthy 로
+      # 만들어 둔다(순서 보장은 스크립트 책임).
     restart: unless-stopped
     healthcheck:
       # SecurityConfig 의 PUBLIC_PATHS 가 이 경로만 인증 없이 연다.
@@ -236,109 +195,23 @@ services:
       retries: 5
       start_period: 40s
 
-  # ── web (정적 dist + nginx) — 유일하게 외부에 열리는 서비스 ────────────────
-  web:
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-    ports:
-      # 보안그룹도 80·443 만 연다. 8000·8100 은 인바운드에 넣지 않는다(#41).
-      # 443 은 인증서가 있을 때만 실제로 listen 한다(web/docker-entrypoint.d/20-tls.sh) —
-      # 포트를 게시해 두는 것은 그 뒤 재기동 없이 붙게 하려는 것이고, 인증서가 없는 동안
-      # 이 포트로 들어오면 그냥 연결이 끊긴다.
-      - "80:80"
-      - "443:443"
-    environment:
-      # server 와 **같은 값**이어야 한다. nginx 가 이 값으로 htpasswd 를 만들고, 브라우저가
-      # 실어 보낸 Authorization 이 그대로 server 로 넘어가 거기서 다시 검증되기 때문이다.
-      # 출처가 SSM 하나라 갈릴 일이 없다(scripts/deploy_ec2.sh).
-      SPHINX_API_USER: ${SPHINX_API_USER:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
-      SPHINX_API_PASSWORD: ${SPHINX_API_PASSWORD:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
-      # htpasswd 에 넣을 **명부 전체**의 id 목록(쉼표 구분). 없으면 위 한 계정만 만들어지고
-      # 나머지 역할은 nginx 에서 401 이라 역할 분리 시연이 안 된다(이슈 #213).
-      #
-      # ❗여기에 목록을 적지 않는다. 값은 `scripts/deploy_ec2.sh` 가 `demo_accounts.yaml`
-      # 에서 뽑아 넣는다 — 명부가 근거이고, 여기 적으면 계정 목록이 두 벌이 된다.
-      # `:?` 를 안 쓰는 이유는 손으로 띄우는 compose 를 막지 않기 위해서다. 그때는
-      # 엔트리포인트가 한 계정만 만들고 **경고를 남긴다**(조용히 줄지 않는다).
-      SPHINX_API_USERS: ${SPHINX_API_USERS:-}
-      # ── 화면을 잠글지 열지 ────────────────────────────────────────────────
-      # 기본은 **잠금**이다. `1` 이면 nginx 가 auth_basic 을 끄고 `/api/` 에 아래 계정의
-      # 자격증명을 대신 실어 준다 — 인증을 없애는 게 아니라 **대신 로그인해 주는 것**이다.
-      # Spring 의 prod 체인과 `@PreAuthorize` 는 그대로 돈다. 진짜로 인증만 끄면 익명은
-      # 역할이 없어서 세션 생성부터 403 이고, 로그인 창만 사라지고 화면은 더 안 된다.
-      #
-      # ❗대가: 감사 로그의 "누가" 가 아래 계정들로 굳는다. 그리고 **한 계정으로는 전 화면이
-      # 안 열리므로**(집계는 COMPL, 오버라이드 승인은 MGR) 경로별로 갈라 넣는다. 근거는
-      # `web/docker-entrypoint.d/15-demo-mode.sh` 머리말.
-      SPHINX_DEMO_OPEN: ${SPHINX_DEMO_OPEN:-}
-      SPHINX_DEMO_ACTOR: ${SPHINX_DEMO_ACTOR:-seller-01}
-      SPHINX_DEMO_ACTOR_AGGREGATE: ${SPHINX_DEMO_ACTOR_AGGREGATE:-compl-01}
-      SPHINX_DEMO_ACTOR_APPROVER: ${SPHINX_DEMO_ACTOR_APPROVER:-mgr-01}
-      SPHINX_DEMO_ACTOR_MANAGE: ${SPHINX_DEMO_ACTOR_MANAGE:-admin-01}
-      # 인증서를 찾을 이름. 비면 443 을 아예 안 세운다(로컬·IP 접속).
-      SPHINX_PUBLIC_HOST: ${SPHINX_PUBLIC_HOST:-}
-    volumes:
-      # 인증서는 certbot 이 쓰고 nginx 는 읽기만 한다.
-      - letsencrypt:/etc/letsencrypt:ro
-      # ACME 챌린지 — certbot 이 파일을 쓰고 nginx 가 :80 으로 내보낸다.
-      - certbot-webroot:/var/www/certbot:ro
-    networks: [edge]
-    depends_on:
-      server:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # ── certbot (Let's Encrypt) — 평소엔 갱신만 돈다 ───────────────────────────
-  #
-  # 첫 발급은 사람이 한 번 돌린다(docs/deployment.md §9.2) — **배포 스크립트로 부른다.**
-  # 이 파일의 비밀들이 `${VAR:?}` 라 값 없이 `docker compose` 를 부르면 명령이 무엇이든
-  # 파일 해석 단계에서 죽고, 값을 가진 것은 그 스크립트뿐이다(SSM 에서 받는다).
-  #
-  #   SPHINX_PUBLIC_HOST=… ./scripts/deploy_ec2.sh --cert   # 발급 + web 재기동까지
-  #
-  # ❗손으로 `docker compose run` 을 칠 일이 생기면 **`--entrypoint certbot` 을 반드시
-  # 붙인다.** `run` 은 `command` 만 덮고 아래 `entrypoint: /bin/sh` 는 안 덮으므로,
-  # 빼면 `/bin/sh certonly …` 가 되어 certbot 이 아예 안 불린다(exit 127).
-  #
-  # ❗**발급을 자동으로 돌리지 않는다.** Let's Encrypt 는 실패에도 rate limit(같은 도메인
-  # 1시간 5회)을 매기는데, 배포마다 자동 발급을 시도하면 DNS 나 :80 이 잠깐 어긋난 날
-  # **한도를 태워서 정작 필요한 순간에 못 받는다.** 갱신은 그 위험이 없다 — 이미 받은
-  # 인증서가 있고 만료 30일 전에만 실제로 움직인다.
-  certbot:
-    image: certbot/certbot:latest
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
-    networks: [edge]
-    # 12시간마다 갱신을 시도한다. 만료 30일 전이 아니면 아무 일도 안 하고 끝난다.
-    # `trap`·`wait` 는 `docker compose down` 에 바로 반응하기 위한 것이다 — 없으면
-    # `sleep` 이 끝날 때까지(최대 12시간) SIGTERM 을 못 받고 10초 뒤 강제 종료된다.
-    entrypoint: /bin/sh
-    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done'
-    restart: unless-stopped
-
-volumes:
-  # ❗**세션·판정·감사 기록이 사는 곳이다. 지우면 되돌릴 수 없다.**
-  # `docker compose down` 은 안 지운다. `down -v` 가 지운다 — 그 한 글자 차이다.
-  # 배포가 트리를 통째로 갈아끼워도(`rm -rf /opt/sphinx`) 이건 docker 가 들고 있어서 산다.
-  mysql-data:
-  # 인증서와 계정 키. **지우면 재발급이고 rate limit 을 태운다.**
-  letsencrypt:
-  certbot-webroot:
-
 networks:
-  # web ↔ server 만. ai-service 는 여기 없다.
-  edge:
-    driver: bridge
-  # server ↔ ai-service 만. web 컨테이너는 이 네트워크에 없으므로 :8100 으로 직접 갈 수 없다.
-  # server ↔ mysql 만. ai-service 는 여기 없다 — 지금 DB 를 안 부르는 것과 못 부르는 것은
-  # 다르고, 이 파일이 지키는 것이 후자다(P3 가 "경로가 아예 없어야 한다" 인 것과 같은 결).
-  data:
-    driver: bridge
+  # server ↔ ai-service 만. 이 프로젝트(sphinx-blue 또는 sphinx-green) 안에서만
+  # 존재하는 기본 네트워크라 blue/green 이 서로 안 섞인다 — 이름을 안 고정해서
+  # Compose 가 프로젝트별로 자동으로 갈라 준다(`sphinx-blue_internal` 등).
   internal:
     driver: bridge
     # ❗`internal: true` 를 붙이지 않는다. 그 플래그는 컨테이너 간 격리가 아니라 **아웃바운드
     # 차단**이고, 그러면 ai-service 가 LLM API 에 못 나간다(F-EXT-002·F-SCR-001·F-INT-002 가
     # 전부 죽는다). 여기서 원하는 격리는 "web 에서 ai-service 로 못 간다"인데 그건 네트워크
     # 소속만으로 이미 성립한다 — 두 서비스가 공유하는 네트워크가 없다.
+  # web(sphinx-edge 프로젝트)과 만나는 자리. 그 프로젝트가 이미 만들어 둔 네트워크를
+  # 이름으로 붙는다 — 여기서 새로 만들지 않는다(`external: true`). sphinx-edge 가
+  # 먼저 떠 있어야 한다(배포 스크립트가 순서를 보장한다).
+  edge:
+    external: true
+    name: sphinx-edge-net
+  # mysql(sphinx-data 프로젝트)과 만나는 자리. 위와 같은 이유로 external.
+  data:
+    external: true
+    name: sphinx-data-net

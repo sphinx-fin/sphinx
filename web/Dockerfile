@@ -36,5 +36,10 @@ COPY docker-entrypoint.d/ /docker-entrypoint.d/
 # ACME 챌린지 웹루트. compose 가 certbot 과 공유 볼륨으로 덮어쓰지만, 볼륨 없이 띄워도
 # `root` 가 없는 디렉토리를 가리켜 404 대신 500 이 나는 일이 없도록 미리 만든다.
 RUN mkdir -p /var/www/certbot
+# blue/green 업스트림 디렉토리. compose 가 여기에 named volume(`nginx-upstream`)을
+# 물린다 — 파일 하나만 골라 물리는 방법은 컨테이너 런타임이 "디렉토리를 파일에
+# 마운트하려 한다"며 거부했다(실측). 그래서 디렉토리를 통째로 마운트하고,
+# `docker-entrypoint.d/05-upstream-seed.sh` 가 최초 1회만 기본값을 써 넣는다.
+RUN mkdir -p /etc/nginx/upstream
 
 EXPOSE 80 443

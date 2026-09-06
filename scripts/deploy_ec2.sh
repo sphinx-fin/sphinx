@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SphinX 배포 — EC2 에서 SSM Parameter Store 의 비밀을 받아 compose 를 띄운다.
-# 소유: 오준서 (인프라 R). 이슈 #41 ④ · 결정로그 10.3.
+# SphinX 배포 — EC2 에서 SSM Parameter Store 의 비밀을 받아 blue/green 으로 띄운다.
+# 소유: 오준서 (인프라 R). 이슈 #41 ④ · 결정로그 10.3 · 7.39("무중단 배포" 리라이트).
 #
 # ── 왜 스크립트인가 ─────────────────────────────────────────────────────────
 #
@@ -10,11 +10,27 @@
 #
 # 키를 이미지에 굽지도 않는다 — 이미지 레이어는 지워도 히스토리에 남는다.
 #
-#   사용:  ./scripts/deploy_ec2.sh            # 받아서 띄운다
+#   사용:  ./scripts/deploy_ec2.sh            # 받아서 blue/green 으로 띄운다
 #          ./scripts/deploy_ec2.sh --check    # 값을 받아 확인만 하고 띄우지 않는다
+#          SPHINX_PUBLIC_HOST=… ./scripts/deploy_ec2.sh --cert   # 인증서 첫 발급
 #
 # EC2 인스턴스 역할에 해당 파라미터의 ssm:GetParameter + kms:Decrypt 가 있어야 한다.
 # 자세한 것은 docs/deployment.md.
+#
+# ── 왜 세 개의 compose 파일인가 ──────────────────────────────────────────────
+#
+#   docker-compose.data.yml   mysql          프로젝트 sphinx-data — 상시 유지
+#   docker-compose.edge.yml   web·certbot    프로젝트 sphinx-edge — 상시 유지
+#   docker-compose.yml        ai-service·server  프로젝트 sphinx-blue/sphinx-green
+#                             — 배포마다 번갈아 뜨고 옛 색은 이 스크립트가 내린다
+#
+# 예전엔 이 다섯 서비스가 프로젝트 하나(`sphinx`)였고, 배포마다
+# `docker compose up -d --build --force-recreate` 가 전부 같이 재생성됐다(이슈
+# #240 이 이 플래그를 넣은 이유는 아래 함수 근처에 남겨 뒀다). 그런데 `web`·`mysql`
+# 은 리포 트리를 bind mount 하지 않아 재생성될 이유가 없었는데도 매번 같이
+# 내려갔다 올라와서, 그 사이 사이트 전체(80/443)가 끊겼다. 지금은 `web`(유일한
+# 외부 진입점)이 배포와 무관하게 계속 떠 있고, 새 색이 healthy 해진 뒤에야
+# `docker exec` 로 nginx 업스트림을 바꾸고 `nginx -s reload`(무중단)한다.
 
 set -euo pipefail
 
@@ -23,6 +39,10 @@ set -euo pipefail
 # 올리면 우리 문서와 어긋난다. 리전 선택 비용은 0 이고 심사에서 물었을 때 답이 갈린다.
 AWS_REGION="${AWS_REGION:-ap-northeast-2}"
 SSM_PREFIX="${SSM_PREFIX:-/sphinx/prod}"
+
+# 배포가 최종적으로 자리 잡는 고정 경로. `rm -rf "$CANONICAL" && mv "$REPO_ROOT" "$CANONICAL"`
+# 을 맨 끝에서 한 번만 한다 — 아래 색 전환이 다 끝나고 옛 색을 내린 **다음**이라 안전하다.
+CANONICAL=/opt/sphinx
 
 CHECK_ONLY=0
 CERT_ONLY=0
@@ -38,6 +58,13 @@ case "${1:-}" in
 esac
 
 # 아래 `cd` 는 --check 를 지난 뒤에 온다. 명부는 --check 에서도 읽으므로 여기서 절대경로를 잡는다.
+#
+# ❗**이 값이 `$CANONICAL` 과 같은지 다른지가 "이번이 새 트리 배포인지"를 가른다.**
+# CI(`.github/workflows/deploy.yml`)는 S3 스냅샷을 `mktemp -d -p /opt` 로 만든 새 디렉토리에
+# 풀고 **그 안에서** 이 스크립트를 부르므로 `REPO_ROOT` 는 `/opt/tmp.XXXXXXXXXX` 같은 값이다
+# (아직 `$CANONICAL` 로 옮기지 않았다 — 그게 이 스크립트가 마지막에 할 일이다). 반대로
+# 오퍼레이터가 `--cert` 나 유지보수 목적으로 이미 배포된 `/opt/sphinx` 안에서 손으로 부르면
+# 둘이 같다 — 그때는 트리를 옮길 대상이 없으므로 마지막 swap 을 건너뛴다.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 command -v aws >/dev/null || { echo "aws CLI 가 없다. EC2 에 설치하거나 AWS_REGION 을 확인한다." >&2; exit 1; }
@@ -80,8 +107,8 @@ export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
 
 # ── DB 비밀번호 (MySQL) ──────────────────────────────────────────────────────
 #
-# **mysql 컨테이너와 server 가 같은 값을 받는다** — 여기서 한 번 읽어 compose 가 양쪽에
-# 같은 변수를 넘기므로 갈릴 수가 없다. internal-token 과 같은 구조다.
+# **mysql 컨테이너와 server(blue·green 둘 다)가 같은 값을 받는다** — 여기서 한 번 읽어
+# compose 가 넘기므로 갈릴 수가 없다. internal-token 과 같은 구조다.
 #
 # 갈리면 증상이 고약하다: mysql 은 멀쩡히 healthy 로 뜨고 server 만
 # `Access denied for user 'sphinx'` 로 죽는데, 그건 배포 로그 깊은 곳에만 있다.
@@ -91,7 +118,7 @@ export SPHINX_INTERNAL_TOKEN; SPHINX_INTERNAL_TOKEN=$(get internal-token)
 # 비밀번호를 계속 쓰고 server 만 새 값으로 붙으러 가서 **Access denied 로 기동을 못 한다.**
 # 바꾸려면 DB 안에서 같이 바꿔야 한다(볼륨을 지우면 기록이 다 날아간다):
 #
-#   docker compose exec mysql mysql -uroot -p -e \
+#   docker compose -f docker-compose.data.yml -p sphinx-data exec mysql mysql -uroot -p -e \
 #     "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"
 export SPHINX_DB_PASSWORD; SPHINX_DB_PASSWORD=$(get db-password)
 
@@ -165,7 +192,17 @@ if [ "$CHECK_ONLY" = 1 ]; then
   exit 0
 fi
 
-cd "$(dirname "$0")/.."
+cd "$REPO_ROOT"
+
+# edge 프로젝트(web·certbot) 호출을 짧게 쓰기 위한 함수. 파일 경로가 항상 절대경로라
+# 어디서 부르든(REPO_ROOT 든 CANONICAL 이든) 같은 프로젝트를 가리킨다.
+compose_edge() { docker compose -f "$REPO_ROOT/docker-compose.edge.yml" -p sphinx-edge "$@"; }
+compose_data() { docker compose -f "$REPO_ROOT/docker-compose.data.yml" -p sphinx-data "$@"; }
+# app 스택(ai-service·server)은 색깔마다 별도 compose 프로젝트다. `STACK` 은 그 색깔의
+# server 가 `edge` 네트워크에 등록할 별명(`server-$color`)을 정하는 데 쓴다
+# (docker-compose.yml 의 `aliases:` 참조) — blue/green 이 같은 별명을 쓰면 Docker DNS 가
+# 라운드로빈해서 요청이 옛/새 버전에 섞인다.
+compose_app() { local color="$1"; shift; STACK="$color" docker compose -f "$REPO_ROOT/docker-compose.yml" -p "sphinx-$color" "$@"; }
 
 # ── --cert : Let's Encrypt 첫 발급 (한 번) ──────────────────────────────────
 #
@@ -173,22 +210,17 @@ cd "$(dirname "$0")/.."
 # 1시간 5회)을 매긴다. 배포마다 시도하면 DNS 나 :80 이 잠깐 어긋난 날 **한도를 태워서
 # 정작 필요한 순간에 못 받는다.** 갱신은 그 위험이 없어서(이미 받은 인증서가 있고 만료
 # 30일 전에만 움직인다) certbot 컨테이너가 12시간마다 알아서 돌린다.
+#
+# ❗**`--no-deps` 가 예전엔 필수였다 — 지금은 필요 없다.** `web` 이 `server` 를
+# `depends_on` 하던 시절엔 그것 없이 재생성하면 `server`(다른 이유로 아직 안 건드릴
+# 스택)까지 딸려 재생성됐다(결정 10.58 · 이슈 #262). `web` 은 이제 별도 프로젝트
+# (`sphinx-edge`)에 있고 `server` 를 참조하지 않으므로 그 사고 경로 자체가 없다.
 if [ "$CERT_ONLY" = 1 ]; then
   : "${SPHINX_PUBLIC_HOST:?--cert 에는 도메인이 필요하다: SPHINX_PUBLIC_HOST=… $0 --cert}"
 
   # web 이 :80 으로 챌린지를 내보내야 발급이 된다. 안 떠 있으면 먼저 띄운다 —
   # `--cert` 를 배포 직후가 아니라 나중에 부르는 경우가 있다.
-  #
-  # ❗**`--no-deps` 가 있어야 한다.** 없으면 compose 가 `depends_on` 을 따라 `server` 까지
-  # 같이 재생성하는데, 이 분기는 아래에서 `exit 0` 으로 끝나므로 **`SPHINX_DEMO_SYNTHETIC_SESSIONS`
-  # 를 export 하는 줄(F-DSH-003 · 결정 10.58)에 도달하지 못한다.** 그러면 server 가 기본값
-  # `false` 로 다시 떠서 합성 세션 71건을 안 읽고, S-08 대시보드가 **빈 표**가 된다 —
-  # 화면도 로그도 정상이라 #179 와 똑같이 조용하다. `SPHINX_DEMO_OPEN` 도 같은 자리에서
-  # 샌다(안 넘기면 web 이 잠금 모드로 돌아와 전 화면 401).
-  #
-  # 인증서 발급에 필요한 것은 :80 의 챌린지 응답 하나뿐이라 web 만 건드리면 된다.
-  # 2026-09-03 계정 이관 중 실제로 이 경로로 대시보드가 비었다.
-  docker compose up -d --no-deps web
+  compose_edge up -d --build web
 
   echo "인증서 발급 — $SPHINX_PUBLIC_HOST"
   # ❗`--entrypoint certbot` 이 있어야 한다. **`docker compose run` 은 `command` 만 덮고
@@ -201,16 +233,15 @@ if [ "$CERT_ONLY" = 1 ]; then
   #
   # LETSENCRYPT_EMAIL 이 비면 등록 없이 받는다. 만료 알림을 못 받는다는 뜻이라
   # 대회가 끝나고도 쓸 도메인이면 채우는 편이 낫다.
-  docker compose run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot \
+  compose_edge run --rm --entrypoint certbot certbot certonly --webroot -w /var/www/certbot \
     -d "$SPHINX_PUBLIC_HOST" --agree-tos -n \
     ${LETSENCRYPT_EMAIL:+--email "$LETSENCRYPT_EMAIL"} \
     ${LETSENCRYPT_EMAIL:---register-unsafely-without-email}
 
   # 20-tls.sh 는 **기동 때** 인증서 유무를 본다. 재기동해야 443 이 선다.
-  # 여기도 `--no-deps` 다 — 위와 같은 이유이고, 빠뜨리면 발급은 됐는데 대시보드가 빈다.
   echo "web 재기동 — 443 을 세운다"
-  docker compose up -d --no-deps --force-recreate web
-  docker compose logs --tail 20 web | grep -E "TLS|모드" || true
+  compose_edge up -d --force-recreate web
+  compose_edge logs --tail 20 web | grep -E "TLS|모드" || true
   exit 0
 fi
 
@@ -241,12 +272,9 @@ export SPHINX_DEMO_SYNTHETIC_SESSIONS=true
 # ── 디스크 — 박스 위에서 빌드하므로 여기가 차면 배포가 아니라 **런타임이** 먼저 상한다 ──
 #
 # 루트 30GB(infra/locals.tf)인데 배포마다 `--build` 가 돌아 이미지와 빌드 캐시가 쌓인다.
-#
-# ❗**#240 의 원인은 디스크가 아니었다** — 확인 시점에 19% 였다(빌드 캐시 2.15GB · 회수
-# 가능한 이미지 1.18GB). 원인은 아래 `--force-recreate` 주석의 마운트 끊김이다. 그래도
-# 남기는 이유는 정리가 **아무 데도 없었기 때문**이다. 배포마다 캐시가 쌓이기만 하는데
-# CloudWatch 에이전트가 없어 추이를 볼 수단이 없었고, 그러면 차는 날이 와도 그날의
-# 증상(healthcheck 의 `docker exec` 실패)이 #240 과 구별되지 않는다.
+# blue/green 겹침 구간엔 트리도 잠깐 두 벌(옛 색의 `$CANONICAL` · 새 색의 `$REPO_ROOT`)
+# 이지만, `data/`·`contracts/` 는 수백 KB 대라(결정로그 7.13) 이 배로 늘어도 무시할 양이다
+# — 디스크를 실제로 압박하는 것은 이미지 레이어·빌드 캐시다.
 echo "디스크:"
 df -h / | tail -1
 docker system df 2>/dev/null | sed 's/^/  /' || true
@@ -259,82 +287,138 @@ if [ -n "${avail_pct:-}" ] && [ "$avail_pct" -ge 90 ]; then
   echo "::warning::루트 사용률 ${avail_pct}% — 90% 를 넘었다. 아래 정리로도 안 내려가면 #240 을 본다." >&2
 fi
 
-# ── 비정상 컨테이너가 있으면 **지우기 전에 로그를 남긴다** (이슈 #240) ────────
-#
-# 아래 `--force-recreate` 가 어차피 전부 새로 만들지만, 그러면 **왜 상했는지가 같이
-# 사라진다.** 상한 컨테이너의 마지막 로그가 다음 사람이 가진 유일한 단서라 여기서 찍는다.
-#
-# ❗**이 compose 프로젝트 것만 본다.** `docker ps --filter health=unhealthy` 로 전역을 훑으면
-# 박스에 우리 것 아닌 컨테이너까지 딸려 나온다. `compose ps -aq` 로 대상을 먼저 좁히고
-# 상태는 `docker inspect` 로 읽는다 — `compose ps --format` 의 템플릿 지원은 버전을 타는데
-# `inspect --format` 은 안 탄다.
-stuck=""
-for cid in $(docker compose ps -aq 2>/dev/null); do
-  info=$(docker inspect --format \
-    '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
-    "$cid" 2>/dev/null) || continue
-  name=${info%% *};  name=${name#/}
-  rest=${info#* };   state=${rest%% *};  health=${rest##* }
-  if [ "$health" = unhealthy ] || [ "$state" = restarting ]; then
-    stuck="${stuck}${stuck:+ }${name}"
-  fi
-done
-if [ -n "$stuck" ]; then
-  echo "::warning::비정상 컨테이너가 있다 — 아래 로그를 남기고 재생성한다 (#240): $stuck"
-  for c in $stuck; do
-    echo "── $c 마지막 로그 40줄 ──"
-    docker logs --tail 40 "$c" 2>&1 | sed 's/^/    /' || true
+# ❗**비정상 컨테이너가 있으면 지우기 전에 로그를 남긴다 (이슈 #240 의 교훈)** — 지금은
+# data·edge 두 프로젝트에만 적용한다. app 스택(blue/green)은 배포마다 새 프로젝트로 뜨고
+# 실패하면 스스로 내리므로(아래) "지난 배포가 남긴 상한 컨테이너" 라는 문제 자체가 없다.
+log_unhealthy() {
+  local project="$1" cid info name state health
+  for cid in $(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null); do
+    info=$(docker inspect --format \
+      '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+      "$cid" 2>/dev/null) || continue
+    name=${info%% *};  name=${name#/}
+    rest=${info#* };   state=${rest%% *};  health=${rest##* }
+    if [ "$health" = unhealthy ] || [ "$state" = restarting ]; then
+      echo "::warning::$project 의 $name 이 비정상이다($state/$health) — 마지막 로그 40줄"
+      docker logs --tail 40 "$cid" 2>&1 | sed 's/^/    /' || true
+    fi
   done
+}
+log_unhealthy sphinx-data
+log_unhealthy sphinx-edge
+
+# ── data·edge 스택 — 상시 유지, 설정이 안 바뀌면 compose 가 아무것도 안 건드린다 ──
+echo "data 스택(mysql) 기동"
+compose_data up -d
+echo "edge 스택(web·certbot) 기동"
+compose_edge up -d --build
+
+# ── 지금 라이브인 색 판정 ─────────────────────────────────────────────────────
+#
+# 별도 상태 파일을 안 둔다 — nginx 자신이 물고 있는 업스트림 설정이 유일한 근거다
+# (web/docker-entrypoint.d/05-upstream-seed.sh 참조). 최초 배포라 그 값이 가리키는 색의 컨테이너가
+# 아직 없으면(이미지 기본값 = blue), 전환 없이 그 색으로 그냥 띄운다.
+edge_web_cid() { compose_edge ps -q web; }
+
+current_color() {
+  local cid upstream
+  cid=$(edge_web_cid)
+  upstream=$(docker exec "$cid" cat /etc/nginx/upstream/active.conf 2>/dev/null || true)
+  case "$upstream" in
+    *server-green*) echo green ;;
+    *)              echo blue ;;   # 이미지 기본값과 같다(web/docker-entrypoint.d/05-upstream-seed.sh)
+  esac
+}
+
+CUR="$(current_color)"
+if [ -n "$(compose_app "$CUR" ps -q server 2>/dev/null || true)" ]; then
+  OLDCOLOR="$CUR"
+  case "$CUR" in blue) NEWCOLOR=green ;; *) NEWCOLOR=blue ;; esac
+  echo "현재 라이브: $OLDCOLOR → 이번엔 $NEWCOLOR 로 띄운다"
+else
+  OLDCOLOR=""
+  NEWCOLOR="$CUR"
+  echo "라이브 스택이 없다(최초 배포 또는 이전 실패의 뒷정리 상태) — $NEWCOLOR 로 띄운다"
 fi
 
-echo "compose 기동"
-# ❗실패해도 여기서 죽지 않는다 — 죽으면 아래 진단이 안 돌고, 그러면 CI 에 남는 것이
-# `unhealthy` 한 줄뿐이라 매번 SSM 으로 들어가야 한다(이슈 #240 ④).
-# ❗`if ! docker compose …; then rc=$?` 로 쓰면 안 된다 — `!` 가 뒤집은 뒤라 `$?` 가 **0** 이고
-# 그대로 `exit 0` 이 되어 **실패가 성공으로 보고된다.** 상태를 먼저 받는다.
+echo "$NEWCOLOR 스택(ai-service·server) 기동"
+compose_app "$NEWCOLOR" up -d --build
+
+# ── healthy 대기 ─────────────────────────────────────────────────────────────
 #
-# ── ❗`--force-recreate` 가 이 이슈의 본체다 (이슈 #240) ──────────────────────
-#
-# 배포는 `rm -rf /opt/sphinx && mv $NEW /opt/sphinx` 로 **트리를 통째로 갈아끼운다**
-# (deploy.yml). 그 순간 돌고 있던 컨테이너의 bind mount 는 **지워진 inode 를 계속 가리킨다** —
-# `./data:/data:ro` 가 컨테이너 안에서 **빈 디렉토리**가 된다. 실측:
-#
-#   호스트: rm -rf tree && mv new tree   → tree/data/file.txt 있음
-#   컨테이너 안 /data                     → []   (빈 디렉토리)
-#
-# compose 는 이미지·설정이 안 바뀐 컨테이너를 재생성하지 않으므로, **그 서비스를 안
-# 건드리는 배포는 마운트가 끊긴 컨테이너를 그대로 둔다.** 그리고 이 상태는 조용하다:
-#
-#   1. 앱은 계속 돈다 — `misconception.library()` 가 `@lru_cache` 라 메모리에 남아 있다
-#   2. `/healthz` 만 죽는다 — `library_version()` 은 캐시가 없어 매번 디스크를 다시 읽는다
-#   3. healthcheck 가 뒤집히는 데 ~50초(interval 10s × retries 5)가 걸려서
-#      **배포는 이미 "성공"으로 끝난 뒤에** 컨테이너가 unhealthy 가 된다
-#   4. 다음 배포가 그걸 보고 `dependency failed to start` 로 죽는다. 이미지가 안 바뀌는 한
-#      영원히 — 8/31 배포 13회가 이것이었다. 8/28 #228 이 ai-service 를 고쳐 이미지가
-#      바뀌자 그때서야 재생성되며 저절로 나았다
-#
-# 그래서 **트리를 갈아끼운 배포는 컨테이너를 다시 만들어야 한다.** 처음에는 다운타임을
-# 아끼려고 상한 것만 골라 지웠는데, 그 판단은 틀렸다 — 방금 끊긴 컨테이너는 아직
-# `healthy` 로 보이므로(3번) 고르는 방식으로는 **정작 이번에 끊긴 것을 못 잡는다.**
-# 재생성 비용은 alpha 에서 수십 초고, 대가는 마운트가 끊긴 채 초록으로 도는 것이다.
-rc=0
-docker compose up -d --build --force-recreate || rc=$?
-if [ "$rc" -ne 0 ]; then
-  echo "::error::compose 기동 실패 — 아래 상태·로그를 본다 (이슈 #240)" >&2
-  echo "── docker compose ps ──"
-  docker compose ps -a || true
-  # 서비스별로 고르지 않고 프로젝트 로그를 통째로 낸다 — 어느 서비스가 원인인지 모르는
-  # 상태에서 고르면 **정작 원인인 쪽을 빼고** 찍을 수 있다. 위 `compose ps -a` 가 어느
-  # 줄을 볼지 알려 주므로 양이 많은 건 문제가 안 된다.
-  echo "── docker compose logs (서비스별 60줄) ──"
-  docker compose logs --tail 60 --no-color 2>&1 | sed 's/^/    /' || true
-  echo "── 디스크 ──"
-  df -h / | tail -1
-  docker system df 2>/dev/null || true
-  exit "$rc"
+# `docker compose up` 의 기본 동작(`depends_on: condition: service_healthy`)이 여기선
+# 안 통한다 — `server` 는 `mysql`(다른 프로젝트)에 그 조건을 못 건다. 그래서 이 스크립트가
+# 직접 폴링한다. 타임아웃은 넉넉히 잡는다 — Spring Boot 부팅 + healthcheck start_period(40s).
+wait_healthy() {
+  local cid="$1" label="$2" timeout="${3:-300}" waited=0 status
+  while :; do
+    status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo gone)
+    case "$status" in
+      healthy) echo "  $label healthy (${waited}s)"; return 0 ;;
+      gone)    echo "::error::$label 컨테이너가 사라졌다" >&2; return 1 ;;
+    esac
+    if [ "$waited" -ge "$timeout" ]; then
+      echo "::error::$label 이 ${timeout}s 안에 healthy 가 안 됐다(마지막 상태: $status)" >&2
+      return 1
+    fi
+    sleep 5; waited=$((waited + 5))
+  done
+}
+
+new_server_cid=$(compose_app "$NEWCOLOR" ps -q server)
+if ! wait_healthy "$new_server_cid" "server($NEWCOLOR)" 300; then
+  echo "::error::$NEWCOLOR 가 안 떴다 — 로그를 남기고 내린다." >&2
+  [ -n "$OLDCOLOR" ] && echo "$OLDCOLOR 는 손대지 않았다 — 배포 실패가 곧 무중단 롤백이다." >&2
+  echo "── docker compose ps ($NEWCOLOR) ──"
+  compose_app "$NEWCOLOR" ps -a || true
+  echo "── docker compose logs ($NEWCOLOR, 서비스별 100줄) ──"
+  compose_app "$NEWCOLOR" logs --tail 100 --no-color 2>&1 | sed 's/^/    /' || true
+  compose_app "$NEWCOLOR" down || true
+  exit 1
 fi
 
-# ── 정리 — 위 디스크 참을 막는 쪽 ──────────────────────────────────────────
+# ── 컷오버 — nginx 업스트림을 바꾸고 무중단 reload ──────────────────────────
+#
+# `nginx -t` 로 먼저 검증한다 — 이 파일은 우리가 직접 쓰는 것이라 문법이 깨질 일은 거의
+# 없지만, 검증 없이 `-s reload` 만 하면 **문법이 깨진 순간 reload 가 조용히 무시되고 옛
+# 워커가 계속 도는데 로그로만 알 수 있다.** `&&` 로 묶어 실패하면 여기서 바로 드러나게 한다.
+echo "컷오버 — nginx 업스트림을 server-$NEWCOLOR 로"
+web_cid=$(edge_web_cid)
+# ❗값에 따옴표를 안 쓴다. nginx 문자열 값은 공백·세미콜론이 없으면 따옴표 없이도
+# 유효하고, 따옴표를 넣으면 이 bash 문자열 → `sh -c` 문자열 → printf 형식 문자열의
+# 세 겹 이스케이프를 거치며 `\"` 가 POSIX printf 에 정의되지 않은 이스케이프가 된다
+# (구현마다 다르게 처리될 수 있다 — 실측하지 않고 넘어가지 않는다).
+docker exec "$web_cid" sh -c \
+  "printf 'set \$sphinx_backend http://server-${NEWCOLOR}:8000;\n' > /etc/nginx/upstream/active.conf && nginx -t && nginx -s reload"
+
+# 짧은 드레인 대기 — cutover 순간의 in-flight 요청이 옛 색으로 끝날 시간을 준다.
+# reload 자체는 즉시 무중단이지만, 옛 워커가 붙잡고 있던 연결이 실제로 끝나는 데는
+# 약간의 시간이 걸린다. 그 창을 지나고서야 옛 색을 내린다.
+sleep 8
+
+if [ -n "$OLDCOLOR" ]; then
+  echo "$OLDCOLOR 스택 내리기"
+  compose_app "$OLDCOLOR" down
+fi
+
+# ── 트리 갈아끼우기 — 이제는 안전하다 ────────────────────────────────────────
+#
+# ❗**이슈 #240 의 원인은 "떠 있는 컨테이너가 물고 있는 디렉토리를 rm -rf 하는 것"이었다,
+# rename 자체가 아니다.** 예전엔 `deploy.yml` 이 스크립트를 부르기도 **전에** 스왑을
+# 해서, 그 순간 아직 살아 있던 컨테이너(다음 배포까지 재생성 안 되는 서비스들)가 지워진
+# inode 를 물게 됐다. 지금은 옛 색($OLDCOLOR)을 방금 내렸고 새 색($NEWCOLOR)은 여전히
+# `$REPO_ROOT` 를 bind mount 한 채 살아 있다 — `mv` 는 같은 파일시스템에서 rename 이라
+# inode 가 안 바뀌므로, 이 mv 는 새 색의 mount 에 아무 영향이 없다. `$REPO_ROOT` 가 이미
+# `$CANONICAL` 이면(오퍼레이터가 이미 배포된 트리에서 손으로 다시 돌린 경우) 옮길 게
+# 없으므로 건너뛴다.
+if [ "$REPO_ROOT" != "$CANONICAL" ]; then
+  echo "트리 갈아끼우기 — $REPO_ROOT → $CANONICAL"
+  rm -rf "$CANONICAL"
+  mv "$REPO_ROOT" "$CANONICAL"
+  REPO_ROOT="$CANONICAL"
+fi
+
+# ── 정리 — 디스크 참을 막는 쪽 ──────────────────────────────────────────────
 #
 # dangling 이미지는 방금 빌드가 밀어낸 옛 레이어라 참조가 없고, 빌드 캐시는 7일치만
 # 남긴다(다음 빌드가 조금 느려지는 대신 30GB 가 안 찬다). 태그 붙은 이미지는 안 지운다 —
@@ -346,7 +430,9 @@ df -h / | tail -1
 
 echo
 echo "상태:"
-docker compose ps
+compose_data ps
+compose_edge ps
+compose_app "$NEWCOLOR" ps
 echo
 echo "확인:"
 # `#162` 로 nginx 가 사이트 전체에 auth_basic 을 건 뒤로 자격증명 없는 GET / 는 401 이다.
@@ -366,12 +452,12 @@ if [ "${SPHINX_DEMO_OPEN:-0}" = "1" ]; then
 else
   echo "  curl -sS -o /dev/null -w '%{http_code}\n' http://localhost/   # 401 이 정상이다(인증이 걸렸다는 뜻)"
 fi
-echo "  docker compose logs -f server          # 기동 로그"
+echo "  docker compose -f docker-compose.yml -p sphinx-$NEWCOLOR logs -f server   # 기동 로그"
 echo
 
 # ❗**자격증명 확인은 안내하지 않고 여기서 한다** (PR #173 리뷰, 오준서).
 #
-# 위 57~58 의 export 는 이 스크립트 프로세스와 그 자식(docker compose)에만 산다. 오퍼레이터
+# 위 export 는 이 스크립트 프로세스와 그 자식(docker compose)에만 산다. 오퍼레이터
 # 셸은 스크립트의 **부모**라 값이 안 내려간다 — `-u "$SPHINX_API_USER:..."` 를 안내 문구로
 # 찍으면 붙여 넣는 순간 `-u ":"` 가 되고, curl 이 빈 자격증명으로 Authorization 을 실제로
 # 보내므로 **401 이 나면서 안내에는 "# 200" 이라고 적혀 있다.** `#170` 과 같은 종류이고,
@@ -400,7 +486,7 @@ auth_note=""
 case "$auth_code" in
   200)      echo "자격증명 확인: 200 — 통과${auth_note}" ;;
   401)      echo "자격증명 확인: 401 — SSM 값과 nginx htpasswd 가 다르다. 둘 다 SSM 에서 나오는지 본다" ;;
-  ''|000)   echo "자격증명 확인: 요청 자체가 안 갔다 — nginx 가 떴는지 본다 (docker compose ps)" ;;
+  ''|000)   echo "자격증명 확인: 요청 자체가 안 갔다 — nginx 가 떴는지 본다 (docker compose -f docker-compose.edge.yml -p sphinx-edge ps)" ;;
   *)        echo "자격증명 확인: $auth_code — 예상 밖이다. server 로그를 본다" ;;
 esac
 echo
