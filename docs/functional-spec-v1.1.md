@@ -2,6 +2,10 @@
 
 소유: 정세현. 텍스트 전용 — 음성 입력은 범위에서 제외.
 
+> **구현 완료 시점의 명세는 [`functional-spec-v1.2.md`](functional-spec-v1.2.md)(2026-09-06) 다** —
+> 제출에 붙이는 문서는 그쪽이다. 이 파일은 v1.1 원본 위에 「강제 지점」을 붙인 색인으로 남기고
+> 아래 표는 `SpecEnforcementIndexTest`·`test_clause_reference.py` 가 읽으므로 구조를 바꾸지 않는다.
+
 > **원본이 레포에 들어왔다** — [`functional-spec-v1.1-original.md`](functional-spec-v1.1-original.md)
 > (v1.1 · 2026-08-22 · 바이트 그대로). 조항 단위 근거의 **정본은 이제 그 파일**이고,
 > 이 파일은 그 위에 **「구현 위치」를 붙인 색인**이다.

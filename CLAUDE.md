@@ -247,5 +247,6 @@ ADR은 원칙급 결정만 담는다. PR·이슈 스레드에서 합의된 계�
 
 - `contracts/README.md`가 `server/app/models/`의 pydantic 모델을 언급한다 — 실제로는 Java
   `domain/` 레코드다.
-- `docs/functional-spec-v1.1.md`는 본문 전사가 안 된 색인 상태다. 조항 단위 근거가 필요하면
-  원본 문서를 봐야 한다.
+- `docs/functional-spec-v1.1.md`는 v1.1 위에 「강제 지점」을 붙인 색인이다(테스트가 읽는다 — 구조 유지).
+  **구현 완료 시점의 명세는 `docs/functional-spec-v1.2.md`** 이고, v1.1 조항 단위 근거는
+  `functional-spec-v1.1-original.md` 를 본다.
