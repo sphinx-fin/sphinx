@@ -8,8 +8,12 @@ import com.sphinxfin.sphinx.domain.Judgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,6 +43,88 @@ import java.util.Map;
  */
 @Component
 public class StoredEvidenceRecorder implements EvidenceRecorder {
+
+    /**
+     * 부동소수를 <b>값을 지키면서</b> {@link BigDecimal} 로 옮긴다 (이슈 #466).
+     *
+     * <h2>왜 필요한가 — 같은 크래시로 가는 두 번째 입구다</h2>
+     *
+     * <p>{@code #453}(모순 근거의 {@code Double} 이 judge 를 죽인다)을 {@code #461} 이
+     * 닫았는데, 그 고침은 <b>{@code AiServiceClient} 전용 매퍼</b>의
+     * {@code USE_BIG_DECIMAL_FOR_FLOATS} 다. {@code surveyResult} 는 <b>그 매퍼를 지나지
+     * 않는다</b> — 웹 요청은 전역 Jackson 이, DB 되읽기는 {@code JsonMapConverter} 가
+     * 역직렬화하고 둘 다 {@code Double} 을 만든다.
+     *
+     * <pre>
+     * {"SUIT-LOSS-TOLERANCE": 20.0}  같은 설문 응답이 오면
+     *   → appendMismatch → CanonicalJson.write(Double) → IllegalArgumentException
+     *   → /sessions/{id}/judge 가 INTERNAL_ERROR → 전이 미커밋 → 세션이 IN_PROGRESS 에 갇힌다
+     * </pre>
+     *
+     * <p>계약이 이 값을 허용한다 — {@code openapi.yaml} 의 {@code surveyResult} 는
+     * {@code additionalProperties: true} 다. 지금 안 터지는 이유는 <b>화면 관례 하나</b>다:
+     * {@code web/src/lib/survey.ts} 가 값을 등급이 아니라 문장으로 보낸다. 그건 F-DET-002 를
+     * 위한 선택이지 이 크래시를 막으려던 것이 아니라, 설문 세트가 바뀌거나 다른 클라이언트가
+     * 붙으면 그날 터진다.
+     *
+     * <h2>❗이것은 «기록이 입력을 바꾸는 것» 이 아니다</h2>
+     *
+     * <p>{@link CanonicalJson} 이 NFC 정규화를 <b>일부러 안 하는</b> 이유가 <i>"직렬화가 내용을
+     * 바꾸면 저장된 문면과 해시 대상이 갈린다"</i> 인데, 여기서 하는 것은 성격이 다르다.
+     *
+     * <pre>
+     * NFC 정규화     내용(바이트)이 바뀐다 → ai-service 가 받은 것과 기록이 갈린다  ❌ 여기서 하면 안 된다
+     * Double→BigDecimal  같은 수의 표현만 바뀐다 → 갈릴 내용이 없다                 ✅ 여기가 맞다
+     * </pre>
+     *
+     * <p>{@code Double.toString}/{@code Float.toString} 은 <b>최단 왕복 표기</b>라
+     * {@code new BigDecimal(n.toString())} 이 원래 수를 그대로 보존한다. RFC 8785 가 숫자에
+     * 요구하는 표기와도 같다(ADR-008). 그래서 <b>사람이 읽는 문면도 안 바뀐다</b> — 이 기록의
+     * 목적이 <i>"왜 모순인가"</i> 를 읽는 것이라(EvidenceRecorder 주석) 그게 중요하다.
+     *
+     * <p><b>그래서 NFC 축은 여기서 안 고친다.</b> 그쪽은 입력 경계의 일이고
+     * ({@code #469} 가 발화에 대해 세운 그 자리 — {@code AiServiceClient.maskAndCount}),
+     * 기록 시점에 하면 ai-service 가 받은 값과 기록이 갈린다. 소유도 그쪽이다({@code core/}).
+     *
+     * <h2>손대지 않는 것</h2>
+     *
+     * <p>{@code contradictions} 는 훑지 않는다. 그건 ai-service <b>응답</b>이라
+     * {@code #461} 이 경계 매퍼에서 이미 {@code BigDecimal} 로 만든다. 여기서 한 번 더 접으면
+     * <b>그 고침이 되돌아가도 안 보인다</b> — 이중 그물이 아니라 첫 그물을 가리는 것이 된다.
+     *
+     * <p>{@code NaN}·{@code Infinity} 도 손대지 않는다. {@code new BigDecimal("NaN")} 은
+     * 던지고, 무엇보다 <b>그건 거부되는 것이 맞다</b>(ADR-008). {@link CanonicalJson} 이
+     * 그 이유를 담은 예외를 내게 그대로 흘린다 — 여기서 다른 문면으로 바꾸면 진단이 흐려진다.
+     */
+    static Object hashable(Object value) {
+        if (value instanceof Double d) {
+            return d.isNaN() || d.isInfinite() ? d : new BigDecimal(d.toString());
+        }
+        if (value instanceof Float f) {
+            return f.isNaN() || f.isInfinite() ? f : new BigDecimal(f.toString());
+        }
+        if (value instanceof Map<?, ?> map) {
+            // ❗한 겹만 훑으면 중첩된 Double 이 그대로 남아 같은 자리에서 죽는다.
+            //   설문은 additionalProperties: true 라 모양이 안 정해져 있다.
+            Map<Object, Object> out = new LinkedHashMap<>();
+            map.forEach((k, v) -> out.put(k, hashable(v)));
+            return out;
+        }
+        if (value instanceof Collection<?> items) {
+            List<Object> out = new ArrayList<>(items.size());
+            for (Object item : items) {
+                out.add(hashable(item));
+            }
+            return out;
+        }
+        return value;
+    }
+
+    /** {@code surveyResult} 는 맵이다 — 호출부가 캐스트하지 않게 한 겹 씌운다. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> hashable(Map<String, Object> survey) {
+        return survey == null ? null : (Map<String, Object>) hashable((Object) survey);
+    }
 
     /** 세션 이해 기록 스트림. 이슈 #54의 2번이 정한 이름이다. */
     static String streamOf(String sessionId) {
@@ -112,7 +198,7 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         payload.put("contradictions", mismatch.contradictions());
         // 판정을 만든 입력. 세션 테이블에만 있으면 재질문·재판정에 덮인다 (#169).
         payload.put("surveySchemaVersion", surveySchemaVersion);
-        payload.put("surveyResult", surveyResult);
+        payload.put("surveyResult", hashable(surveyResult));
         store.append(streamOf(sessionId), payload);
     }
 
