@@ -666,3 +666,47 @@ class RubricListResponse(Strict):
     #: 전체 개수. 필터를 걸어도 «분모» 를 화면이 알 수 있게 같이 낸다 — 걸러진 목록만
     #: 보이면 *"이게 전부"* 로 읽힌다(`R-00` 이 분모를 지키는 것과 같은 이유).
     total: int
+
+
+# ── 커버리지 사각 (이슈 #474 1번 칸) ─────────────────────────────────────────
+class CoverageGapRequest(Strict):
+    """문서에서 «아무도 안 덮는 문면» 을 찾는다. **고객 텍스트를 안 받는다.**"""
+
+    parsed_document: ParsedDocument
+    #: 안 주면 문서가 말하는 상품유형을 쓴다.
+    product_type: str | None = None
+    #: 겹침이 이 값 미만이면 사각. 안 주면 `coveragegap.COVERED_MIN`.
+    limit: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class CoverageGap(Strict):
+    """사각 하나. `page`/`start`/`end` 는 **원문 오프셋**이다 (P6 · 1절).
+
+    ❗`pages[page].text[start:end] == text` 가 성립한다 — 화면이 이 스팬으로 원문을
+    하이라이트할 수 있어야 하고, 가공해서 내보내면 *"문서에 이렇게 적혀 있다"* 가
+    *"우리가 이렇게 읽었다"* 가 된다.
+    """
+
+    page: int
+    start: int
+    end: int
+    text: str
+    best_overlap: float = Field(description="가장 많이 덮는 앵커와의 겹침 (0~1)")
+    #: ❗`"-"` 는 **어느 앵커와도 안 겹친다**(겹침 0.0)는 뜻이다. 그런데 `anchors_used=0`
+    #: 일 때도 같은 값이 나온다 — 한 행만 보면 *"아무도 안 덮는다"* 와 *"덮을 것이 애초에
+    #: 없다"* 가 구별되지 않는다(`#499` 리뷰). **두 값을 같이 봐야 갈린다** — 화면은
+    #: `anchors_used` 를 먼저 읽는다.
+    covered_by: str = Field(description="그 앵커의 출처 — template:<id> · rubric:<id> · '-'(겹침 0)")
+
+
+class CoverageGapResponse(Strict):
+    product_type: str
+    #: 사각 목록. **겹침이 낮은 것부터** — 가장 안 덮인 것이 먼저다.
+    gaps: list[CoverageGap]
+    #: 훑은 문장 수. ❗**분모다** — 사각 0건이 「깨끗하다」인지 「문장을 못 읽었다」인지
+    #: 이 값으로 갈린다(`R-00` 이 분모를 지키는 것과 같은 이유).
+    sentences_scanned: int
+    #: 대조에 쓴 앵커 수(템플릿 cue + 루브릭 조항). 0 이면 **모든 문장이 사각으로 나온다**
+    #: — 빈 모집단이 결과를 뒤집는 자리라 같이 낸다.
+    anchors_used: int
+    limit: float

@@ -162,7 +162,8 @@ def test_only_document_paths_relax_broad_pii_heuristics():
     from app.main import PiiGuardMiddleware
 
     relaxed = set(PiiGuardMiddleware.PUBLIC_DOCUMENT_PATHS)
-    assert relaxed == {"/internal/parse", "/internal/extract", "/internal/rubric/propose"}
+    assert relaxed == {"/internal/parse", "/internal/extract", "/internal/rubric/propose",
+                       "/internal/template/gaps"}
 
     spec = client.get("/openapi.json").json()
     paths = set(spec["paths"])

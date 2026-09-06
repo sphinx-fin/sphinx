@@ -124,7 +124,7 @@ class PiiGuardMiddleware:
     #: 그 사실을 `test_only_document_paths_relax_broad_pii_heuristics` 가 스키마에서
     #: 유도해 잠근다 — 목록에 손으로 더하는 것만으로는 다음 사람이 왜 안전한지 모른다.
     PUBLIC_DOCUMENT_PATHS = frozenset({
-        "/internal/parse", "/internal/extract", "/internal/rubric/propose",
+        "/internal/parse", "/internal/extract", "/internal/rubric/propose", "/internal/template/gaps",
     })
 
     def _scope(self, path: str) -> str:
