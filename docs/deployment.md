@@ -115,13 +115,18 @@ demo-*   (밀지 않는다)               태그 트리거는 살아 있지만 �
 | 겹침 | 증상 |
 | --- | --- |
 | 옛 `sphinx-web-1` 이 80·443 을 쥔다 | `Bind for 0.0.0.0:443 failed: port is already allocated` 로 edge 가 죽는다 |
-| 옛 `sphinx-mysql-1` 이 `sphinx_mysql-data` 를 문다 | data 스택의 mysql 이 같은 데이터 디렉토리를 잡는다 |
+| 옛 `sphinx-mysql-1` 이 `sphinx_mysql-data` 를 문다 | data 스택의 mysql 이 `[InnoDB] Unable to lock ./ibdata1 error: 11` 로 **재시작 루프**를 돈다 |
 
 PR #513 머지 직후 alpha 배포(런 34035273642)가 정확히 첫 줄로 실패했다. 지금은
 `deploy_ec2.sh` 가 data·edge 를 띄우기 **전에** `com.docker.compose.project=sphinx` 라벨이
 붙은 컨테이너를 찾아 내린다. **컨테이너만 지운다 — 볼륨은 손대지 않는다.** 여기에
 `docker compose down -v` 를 쓰면 인증서와 DB 가 같이 날아가고, 인증서 재발급은 Let's Encrypt
 발급 한도에 걸린다.
+
+DB 쪽 겹침은 **락이 막아 준다 — 데이터가 상하지는 않는다.** 다만 실패한 이관 배포가 만들어 둔
+`sphinx-data-mysql-1` 은 그 뒤로 계속 루프를 돈다(alpha 실측: 2시간에 68회). 옛 컨테이너를
+내려 락이 풀려도 Docker 재시작 백오프가 최대 1분까지 커진 뒤라, 스크립트가 그 자리에서 한 번
+`restart` 로 깨운다 — 안 깨우면 새 색의 `server` 가 먼저 떠서 Flyway 가 DB 를 못 찾고 죽는다.
 
 이 **한 번의 배포에만 짧은 단절이 있다.** 80/443 을 쥔 쪽이 바뀌는 순간이라 피할 수 없다.
 두 번째 배포부터는 라벨에 걸리는 컨테이너가 0개라 그 블록이 아무 일도 안 하고, 평소의 무중단

@@ -346,6 +346,15 @@ if [ -n "$legacy_cids" ]; then
   # 컨테이너가 없으면 옛 네트워크는 빈 껍데기다. 아직 붙은 것이 있으면 실패하는데, 그때는
   # 지워지지 않는 쪽이 맞으므로 무시한다.
   docker network rm sphinx_default >/dev/null 2>&1 || true
+
+  # ❗**data 스택의 mysql 을 한 번 깨운다.** 실패한 이관 배포가 이미 이 컨테이너를 만들어
+  # 놨다면, 옛 mysql 이 볼륨을 쥐고 있는 동안 `[InnoDB] Unable to lock ./ibdata1 error: 11`
+  # 로 재시작 루프를 돌고 있다(alpha 실측: 2시간에 68회). 락은 방금 풀렸지만 Docker 의
+  # 재시작 백오프가 최대 1분까지 커진 뒤라, 그냥 두면 **새 색의 server 가 먼저 떠서 Flyway
+  # 가 DB 를 못 찾고 죽는다** — 이관이 포트에서 한 번, DB 에서 또 한 번 실패하는 모양이 된다.
+  # 아직 그 컨테이너가 없는 박스(=처음부터 새 배치)에서는 실패하고, 그때는 바로 아래
+  # `compose_data up -d` 가 만든다.
+  compose_data restart mysql >/dev/null 2>&1 || true
 fi
 
 # ── data·edge 스택 — 상시 유지, 설정이 안 바뀌면 compose 가 아무것도 안 건드린다 ──
