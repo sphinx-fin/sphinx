@@ -148,7 +148,7 @@ class AiServiceClientTest {
     }
 
     @Test
-    @DisplayName("(NFC) 조합형(NFD) 답변은 ai-service 로 나가기 전 NFC 로 정규화된다 (결정 10.2.1)")
+    @DisplayName("(NFC) 조합형(NFD) 답변은 나가는 값도 **저장되는 값도** NFC 다 (결정 10.2.1 · 10.84)")
     void normalizesCustomerTextToNfcBeforeSending() {
         String nfc = "원금은 지켜지죠";
         String nfd = java.text.Normalizer.normalize(nfc, java.text.Normalizer.Form.NFD);
@@ -161,8 +161,20 @@ class AiServiceClientTest {
                 .andExpect(jsonPath("$.answer_text").value(nfc))
                 .andRespond(withSuccess(validJudgmentJson(), MediaType.APPLICATION_JSON));
 
-        client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", nfd, ITEM, "ELS");
+        AiServiceClient.Scored scored =
+                client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", nfd, ITEM, "ELS");
         server.verify();
+
+        // ❗**나가는 값이 아니라 저장되는 값을 잰다.** 위 jsonPath 는 요청 본문만 본다.
+        // 해시로 굳는 것은 이쪽이다 — `Scored.maskedAnswer` 가 세션에 영속되고
+        // (`SessionService.recordJudgment` → `Session.recordAnswer`), 그게
+        // `maskedUtterances` 와 `utteranceQuote` 의 출처이며 `CanonicalJson` 이 그것을
+        // 해시한다. 지금은 둘이 같은 `masked.text()` 라 통과하지만, `score()` 가 원문을
+        // 돌려주도록 바뀌면 **요청 단정은 초록인 채로 저장 값만 NFD 가 된다.**
+        // 영속 DB(#445) 이후로는 그 상태를 되돌릴 수 없다(결정 10.84).
+        org.assertj.core.api.Assertions.assertThat(scored.maskedAnswer())
+                .as("세션·불변 기록으로 내려가는 값이 NFC 여야 한다 — 나가는 값만으로는 부족하다")
+                .isEqualTo(nfc);
     }
 
     @Test
