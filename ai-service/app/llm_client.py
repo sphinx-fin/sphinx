@@ -48,6 +48,53 @@ class LlmTruncated(LlmError):
     """
 
 
+#: 구조화 출력에서 **`strict: true` 를 켤 수 있는 스키마인가.**
+#:
+#: ## 왜 필요한가 — `additionalProperties: false` 를 보내도 «지켜지지 않았다»
+#:
+#: `strict` 없이 `json_schema` 를 보내면 프로바이더가 **최선노력**으로만 맞춘다. 실측에서
+#: `QuestionDraft` 가 **5/5** 로 스키마의 `description`(모델 docstring)을 **출력 필드로
+#: 되돌려 보냈고**, `Strict`(=`extra="forbid"`) 인 우리 모델이 그것을 거부해 `LlmError` 가
+#: 났다. F-INT-002 는 그 예외에서 템플릿 폴백으로 내려가므로 — alpha 폴백률 **93/100**
+#: 이 되었다(`#487`). `strict: true` 를 켜니 같은 프롬프트가 **5/5** 로 통과했다.
+#:
+#: ## ❗그런데 전부 켤 수는 없다 — 실측으로 넷이 400 이다
+#:
+#:     QuestionDraft · ReexplainResponse · ExtractionDraft        ✅ 통과
+#:     Judgment · MismatchDraft · PolarityVerdict · Reranked · _Draft   ❗400
+#:
+#: 프로바이더의 strict 부분집합이 요구하는 것이 둘이다.
+#:
+#:     ① 모든 object 에 `additionalProperties: false`
+#:     ② `required` 가 **그 object 의 모든 property** 를 포함
+#:
+#: `Judgment` 는 계약(`judgment.schema.json`)이라 선택 필드를 여기서 못 없앤다 — 계약 변경은
+#: 강희진 승인 절차다. 그래서 **스키마 모양을 보고 켤 수 있을 때만 켠다.** 자격을 못 갖춘
+#: 스키마는 오늘과 **완전히 같은 요청**을 보낸다(회귀 0 — 채점·`#409` 수치가 안 흔들린다).
+#:
+#: 프로바이더에 물어서 정하지 않는 이유는 **왕복이 하나 더 생기기 때문**이다. `#447` 이
+#: 줄인 그 대기시간을 다시 늘린다. 이 판정은 스키마만 보면 되므로 **LLM 없이** 결정된다.
+def supports_strict(schema: dict[str, Any]) -> bool:
+    """이 JSON 스키마로 `strict: true` 를 켤 수 있는가. **호출 없이** 모양만 본다."""
+
+    def ok(node: Any) -> bool:
+        if isinstance(node, list):
+            return all(ok(n) for n in node)
+        if not isinstance(node, dict):
+            return True
+        if node.get("type") == "object" or "properties" in node:
+            props = node.get("properties")
+            if not isinstance(props, dict):
+                return False
+            if node.get("additionalProperties") is not False:
+                return False
+            if set(node.get("required") or ()) != set(props):
+                return False
+        return all(ok(v) for k, v in node.items() if k != "required")
+
+    return ok(schema)
+
+
 class LlmClient:
     def __init__(self, cfg: Settings | None = None) -> None:
         self._cfg = cfg or settings()
@@ -223,13 +270,14 @@ class LlmClient:
         모델이 스키마를 지켜도 우리가 한 번 더 검증한다 — P4(근거 필수)는 프로바이더
         약속이 아니라 우리 코드가 보장해야 한다.
         """
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": schema_name,
-                "schema": model_cls.model_json_schema(),
-            },
-        }
+        schema = model_cls.model_json_schema()
+        json_schema: dict[str, Any] = {"name": schema_name, "schema": schema}
+        if supports_strict(schema):
+            json_schema["strict"] = True
+        else:
+            # ❗**켜고 싶지만 못 켜는 것**과 **안 켜는 것**은 다르다 (결정 5.40).
+            log.debug("구조화 출력 strict 미적용 — 스키마가 조건을 못 채운다: %s", schema_name)
+        response_format = {"type": "json_schema", "json_schema": json_schema}
         raw = self.send(
             prompt=prompt,
             system=system,
