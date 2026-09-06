@@ -32,21 +32,28 @@
  *    항목인가" 지 "재검증 몇 번째인가" 가 아니라, 그대로 그리면 진행률이 뒤로 가거나
  *    제자리인 것처럼 보인다. 대신 지금이 재검증이라는 사실만 적는다.
  *
- *    ⚠️ **남은 구멍 — 인계를 못 받은 탭에서는 이 화면이 재검증인 줄 모른다.** 문면을 다시
- *    읽는 GET 이 계약에 없어서(`ReExplanation` 주석) 다른 기기·다른 탭으로 넘어가면
- *    일반 흐름으로 떨어지고, 세션은 `RE_EXPLAIN` 인데 화면은 *다음 항목*을 묻는다 —
- *    그 답이 엉뚱한 항목의 재검증으로 기록된다. 화면 쪽에서 막으려면 세션 상태를 읽어야
- *    하는데 `session:read` 는 CUST 에게 없다(#166). 계약에 재설명 조회가 생기면 그때
- *    닫힌다. 한 태블릿에서 넘기는 데모 경로에서는 인계가 항상 있다.
+ *    ⚠️ **인계를 못 받은 탭에서는 이 화면이 재검증인 줄 모른다 — 그래서 표시를 경로에
+ *    싣는다** (이슈 #492). `sessionStorage` 는 탭 단위라 새 탭·새 창·링크 공유로 열면
+ *    인계가 없다. 예전에는 그때 일반 흐름으로 떨어져 **엉뚱한 항목을 묻고 그 답이
+ *    재검증으로 기록**됐다 — 에러도 빈 화면도 아니라 사람이 못 알아챈다.
+ *
+ *    지금은 `/interview/:sid?reverify=1` 표시가 있는데 꺼낼 것이 없으면 **묻지 않고
+ *    멈춘다**(`phase = "handoff-lost"`). 틀린 상태를 눈에 보이게 만드는 쪽이고, 이 레포가
+ *    계속 해 온 방식이다(E-EXT-03 · `PolarityMeter.not_run`).
+ *
+ *    ❗**표시가 «재검증인가» 를 정하지는 않는다.** 그건 서버가 정하고, 화면은 세션 상태를
+ *    못 읽는다 — `session:read` 는 CUST 에게 없다(#166). 표시가 없는 재검증 진입은 여전히
+ *    일반 흐름으로 떨어진다. 표시는 «받았어야 하는데 못 받았다» 를 알아채게 할 뿐이고,
+ *    완전히 닫히는 것은 계약에 재설명 조회가 생길 때다(#492 ⓑ).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type { Judgment, NextQuestion, ReExplanation, RiskItem } from "../api/types";
 import { useElderlyMode } from "../hooks/useElderlyMode";
 import { useInputMeta } from "../hooks/useInputMeta";
 import { detectPii } from "../lib/pii";
-import { clearReExplanation, readReExplanation } from "../lib/reexplain";
+import { REVERIFY_PARAM, clearReExplanation, readReExplanation } from "../lib/reexplain";
 import "./S03_Interview.css";
 
 /** E-INT-02: 공백 제외 5자 미만이면 1회 재요청. */
@@ -54,12 +61,20 @@ const MIN_CHARS = 5;
 /** E-INT-03: 무응답 안내까지의 시간(고령자 모드에서는 비활성). */
 const IDLE_PROMPT_MS = 60_000;
 
-/** `reexplain` = 재설명 문면을 읽는 중. 읽고 나서 `asking`(재질문)으로 간다(설계 판단 ④). */
-type Phase = "loading" | "reexplain" | "asking" | "submitting" | "answered" | "failed";
+/**
+ * `reexplain` = 재설명 문면을 읽는 중. 읽고 나서 `asking`(재질문)으로 간다(설계 판단 ④).
+ * `handoff-lost` = 경로는 재검증이라는데 인계가 없다 — **질문을 안 묻고 멈춘 상태**다(#492).
+ */
+type Phase =
+  | "loading" | "reexplain" | "asking" | "submitting" | "answered" | "failed" | "handoff-lost";
 
 export default function S03Interview() {
   const { sid = "" } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  /** S-05 가 경로에 실어 보낸 «지금은 재검증» 표시(#492). 인계 자체가 아니라 인계가
+      있어야 한다는 사실만 말한다. */
+  const markedReverify = searchParams.get(REVERIFY_PARAM) === "1";
   const { elderly, toggle, enable } = useElderlyMode();
   const meta = useInputMeta();
 
@@ -170,6 +185,13 @@ export default function S03Interview() {
           setPhase("reexplain");
           return;
         }
+        /* 경로는 «재검증» 이라는데 꺼낼 것이 없다 → **묻지 않는다**(이슈 #492).
+           여기서 `loadQuestion()` 으로 흘러가면 서버가 *아직 안 물은 다음 항목*을 주고,
+           그 답이 재검증으로 기록된다. 그건 조용히 틀리는 종류라 사람이 못 알아챈다. */
+        if (markedReverify) {
+          setPhase("handoff-lost");
+          return;
+        }
         await loadQuestion();
       } catch (e) {
         if (!alive) return;
@@ -208,6 +230,14 @@ export default function S03Interview() {
     setPhase("asking");
   }
 
+  /* ── 제출이 끝나면 경로에서 표시를 뗀다 (#492) ───────────────────────────
+     안 떼면 그 뒤 새로고침이 «인계를 잃었다» 로 뜬다 — 제출은 이미 성공했는데 화면이
+     사고를 말하게 된다. 인계를 지우는 자리(`clearReExplanation`)와 같은 시점이어야 둘이
+     갈리지 않는다. `replace` 라 뒤로가기가 표시 붙은 주소로 돌아가지 않는다.            */
+  function dropReverifyMark() {
+    if (markedReverify) navigate(`/interview/${sid}`, { replace: true });
+  }
+
   /* ── 제출 ───────────────────────────────────────────────────────────────── */
   async function submit() {
     if (!askedItemId) return;   // done=true 면 itemId 가 null 이다
@@ -233,7 +263,10 @@ export default function S03Interview() {
       });
       // 인계는 여기서 지운다 — 성공한 뒤라야 한다(`lib/reexplain` 주석). 화면 상태는
       // 남겨 둔다: 다음 화면이 "재검증이 기록됐다"를 말해야 하고, 그건 이 값으로만 안다.
-      if (reverifying) clearReExplanation(sid);
+      if (reverifying) {
+        clearReExplanation(sid);
+        dropReverifyMark();
+      }
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -251,7 +284,10 @@ export default function S03Interview() {
         text: "(응답하지 않음)",
         inputMeta: meta.snapshot("", elderly),
       });
-      if (reverifying) clearReExplanation(sid);
+      if (reverifying) {
+        clearReExplanation(sid);
+        dropReverifyMark();
+      }
       setPhase("answered");
     } catch (e) {
       setError(describe(e));
@@ -284,6 +320,53 @@ export default function S03Interview() {
             <b>인터뷰를 시작할 수 없어요</b>
             {error}
           </div>
+        </div>
+      </main>
+    );
+  }
+
+  /* ── 인계를 못 받았다 (이슈 #492) ─────────────────────────────────────────
+     경로가 «재검증» 이라고 말하는데 꺼낼 문면이 없다. 여기까지 온 이상 **질문을 묻지
+     않는다** — 그게 이 화면이 조용히 틀리던 자리다.
+
+     ❗**S-05 로 자동 이동하지 않는다.** 지금 이 화면 앞에 있는 사람은 고객이고 S-05 는
+     등급·근거가 있는 판매자 화면이다(설계 판단 ①). 자동으로 넘기면 인계 사고를 «고객에게
+     판정을 보이는 사고» 로 바꾼다. 화면은 태블릿을 돌려 달라고만 말하고, 버튼은 담당자가
+     누른다 — 문면도 그렇게 읽히게 적는다.
+
+     막다른 길로 두지도 않는다(#438 과 같은 결) — 나가는 길이 한 개는 있어야 한다.      */
+  if (phase === "handoff-lost") {
+    return (
+      <main className="iv">
+        <div className="iv__shell">
+          <section className="iv__card" aria-live="polite">
+            <h1 className="iv__question">담당자 확인이 필요해요.</h1>
+            <p className="iv__alert iv__alert--warn" role="status">
+              <b>다시 설명드릴 내용을 이 화면이 받지 못했어요.</b>
+              새 탭이나 다른 창에서 열면 이렇게 됩니다. 이대로 진행하면 다른 항목을 여쭙게
+              되니, 화면을 담당자에게 돌려주세요.
+            </p>
+            {/* ❗나가는 길을 한 줄 더 준다 — 되돌릴 방법이 실제로 하나 있고, 그게 «처음
+                시작한 탭» 이다. 세션은 `RE_EXPLAIN` 이라 재설명을 다시 시작할 수 없고
+                (상태머신이 그 상태에서 `REQUEST_REEXPLAIN` 을 안 받는다), 나가는 길은
+                고객의 재답변 하나뿐이다(S-05 설계 판단 ⑦). 그 사실을 안 적으면 담당자가
+                S-05 로 돌아가 같은 버튼을 다시 누르고 여기로 되돌아온다. 판정은 여전히
+                적지 않는다(설계 판단 ①) — 상태와 다음 동작만 말한다. */}
+            <p className="iv__alert iv__alert--info">
+              <b>담당자 안내</b>
+              재설명을 시작한 탭이 아직 열려 있다면 그 탭에서 이어 주세요. 이 세션은
+              재설명 상태로 남아 있고, 고객이 다시 답해야 다음으로 넘어갑니다.
+            </p>
+            <div className="iv__actions">
+              <button
+                type="button"
+                className="iv__btn iv__btn--primary"
+                onClick={() => navigate(`/judgment/${sid}`)}
+              >
+                담당자 화면으로 돌아가기
+              </button>
+            </div>
+          </section>
         </div>
       </main>
     );

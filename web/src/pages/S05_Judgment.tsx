@@ -58,7 +58,7 @@ import type {
   GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem, RuleRef,
   SessionResponse, Signal, SuitabilityStatus,
 } from "../api/types";
-import { stashReExplanation } from "../lib/reexplain";
+import { reverifyPath, stashReExplanation } from "../lib/reexplain";
 import ErrorNote from "../components/ErrorNote";
 import { describeError, type ShownError } from "../lib/errorText";
 import "./S05_Judgment.css";
@@ -202,7 +202,10 @@ export default function S05Judgment() {
       const body: ReExplainRequest = { itemId };
       const re = await post<ReExplanation>(`/sessions/${sid}/re-explain`, body);
       stashReExplanation(sid, re);
-      navigate(`/interview/${sid}`);
+      // 경로에 «재검증» 표시를 실어 보낸다(이슈 #492). 인계는 `sessionStorage` 라 탭을
+      // 못 따라가는데 표시는 URL 이라 따라간다 — 표시만 오고 인계가 없으면 S-03 이
+      // 조용히 다음 항목을 묻는 대신 «못 받았다» 를 말한다.
+      navigate(reverifyPath(sid));
     } catch (e) {
       setReNotes((prev) => [...prev, noteFor(itemId, e)]);
       // 상태가 바뀌었을 수 있다(다른 창에서 진행 등). 다시 읽어 화면을 맞춘다.
@@ -285,10 +288,13 @@ export default function S05Judgment() {
               판정을 확정할 수 없습니다.
             </p>
           </div>
+          {/* 여기도 표시를 싣는다(#492). 이 버튼이 눌리는 상태(`RE_EXPLAIN`)가 곧
+              «인계가 있어야 하는 상태» 다 — 새로고침·다른 탭으로 인계가 날아간 채
+              눌리는 것이 정확히 이 자리이고, 그때 표시가 없으면 못 알아챈다. */}
           <button
             type="button"
             className="s05__btn s05__btn--primary"
-            onClick={() => navigate(`/interview/${sid}`)}
+            onClick={() => navigate(reverifyPath(sid))}
           >
             고객 화면으로
           </button>
