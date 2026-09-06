@@ -32,21 +32,33 @@ demo-*   (밀지 않는다)               태그 트리거는 살아 있지만 �
 
 ## 1. 무엇이 어디에 뜨는가
 
+**세 개의 compose 프로젝트로 갈려 있다** — "무중단 배포" 리라이트(결정로그 7.39 후속) 이후.
+`web`(유일한 외부 진입점)과 `mysql` 은 배포와 무관하게 **상시 유지**되고, `ai-service`·
+`server` 만 배포마다 blue/green 을 번갈아 뜬다.
+
 ```
-                인터넷
-                   │  :80 만
-                   ▼
-        ┌──────────────────────┐
-        │  web  (nginx + dist) │   edge 네트워크
-        └──────────┬───────────┘
-                   │  /api → server:8000
-        ┌──────────▼───────────┐
-        │  server (Spring)     │   edge + internal
-        └──────────┬───────────┘
-                   │  http://ai-service:8100
-        ┌──────────▼───────────┐
-        │  ai-service (FastAPI)│   internal 만
-        └──────────────────────┘
+                        인터넷
+                           │  :80 만
+                           ▼
+                ┌──────────────────────┐
+                │ sphinx-edge (상시)    │
+                │  web (nginx + dist)   │
+                └──────────┬───────────┘
+                           │  $sphinx_backend (컷오버로 바뀜)
+              ┌────────────┴────────────┐
+              ▼                         ▼
+   ┌─────────────────────┐   ┌─────────────────────┐
+   │ sphinx-blue          │   │ sphinx-green         │  ← 배포마다 번갈아 뜬다.
+   │  server (Spring)     │   │  server (Spring)     │    한쪽만 "라이브"다.
+   │  ai-service (FastAPI)│   │  ai-service (FastAPI)│
+   └───────────┬──────────┘   └───────────┬──────────┘
+               │                          │
+               └────────────┬─────────────┘
+                             ▼
+                  ┌─────────────────────┐
+                  │ sphinx-data (상시)   │
+                  │  mysql               │  ← blue/green 이 공유한다
+                  └─────────────────────┘
 ```
 
 **외부에 열리는 것은 `web:80` 하나뿐이다.** `server` 와 `ai-service` 는 compose 에
@@ -57,12 +69,51 @@ demo-*   (밀지 않는다)               태그 트리거는 살아 있지만 �
 있다 — CLAUDE.md 가 P3 로 못박은 *"고객 텍스트가 ai-service 로 나가는 유일한 경로"* 가 그
 순간 거짓이 된다. 노출을 안 하면 `permitAll` 상태여도 외부에서 못 부른다.
 
-네트워크를 둘로 가른 것은 그 위의 2차 방어다. `web` 컨테이너가 뚫려도 `ai-service` 와 공유하는
-네트워크가 없어서 :8100 으로 직접 못 간다.
+네트워크를 가른 것은 그 위의 2차 방어다. `web` 컨테이너가 뚫려도 `ai-service` 와 공유하는
+네트워크가 없어서 :8100 으로 직접 못 간다. `edge`·`data` 는 프로젝트 경계를 넘어 공유해야
+해서 고정 이름의 external 네트워크다(`sphinx-edge-net`·`sphinx-data-net`) — `internal`
+(server↔ai-service)은 blue/green 이 서로 안 섞여야 해서 반대로 **프로젝트마다 자동으로
+갈라지는 기본 네트워크**다(이름을 안 고정한다).
 
 > `internal` 네트워크에 `internal: true` 를 **붙이지 않았다.** 그 플래그는 컨테이너 간 격리가
 > 아니라 아웃바운드 차단이라, 붙이면 `ai-service` 가 LLM API 에 못 나가서 추출·채점·질문생성이
 > 전부 죽는다. 원하는 격리는 네트워크 소속만으로 이미 성립한다.
+
+### 1.1 왜 세 프로젝트인가 — 무중단의 핵심
+
+예전엔 다섯 서비스가 프로젝트 하나(`sphinx`)였고, 배포마다
+`docker compose up -d --build --force-recreate` 가 전부 같이 재생성됐다(이슈 #240 →
+결정 7.39). `web`·`mysql` 은 리포 트리를 bind mount 하지 않아 재생성될 이유가 없었는데도
+매번 같이 내려갔다 올라와서, `mysql`(healthcheck start_period 60s) → `ai-service`(20s) →
+`server`(Spring Boot 부팅 + 40s) 체인이 끝날 때까지 **사이트 전체(80/443)가 몇 분씩
+끊겼다.**
+
+지금은:
+
+1. `web`(`docker-compose.edge.yml`, 프로젝트 `sphinx-edge`)과 `mysql`
+   (`docker-compose.data.yml`, 프로젝트 `sphinx-data`)이 **상시 유지**된다. 배포가
+   `docker compose ... up -d` 를 매번 부르지만, 이 두 파일의 설정이 안 바뀌면 compose 가
+   실제로는 아무것도 안 건드린다.
+2. `ai-service`·`server`(`docker-compose.yml`, 프로젝트 `sphinx-blue`/`sphinx-green`)만
+   배포마다 반대 색으로 새로 뜬다. 새 색이 healthy 해지면 배포 스크립트가 `web` 컨테이너
+   안에서 `nginx -s reload` 로 업스트림을 바꾼다 — reload 는 워커를 새로 띄우고 기존 연결은
+   끝날 때까지 두는 무중단 동작이다(`web/docker-entrypoint.d/30-cert-reload.sh` 가 인증서
+   갱신에 쓰는 것과 같은 메커니즘). 그다음에야 옛 색을 내린다.
+3. **트리 교체(`rm -rf /opt/sphinx && mv $NEW /opt/sphinx`) 순서가 뒤집혔다.** 예전엔 배포
+   시작 시점에 스왑해서 그때 떠 있던 컨테이너의 bind mount 가 지워진 inode 를 물었다
+   (#240 의 원인). 지금은 옛 색을 내린 **다음**(더는 그 트리를 물고 있는 컨테이너가 없을
+   때)에 스왑한다 — `mv` 는 같은 파일시스템에서 rename 이라 새 색의 mount 에 영향이 없다.
+
+자세한 절차는 `scripts/deploy_ec2.sh` 머리말과 인라인 주석에 있다.
+
+### 1.2 DB 마이그레이션 — blue/green 겹침 구간의 새 제약
+
+`mysql` 은 blue/green 이 **공유한다**(나누면 세션·감사 기록이 두 갈래로 갈린다). 새 색의
+`server` 가 뜨면서 Flyway 가 새 마이그레이션을 **그 순간** 적용하는데, 옛 색은 아직 그
+스키마로 라이브 트래픽을 받고 있다 — 컬럼 삭제·타입 변경처럼 옛 코드가 못 견디는 변경은
+**같은 배포에 넣지 않는다.** 추가(expand)를 먼저 배포하고, 옛 색이 완전히 물러난 다음
+배포에서 제거(contract)한다. 이 규율은 코드로 못 막으므로 마이그레이션을 쓸 때마다
+직접 확인한다.
 
 ---
 
@@ -115,7 +166,8 @@ aws ssm put-parameter --region ap-northeast-2 \
 # ❗**이 값은 볼륨과 묶인다.** MySQL 은 계정을 데이터 디렉토리 첫 초기화 때 만들고 그 뒤로는
 # MYSQL_PASSWORD 를 안 본다. 나중에 SSM 만 바꾸면 mysql 은 옛 값을 계속 쓰고 server 만 새
 # 값으로 붙으러 가서 `Access denied` 로 기동을 못 한다. 바꾸려면 DB 안에서 같이 바꾼다:
-#   docker compose exec mysql mysql -uroot -p -e "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"
+#   docker compose -f docker-compose.data.yml -p sphinx-data exec mysql \
+#     mysql -uroot -p -e "ALTER USER 'sphinx'@'%' IDENTIFIED BY '<새 값>'"
 aws ssm put-parameter --region ap-northeast-2 \
   --name /sphinx/prod/db-password --type SecureString --value "$(openssl rand -hex 24)"
 ```
@@ -175,14 +227,17 @@ EC2 인스턴스 프로파일에 아래가 필요하다. **키를 인스턴스�
 ```bash
 git clone <repo> && cd sphinx
 ./scripts/deploy_ec2.sh --check     # 비밀을 받을 수 있는지만 확인
-./scripts/deploy_ec2.sh             # 받아서 compose up -d --build
+./scripts/deploy_ec2.sh             # 받아서 blue/green 으로 띄운다
 ```
 
 스크립트가 값을 **환경변수로만** 넘긴다(파일로 안 떨어진다). 값 자체는 로그에 안 찍고 길이만
 보여준다.
 
-`docker compose up` 을 직접 부를 때도 세 값이 없으면 **기동을 거부한다** — compose 의
-`${VAR:?}` 문법이다. 키 없이 떠서 데모 중에 LLM 호출만 실패하는 상태를 만들지 않기 위한 것이다.
+`docker compose up` 을 세 파일 중 하나라도 직접 부를 때 필요한 값이 없으면 **기동을
+거부한다** — compose 의 `${VAR:?}` 문법이다. 키 없이 떠서 데모 중에 LLM 호출만 실패하는
+상태를 만들지 않기 위한 것이다. 손으로 하나씩 띄우려면(디버깅 등) §1.1 의 순서를 지킨다 —
+`docker-compose.data.yml` → `docker-compose.edge.yml` → `STACK=blue
+docker-compose.yml`(각각 `-p sphinx-data`·`sphinx-edge`·`sphinx-blue`).
 
 ---
 
@@ -233,7 +288,13 @@ git clone <repo> && cd sphinx
 ## 8. 확인
 
 ```bash
-docker compose ps                       # 세 서비스가 healthy 인가
+# 지금 라이브인 색은 nginx 자신이 안다 — 별도 상태 파일이 없다.
+docker exec "$(docker compose -f docker-compose.edge.yml -p sphinx-edge ps -q web)" \
+  cat /etc/nginx/upstream/active.conf
+
+docker compose -f docker-compose.data.yml -p sphinx-data ps        # mysql 이 healthy 인가
+docker compose -f docker-compose.edge.yml -p sphinx-edge ps        # web·certbot 이 떠 있는가
+docker compose -f docker-compose.yml -p sphinx-blue ps             # 라이브 색을 넣는다(위 결과로 판단)
 
 # 인증이 걸려 있는가. **401 이 정상이다** — 사이트 전체에 auth_basic 이 걸려 있다(#162).
 # 200 이 나오면 auth_basic 이 빠진 것이라, 이 한 줄이 #41 1항의 회귀도 같이 잡는다.
@@ -313,11 +374,15 @@ SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinxfin.duckdns.org SPHINX_DEMO_OP
 그때 넘어간 값으로 새로 뜬다 — 안 주면 개방 모드(§9.3)가 꺼진 채 돌아와 **인증서는 받았는데
 전 화면이 401** 이 된다. prod 는 애초에 개방 모드가 아니므로 붙이지 않는다.
 
-`--cert` 가 **web 만**(`--no-deps`) 건드리는 것도 같은 종류의 사고를 막는다. 이 분기는
-`exit 0` 으로 끝나서 `SPHINX_DEMO_SYNTHETIC_SESSIONS` 를 켜는 줄(결정 10.58)까지 못 가는데,
-compose 가 `depends_on` 을 따라 `server` 까지 재생성하면 server 가 기본값 `false` 로 돌아와
-**합성 세션을 안 읽고 S-08 대시보드가 빈 표**가 된다. 화면도 로그도 정상이라 #179 와 똑같이
-조용하다 — 2026-09-03 계정 이관 중 실제로 이 경로로 대시보드가 비었다.
+`--cert` 는 `docker-compose.edge.yml`(프로젝트 `sphinx-edge`, `web`·`certbot` 만)만
+건드린다. **예전엔 여기 `--no-deps` 가 필수였다** — `web` 이 `server` 를 `depends_on` 하던
+시절엔 그것 없이 재생성하면 `server` 까지 딸려 재생성되고, 이 `--cert` 분기가 `exit 0` 으로
+끝나서 `SPHINX_DEMO_SYNTHETIC_SESSIONS` 를 켜는 줄(결정 10.58)에 못 미쳐 server 가 기본값
+`false` 로 다시 떠 **합성 세션을 안 읽고 S-08 대시보드가 빈 표**가 됐다(화면도 로그도 정상이라
+#179 와 똑같이 조용하다 — 2026-09-03 계정 이관 중 실제로 이 경로로 대시보드가 비었다).
+**지금은 이 사고 경로 자체가 없다** — "무중단 배포" 리라이트로 `web` 이 `server` 와 다른
+compose 프로젝트가 되면서 `depends_on` 관계가 사라졌다. `--cert` 가 `server`(blue/green)를
+건드릴 방법이 없다.
 
 ❗**`docker compose run --rm certbot …` 을 손으로 치면 안 된다.** 두 가지가 걸린다.
 
@@ -369,7 +434,7 @@ curl -sS https://sphinxfin.duckdns.org/api/dashboard/heatmap | head -c 200   # 2
 ```
 
 `http://` 가 200 이면 인증서가 아직 없는 것이다(§9.2). `https://` 가 401 이면 개방 모드가
-안 켜진 것이라 `docker compose logs web | grep 모드` 를 본다.
+안 켜진 것이라 `docker compose -f docker-compose.edge.yml -p sphinx-edge logs web | grep 모드` 를 본다.
 
 ### 9.5 데모는 alpha **개방 모드로 간다** — 역할 차단은 따로 보여준다 (결정 10.70)
 
@@ -417,7 +482,10 @@ export SPHINX_API_PASSWORD=$P
 export SPHINX_INTERNAL_TOKEN=$(openssl rand -hex 32)
 export SPHINX_API_USERS=$(sed -n 's/^.*[^A-Za-z0-9_-]id:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' \
                             server/src/main/resources/demo_accounts.yaml | paste -sd, -)
-docker compose up -d --build
+# 세 프로젝트 순서대로 — §1.1 참조. data·edge 는 상시 유지, app 은 색을 고른다(처음엔 blue).
+docker compose -f docker-compose.data.yml -p sphinx-data up -d
+docker compose -f docker-compose.edge.yml -p sphinx-edge up -d --build
+STACK=blue docker compose -f docker-compose.yml -p sphinx-blue up -d --build
 ```
 
 `SPHINX_DEMO_OPEN` 을 안 주므로 **잠금**이다(기본값). `SPHINX_API_USERS` 를 넘기는 이유는
@@ -444,14 +512,19 @@ SPHINX_DEMO_OPEN= \
 
 되돌릴 때는 `SPHINX_DEMO_OPEN=1` 로 같은 명령을 돌린다.
 
+> ❗이 명령은 `web`(edge 프로젝트) 설정만 바꾸려는 것이지만, 전체 배포 스크립트를 돌리므로
+> `server`·`ai-service`(app 프로젝트)도 blue/green 을 한 번 뒤집는다 — 코드가 안 바뀌었으니
+> 빌드는 캐시로 몇 초면 끝나고 무중단으로 넘어가므로 해롭지 않다. 그냥 "왜 라이브 색이
+> 바뀌었지"로 놀라지 않으라고 적어 둔다.
+
 **모드만 바꾸려고 `web` 컨테이너를 따로 다시 만드는 지름길을 표준 절차로 적지 않는다** —
-세 값이 조용히 빠지고, 셋 다 화면이 멀쩡해 보이는 방향으로 나빠진다.
+값이 조용히 빠지면 화면이 멀쩡해 보이는 방향으로 나빠진다. (`server`(blue/green)까지 딸려
+재생성되는 사고는 이제 구조적으로 없다 — `web` 이 다른 compose 프로젝트라 `depends_on` 이
+없다. 신경 쓸 것은 아래 둘뿐이다.)
 
 ```
 SPHINX_PUBLIC_HOST 누락   443 을 안 세운다 — https 가 죽는다 (20-tls.sh 는 기동 때 본다)
 SPHINX_API_USERS   누락   htpasswd 에 계정이 하나만 남는다 — 시연 자체가 401 이다 (#213)
---no-deps          누락   server 까지 재생성돼 SPHINX_DEMO_SYNTHETIC_SESSIONS 가 기본값으로
-                          돌아가고 S-08 이 빈 표가 된다 (결정 10.58 · #179 와 같은 조용함)
 ```
 
 #### ❗잠가 둔 동안 `main` 에 머지하지 않는다
@@ -466,7 +539,7 @@ SPHINX_API_USERS   누락   htpasswd 에 계정이 하나만 남는다 — 시�
 curl -sS -o /dev/null -w '%{http_code}\n' https://sphinxfin.duckdns.org/api/products
 # 개방 200  ·  잠금 401
 
-docker compose logs --tail 20 web | grep 모드
+docker compose -f docker-compose.edge.yml -p sphinx-edge logs --tail 20 web | grep 모드
 ```
 
 데모 중에는 이 값이 **200 이어야 정상**이다(무로그인 관람). `401` 이 나오면 누가 잠갔거나

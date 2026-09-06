@@ -121,8 +121,12 @@ jobs:
         id: send
         run: |
           set -eu
-          # 새 디렉토리에 풀고 나서 갈아 끼운다. 받기에 실패하면 `set -e` 가 여기서
-          # 멈추므로 **돌고 있던 배포를 지우지 않는다.**
+          # 새 디렉토리에 풀고 **그 안에서** 스크립트를 부른다 — `/opt/sphinx` 는 아직
+          # 안 건드린다. 트리를 그 경로로 갈아끼우는 것은 이제 `deploy_ec2.sh` 자신의
+          # 마지막 단계다("무중단 배포" 리라이트) — blue/green 이 겹치는 동안 옛 색
+          # 컨테이너가 물고 있는 트리를 그대로 둬야 하기 때문이다(#240 재발 방지, 스크립트
+          # 머리말 참조). 받기에 실패하면 `set -e` 가 여기서 멈추므로 **돌고 있던 배포를
+          # 지우지 않는다** — 이 성질은 그대로다.
           #
           # 아래 JSON 안의 `$(mktemp)`·`$NEW` 는 **러너에서 확장되면 안 된다** — 원격
           # 박스의 셸이 받아 실행할 문자열이라 작은따옴표가 맞다.
@@ -138,8 +142,8 @@ jobs:
                 "set -eux",
                 "NEW=$(mktemp -d -p /opt)",
                 "aws s3 cp s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/${{ steps.art.outputs.key }} - | tar xz -C \"$NEW\"",
-                "rm -rf /opt/sphinx && mv \"$NEW\" /opt/sphinx && chmod 755 /opt/sphinx",
-                "cd /opt/sphinx",
+                "chmod 755 \"$NEW\"",
+                "cd \"$NEW\"",
                 "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -200 /var/log/sphinx-deploy.log; exit 1; }",
                 "tail -40 /var/log/sphinx-deploy.log"
               ]}' \
