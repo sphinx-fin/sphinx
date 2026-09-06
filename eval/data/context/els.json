@@ -1,10 +1,11 @@
 {
   "_생성": "eval/tools/build_context.py — 손으로 고치지 않는다",
-  "built_at": "2026-09-05T10:01:48+00:00",
+  "built_at": "2026-09-06T05:18:31+00:00",
   "model": "gpt-5-mini",
   "product_type": "ELS",
   "product_id": "eval-els-001",
   "parsed_document": "contracts/samples/parsed_els_sample.json",
+  "parser_version": "0.3.0",
   "risk_items": {
     "ELS-NO-DEPOSIT-INSURANCE": {
       "item_id": "ELS-NO-DEPOSIT-INSURANCE",
@@ -12,10 +13,10 @@
       "name": "예금자보호 비대상",
       "importance": "required",
       "condition": {
-        "value_text": "이 파생결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
+        "value_text": "또한 이 파생결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
         "source_span": {
           "page": 1,
-          "start": 123,
+          "start": 120,
           "end": 206
         }
       },
@@ -28,10 +29,10 @@
       "name": "원금손실 가능성 고지",
       "importance": "required",
       "condition": {
-        "value_text": "결\n합증권은「예금자보호법」에 따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
+        "value_text": "따라 보호되지 않는 금융투자상품으로 투자원금의 손\n실이 발생할 수 있으므로 투자에 신중을 기하여 주시기 바랍니다.",
         "source_span": {
           "page": 1,
-          "start": 127,
+          "start": 143,
           "end": 206
         }
       },
@@ -76,11 +77,11 @@
       "name": "조기상환 조건",
       "importance": "required",
       "condition": {
-        "value_text": "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK\nEI225 지수, EuroStoxx50 지수의 자동조기상환평가가격이 모\n두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경",
+        "value_text": "1차 자동조기상환평가일에 기초자산인 S&P500 지수, NIKK\nEI225 지수, EuroStoxx50 지수의 자동조기상환평가가격이 모\n두 각각의 최초기준가격의 85%인 85/ 85/ 85 이상인 경\n우 1차 자동조기상환지급일에 자동조기상환되며, 상환금액은\n다음과 같습니다.",
         "source_span": {
           "page": 7,
           "start": 358,
-          "end": 469
+          "end": 511
         }
       },
       "status": "extracted",
@@ -95,8 +96,8 @@
         "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터\n만기평가일(포함)까지 세 기초자산의 종가 중 어느 하나라\n도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로\n하락한 적이 있는 경우(어느 한 기초자산의 가격만 발표되\n는 날도 포함)만기상환금액은 다음과 같습니다.",
         "source_span": {
           "page": 8,
-          "start": 827,
-          "end": 982
+          "start": 809,
+          "end": 964
         }
       },
       "status": "extracted",
@@ -108,11 +109,11 @@
       "name": "만기 손실조건",
       "importance": "required",
       "condition": {
-        "value_text": "위 ⑥에 해당하지 않고, 최초기준가격평가일(불포함)부터\n만기평가일(포함)까지 세 기초자산의 종가 중 어느 하나라\n도 각각의 최초기준가격의 45%인 45/ 45/ 45 미만으로\n하락한 적이 있는 경우(어느 한 기초자산의 가격만 발표되\n는 날도 포함)만기상환금액은 다음과 같습니다.",
+        "value_text": "이 경우 원금 손실이 발생합니다.",
         "source_span": {
           "page": 8,
-          "start": 827,
-          "end": 982
+          "start": 986,
+          "end": 1004
         }
       },
       "status": "extracted",
@@ -124,11 +125,11 @@
       "name": "전액손실 사례",
       "importance": "required",
       "condition": {
-        "value_text": "만기일에 [S&P500 지수], [NIKKEI225 지수], [EuroStoxx50 지수]의 만\n기평가가격이 각각 50, 75, 0일때\n사례4 -100%",
+        "value_text": "만기일에 [S&P500 지수], [NIKKEI225 지수], [EuroStoxx50 지수]의 만\n기평가가격이 각각 50, 75, 0일때",
         "source_span": {
           "page": 10,
           "start": 653,
-          "end": 738
+          "end": 728
         }
       },
       "status": "extracted",
@@ -172,11 +173,11 @@
       "name": "숙려기간",
       "importance": "recommended",
       "condition": {
-        "value_text": "숙려기간 (청약일(불포함)이후 2영업일로, 청약시점에 따라 다르게 적\n용됩니다.)",
+        "value_text": "숙려기간\n2026년 08월 26일 ~ 2026년 08월 27일",
         "source_span": {
           "page": 5,
-          "start": 276,
-          "end": 321
+          "start": 246,
+          "end": 280
         }
       },
       "status": "extracted",
@@ -188,11 +189,11 @@
       "name": "환금성 제약(비상장)",
       "importance": "required",
       "condition": {
-        "value_text": "본 증권은 상장하지 않을 예정이므로 증권 보유자는 장외매매를\n통하여 본 증권을 양도하거나, 투자자의 요청에 의한 중도상환 등",
+        "value_text": "본 증권은 상장하지 않을 예정이므로 증권 보유자는 장외매매를\n통하여 본 증권을 양도하거나, 투자자의 요청에 의한 중도상환 등\n본 증권의 조건에 따라 본 증권보유자에게 부여된 발행회사의 권리\n행사 가능 사유를 제외하고는 유동성 확보에 지장이 있을 수 있\n다는 점을 고려하여야 할 것입니다.",
         "source_span": {
           "page": 14,
           "start": 560,
-          "end": 629
+          "end": 720
         }
       },
       "status": "extracted",
