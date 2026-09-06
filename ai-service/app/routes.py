@@ -21,6 +21,8 @@ from . import (extraction, misconception, mismatch, parsing, question_gen, reexp
 from .llm_client import LlmError, LlmNotConfigured, client as default_client
 from .pii import PiiDetected, assert_clean
 from .schemas import (
+    RubricListResponse,
+    RubricView,
     ConditionNotExtracted,
     ExtractRequest,
     ExtractResponse,
@@ -316,3 +318,60 @@ def propose_rubric(body: RubricProposeRequest) -> RubricProposeResponse:
 
 
 __all__ = ["router", "PiiDetected"]
+
+
+# ── 루브릭 열람 (이슈 #474 ③) ────────────────────────────────────────────────
+#
+# ❗**왜 조회가 필요한가** — 루브릭은 **공개 의무 대상**인데 지금 그것을 읽는 경로가
+# 레포 어디에도 없었다(라우트 0 · server 0 · web 0). 화면이 볼 수 있는 것은 채점 결과에
+# 인용된 **조항 한 줄**(`evidence.rubric_clause`)뿐이라, *"그 조항이 어느 기준에서 왔나"*
+# 를 심사자가 대조할 방법이 없다.
+#
+# ❗**읽기 전용이다.** 승인 산출물은 `app/rubrics/*.yaml` **파일**이고, 승인은 git 커밋이다
+# (`#475` 에서 강희진 확정 — 서버가 승인 상태를 갖지 않는다). 이 경로로 **쓰지 않는다** —
+# 쓰면 정본이 둘(git 이력 ↔ 런타임 상태)이 되고, 채점이 파일만 읽는 규약이 깨지면
+# `verify_rubric_clause_is_published` 가 순환한다(P4 · `#358` 과 같은 자리).
+def _view(r: rubrics.Rubric) -> RubricView:
+    return RubricView(
+        item_id=r.item_id,
+        product_type=r.product_type,
+        name=r.name,
+        status=r.status,
+        required_elements=list(r.required_elements),
+        u1_requires=r.u1_requires,
+        misconception_conditions=list(r.misconception_conditions),
+        related_misconceptions=list(r.related_misconceptions),
+        # ❗`is not None` 이다 (`#493` 리뷰, 정세현). 빈 값을 `None` 으로 접으면
+        #   **이 필드의 존재 이유**(빈 것과 없는 것을 가른다 — `#284`·`#396`)가
+        #   그 자리에서 사라진다. 지금 빈 튜플은 도달 불가하지만(`rubrics._parse` 가
+        #   `reason`·`until` 둘 다 없으면 던진다) **그 불변식을 여기서 끌어오지 않는다.**
+        unlinked_until=list(r.unlinked_until) if r.unlinked_until is not None else None,
+    )
+
+
+@router.get("/rubrics", response_model=RubricListResponse)
+def list_rubrics(product_type: str | None = None) -> RubricListResponse:
+    """루브릭 전체(또는 상품유형별). **파일에 있는 것을 그대로 낸다.**
+
+    `total` 은 **필터 전 전체 개수**다 — 걸러진 목록만 보이면 화면이 *"이게 전부"* 로
+    읽는다(`R-00` 이 분모를 지키는 것과 같은 이유).
+    """
+    every = rubrics.all_rubrics()
+    picked = [r for r in every.values() if product_type in (None, r.product_type)]
+    return RubricListResponse(
+        rubrics=[_view(r) for r in sorted(picked, key=lambda r: r.item_id)],
+        total=len(every),
+    )
+
+
+@router.get("/rubrics/{item_id}", response_model=RubricView)
+def get_rubric(item_id: str) -> RubricView:
+    """항목 하나의 루브릭. 없으면 404 — **빈 루브릭을 지어내지 않는다.**
+
+    채점은 루브릭이 없는 항목을 아예 못 매긴다(`recommended` 항목이 그렇다 — `#435`).
+    여기서 빈 것을 내주면 화면이 *"기준이 없다"* 와 *"기준이 비어 있다"* 를 못 가른다.
+    """
+    try:
+        return _view(rubrics.get(item_id))
+    except rubrics.RubricNotFound:
+        raise HTTPException(status_code=404, detail=f"루브릭이 없다: {item_id}") from None
