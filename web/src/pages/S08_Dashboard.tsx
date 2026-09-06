@@ -498,7 +498,7 @@ export default function S08Dashboard() {
   if (loading && data === null && indicator === null && !blocked) {
     return (
       <main className="s08">
-        <p><Link className="s08__back" to="/admin">← 화면 목록</Link></p>
+        <p><Link className="s08__back" to="/">← 세션 시작</Link></p>
         <p className="s08__loading">집계를 불러오고 있어요…</p>
       </main>
     );
@@ -516,7 +516,7 @@ export default function S08Dashboard() {
             개인의 이해도가 영업 관리 지표로 되돌아가면 이 제품은 고객을 지키는 대신
             압박하는 도구가 돼요. 그래서 <strong>역할 자체를 만들지 않았어요.</strong>
           </p>
-          <p><Link className="s08__back" to="/admin">화면 목록으로</Link></p>
+          <p><Link className="s08__back" to="/">세션 시작 화면으로</Link></p>
         </section>
       </main>
     );
@@ -527,8 +527,10 @@ export default function S08Dashboard() {
       <header className="s08__head">
         <div>
           {/* 이 화면은 세션에 매이지 않아 「돌아갈 곳」이 화면 안에 없었다 — navigate 호출이
-              0건이라 브라우저 뒤로가기 말고는 못 나왔다(#438 ③). 목차로 보낸다. */}
-          <p><Link className="s08__back" to="/admin">← 화면 목록</Link></p>
+              0건이라 브라우저 뒤로가기 말고는 못 나왔다(#438 ③). 심사용 목차(S-00)가 있던
+              동안은 그리로 보냈고, 그 화면을 지운 지금은 흐름의 입구인 S-02 로 보낸다 —
+              **링크를 같이 지우면 출구가 도로 0개가 된다.** */}
+          <p><Link className="s08__back" to="/">← 세션 시작</Link></p>
           <h1>대시보드</h1>
           {/* 범위와 합성 여부는 문장이 아니라 **표식**으로 남긴다. 둘 다 명세가 요구하는
               것이라(F-DSH-001 표시 · 연출 금지) 지우지 않고 최소 형태로 줄였다. */}

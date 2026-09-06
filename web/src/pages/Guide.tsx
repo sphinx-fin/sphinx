@@ -5,19 +5,15 @@
  *
  * `pages/` 의 다른 파일은 전부 `S0n_` 으로 시작한다. 이건 안 붙인다 — 명세 8절의 화면
  * 목록은 S-01~S-08 이고 **여기 새 번호를 얹으면 명세에 없는 화면이 명세 화면인 척**
- * 하게 된다. S-00(목차)이 "흐름 밖" 번호를 받은 것과는 사정이 다르다: 저건 그래도 사람이
- * 조작하는 화면이고, 이건 **다른 화면들에 대해 쓴 문서**다. 그래서 번호 대신 이름이다.
+ * 하게 된다. 예전 S-00(심사·시연용 목차, 삭제됨)이 "흐름 밖" 번호를 받았던 것과는 사정이
+ * 다르다: 저건 그래도 사람이 조작하는 화면이었고, 이건 **다른 화면들에 대해 쓴 문서**다.
+ * 그래서 번호 대신 이름이다.
  *
- * 같은 이유로 **`S00_Admin.tsx` 의 `SCREENS` 에 넣지 않는다.** 그 배열은 심사자가 명세를
- * 들고 대조하는 목록이라, 명세에 없는 항목이 끼면 대조가 어긋난다. `App.tsx` 의 라우트
- * 주석이 "라우트를 늘리면 SCREENS 도 고친다" 고 적어 둔 것의 예외이고, 예외인 이유를
- * 그쪽 주석에도 적어 뒀다.
+ * ── 예전 목차(S-00)와 무엇이 달랐나 ──────────────────────────────────────────
  *
- * ── 목차(S-00)와 무엇이 다른가 ──────────────────────────────────────────────
- *
- * 목차는 **어디로 가는지**를 말하고 여기는 **가서 무엇을 하는지**를 말한다. 목차의 카드는
- * 한 줄 설명 + 전제 + 링크라 이미 화면을 아는 사람에게 쓸모가 있고, 처음 여는 사람은
- * "세션 시작" 을 눌러 놓고 어느 칸을 채워야 하는지에서 멈춘다. 그 자리를 캡처가 메운다 —
+ * 목차는 **어디로 가는지**를 말했고 여기는 **가서 무엇을 하는지**를 말한다. 목차의 카드는
+ * 한 줄 설명 + 전제 + 링크라 이미 화면을 아는 사람에게 쓸모가 있었고, 처음 여는 사람은
+ * "세션 시작" 을 눌러 놓고 어느 칸을 채워야 하는지에서 멈췄다. 그 자리를 캡처가 메운다 —
  * 글로 "상품을 고르고 설문을 채워요" 라고 쓰는 것보다 그 화면을 한 장 보여주는 쪽이 짧다.
  *
  * ── 캡처는 `src/assets/guide/` 에 둔다 (`public/` 이 아니다) ────────────────
@@ -47,9 +43,6 @@
  */
 import { Link } from "react-router-dom";
 import { useElderlyMode } from "../hooks/useElderlyMode";
-// 세션 번호는 목차(S-00)가 소유한다. 여기서 키 문자열을 다시 적으면 두 벌이 되고, 갈리는
-// 날 가이드의 링크만 조용히 남의 세션을 연다.
-import { SID_KEY } from "./S00_Admin";
 import s02Shot from "../assets/guide/s02-session-start.jpg";
 import s03Shot from "../assets/guide/s03-interview.jpg";
 import s04Shot from "../assets/guide/s04-simulator.jpg";
@@ -61,7 +54,7 @@ import s08Shot from "../assets/guide/s08-dashboard.jpg";
 import s08ItemsShot from "../assets/guide/s08-dashboard-items.jpg";
 import "./Guide.css";
 
-/** 창구에서 **누가 이 화면을 잡는가**. S-00 의 `Audience` 와 같은 뜻이다(역할≠RBAC). */
+/** 창구에서 **누가 이 화면을 잡는가**(역할≠RBAC). */
 type Audience = "판매자" | "고객" | "관리자" | "준법감시";
 
 interface Shot {
@@ -254,7 +247,6 @@ const STEPS: readonly Step[] = [
 
 export default function Guide() {
   const { elderly, toggle } = useElderlyMode();
-  const sid = readStoredSid();
 
   return (
     <main className="gd">
@@ -278,9 +270,6 @@ export default function Guide() {
             >
               큰 글씨 {elderly ? "켜짐" : "꺼짐"}
             </button>
-            <Link className="gd__navlink" to="/admin">
-              심사용 화면 목록
-            </Link>
           </div>
         </header>
 
@@ -295,7 +284,7 @@ export default function Guide() {
             </li>
             <li>
               <b>세션 번호가 열쇠예요.</b> S-02 에서 만든 번호로 나머지 화면이 열려요.
-              번호가 없으면 <Link to="/admin">화면 목록</Link>에서 하나 만들면 돼요.
+              번호가 없으면 아래 1단계(세션 시작)에서 하나 만들면 돼요.
             </li>
             <li>
               <b>색은 판정에만 써요.</b> 녹색·노란색·빨간색이 보이면 그건 검사 결과지
@@ -307,7 +296,7 @@ export default function Guide() {
         {/* ── 단계 ─────────────────────────────────────────────────────────── */}
         <ol className="gd__steps">
           {STEPS.map((step, i) => (
-            <StepCard key={step.id} step={step} index={i + 1} sid={sid} />
+            <StepCard key={step.id} step={step} index={i + 1} />
           ))}
         </ol>
 
@@ -320,8 +309,8 @@ export default function Guide() {
             <div>
               <dt>화면이 열리지 않아요</dt>
               <dd>
-                주소에 세션 번호가 들어가는 화면이에요. <Link to="/admin">화면 목록</Link>에서
-                세션을 만들고 그 카드의 「열기」로 들어가요.
+                주소에 세션 번호가 들어가는 화면이에요. 위 1단계(세션 시작)에서 먼저 세션을
+                만들고, 그 번호로 주소를 채워야 열려요.
               </dd>
             </div>
             <div>
@@ -345,15 +334,6 @@ export default function Guide() {
   );
 }
 
-/** 목차가 저장해 둔 세션 번호. 없으면 빈 문자열이고, 그때 링크는 목차로 간다. */
-function readStoredSid(): string {
-  try {
-    return localStorage.getItem(SID_KEY)?.trim() ?? "";
-  } catch {
-    return "";   // 사생활 모드·저장소 차단 — 가이드는 그대로 읽히고 링크만 목차로 간다
-  }
-}
-
 /**
  * 단계 한 장.
  *
@@ -361,11 +341,9 @@ function readStoredSid(): string {
  * 읽는 사람이 글과 그림을 번갈아 오가야 하는데, 이 화면은 처음 보는 화면을 설명하는
  * 자리라 그림이 먼저 와야 글의 "여기" 가 어디인지 정해진다.
  */
-function StepCard({ step, index, sid }: { step: Step; index: number; sid: string }) {
-  const needsSession = step.route.includes(":sid");
-  // 세션이 없으면 그 화면으로 못 보낸다. 죽은 링크를 그리는 대신 목차로 보내고 문구도 바꾼다.
-  const openable = !needsSession || sid !== "";
-  const href = needsSession ? step.route.replace(":sid", encodeURIComponent(sid)) : step.route;
+function StepCard({ step, index }: { step: Step; index: number }) {
+  // 세션 번호를 미리 알 방법이 없다 — 직접 채워야 여는 화면은 링크를 안 그린다.
+  const openable = !step.route.includes(":sid");
 
   return (
     <li className="gd__step">
@@ -415,11 +393,11 @@ function StepCard({ step, index, sid }: { step: Step; index: number; sid: string
 
         <div className="gd__step-foot">
           {openable ? (
-            <Link className="gd__open" to={href}>
+            <Link className="gd__open" to={step.route}>
               이 화면 열어보기
             </Link>
           ) : (
-            <Link className="gd__open gd__open--ghost" to="/admin">
+            <Link className="gd__open gd__open--ghost" to="/">
               세션 만들고 열어보기
             </Link>
           )}
