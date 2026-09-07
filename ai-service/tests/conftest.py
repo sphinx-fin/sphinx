@@ -297,3 +297,20 @@ def _consistency_probe_is_serial_in_tests(monkeypatch):
     from app import scoring
 
     monkeypatch.setattr(scoring, "_parallel_enabled", lambda: False)
+
+
+#: 극성 게이트(F-DET-001 3단계)도 같은 이유로 스위트에서는 순차다 (이슈 #498).
+#:
+#: 위와 같은 성질이다 — `test_polarity_gate.py` 의 스텁이 `complete_json` 인자를 리스트에
+#: 모으고 그 **순서**를 단정한다. 병렬로 돌면 회차마다 갈리는데, 운영에서는 후보들이 서로
+#: 독립이라 없는 문제다.
+#:
+#: ❗**여기는 계량기 문제가 없다.** `#437` 은 스위치를 끄면 `METER.disabled` 가 올라서
+#: 함수로 덮어야 했는데, 극성 게이트는 병렬 여부를 안 센다(호출 수가 안 바뀌므로).
+#: 그래도 **같은 자리에 덮는다** — 두 층이 다른 방식으로 꺼지면 다음 사람이 한쪽만 보고
+#: *"병렬이 왜 안 도나"* 를 틀린 데서 찾는다.
+@pytest.fixture(autouse=True)
+def _polarity_gate_is_serial_in_tests(monkeypatch):
+    from app import misconception
+
+    monkeypatch.setattr(misconception, "_polarity_parallel_enabled", lambda: False)

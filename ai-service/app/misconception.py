@@ -97,6 +97,8 @@
 """
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -384,22 +386,32 @@ class PolarityMeter:
     #: ❗**못 돈 건수.** 0 건과 「모른다」를 가르는 유일한 자리 — 위 docstring 참조.
     not_run: int = 0
     by_type: dict[str, int] = field(default_factory=dict)
+    #: ❗**후보를 병렬로 확인하면서 필요해졌다** (이슈 #498). `+= 1` 은 원자적이지 않아
+    #: 락 없이 여러 스레드가 동시에 세면 **건수가 샌다** — 그리고 그 샘은 조용하다.
+    #: 비교·표시 대상이 아니라 `repr`·`==` 에서 뺀다.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def record_kept(self) -> None:
-        self.asked += 1
-        self.kept += 1
+        with self._lock:
+            self.asked += 1
+            self.kept += 1
 
     def record_dropped(self, type_id: str, *, contradicted: bool) -> None:
-        self.asked += 1
-        self.dropped += 1
-        if contradicted:
-            self.contradicted += 1
-        self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
+        # ❗락은 **본문 전체**를 감싼다. 앞의 둘만 감싸면 `by_type` 의 read-modify-write 가
+        # 밖에 남아 같은 유형 두 건이 동시에 들어올 때 하나가 사라진다 — 그리고 그 샘은
+        # 합계(`dropped`)와 내역(`by_type`)이 **서로 안 맞는** 모양으로만 드러난다.
+        with self._lock:
+            self.asked += 1
+            self.dropped += 1
+            if contradicted:
+                self.contradicted += 1
+            self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
 
     def record_not_run(self) -> None:
         """게이트가 못 돌았다. 후보는 남는다 — 판정만 보면 게이트가 없는 것과 같다."""
-        self.asked += 1
-        self.not_run += 1
+        with self._lock:
+            self.asked += 1
+            self.not_run += 1
 
     def summary(self) -> str:
         return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
@@ -473,6 +485,59 @@ def _polarity_holds(client, misconception_text: str, utterance: str, type_id: st
     return holds
 
 
+#: 극성 확인을 동시에 돌리는 워커 수 (이슈 #498).
+#:
+#: 한 답변의 **후보 수만큼** 호출이 필요하고 그 호출들은 서로 독립이다 — 같은 프롬프트
+#: 구조에 다른 입력이라 순서를 지킬 이유가 없다. 순차로 두면 채점 본체(병렬, ~2~3초) 뒤에
+#: 후보 수만큼 왕복이 **그대로 얹힌다.**
+#:
+#: ❗**호출 수는 안 바뀐다.** `#437`(투기적 재질의)은 등급을 보기 전에 던지느라 **버리는
+#: 호출**이 생겨서 계량기가 그 낭비를 세야 했지만, 여기서는 필요한 N 건을 동시에 부를 뿐이다.
+#: 그래서 *"쿼터가 왜 늘었나"* 라는 질문이 없고, 새 계량기도 안 만든다.
+POLARITY_WORKERS = 4
+
+_POLARITY_POOL = ThreadPoolExecutor(max_workers=POLARITY_WORKERS,
+                                    thread_name_prefix="det-polarity")
+
+
+def _polarity_parallel_enabled() -> bool:
+    """후보를 동시에 확인할 것인가. **함수로 빼 둔 이유가 테스트다**(`#437` 과 같다).
+
+    이 레포의 스텁 상당수가 호출 순서에 매여 있거나 호출 인자를 리스트에 모아 두고 그
+    순서를 단정한다. 병렬로 돌면 그 순서가 회차마다 갈리는데, **운영에서는 후보들이 서로
+    독립이라 없는 문제**이고 스텁의 성질이다. 그래서 `conftest.py` 가 이 함수를 덮어
+    기본을 순차로 두고, 병렬 경로는 스레드 안전한 스텁으로 따로 잰다.
+    """
+    return True
+
+
+def _verdicts(client, matches, text: str) -> list[bool]:
+    """후보별 극성 판정. **입력 순서를 그대로 돌려준다.**
+
+    `executor.map` 이 입력 순서대로 결과를 주므로 호출자가 `zip` 으로 다시 짝지어도
+    후보와 판정이 안 섞인다.
+
+    ❗**후보가 하나면 스레드를 안 쓴다.** 얻는 것이 없고 풀에 넣었다 꺼내는 값만 든다.
+
+    ❗**여기서 예외가 새면 게이트가 채점을 죽인다.** `_polarity_holds` 는 스스로 전부
+    잡아 `True` 로 떨어지지만(P5 0.2절), `executor.map` 은 안에서 난 예외를 **결과를 꺼낼
+    때** 올리므로 그 계약이 나중에 깨지면 여기가 조용히 위험해진다. 게이트는 과탐을 줄이는
+    장치이지 판정을 만드는 장치가 아니므로(P1) 한 겹 더 막는다.
+    """
+    def holds(match) -> bool:
+        try:
+            return _polarity_holds(client, match.matched_pattern, text, match.type_id)
+        except Exception as exc:                    # noqa: BLE001 — 게이트가 채점을 죽이면 안 된다
+            log.info("F-DET-001 극성 게이트가 예외로 끝났다: %s — 후보를 그대로 둔다(P5 0.2절). type_id=%s",
+                     type(exc).__name__, match.type_id)
+            METER.record_not_run()
+            return True
+
+    if len(matches) == 1 or not _polarity_parallel_enabled():
+        return [holds(m) for m in matches]
+    return list(_POLARITY_POOL.map(holds, matches))
+
+
 def apply_polarity_gate(
     response: MisconceptionResponse, text: str, *, client
 ) -> MisconceptionResponse:
@@ -487,10 +552,8 @@ def apply_polarity_gate(
     """
     if not response.matches:
         return response
-    kept = [
-        m for m in response.matches
-        if _polarity_holds(client, m.matched_pattern, text, m.type_id)
-    ]
+    kept = [m for m, holds in zip(response.matches, _verdicts(client, response.matches, text))
+            if holds]
     if len(kept) == len(response.matches):
         return response
     log.info(
