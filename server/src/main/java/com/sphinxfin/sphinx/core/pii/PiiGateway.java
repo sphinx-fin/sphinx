@@ -56,6 +56,20 @@ public final class PiiGateway {
     }
 
     /**
+     * 이 경계가 지우는 <b>패턴 종류 전부</b> — 마스킹이 도는 순서대로 (이슈 #326).
+     *
+     * <p>조회 경로가 이 목록으로 <b>한 번도 안 걸린 종류를 0 으로 채운다.</b> 안 걸린 종류의
+     * 키를 아예 빼면 <i>"0 건이다"</i> 와 <i>"그런 패턴이 없다"</i> 가 화면에서 같아진다 —
+     * 결정 5.40({@code unreadable} 을 0 으로 접지 않는다)이 지키려는 것과 같은 구별이다.
+     *
+     * <p>순서에 뜻이 있다: {@code CARD}·{@code PHONE} 이 {@code ACCOUNT} 보다 앞이라
+     * 카드·전화가 먼저 지워지고 남은 것만 계좌로 센다. 그래서 이 값은 정렬하지 않는다.
+     */
+    public static java.util.List<String> kinds() {
+        return java.util.List.copyOf(PATTERNS.keySet());
+    }
+
+    /**
      * 마스킹 결과와 <b>무엇이 몇 번 지워졌는지</b>. (이슈 #326)
      *
      * @param text 마스킹된 문면
