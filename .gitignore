@@ -11,6 +11,10 @@ __pycache__/
 # 그 링크가 실제로 커밋됐다(PR #509). 링크는 절대경로라 다른 사람 머신에서는 깨진다.
 node_modules
 dist/
+# CI 의 데모 답지 대조(이슈 #539)가 만드는 **양성 대조 빌드**다 —
+# `.github/workflows/ci.yml`. 검사가 실패하면 `set -e` 로 죽어 `rm -rf` 에 못 가므로
+# 로컬에서 돌린 뒤 남는다. `dist/` 는 슬래시가 있어 이 이름을 안 문다.
+dist-demo-captions/
 data/synth_sessions/*.json
 eval/labeling/*.xlsx
 .DS_Store

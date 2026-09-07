@@ -27,8 +27,25 @@ declare const process: { env: Record<string, string | undefined> };
 
 const API_TARGET = process.env.SPHINX_API_TARGET ?? "http://localhost:8000";
 
+/**
+ * 데모 답지 캡션(S-03 설계 판단 ⑤ · 이슈 #539)을 빌드에 넣을지.
+ *
+ * ❗**`import.meta.env` 를 화면에서 직접 읽지 않고 여기서 리터럴로 굳힌다.** 화면 조건이
+ * 리터럴이어야 `false && …` 가 접히고, 그래야 캡션 JSX 와 `lib/demoAnswers` 모듈이
+ * **번들에서 통째로 빠진다.** `import.meta.env.VITE_…` 는 변수가 없는 빌드에서 객체 속성
+ * 접근으로 남아 접히지 않을 수 있고, 그러면 답지 문자열이 꺼진 빌드에도 실린다 —
+ * 화면에 안 보일 뿐 페이지 소스에는 있는 상태이고, 그건 이 플래그를 둔 이유를 없앤다.
+ *
+ * 값은 배포가 준다: `deploy.yml` → compose `build.args` → `web/Dockerfile` 의 ARG.
+ * **alpha 에만** 주고 prod 는 빈 값이다(`SPHINX_DEMO_OPEN` 과 같은 배선).
+ */
+const DEMO_CAPTIONS = process.env.VITE_SPHINX_DEMO_CAPTIONS === "1";
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __DEMO_CAPTIONS__: JSON.stringify(DEMO_CAPTIONS),
+  },
   server: {
     proxy: {
       "/api": {
