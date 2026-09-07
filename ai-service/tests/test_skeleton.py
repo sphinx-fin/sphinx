@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -429,15 +430,39 @@ def test_the_narrow_patterns_are_never_relaxed():
 
 
 def test_the_relaxation_names_are_real_and_partial():
-    """★ 완화 목록에 오타가 있으면 **아무것도 안 끄면서 조용히 통과**한다."""
+    """★ 완화 목록에 오타가 있으면 **아무것도 안 끄면서 조용히 통과**한다.
+
+    범위를 늘려도 같이 돈다 — 표를 순회한다(`#534` 리뷰, 오준서).
+    """
     from app import pii
 
-    unknown = pii.RELAXED_IN_PUBLIC_DOCUMENT - set(pii.BROAD)
-    assert not unknown, f"BROAD 에 없는 이름이 완화 목록에 있다: {sorted(unknown)}"
-    assert pii.RELAXED_IN_PUBLIC_DOCUMENT, "완화가 비면 정상 문서가 422 로 막힌다"
-    assert set(pii.BROAD) - pii.RELAXED_IN_PUBLIC_DOCUMENT, (
-        "넓은 패턴을 통째로 끄면 공시 문서 경로에 넓은 방어선이 하나도 안 남는다"
+    for scope, rule in pii.SCOPE_RULES.items():
+        unknown = rule["relaxed"] - set(pii.BROAD)
+        assert not unknown, f"{scope}: BROAD 에 없는 이름이 완화 목록에 있다: {sorted(unknown)}"
+        assert set(pii.BROAD) - rule["relaxed"], (
+            f"{scope}: 넓은 패턴을 통째로 끄면 넓은 방어선이 하나도 안 남는다"
+        )
+    assert pii.SCOPE_RULES["public_document"]["relaxed"], (
+        "공시 문서 완화가 비면 정상 문서가 422 로 막힌다 — 그게 이 범위가 존재하는 이유다"
     )
+    assert not pii.SCOPE_RULES["customer"]["relaxed"], (
+        "고객 범위는 무엇도 완화하지 않는다 — 거짓양성 비용이 낮은 쪽이다(P3)"
+    )
+
+
+def test_the_scope_table_is_the_only_place_that_declares_a_scope():
+    """★ **범위를 반쪽만 들이는 경로가 없어야 한다** (`#534` 리뷰, 오준서).
+
+    예전에는 이 사실이 세 곳의 `scope == "public_document"` 조건으로 흩어져 있었다.
+    범위가 하나 늘 때 두 곳만 고쳐도 조용히 돌던 자리다.
+    """
+    from app import pii
+
+    assert set(pii.SCOPES) == set(pii.SCOPE_RULES), "SCOPES 가 표에서 파생되지 않는다"
+    for scope, rule in pii.SCOPE_RULES.items():
+        assert set(rule) == {"relaxed", "prestrip"}, f"{scope}: 표의 칸이 다르다 — {sorted(rule)}"
+    with pytest.raises(ValueError):
+        pii.detect("본문", scope="branch_office")
 
 
 def test_the_customer_scope_relaxes_nothing():

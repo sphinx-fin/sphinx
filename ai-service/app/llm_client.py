@@ -232,8 +232,14 @@ class LlmClient:
         빼먹은 사람이 `EMAIL`·`CARD`·`ACCOUNT` 검사를 끈 채로 내보낸다.** 넓은 검사를
         끄는 것은 **그럴 이유를 아는 호출부**가 명시한다.
 
-            SPECIFIC (항상)       RRN · PHONE
-            BROAD (customer 만)   EMAIL · CARD · ACCOUNT
+        ❗**이 표를 `pii.SCOPE_RULES` 에 적지 않고 여기 베끼면 낡는다** — 실제로 낡았다.
+        `#534` 까지 여기에 *"BROAD(customer 만) EMAIL · CARD · ACCOUNT"* 라고 적혀
+        있었는데, 그 PR 이 완화를 «측정된 오탐만큼만» 으로 좁혀서 `public_document` 에서도
+        `ACCOUNT` 가 켜졌다(법인 유선번호를 선지우기로 걷는다). 지금 참인 값은 표에 있다:
+
+            SPECIFIC          RRN · PHONE — 어느 범위에서도 검사한다
+            BROAD             EMAIL · CARD · ACCOUNT
+            범위별 완화·선지우기   pii.SCOPE_RULES 를 본다
 
         실패 방향을 뒤집은 것이다 — 잊으면 조용히 약해지는 대신 **엄격한 쪽으로 죽는다.**
 

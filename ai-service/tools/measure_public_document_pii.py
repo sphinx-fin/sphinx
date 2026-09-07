@@ -126,7 +126,7 @@ def main(show_matches: bool = False) -> None:
     #   (`#534` 리뷰, 오준서). 그래서 **완화의 이유를 세지 않고 적는다.**
     print("\n── 완화 목록과 그 이유 (0건이 근거가 아니다)")
     for name in sorted(pii.BROAD):
-        relaxed = name in pii.RELAXED_IN_PUBLIC_DOCUMENT
+        relaxed = name in pii.SCOPE_RULES["public_document"]["relaxed"]
         print(f"  {name:8} {'끔  ' if relaxed else '검사'} {RELAXED_BECAUSE.get(name, '실증된 오탐 없음 — 켜 둔다')}")
 
     print("\n── 법인 연락처 선지우기가 실제로 하는 일")
