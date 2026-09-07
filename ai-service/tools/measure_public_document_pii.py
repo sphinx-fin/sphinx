@@ -35,25 +35,65 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from app import parsing, pii  # noqa: E402
 
-DOCUMENTS = pathlib.Path(__file__).resolve().parents[2] / "data" / "documents"
+#: ❗**파싱이 읽는 뿌리에서 글롭한다.** 레포 경로로 글롭하고 파싱은 `documents_root()`
+#: (= `SPHINX_DATA_DIR`)로 하면, 그 둘이 다른 데를 가리킬 때 **전부 실패하는데 결론은
+#: 정상처럼 인쇄된다**(`#534` 리뷰, 오준서).
+#: 완화의 **이유**. 세는 것이 아니라 적는 것이다 — 0건은 근거가 아니다.
+RELAXED_BECAUSE = {
+    "CARD": "실증된 오탐: 공백으로 나뉜 4자리 넷(연도 표·지수 표)이 전부 걸린다",
+    "EMAIL": "법인 문의 이메일이 정상 인쇄된다. 이 코퍼스 0건은 「없다」의 증거가 아니다",
+}
+
+#: 실측된 법인 대표번호 — `CORPORATE_CONTACT` 가 지워야 하는 것.
+CORPORATE_SAMPLES = ("문의 02-785-7424", "문의 02-2262-6600")
+
+#: `CARD` 를 켜면 죽는 문면. 이 코퍼스에는 없지만 **ELS 설명서에 흔하다.**
+CARD_FALSE_POSITIVES = (
+    "평가일 2024 2025 2026 2027 만기",
+    "기초자산 지수 3245 1180 2870 4410 종가",
+)
+
+
+def documents_dir() -> pathlib.Path:
+    return parsing.documents_root() / "documents"
 
 
 def broad_hits(text: str) -> dict[str, list[str]]:
-    """`detect()` 와 같은 순서로 좁은 패턴을 지운 뒤 넓은 패턴을 센다."""
-    residual = pii.PLACEHOLDER.sub("", text)
-    for pattern in pii.SPECIFIC.values():
-        residual = pattern.sub(" ", residual)
+    """넓은 패턴이 실제로 무엇을 물었나.
+
+    ❗**파이프라인을 베끼지 않고 `pii.residual_for_broad()` 를 부른다.** 베끼면
+    `SPECIFIC`·`CORPORATE_CONTACT` 가 늘어도 **도구는 옛 숫자를 계속 보고하고 아무
+    테스트도 안 깨진다**(`#534` 리뷰, 오준서).
+    """
+    residual = pii.residual_for_broad(text, scope="public_document")
     return {name: found for name, pattern in pii.BROAD.items()
             if (found := pattern.findall(residual))}
 
 
-def main() -> None:
-    documents = sorted(DOCUMENTS.glob("*.pdf"))
-    if not documents:
-        raise SystemExit(f"문서를 못 찾았다: {DOCUMENTS} — data/documents 가 커밋돼 있어야 한다")
+def checked_surface(parsed: dict) -> str:
+    """미들웨어가 **실제로 훑는** 문자열 전부.
 
-    print(f"커밋된 공시 문서 {len(documents)}건 · 넓은 패턴이 몇 번 걸리나\n")
+    ❗`pages[].text` 만 보면 안 된다. `assert_payload_clean` 은 `_walk_strings` 로 본문의
+    **모든** 문자열을 훑고, `parsed_document.tables` 도 `/internal/extract` 본문의 일부다.
+    표 셀에서 나는 오탐을 0 으로 보고하면서 미들웨어는 422 를 내는 상태가 된다
+    (`#534` 리뷰, 오준서).
+    """
+    return "\n".join(text for _, text in pii._walk_strings(parsed))
+
+
+def _masked(value: str) -> str:
+    """길이와 모양만 남긴다. 값은 안 남긴다."""
+    return f"<{len(value)}자>"
+
+
+def main(show_matches: bool = False) -> None:
+    documents = sorted(documents_dir().glob("*.pdf"))
+    if not documents:
+        raise SystemExit(f"문서를 못 찾았다: {documents_dir()} — SPHINX_DATA_DIR 를 본다")
+
+    print(f"공시 문서 후보 {len(documents)}건 · 넓은 패턴이 몇 번 걸리나\n")
     total: collections.Counter[str] = collections.Counter()
+    parsed_ok = 0
     for path in documents:
         try:
             parsed = parsing.parse_upload(f"documents/{path.name}", product_type="ELS",
@@ -61,26 +101,47 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001 — 한 건이 안 열려도 나머지를 재야 한다
             print(f"  ⚠ {path.name}: {type(exc).__name__} — 건너뛴다")
             continue
-        hits = broad_hits("\n".join(page["text"] for page in parsed["pages"]))
+        parsed_ok += 1
+        hits = broad_hits(checked_surface(parsed))
         total.update({name: len(found) for name, found in hits.items()})
         print(f"  {path.name[:46]:48} {({k: len(v) for k, v in hits.items()}) or '없음'}")
         for name, found in hits.items():
-            # ❗원문 전체를 찍지 않는다. 걸린 조각만, 그리고 넉넉히 자른다.
-            print(f"       {name}: {found[:4]}")
+            # ❗**기본은 마스킹이다.** 이 도구의 전제가 «모집단이 임의의 ADMIN 업로드» 라,
+            #   실제 업로드에 돌리면 진짜 카드번호·개인 이메일이 터미널·CI 로그·PR 본문으로
+            #   나간다. `PiiDetected` 가 패턴 이름만 들고 다니는 이유와 같다(`#534` 리뷰).
+            shown = found[:4] if show_matches else [_masked(x) for x in found[:4]]
+            print(f"       {name}: {shown}")
 
-    print(f"\n합계 {dict(total)}")
-    print(f"\n지금 끄는 것: {sorted(pii.RELAXED_IN_PUBLIC_DOCUMENT)}")
-    unnecessary = sorted(pii.RELAXED_IN_PUBLIC_DOCUMENT - set(total))
-    if unnecessary:
-        print(f"  ❗{unnecessary} 는 이 코퍼스에서 한 번도 안 걸렸다 — 끌 이유가 아직 없다.")
-        print("     표본이 작아 「없다」의 증거는 아니지만, 완화를 넓힐 때 근거로 쓰지 않는다.")
-    still_checked = sorted(set(pii.BROAD) - pii.RELAXED_IN_PUBLIC_DOCUMENT)
-    print(f"이 범위에서도 검사하는 것: {still_checked}")
-    for name in still_checked:
-        if name in total:
-            print(f"  ❗{name} 이 정상 문서에서 {total[name]}건 걸린다 — 추출이 422 로 막힌다.")
-            print("     완화에 넣을지 판단이 필요하다(막는 쪽이 P5 방향이지만 기능이 죽는다).")
+    # ❗**「재서 0」과 「아무것도 못 쟀다」를 가른다.** 파싱이 전부 실패해도 아래 결론이
+    #   정상처럼 인쇄되면, 보안 결정의 유일한 근거가 빈 측정 위에 선다(`#534` 리뷰).
+    if parsed_ok == 0:
+        raise SystemExit(
+            f"❗파싱에 성공한 문서가 0건이다 ({len(documents)}건 시도). "
+            f"SPHINX_DATA_DIR 가 {parsing.documents_root()} 를 가리키는지 본다 — "
+            "이 도구의 결론을 인용하면 안 된다"
+        )
+    print(f"\n실제로 파싱된 문서 {parsed_ok}/{len(documents)}건 · 합계 {dict(total)}")
+    # ❗**0 건은 판단 근거가 아니다.** 예전 판이 같은 0 을 「켤 근거」(CARD)와
+    #   「끌 근거」(EMAIL) 양쪽으로 읽었다 — 다음 사람이 어느 규칙인지 알 수 없다
+    #   (`#534` 리뷰, 오준서). 그래서 **완화의 이유를 세지 않고 적는다.**
+    print("\n── 완화 목록과 그 이유 (0건이 근거가 아니다)")
+    for name in sorted(pii.BROAD):
+        relaxed = name in pii.RELAXED_IN_PUBLIC_DOCUMENT
+        print(f"  {name:8} {'끔  ' if relaxed else '검사'} {RELAXED_BECAUSE.get(name, '실증된 오탐 없음 — 켜 둔다')}")
+
+    print("\n── 법인 연락처 선지우기가 실제로 하는 일")
+    for sample in CORPORATE_SAMPLES:
+        raw = {name: len(found) for name, pattern in pii.BROAD.items()
+               if (found := pattern.findall(sample))}
+        after = pii.detect(sample, scope="public_document")
+        print(f"  {sample:26} 지우기 전 {raw or '없음'} · 판정 {after or '통과'}")
+
+    print("\n── ❗CARD 를 켜면 무엇이 죽나 (실증된 오탐 — 이 코퍼스엔 없다)")
+    for sample in CARD_FALSE_POSITIVES:
+        hit = bool(pii.BROAD["CARD"].search(sample))
+        print(f"  {'걸린다' if hit else '안 걸린다'}  {sample}")
+    print("  → 공백으로 나뉜 4자리 넷이면 전부 걸린다. pdfplumber 는 표 한 행을 그렇게 낸다.")
 
 
 if __name__ == "__main__":
-    main()
+    main(show_matches="--show-matches" in sys.argv)

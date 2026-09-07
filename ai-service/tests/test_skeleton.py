@@ -305,15 +305,71 @@ def test_no_duplicate_test_names():
 #
 # ❗그리고 `#527`(업로드 실배선) 이후 이 자리에 오는 것이 **사람이 고른 문서**에서
 # **ADMIN 이 올린 임의의 PDF** 로 바뀌었다. *"공시 자료라서 안전하다"* 가 조건부가 됐다.
-def test_a_card_number_is_still_caught_in_a_public_document():
-    """★ 카드번호는 공시 문서 범위에서도 막는다.
+def _extract(monkeypatch, *, pages=None, tables=None):
+    """미들웨어를 **실제로 지나게** 한다.
 
-    상품설명서에 16자리 카드번호가 인쇄될 이유가 없다. 걸린다면 **올린 파일이 설명서가
-    아니라는 신호**이고, 업로드가 붙은 뒤로는 그게 현실적인 운영 실수다.
+    ❗`pii.detect()` 를 직접 부르면 `PiiGuardMiddleware._scope()` 나
+    `PUBLIC_DOCUMENT_PATHS` 가 어긋나도 전부 초록이다(`#534` 리뷰, 오준서).
+    기존 `test_corporate_phone_in_document_is_not_blocked` 의 관례를 따른다 —
+    핸들러를 대체해 실제 LLM 을 안 부른다.
+    """
+    from app import routes
+    from app.schemas import ExtractResponse
+
+    monkeypatch.setattr(routes.extraction, "extract",
+                        lambda *a, **k: ExtractResponse(items=[], warnings=[]))
+    document = {"document_id": "d", "product_type": "ELS", "parser_version": "x",
+                "pages": pages or [{"page": 1, "text": "본문"}]}
+    if tables is not None:
+        document["tables"] = tables
+    return client.post("/internal/extract",
+                       json={"product_id": "p", "parsed_document": document})
+
+
+def test_a_real_account_number_is_caught_in_a_public_document(monkeypatch):
+    """★ **이게 이 변경의 목적이다.** 예전에는 `ACCOUNT` 를 통째로 꺼서 검사 밖이었다.
+
+    법인 대표번호 하나가 오탐을 냈다는 이유로 진짜 계좌번호까지 놓쳤다 —
+    `CORPORATE_CONTACT` 가 그 오탐만 지우므로 이제 켠 채로 둘 수 있다.
+    """
+    resp = _extract(monkeypatch, pages=[{"page": 1, "text": "입금 계좌 110-234-567890"}])
+    assert resp.status_code == 422
+    assert resp.json()["kinds"] == ["ACCOUNT"]
+
+
+def test_a_corporate_landline_still_passes(monkeypatch):
+    """실측된 오탐 둘은 그대로 통과해야 한다 — 막으면 정상 문서의 추출이 죽는다."""
+    for phone in ("02-785-7424", "02-2262-6600"):
+        resp = _extract(monkeypatch, pages=[{"page": 1, "text": f"문의 {phone}"}])
+        assert resp.status_code == 200, f"{phone} 가 막혔다: {resp.json()}"
+
+
+def test_a_numeric_table_row_is_not_mistaken_for_a_card(monkeypatch):
+    """★ **`CARD` 를 켜면 죽는 자리**(`#534` 리뷰, 오준서).
+
+    `(?:\d{4}[-\s]?){3}\d{4}` 는 **공백으로 나뉜 4자리 넷이면 전부** 문다. ELS 설명서의
+    조기상환 평가일 표·지수 레벨 행이면 바로 닿고, pdfplumber 는 표 한 행을 공백으로
+    이어 붙인 한 줄로 낸다. 켜면 운영자가 올린 정상 문서가 422 로 죽는다.
     """
     from app import pii
 
-    assert "CARD" in pii.detect("결제수단 4111-1111-1111-1111", scope="public_document")
+    for row in ("평가일 2024 2025 2026 2027 만기", "기초자산 지수 3245 1180 2870 4410"):
+        assert pii.BROAD["CARD"].search(row), f"전제가 깨졌다 — 이 문면이 CARD 에 안 걸린다: {row}"
+        resp = _extract(monkeypatch, pages=[{"page": 1, "text": row}])
+        assert resp.status_code == 200, f"숫자 표가 막혔다: {row} → {resp.json()}"
+
+
+def test_the_table_cells_are_checked_too(monkeypatch):
+    """★ `tables` 도 본문의 일부다 — 페이지 텍스트만 재면 **차단 표면보다 작은 데서** 잰다.
+
+    `assert_payload_clean` 은 `_walk_strings` 로 본문의 모든 문자열을 훑는다
+    (`#534` 리뷰, 오준서).
+    """
+    resp = _extract(monkeypatch,
+                    pages=[{"page": 1, "text": "본문에는 없다"}],
+                    tables=[{"page": 1, "rows": [["계좌", "110-234-567890"]]}])
+    assert resp.status_code == 422
+    assert resp.json()["kinds"] == ["ACCOUNT"]
 
 
 def test_the_measured_false_positive_stays_relaxed():
@@ -351,3 +407,18 @@ def test_the_customer_scope_relaxes_nothing():
 
     assert "ACCOUNT" in pii.detect("계좌 123-456-7890", scope="customer")
     assert "EMAIL" in pii.detect("메일 a@b.co.kr", scope="customer")
+
+
+def test_the_corporate_strip_does_not_reach_customer_text():
+    """★ 법인 연락처 선지우기가 **고객 범위로 새면 안 된다.**
+
+    유선번호는 개인 집전화일 수 있다. 그 범위는 거짓양성 비용이 낮은 쪽이라(P3) 지우지
+    않는다 — 지우면 고객 발화의 집전화가 조용히 통과한다.
+
+    ❗이 대조가 없으면 범위 조건을 지우는 변이가 안 잡힌다. 기존 대조가 쓰던
+    `123-456-7890` 은 지역번호로 안 시작해 `CORPORATE_CONTACT` 에 애초에 안 걸린다.
+    """
+    from app import pii
+
+    assert pii.detect("문의 02-785-7424", scope="public_document") == []
+    assert "ACCOUNT" in pii.detect("집 02-785-7424 로 연락 주세요", scope="customer")
