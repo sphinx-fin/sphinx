@@ -88,15 +88,24 @@ def test_reproduction_commands_point_at_files_that_exist() -> None:
     assert not missing, f"문서가 부르는 도구가 없다: {missing}"
 
 
-def test_the_measurement_tool_is_not_wired_into_scoring() -> None:
+_TOOLS_NEVER_IMPORTED = ("tune_ngram_threshold", "measure_selfconsistency_rate")
+
+
+@pytest.mark.parametrize("tool", _TOOLS_NEVER_IMPORTED)
+def test_the_measurement_tool_is_not_wired_into_scoring(tool: str) -> None:
     """측정 도구가 채점 경로에 들어가면 안 된다.
 
     `condition_counters` 와 같은 규약이다 — 도구는 근거를 만들 뿐 판정하지 않는다(P1).
 
+    ❗**목록으로 둔다.** 도구가 둘이 되는 순간 이름 하나만 보는 검사는 나머지를 안 본다 —
+    `EchoCapBelowR05Test` 가 캡이 셋이 되는 동안 하나만 보고 있던 것과 같은 모양이다.
+    그리고 이 도구들은 **실 LLM 을 호출**하므로, 배선되면 채점이 느려지고 요금이 는다
+    (결과는 맞게 나와서 **지연과 요금으로만** 드러난다).
+
     원문 grep 이 아니라 `ast` 로 **import 문만** 본다. 문면을 세면 주석에 도구 이름을 적은
     것까지 걸려서, 판별에 안 쓰이는 줄이 판별을 바꾼다(`#368` 에서 밟은 그 결함).
     """
-    offenders = importers_of("tune_ngram_threshold", APP)
+    offenders = importers_of(tool, APP)
     assert not offenders, f"app/ 이 측정 도구를 import 한다: {offenders}"
 
 
