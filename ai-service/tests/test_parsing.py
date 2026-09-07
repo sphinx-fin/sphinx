@@ -406,3 +406,75 @@ def test_lines_outside_tables_do_not_move(real_case):
                     raise AssertionError(
                         f"p{index + 1} 표 밖 줄이 사라졌거나 순서가 바뀌었다: {expected!r}"
                     ) from None
+
+
+# ── 권한 거부는 넷째 갈래다 (이슈 #521 · PR #532 리뷰) ────────────────────────
+#
+# `#532` 가 업로드 볼륨(`/data/uploads`)을 붙이면서 **이 스택의 첫 rw 마운트**가 생겼다.
+# 그전에는 마운트가 전부 `:ro` 고 파일은 git 이 넣어 준 것이라 권한이 어긋날 자리가 없었다.
+# 지금은 `docker volume create` 가 만든 볼륨 루트가 `root:root` 이고 server 는 비루트로
+# 도므로, 소유권을 맞추지 않으면 그 트리를 못 읽는다.
+#
+# ❗**파일 권한(`chmod 000`)으로 재지 않는다.** root 로 도는 러너에서는 그 권한이 무효라
+# 테스트가 조용히 통과한다 — CI 가 skip 을 실패로 보는 것과 같은 이유로, 「재서 통과」와
+# 「못 재고 통과」를 갈라야 한다. 그래서 실패 지점에 `PermissionError` 를 직접 넣는다.
+
+
+def _fake_permission_error(*_args, **_kwargs):
+    raise PermissionError(13, "Permission denied")
+
+
+def test_a_permission_error_becomes_its_own_refusal(monkeypatch, tmp_path):
+    """❗`PermissionError` 가 `ParseRefused` 계열 **밖으로 새면** 500 이 되고, 상류가 그것을
+    502 `AI_SERVICE_UNAVAILABLE` 로 뭉쳐 「ai-service 장애」로 오진한다(#532 리뷰 실측).
+    """
+    doc = tmp_path / "x.pdf"
+    doc.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(parsing, "parse_document", _fake_permission_error)
+
+    with pytest.raises(parsing.DocumentAccessDenied) as caught:
+        parsing.parse_upload("x.pdf", product_type="ELS", root=tmp_path)
+
+    # 원인을 메시지가 말해야 한다 — 상태 코드로는 이 사실을 말할 수 없다(그 클래스 docstring).
+    assert "권한" in str(caught.value)
+    assert "10001" in str(caught.value), "고칠 자리(볼륨 소유권)를 가리켜야 한다"
+
+
+def test_the_manual_override_path_is_covered_too(monkeypatch, tmp_path):
+    """파스 출력 JSON 을 읽는 경로도 같은 갈래로 간다.
+
+    `_manual_override` 는 `parse_document` 를 안 지나므로 위 단정이 이 자리를 덮지 않는다.
+    """
+    doc = tmp_path / "x.pdf"
+    doc.write_bytes(b"%PDF-1.4\n")
+    (tmp_path / "x.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(parsing, "_manual_override", _fake_permission_error)
+
+    with pytest.raises(parsing.DocumentAccessDenied):
+        parsing.parse_upload("x.pdf", product_type="ELS", root=tmp_path)
+
+
+def test_the_four_refusals_are_distinct_types():
+    """★ 넷이 서로 다른 타입이다 — 하나로 뭉치면 라우트가 코드를 못 가른다.
+
+    `ParseRefused` docstring 이 *"고치는 자리가 전부 다르다"* 로 그 이유를 적어 뒀다.
+    """
+    four = (parsing.DocumentPathRejected, parsing.DocumentNotFound,
+            parsing.DocumentUnreadable, parsing.DocumentAccessDenied)
+    assert len(set(four)) == 4
+    for cls in four:
+        assert issubclass(cls, parsing.ParseRefused)
+    # ❗권한 거부는 「문서가 안 열린다」가 아니다 — 문서는 멀쩡하고 못 읽는 것이 우리 쪽이다.
+    assert not issubclass(parsing.DocumentAccessDenied, parsing.DocumentUnreadable)
+    assert not issubclass(parsing.DocumentAccessDenied, parsing.DocumentNotFound)
+
+
+def test_a_readable_document_still_parses(tmp_path):
+    """★ 양성 대조. 위 단정들이 「무엇을 걸어도 거부」로 통과하면 아무것도 안 잰다."""
+    src = pathlib.Path(__file__).resolve().parents[2] / "data" / "documents"
+    pdfs = sorted(src.glob("els_*.pdf"))
+    assert pdfs, "실문서가 없으면 이 대조가 성립하지 않는다 — data/ 가 커밋돼 있어야 한다"
+
+    out = parsing.parse_upload(f"documents/{pdfs[0].name}", product_type="ELS",
+                               root=src.parent)
+    assert out["pages"], "정상 문서가 파싱돼야 위 거부 단정들이 뜻을 갖는다"

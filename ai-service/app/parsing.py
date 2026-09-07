@@ -545,8 +545,9 @@ def verify_span(doc: dict, source_span: dict, value_text: str) -> bool:
 class ParseRefused(Exception):
     """파싱을 시작하지 못했다. 하위 타입이 이유를 가르고, 라우트가 그것으로 상태 코드를 고른다.
 
-    세 이유를 한 코드로 묶으면 안 된다 — 고치는 자리가 전부 다르다. 경로 규칙 위반은
-    부르는 쪽 배선, 파일 없음은 업로드·마운트, 못 읽음은 문서 자체다.
+    네 이유를 한 코드로 묶으면 안 된다 — 고치는 자리가 전부 다르다. 경로 규칙 위반은
+    부르는 쪽 배선, 파일 없음은 업로드·마운트, 못 읽음은 문서 자체, **권한 거부는 볼륨
+    소유권**이다.
     """
 
 
@@ -560,6 +561,38 @@ class DocumentNotFound(ParseRefused):
 
 class DocumentUnreadable(ParseRefused):
     """PDF 로 열리지 않는다 — 형식 오류·암호화·페이지 0."""
+
+
+class DocumentAccessDenied(ParseRefused):
+    """뿌리 안이고 파일도 있는데 **읽을 권한이 없다** (이슈 #521 · PR #532 리뷰, 윤지석).
+
+    ❗**위 셋 중 어디에도 안 맞는다.** `DocumentNotFound` 는 거짓이고(파일은 있다)
+    `DocumentUnreadable` 도 거짓이다(문서는 멀쩡하다). 고치는 자리가 **볼륨 소유권**이라
+    넷째 갈래가 된다 — 이 클래스의 존재 이유가 그것이다.
+
+    ## 왜 이 갈래가 생겼나
+
+    `#532` 가 업로드 볼륨(`/data/uploads`)을 붙이면서 **이 스택의 첫 rw 마운트**가 생겼다.
+    그전에는 마운트가 전부 `:ro` 고 파일은 git 이 넣어 준 것이라 권한이 어긋날 자리가
+    없었다. 지금은 `docker volume create` 가 만든 볼륨 루트가 `root:root` 이고 server 는
+    비루트(10001)로 도므로, 소유권을 맞추지 않으면 그 트리를 못 읽는다.
+
+    실측(`#532` 리뷰): `chmod 000` 한 파일에 `parse_upload()` 를 걸면 `PermissionError` 가
+    **`ParseRefused` 계열 밖으로** 새어 500 이 됐고, Spring 이 그것을 502
+    `AI_SERVICE_UNAVAILABLE` 로 뭉쳐 **「ai-service 장애」로 오진**됐다.
+
+    ## ❗상태 코드로는 이 사실을 말할 수 없다
+
+    라우트가 이 타입을 어떻게 매핑해도 부족하다. 4xx 로 두면 *"요청이 잘못됐다"* 가 되는데
+    요청은 정상이고, 5xx 는 Spring 이 다시 502 로 뭉친다. **어느 코드도 「ai-service 는
+    멀쩡하고 볼륨 권한만 어긋났다」를 말하지 못한다** — 그게 `#531` 이 `/ops/status` 를
+    별도 엔드포인트로 낸 이유의 그 종류다.
+
+    그래서 이 클래스가 하는 일은 **원인을 타입과 메시지에 남기는 것**이다. 로그에서
+    갈리고, 다음 사람이 위 셋을 볼 때 넷째가 있다는 것을 안다. 화면에서 가르는 것은
+    `/ops/status` 의 `data-volumes` 가 **쓰기 가능 여부**를 보는 쪽이 답이다(`#532` 에
+    요청해 뒀다).
+    """
 
 
 #: pdfplumber 는 pdfminer 예외를 자기 타입으로 감싼다. 핀이 없는 의존성이라(requirements.txt)
@@ -720,10 +753,19 @@ def parse_upload(
     if not path.is_file():
         raise DocumentNotFound(f"문서가 없다: {document_path!r}")
 
-    override = path.with_suffix(".json")
-    if override.is_file():
-        return _manual_override(override, product_type=product_type,
-                                document_id=document_id, parsed_at=parsed_at)
+    # ❗**권한을 미리 보지 않는다** — `os.access()` 로 앞서 확인하면 확인과 열기 사이에
+    #   바뀔 수 있고(TOCTOU), 무엇보다 **실제 실패 지점에서 잡는 것이 정확하다.** 여기서
+    #   감싸는 이유는 `PermissionError` 가 `ParseRefused` 계열 밖이라 그대로 새면 500 이
+    #   되고 상류가 그것을 「ai-service 장애」로 오진하기 때문이다(#532 리뷰).
+    try:
+        override = path.with_suffix(".json")
+        if override.is_file():
+            return _manual_override(override, product_type=product_type,
+                                    document_id=document_id, parsed_at=parsed_at)
+    except PermissionError as exc:
+        raise DocumentAccessDenied(
+            f"파스 출력을 읽을 권한이 없다: {override.name!r} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
 
     try:
         return parse_document(
@@ -736,6 +778,13 @@ def parse_upload(
         # parse_document 가 내는 것: 데모 범위 밖 product_type · 페이지 0.
         # 둘 다 입력 문제라 500 이 아니다.
         raise DocumentUnreadable(str(exc)) from exc
+    except PermissionError as exc:
+        # ❗`_UNREADABLE` 보다 **먼저** 잡는다. pdfplumber 가 권한 오류를 자기 예외로
+        #   감싸면 「문서가 안 열린다」(422)로 보고되는데, 그건 거짓이다 — 문서는 멀쩡하고
+        #   못 읽는 것이 우리 쪽이다. 고치는 자리가 문서가 아니라 볼륨 소유권이다.
+        raise DocumentAccessDenied(
+            f"문서를 읽을 권한이 없다: {document_path!r} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
     except _UNREADABLE as exc:
         raise DocumentUnreadable(
             f"PDF 로 열리지 않는다: {document_path!r} ({type(exc).__name__}: {exc})"
