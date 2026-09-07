@@ -49,6 +49,10 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   REEXPLAIN_NOT_ELIGIBLE: "재설명할 수 있는 항목이 아니에요.",
   REVERIFY_EXHAUSTED: "재설명 횟수를 다 썼어요. 판정으로 넘어가요.",
   OVERRIDE_NOT_ELIGIBLE: "판정을 확정한 뒤에 요청할 수 있어요.",
+  // ❗**「서비스 오류」로 적으면 안 된다.** ai-service 는 멀쩡하고 그 문서가 문제다 —
+  // 다음에 할 일은 다시 시도가 아니라 **파일을 바꿔 다시 올리는 것**이다(#521).
+  // 무엇이 걸렸는지(못 열림·개인정보 패턴)는 서버 문면이 `detail` 로 들고 온다.
+  DOCUMENT_UNPROCESSABLE: "이 문서로는 진행할 수 없어요. 파일을 확인해 다시 올려 주세요.",
   // 502 셋은 고칠 곳이 다르다. 문면도 다르게 적어야 판매자가 무엇을 할지 안다.
   EVIDENCE_REQUIRED: "채점 근거가 없어요. 다시 시도해 주세요.",
   MEASUREMENT_INVALID: "채점 결과를 확인하지 못했어요. 다시 시도해 주세요.",

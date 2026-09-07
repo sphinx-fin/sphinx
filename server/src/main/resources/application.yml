@@ -1,5 +1,20 @@
 server:
   port: 8000
+  tomcat:
+    # ❗**이 값이 없으면 업로드 상한 초과가 「파일이 너무 큽니다」 봉투 대신 봉투 없는
+    # 502 로 나간다** (F-EXT-001 · PR #527 리뷰 ⑧).
+    #
+    # Spring 이 멀티파트 읽기를 중단하면 Tomcat 은 남은 본문을 이 크기(기본 **2MB**)까지만
+    # 삼키고 **커넥션을 리셋**한다. 그런데 nginx 는 요청을 이미 통째로 버퍼링했으므로
+    # (`proxy_request_buffering` 기본 on) 업스트림 리셋을 보고 **자기 502 HTML** 을 낸다.
+    #
+    #   28MB PDF  →  Spring 이 400 VALIDATION_ERROR 를 만들지만 그것이 나가지 못한다
+    #             →  운영자가 받는 것은 봉투 없는 502 「서버 오류」
+    #
+    # 즉 `web/app.conf` 가 nginx 상한(32m)을 server(25MB)보다 넉넉히 둔 근거
+    # (*"거부는 봉투를 아는 쪽에서 해야 한다"*)가 이 값 없이는 **성립하지 않는다.**
+    # -1 은 무제한 삼킴이고, 상한을 넘긴 요청은 어차피 거부되므로 읽어 버리는 비용만 든다.
+    max-swallow-size: -1
 
 spring:
   datasource:
@@ -27,6 +42,22 @@ spring:
     console:
       enabled: true                             # 개발용 DB 콘솔: http://localhost:8000/h2-console
       path: /h2-console
+  # ── 업로드 크기 (F-EXT-001 · 이슈 #521) ─────────────────────────────────────
+  #
+  # ❗**기본값을 그대로 두면 안 된다.** Spring Boot 기본은 max-file-size 1MB 이고, 실측한
+  # 공시 PDF 가 그 선에 걸쳐 있다 — 데모 문서만 봐도 0.33MB·0.51MB·1.63MB 다. 즉 기본값
+  # 상태에서는 **실물 상품설명서 중 일부가 업로드 단계에서 거부된다.**
+  #
+  # 상한을 넘으면 MaxUploadSizeExceededException 이고 GlobalExceptionHandler 가 400
+  # VALIDATION_ERROR 로 낸다. 핸들러가 없으면 500 «서버 내부 오류» 라 운영자가 파일을
+  # 줄이면 되는 것을 모른다.
+  #
+  # request 를 file 보다 크게 두는 이유: 같은 요청에 productType 필드가 함께 온다.
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
 
 # actuator: 헬스체크만 노출
 management:

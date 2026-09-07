@@ -375,7 +375,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(HttpStatusCode::isError, failure("/internal/parse"))
+                    .onStatus(HttpStatusCode::isError, parseFailure())
                     .body(ParsedDocument.class);
         } catch (AiServiceException e) {
             throw e;
@@ -492,14 +492,142 @@ public class AiServiceClient {
      * 나머지는 문자열</b>이다. 그 상태에서 전부 객체로 가정하면 나머지 경로가 죽는다.
      */
     private static ErrorHandler failure(String endpoint) {
+        return (req, resp) -> raise(endpoint, resp);
+    }
+
+    /** {@link #failure} 의 본체. {@link #parseFailure} 가 422 를 가른 뒤 나머지를 여기로 넘긴다. */
+    private static void raise(String endpoint,
+                              org.springframework.http.client.ClientHttpResponse resp) {
+        String code = errorCode(resp);
+        String where = "ai-service " + endpoint + " 실패: HTTP " + statusOf(resp);
+        if ("MEASUREMENT_INVALID".equals(code)) {
+            throw new MeasurementInvalidException(where + " — " + code);
+        }
+        throw new AiServiceException(where);
+    }
+
+    /** 상태코드 읽기가 IOException 을 던지는 계약이라 한 자리에서 접는다. */
+    private static String statusOf(org.springframework.http.client.ClientHttpResponse resp) {
+        try {
+            return String.valueOf(resp.getStatusCode().value());
+        } catch (java.io.IOException e) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * {@code /internal/parse} 전용 실패 분류 — <b>422 만 갈라내고, 그 안에서 또 가른다</b>
+     * (이슈 #521 · PR #534).
+     *
+     * <p>그쪽 라우트가 실패를 셋으로 갈라 놓았다: 경로 규칙 위반 400 · 파일 없음 404 ·
+     * <b>PDF 로 안 열림 422</b>. 앞의 둘은 우리가 넘긴 경로가 틀린 것이라 <b>서버 결함</b>
+     * 이고 502 로 나가는 게 맞다 — 업로드본이 볼륨에 안 보이는 상태가 대표적이다. 422 만
+     * 이 <b>문서</b>의 문제이고, 그것만 업로드 응답의 {@code parse_failed} 로 접힌다.
+     *
+     * <p>❗<b>{@link #failure} 를 그대로 쓰면 셋이 한 덩이가 된다.</b> 그러면 암호화 PDF 를
+     * 올린 운영자가 502 를 받고 «서비스 장애» 로 읽는다 — 고칠 자리(문서를 다시 넣는 것)에
+     * 아무도 못 간다. 반대로 셋 다 {@code parse_failed} 로 접으면 볼륨 마운트가 빠진 배포가
+     * <b>200 으로 조용히</b> 넘어간다.
+     *
+     * <h2>❗422 가 두 뜻이다 — PR #534 가 그렇게 만들었다</h2>
+     *
+     * <pre>
+     *   routes.py  parsing.DocumentUnreadable  → 422 {"detail": "…"}
+     *   main.py    PiiDetected (미들웨어)       → 422 {"error": "pii_detected", "kinds": […]}
+     * </pre>
+     *
+     * <p>PR #534 가 {@code public_document} 완화를 «측정된 오탐만큼» 으로 좁혀
+     * {@code CARD} 를 이 범위에서도 검사하게 했다. 그래서 <b>업로드된 문서에 카드번호 같은
+     * 것이 있으면</b> 파스가 라우트에 닿기도 전에 미들웨어에서 422 다.
+     *
+     * <p>둘을 한 문면으로 접으면 운영자가 <i>"문서를 열 수 없다(암호화·손상 PDF 인지
+     * 확인하라)"</i> 를 받는데 <b>문서는 멀쩡히 열린다</b> — 다른 PDF 를 넣어도 같은 결과이고,
+     * 고칠 자리(그 문서에서 그 숫자를 확인하는 것)에 아무도 못 간다. 같은 코드가 두 뜻을
+     * 갖는 그 결함이라 {@code error} 필드로 가른다.
+     *
+     * <h2>❗셋이다 — FastAPI 가 <b>스키마 검증 실패에도</b> 422 를 낸다 (PR #527 리뷰)</h2>
+     *
+     * <pre>
+     *   문서를 못 열었다      422 {"detail": "…"}                  ← 문자열
+     *   PII 입구 재검사        422 {"error": "pii_detected", …}
+     *   요청 스키마가 틀렸다   422 {"detail": [{"loc":…,"msg":…}]}  ← ❗배열
+     * </pre>
+     *
+     * <p>마지막 것은 <b>우리 결함</b>이다 — Java {@code ParseRequest} 레코드가 그쪽
+     * {@code schemas.ParseRequest}(pydantic {@code Strict})와 갈리면 필드가 하나 늘거나
+     * 이름이 달라도 전부 같은 422 다. 그걸 {@code parse_failed} 로 접으면 <b>멀쩡한 파일을
+     * 두고 운영자에게 «암호화·손상 PDF 인지 확인하라» 를 말하고</b> {@code GET /products} 에
+     * 영구 실패로 남는다 — 이 배선이 없애려던 «조용한 성공» 이 자리를 옮겨 돌아온다.
+     *
+     * <p>그래서 <b>{@code detail} 이 배열이면 서버 결함</b>으로 올린다({@code IllegalStateException}
+     * → 500 {@code INTERNAL_ERROR}). 502 로 내지 않는 이유는 상류가 멀쩡하기 때문이다 —
+     * 연결도 됐고 응답도 왔다. 우리 요청이 틀렸다.
+     *
+     * <p>실측(2026-09-07): {@code product_type="FUND"} → {@code 422 {"detail": [{"type":
+     * "literal_error", "loc": ["body","product_type"], …}]}}. 문자열/배열 구분이 그 근거다.
+     */
+    private static ErrorHandler parseFailure() {
         return (req, resp) -> {
-            String code = errorCode(resp);
-            String where = "ai-service " + endpoint + " 실패: HTTP " + resp.getStatusCode();
-            if ("MEASUREMENT_INVALID".equals(code)) {
-                throw new MeasurementInvalidException(where + " — " + code);
+            if (!"422".equals(statusOf(resp))) {
+                raise("/internal/parse", resp);
+                return;
             }
-            throw new AiServiceException(where);
+            // ❗**본문을 한 번만 읽는다.** `resp.getBody()` 는 스트림이라 두 번째 읽기가
+            //   빈 값을 준다 — 갈래마다 따로 읽으면 **앞에서 읽은 갈래가 뒤를 먹어** 뒤쪽
+            //   판정이 조용히 «아니다» 로 떨어진다. 처음에 그렇게 썼고, 스키마 거부가
+            //   DocumentUnreadable 로 새는 것이 그 결과였다.
+            JsonNode body = errorBody(resp);
+
+            // 미들웨어가 막은 것인가(PII). 어느 패턴이 걸렸는지는 `kinds` 에 있고, 그 값은
+            // 패턴 **이름**이라 원문이 아니다 — 문면에 실어도 문서 내용이 새지 않는다.
+            List<String> kinds = piiKinds(body);
+            if (kinds != null) {
+                throw new DocumentRejectedException(
+                        "문서에 개인정보로 보이는 값이 있어 거부됐다(" + String.join(", ", kinds)
+                        + ") — 올린 파일이 상품설명서인지 확인하라");
+            }
+            if (body.path("detail").isArray()) {
+                // ❗**문서 문제가 아니다 — 우리가 보낸 요청이 계약을 벗어났다.**
+                //   parse_failed 로 접으면 멀쩡한 파일이 영구 실패로 남는다.
+                throw new IllegalStateException(
+                        "ai-service /internal/parse 요청 스키마가 거부됐다 — Java ParseRequest 가 "
+                        + "그쪽 schemas.ParseRequest 와 갈렸다(문서 문제가 아니다): " + body.path("detail"));
+            }
+            throw new DocumentUnreadableException(
+                    "문서를 열 수 없다(암호화·손상 PDF 인지 확인하라): HTTP 422");
         };
+    }
+
+    /**
+     * 오류 본문을 <b>한 번</b> 파싱한다. 못 읽으면 {@code MissingNode} — 그 위의
+     * {@code path()} 가 전부 «없다» 를 주므로 호출부가 null 검사를 안 해도 된다.
+     */
+    private static JsonNode errorBody(org.springframework.http.client.ClientHttpResponse resp) {
+        try {
+            return ERROR_MAPPER.readTree(resp.getBody());
+        } catch (java.io.IOException e) {
+            // 본문이 없거나 JSON 이 아니다. 그 자체가 정보다 — 호출부가 기본 갈래로 간다.
+            return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+        }
+    }
+
+    /**
+     * {@code {"error": "pii_detected", "kinds": […]}} 면 그 {@code kinds}, 아니면 {@code null}.
+     *
+     * <p>❗<b>{@code null} 과 빈 목록을 가른다.</b> {@code null} 은 «PII 응답이 아니다»,
+     * 빈 목록은 «PII 응답인데 패턴 이름이 안 왔다» 다 — 뒤쪽도 PII 거부이므로 문서 문제로
+     * 다뤄야 한다. 한 값으로 접으면 이름이 안 온 날 «문서를 열 수 없다» 로 되돌아간다.
+     *
+     * <p>{@link #errorCode} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
+     * {@code get()} 은 문자열 본문에서 NPE 다(#293 리뷰).
+     */
+    private static List<String> piiKinds(JsonNode body) {
+        if (!"pii_detected".equals(body.path("error").asText(null))) {
+            return null;
+        }
+        List<String> kinds = new java.util.ArrayList<>();
+        body.path("kinds").forEach(node -> kinds.add(node.asText()));
+        return kinds;
     }
 
     /** {@code {"detail": {"code": …}}} 에서 code 만. 그 모양이 아니면 {@code null}. */
