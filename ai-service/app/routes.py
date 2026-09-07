@@ -25,6 +25,7 @@ from .schemas import (
     CoverageGap,
     CoverageGapRequest,
     CoverageGapResponse,
+    PolaritySummary,
     RubricListResponse,
     RubricView,
     ConditionNotExtracted,
@@ -351,6 +352,25 @@ def _view(r: rubrics.Rubric) -> RubricView:
         #   `reason`·`until` 둘 다 없으면 던진다) **그 불변식을 여기서 끌어오지 않는다.**
         unlinked_until=list(r.unlinked_until) if r.unlinked_until is not None else None,
     )
+
+
+@router.get("/polarity/summary", response_model=PolaritySummary)
+def polarity_summary() -> PolaritySummary:
+    """극성 게이트(F-DET-001 3단계) 계량기 (이슈 #483).
+
+    **`/healthz` 에 안 싣는다.** 그쪽은 `GUARDED_PREFIX` 밖이라 **무인증**인데, `by_type` 에
+    `M08-TYING` 이 들어올 수 있고 그건 불공정영업 신호다(기획 7-4). 총계만 보면 무해해
+    보이지만 **유형별 내역이 같이 있어야 쓸모가 있고**, 둘을 갈라 두 곳에 두면 같은 사실이
+    두 벌이 된다. 그래서 통째로 인증 뒤에 둔다.
+
+    ❗**구간의 시작은 여기 안 담는다.** `/healthz` 의 `started_at` 이 같은 프로세스의
+    기동 시각이고, 두 곳에 두면 같은 사실이 두 벌이 된다. 소비자가 둘을 짝지어 읽는다.
+
+    ❗**읽기가 값을 바꾸지 않는다.** 여기서 초기화하면 두 소비자가 서로의 값을 지운다 —
+    누적을 원하는 쪽(`#483` ③ 의 불변 기록)과 지금을 보는 쪽(운영 콘솔)이 같은 카운터를
+    본다. 리셋이 필요해지면 그때 **별도 동작**으로 만든다.
+    """
+    return PolaritySummary(**misconception.METER.snapshot())
 
 
 @router.get("/rubrics", response_model=RubricListResponse)

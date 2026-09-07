@@ -602,3 +602,83 @@ def test_an_exception_does_not_kill_scoring(monkeypatch) -> None:
     holds = misconception._verdicts(object(), [_Match("M01"), _Match("M02")], "발화")
 
     assert holds == [True, True], "실패는 후보를 남기는 쪽으로 떨어져야 한다 (P5 0.2절)"
+
+
+# ── 계량기 조회 경로 (이슈 #483) ─────────────────────────────────────────────
+#
+# `#327` ①~④ 는 evidence 에 이미 쌓여 있어 세는 코드만 없었는데, 이 계량기는 **애초에
+# 기록으로 안 간다.** 그래서 조회 경로가 먼저 필요하다.
+def test_the_summary_endpoint_reports_the_meter() -> None:
+    """★ 계량기 값이 그대로 나온다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    misconception.METER.__init__()
+    misconception.METER.record_kept()
+    misconception.METER.record_dropped("M08-TYING", contradicted=True)
+    misconception.METER.record_not_run()
+
+    body = TestClient(app).get("/internal/polarity/summary").json()
+
+    assert body == {"asked": 3, "kept": 1, "dropped": 1, "contradicted": 1,
+                    "not_run": 1, "by_type": {"M08-TYING": 1}}
+
+
+def test_not_run_is_visible_and_distinct_from_zero() -> None:
+    """★ **이 엔드포인트가 존재하는 이유다.**
+
+    게이트는 실패하면 후보를 남기므로(P5 0.2절) `dropped == 0` 과 `not_run > 0` 이
+    **판정에서 구별되지 않는다.** 결정 5.40 — 못 잰 값은 0 이 아니라 「모른다」다.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    client = TestClient(app)
+
+    misconception.METER.__init__()
+    quiet = client.get("/internal/polarity/summary").json()
+
+    misconception.METER.__init__()
+    misconception.METER.record_not_run()
+    misconception.METER.record_not_run()
+    broken = client.get("/internal/polarity/summary").json()
+
+    assert quiet["dropped"] == broken["dropped"] == 0, "판정 쪽 증상이 같다는 것이 전제다"
+    assert quiet["not_run"] == 0 and broken["not_run"] == 2, "그 둘을 가르는 값이 이것뿐이다"
+
+
+def test_reading_the_summary_does_not_reset_it() -> None:
+    """읽기가 값을 바꾸면 두 소비자가 서로의 값을 지운다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    client = TestClient(app)
+
+    misconception.METER.__init__()
+    misconception.METER.record_kept()
+
+    first = client.get("/internal/polarity/summary").json()
+    second = client.get("/internal/polarity/summary").json()
+
+    assert first == second == {"asked": 1, "kept": 1, "dropped": 0, "contradicted": 0,
+                               "not_run": 0, "by_type": {}}
+
+
+def test_the_summary_is_behind_internal_auth() -> None:
+    """★ `by_type` 에 `M08-TYING` 이 들어온다 — **무인증 자리에 두면 안 된다**(기획 7-4).
+
+    `/healthz` 가 `GUARDED_PREFIX` 밖이라 거기 실을 수 없는 이유이고, 이 경로가
+    `/internal/` 접두어를 지키는지가 그 경계다.
+    """
+    from app.main import GUARDED_PREFIX
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    paths = [p for p in TestClient(app).get("/openapi.json").json()["paths"]
+             if "polarity" in p]
+    assert paths, "요약 경로가 스키마에 없다"
+    assert all(p.startswith(GUARDED_PREFIX) for p in paths), (
+        f"인증 밖에 있다: {paths} — by_type 이 M08-TYING 을 담는다"
+    )
