@@ -53,7 +53,7 @@ def _key(row: dict) -> tuple[str, str]:
     return (row["sample_id"], row["item_id"])
 
 
-def load() -> tuple[dict, dict, dict]:
+def load() -> tuple[dict, dict, dict, list]:
     corpus = {_key(r): r for r in _jsonl(EVAL / "corpus/els.jsonl")}
     a = {_key(r): r["grade"] for r in _jsonl(EVAL / "data/labels/정세현.jsonl")}
     b = {_key(r): r["grade"] for r in _jsonl(EVAL / "data/labels/강희진.jsonl")}
@@ -61,8 +61,10 @@ def load() -> tuple[dict, dict, dict]:
     # 모델 판정 — floor 는 **모델이 U4 를 안 냈을 때만** 등급을 움직인다. 사람 라벨만
     # 보면 "미탐 구제" 를 과대 계상한다(모델이 이미 U4 인 건까지 센다).
     # ❗eval/data/model.jsonl 은 정세현 소유다. 읽기만 한다 — 절대 덮어쓰지 않는다.
-    model = {_key(r): r["grade"] for r in _jsonl(EVAL / "data/model.jsonl")}
-    return corpus, consensus, model
+    rows = _jsonl(EVAL / "data/model.jsonl")
+    model = {_key(r): r["grade"] for r in rows}
+    versions = [r.get("prompt_version") for r in rows]
+    return corpus, consensus, model, versions
 
 
 def best_related(corpus: dict, key: tuple[str, str]) -> tuple[float, str | None, str | None]:
@@ -108,7 +110,7 @@ def devset_firing_rate() -> tuple[int, int]:
 
 
 def main() -> None:
-    corpus, consensus, model = load()
+    corpus, consensus, model, prompt_versions = load()
     positives = sum(1 for g in consensus.values() if g == "U4")
     print(
         f"코퍼스 {len(corpus)}쌍 · 합의 {len(consensus)}건 "
@@ -150,8 +152,13 @@ def main() -> None:
         print(f"  {key[0]} 사람 {grade} · 모델 {seen} · {score:.3f} · {type_id} {pattern!r}")
         print(f"      {effect}")
     print("  합계 " + " · ".join(f"{k} {v}" for k, v in tally.items()))
-    print("  ❗모델 판정은 model.jsonl 기준이고 그 파일은 prompt_version F-SCR-001_v2 다.")
-    print("     v3(#366) 로 다시 돌리면 이 셈이 바뀔 수 있다 — 조건을 같이 읽는다.")
+    # ❗**판을 파일에서 읽는다. 문자열로 박지 않는다.** 예전에는 여기 `F-SCR-001_v2` 가
+    # 박혀 있었는데 `#409`(9/6)가 v3 로 재채점하면서 **도구가 틀린 조건을 찍게 됐다** —
+    # 조건을 적으라고 만든 도구가 조건을 틀리는 것이 제일 나쁘다.
+    versions = sorted({r for r in prompt_versions if r})
+    print(f"  ❗모델 판정은 model.jsonl 기준이고 그 파일의 prompt_version 은 "
+          f"{', '.join(versions) or '(기록 없음)'} 이다.")
+    print("     다시 채점하면 이 셈이 바뀐다 — 인용할 때 이 줄을 같이 옮긴다.")
 
     hits, total = devset_firing_rate()
     print("\n── 씨앗 오염 대비 — 같은 매처를 내 dev set 에 돌린다")

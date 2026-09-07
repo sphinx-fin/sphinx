@@ -217,3 +217,26 @@ def test_the_guard_actually_runs_when_only_this_file_changes(path: Path, what: s
     # 검사가 ci.yml 에서 **빗나간다** — 변이가 실제로 걸렸는데 초록이었다.
     assert "app/scoring.py" not in joined.replace("\\", ""), (
         f"{path.name}: 옛 경로(app/scoring.py)가 남아 있다 — 값은 이제 그 파일에 없다")
+
+
+# ── 실측을 든 why 는 재현 경로를 같이 든다 ──────────────────────────────────
+#
+# `#388` 에서 세운 규약과 같다 — 숫자를 적은 자리에 **그 숫자를 다시 낼 명령**이 없으면,
+# 값을 의심하는 다음 사람이 옮겨 적을 출처가 없어 스스로 다시 재고 또 다른 값을 낸다.
+# `ngram_match` 는 그 규약이 필요한 첫 사례다: `why` 가 코퍼스·모집단·셈을 다 적는다.
+_MEASURED_WHY = {"ngram_match": "tools/tune_ngram_threshold.py"}
+
+
+@pytest.mark.parametrize("threshold_id,tool", sorted(_MEASURED_WHY.items()))
+def test_measured_why_names_its_reproduction(threshold_id: str, tool: str) -> None:
+    """실측 수치를 든 `why` 는 그 수치를 다시 낼 도구를 이름 대야 한다."""
+    raw = yaml.safe_load(thresholds.THRESHOLDS_PATH.read_text(encoding="utf-8"))
+    entry = raw["thresholds"][threshold_id]
+    why = entry["why"]
+    assert tool in why, (
+        f"{threshold_id} 의 why 가 실측을 인용하면서 {tool} 을 안 가리킨다 — "
+        "값을 의심하는 다음 사람이 옮겨 적을 출처가 없다"
+    )
+    assert (Path(__file__).resolve().parents[1] / tool).is_file(), (
+        f"why 가 부르는 도구가 없다: {tool}"
+    )
