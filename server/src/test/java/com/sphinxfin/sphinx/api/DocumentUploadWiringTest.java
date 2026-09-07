@@ -223,6 +223,33 @@ class DocumentUploadWiringTest {
     }
 
     @Test
+    @DisplayName("★ PII 로 거부된 문서는 «못 열었다» 가 아니다 — 문면이 갈려야 고칠 자리에 간다 (PR #534)")
+    void aPiiRejectedDocumentGetsItsOwnWording() throws Exception {
+        // PR #534 가 public_document 완화를 좁혀 CARD 를 이 범위에서도 검사한다. 그래서
+        // 올린 파일에 카드번호가 있으면 파서가 아니라 **미들웨어**가 422 를 낸다.
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenThrow(new com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException(
+                        "문서에 개인정보로 보이는 값이 있어 거부됐다(CARD) — "
+                        + "올린 파일이 상품설명서인지 확인하라"));
+
+        String body = mvc.perform(multipart("/products/documents")
+                        .file(new MockMultipartFile("file", "card.pdf", "application/pdf", PDF))
+                        .param("productType", "ELS"))
+                // 못 열은 것과 같은 부류다 — 운영자가 고칠 수 있으므로 502 가 아니다.
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("parse_failed"))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        String productId = com.jayway.jsonpath.JsonPath.read(body, "$.data.productId");
+        UploadedProduct row = uploads.findByProductId(productId).orElseThrow();
+        assertThat(row.failureReason())
+                .as("«암호화·손상 PDF 인지 확인하라» 로 접히면 운영자가 다른 파일을 넣어 보고 "
+                        + "같은 결과를 받는다 — 문서는 멀쩡히 열리기 때문이다")
+                .contains("개인정보")
+                .doesNotContain("암호화");
+    }
+
+    @Test
     @DisplayName("★ ai-service 가 죽은 것은 parse_failed 가 아니다 — 502 로 올라가고 상품이 안 생긴다")
     void aiServiceOutageIsNotAParseFailure() throws Exception {
         when(aiServiceClient.parse(anyString(), anyString()))

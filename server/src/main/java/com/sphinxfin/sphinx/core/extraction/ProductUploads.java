@@ -1,6 +1,7 @@
 package com.sphinxfin.sphinx.core.extraction;
 
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
 import lombok.RequiredArgsConstructor;
@@ -83,15 +84,20 @@ public class ProductUploads {
         UploadedDocumentStore.Stored stored = store.store(command.filename(), bytes);
         String productId = store.issueProductId(command.filename(), stored.sha256());
 
-        // ❗파스 실패를 두 갈래로 가른다. 문서를 못 연 것(422)은 이 문서의 문제라 200 봉투의
-        // parse_failed 로 나가고, 그 밖(연결 실패·경로 오류)은 502 로 올라간다 — 그쪽은
-        // 운영자가 문서를 다시 넣어서 고칠 수 없는 것이라 같은 문면으로 접으면 안 된다.
+        // ❗파스 실패를 두 갈래로 가른다. **이 문서의 문제**는 200 봉투의 parse_failed 로
+        // 나가고, 그 밖(연결 실패·경로 오류)은 502 로 올라간다 — 그쪽은 운영자가 문서를
+        // 다시 넣어서 고칠 수 없는 것이라 같은 문면으로 접으면 안 된다.
+        //
+        // 「이 문서의 문제」가 둘이다(PR #534). 못 열었다(DocumentUnreadable)와 PII 입구
+        // 재검사에 걸렸다(DocumentRejected). 둘 다 parse_failed 지만 **문면이 다르다** —
+        // 앞은 다른 PDF 를 넣으라는 뜻이고 뒤는 그 문서의 그 값을 확인하라는 뜻이다.
+        // 두 예외 타입의 javadoc 이 그 구별을 적어 뒀다.
         String status = "parsed";
         String failureReason = null;
         ParsedDocument parsed = null;
         try {
             parsed = aiServiceClient.parse(stored.documentPath(), productType);
-        } catch (DocumentUnreadableException e) {
+        } catch (DocumentUnreadableException | DocumentRejectedException e) {
             status = "parse_failed";
             failureReason = e.getMessage();
             log.warn("업로드 문서를 파스하지 못했다 — product={} path={} : {}",

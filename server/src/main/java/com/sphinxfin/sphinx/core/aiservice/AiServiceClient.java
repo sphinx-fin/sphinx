@@ -514,7 +514,8 @@ public class AiServiceClient {
     }
 
     /**
-     * {@code /internal/parse} 전용 실패 분류 — <b>422 만 갈라낸다</b>(이슈 #521).
+     * {@code /internal/parse} 전용 실패 분류 — <b>422 만 갈라내고, 그 안에서 또 가른다</b>
+     * (이슈 #521 · PR #534).
      *
      * <p>그쪽 라우트가 실패를 셋으로 갈라 놓았다: 경로 규칙 위반 400 · 파일 없음 404 ·
      * <b>PDF 로 안 열림 422</b>. 앞의 둘은 우리가 넘긴 경로가 틀린 것이라 <b>서버 결함</b>
@@ -525,15 +526,65 @@ public class AiServiceClient {
      * 올린 운영자가 502 를 받고 «서비스 장애» 로 읽는다 — 고칠 자리(문서를 다시 넣는 것)에
      * 아무도 못 간다. 반대로 셋 다 {@code parse_failed} 로 접으면 볼륨 마운트가 빠진 배포가
      * <b>200 으로 조용히</b> 넘어간다.
+     *
+     * <h2>❗422 가 두 뜻이다 — PR #534 가 그렇게 만들었다</h2>
+     *
+     * <pre>
+     *   routes.py  parsing.DocumentUnreadable  → 422 {"detail": "…"}
+     *   main.py    PiiDetected (미들웨어)       → 422 {"error": "pii_detected", "kinds": […]}
+     * </pre>
+     *
+     * <p>PR #534 가 {@code public_document} 완화를 «측정된 오탐만큼» 으로 좁혀
+     * {@code CARD} 를 이 범위에서도 검사하게 했다. 그래서 <b>업로드된 문서에 카드번호 같은
+     * 것이 있으면</b> 파스가 라우트에 닿기도 전에 미들웨어에서 422 다.
+     *
+     * <p>둘을 한 문면으로 접으면 운영자가 <i>"문서를 열 수 없다(암호화·손상 PDF 인지
+     * 확인하라)"</i> 를 받는데 <b>문서는 멀쩡히 열린다</b> — 다른 PDF 를 넣어도 같은 결과이고,
+     * 고칠 자리(그 문서에서 그 숫자를 확인하는 것)에 아무도 못 간다. 같은 코드가 두 뜻을
+     * 갖는 그 결함이라 {@code error} 필드로 가른다.
      */
     private static ErrorHandler parseFailure() {
         return (req, resp) -> {
             if ("422".equals(statusOf(resp))) {
+                // 미들웨어가 막은 것인가(PII) 파서가 못 연 것인가. 어느 패턴이 걸렸는지는
+                // 응답의 `kinds` 에 있고, 그 값은 패턴 **이름**이라 원문이 아니다 —
+                // 그대로 문면에 실어도 발화·문서 내용이 새지 않는다(그쪽 PiiDetected 규약).
+                List<String> kinds = piiKinds(resp);
+                if (kinds != null) {
+                    throw new DocumentRejectedException(
+                            "문서에 개인정보로 보이는 값이 있어 거부됐다(" + String.join(", ", kinds)
+                            + ") — 올린 파일이 상품설명서인지 확인하라");
+                }
                 throw new DocumentUnreadableException(
                         "문서를 열 수 없다(암호화·손상 PDF 인지 확인하라): HTTP 422");
             }
             raise("/internal/parse", resp);
         };
+    }
+
+    /**
+     * {@code {"error": "pii_detected", "kinds": […]}} 면 그 {@code kinds}, 아니면 {@code null}.
+     *
+     * <p>❗<b>{@code null} 과 빈 목록을 가른다.</b> {@code null} 은 «PII 응답이 아니다»,
+     * 빈 목록은 «PII 응답인데 패턴 이름이 안 왔다» 다 — 뒤쪽도 PII 거부이므로 문서 문제로
+     * 다뤄야 한다. 한 값으로 접으면 이름이 안 온 날 «문서를 열 수 없다» 로 되돌아간다.
+     *
+     * <p>{@link #errorCode} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
+     * {@code get()} 은 문자열 본문에서 NPE 다(#293 리뷰).
+     */
+    private static List<String> piiKinds(org.springframework.http.client.ClientHttpResponse resp) {
+        try {
+            JsonNode body = ERROR_MAPPER.readTree(resp.getBody());
+            if (!"pii_detected".equals(body.path("error").asText(null))) {
+                return null;
+            }
+            List<String> kinds = new java.util.ArrayList<>();
+            body.path("kinds").forEach(node -> kinds.add(node.asText()));
+            return kinds;
+        } catch (java.io.IOException e) {
+            // 본문이 없거나 JSON 이 아니다 — PII 응답이라고 볼 근거가 없다.
+            return null;
+        }
     }
 
     /** {@code {"detail": {"code": …}}} 에서 code 만. 그 모양이 아니면 {@code null}. */
