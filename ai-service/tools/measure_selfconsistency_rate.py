@@ -9,8 +9,19 @@
 
     발화    eval/corpus/els.jsonl 70쌍  (키는 (sample_id, item_id) 짝이다)
     경로    scoring.score() — **프로덕션과 같은 함수**다. 평가용 경로를 따로 만들지 않는다
-    분모    그 실행에서 모델이 U1 을 낸 항목 수. 캡은 U1 에만 걸린다(CONSISTENCY_GRADES)
-    분자    그중 confidence 가 DISAGREEMENT_CONFIDENCE_CAP 으로 내려온 항목 수
+    분모    `METER.needed` — **실제로 재질의한 건수.** 최종 U1 을 세면 안 된다(복창 캡이
+            이미 걸린 U1 은 두 번째 호출 없이 조기 반환하므로 재확인 대상이 아니다)
+    분자    `METER.disagreed` — **캡 사건.** `confidence == CAP` 비교를 쓰면 모델이 그냥
+            0.5 를 낸 판정까지 문다
+    세션 분모  `interview_items()` = `required` (컨텍스트 전체가 아니다 — 아래)
+
+❗**분모 둘은 계량기가 들고 도구가 유도하지 않는다**(`#533` 리뷰, 오준서). 위 넷 중
+셋이 원래는 도구가 계산한 프록시였고 세 개가 다 조금씩 틀렸다.
+
+❗**세션 분모의 출처는 평가 컨텍스트다 — 실세션은 추출 스냅샷이다**(`#533` 리뷰, 강희진).
+이 도구는 `eval/data/context/els.json` 을 상품의 대리물로 쓴다. 실세션의 분모는
+`ProductRiskItems.requiredItemsOf`(추출 스냅샷)라 **재추출로 항목이 늘면 컨텍스트만 낡는다.**
+그때 볼 자리가 여기다.
 
 ❗**실 LLM 을 호출한다.** 비용을 짐작하지 않는다 — `scoring.METER`(`ConsistencyMeter`)가
 던진 횟수·쓴 횟수·**버린 횟수**를 세고 있으므로 그 값을 그대로 찍는다. `#447` 이 재질의를
@@ -29,8 +40,11 @@
 회차마다 다르다. 그러니 한 번 돌려 `0%` 를 보고 *"안 걸린다"* 로 읽으면 안 된다.
 
 **여러 번 돌려 합산하고 구간을 같이 낸다.** 오늘 두 실행 합산은 `2/49 = 4.1%`
-(Wilson 95% `[1.1%, 13.7%]`)이고, 13항목 세션이 YELLOW 로 갈 확률로 옮기면
-`11% ~ 34% ~ 77%` 다(분모는 **`required` 10건** — 아래). **점추정만 인용하지 않는다.**
+(Wilson 95% `[1.1%, 13.7%]`)이고, **`required` 10항목** 세션이 YELLOW 로 갈 확률로
+옮기면 `11% ~ 34% ~ 77%` 다. **점추정만 인용하지 않는다.**
+
+❗**그 셋은 신뢰구간이 아니라 민감도다** — Wilson 상·하한을 `1-(1-q)^n` 에 통과시킨
+값이므로 *"q 가 그 값이면 세션 확률이 이렇다"* 를 뜻한다(`#533` 리뷰, 강희진).
 
 ❗**세션 확률의 분모는 「세션에 판정이 쌓이는 항목」이다.** `R-06` 이 보는 것은 판정이고
 판정은 면담이 물은 항목에만 생기는데, 그 집합이 `required ∧ extracted` 다. 컨텍스트의
@@ -148,6 +162,12 @@ def main() -> int:
     capped: list[str] = []
     failures: list[str] = []
     skipped: list[str] = []
+    # ★ **어느 상품유형을 실제로 쟀는지 센다.** 세션 분모가 여기서 나온다 — 예전에는
+    #   루프 변수 `context` 가 새어 나가 **마지막 행의 컨텍스트**로 분모를 냈다. ELS 와
+    #   변액이 섞이면 분모가 **코퍼스 행 순서에 따라** 달라졌고, 코퍼스가 비면
+    #   `UnboundLocalError` 로 **리포트를 절반 찍고 죽었다**(`#533` 리뷰가 형제 도구에서
+    #   지적한 «절반 찍고 죽는 자리» 와 같은 부류다).
+    scored_types: collections.Counter[str] = collections.Counter()
 
     for row in corpus:
         key = f"{row['sample_id']}/{row['item_id']}"      # ⑦ (sample_id, item_id) 짝이다
@@ -173,6 +193,7 @@ def main() -> int:
             print(f"  실패 {key}: {type(exc).__name__}: {exc}", file=sys.stderr)
             continue
         grades[judgment.grade.value] += 1
+        scored_types[row["product_type"]] += 1
         time.sleep(PACE_SEC)
         # 진행을 stderr 로 낸다 — 90회 호출이라 몇 분 걸리고, 조용하면 죽은 것과
         # 도는 것을 못 가른다. stdout 은 결과만 담아 그대로 인용할 수 있게 둔다.
@@ -215,11 +236,18 @@ def main() -> int:
 
     print(f"\n재질의 계량기 {meter}")
     if meter["speculated"]:
-        print(f"  던진 것 중 버린 비율  {meter['discarded']}/{meter['speculated']}"
+        # ❗**「투기 호출 중」이다 — 「던진 것 중」이 아니다** (`#533` 리뷰, 강희진).
+        # 분모가 `speculated` 인데 「던진 것」은 순차 재질의(`no_slot`·`disabled` 일 때
+        # `_ask_again` 을 그대로 던진다)까지 포함해 읽힌다. 그 둘이 0 이 아닌 회차에서는
+        # 실제 쿼터 낭비 비율이 이보다 **낮다** — 옛 이름은 과대 쪽이었다.
+        print(f"  투기 호출 중 버린 비율  {meter['discarded']}/{meter['speculated']}"
               f" = {meter['discarded'] / meter['speculated']:.0%}   ← 이만큼이 쿼터 낭비다")
+        if meter["no_slot"] or meter["disabled"]:
+            print(f"   (순차로 던진 것이 따로 있다 — 자리 없음 {meter['no_slot']} ·"
+                  f" 스위치 꺼짐 {meter['disabled']}. 전체 호출 대비 낭비율은 이보다 낮다)")
     else:
         # ❗**0/0 을 0% 로 찍지 않는다.** 투기가 안 돈 것이지 「낭비 0%」를 잰 것이 아니다.
-        print("  던진 것 중 버린 비율  **측정 안 됨** — 투기 재질의가 안 돌았다"
+        print("  투기 호출 중 버린 비율  **측정 안 됨** — 투기 재질의가 안 돌았다"
               f" (자리 없음 {meter['no_slot']} · 스위치 꺼짐 {meter['disabled']})")
     if meter["failed"]:
         print(f"  ❗필요했던 재질의가 {meter['failed']}건 죽었다 — 그만큼은 「캡 안 걸림」이"
@@ -235,19 +263,37 @@ def main() -> int:
     # 생긴다. 그 집합이 `ProductRiskItems.interviewItemsOf` = required ∧ extracted 라
     # **`recommended` 는 애초에 안 물어지고 판정도 없다.** 컨텍스트 13건을 그대로 쓰면
     # 세션 확률이 과대해진다(42% → 34%). 게이트의 분모와 맞춘다.
-    items = context.get("risk_items", {})
-    required = interview_items(items)
-    items_per_session = len(required)
-    print(f"\n전부 U1 인 {items_per_session}항목 세션이 YELLOW 로 갈 확률")
-    print(f"  (분모는 required {len(required)}건 — 컨텍스트 전체 {len(items)}건이 아니다."
-          f" recommended 는 안 물어지므로 판정이 없다)")
-    for label, q in (("하한", lo), ("점추정", rate), ("상한", hi)):
-        print(f"  {label:4} {1 - (1 - q) ** items_per_session:.0%}")
-    print("❗점추정만 인용하지 않는다 — 위 셋을 같이 적는다.")
-    print(f"❗인용할 때 이 줄을 같이 옮긴다 — 판 {provenance}")
-    return 0
+    if not scored_types:
+        # ❗**분모가 없으면 세션 확률을 안 찍는다.** 예전에는 여기서 죽어 리포트가
+        #   절반만 나왔고, 그 절반이 완전한 리포트로 읽혔다.
+        print("\n❗세션 확률을 못 낸다 — 채점된 행이 0건이라 분모가 없다.")
+    for product_type, n_rows in sorted(scored_types.items()):
+        items = contexts[product_type].get("risk_items", {})
+        required = interview_items(items)
+        items_per_session = len(required)
+        print(f"\n[{product_type}] 전부 U1 인 {items_per_session}항목 세션이 YELLOW 로 갈 확률"
+              f"  (이 유형에서 {n_rows}행 쟀다)")
+        print(f"  (분모는 required {len(required)}건 — 컨텍스트 전체 {len(items)}건이 아니다."
+              f" recommended 는 안 물어지므로 판정이 없다)")
+        for label, q in (("하한", lo), ("점추정", rate), ("상한", hi)):
+            print(f"  {label:4} {1 - (1 - q) ** items_per_session:.0%}")
+        # ❗**비율 q 는 유형별로 안 갈랐다.** 위 세 값은 전체 합산 q 를 이 유형의 분모에
+        #   얹은 것이다 — 유형마다 q 를 따로 내려면 계량기를 유형별로 나눠야 한다.
+        if len(scored_types) > 1:
+            print("   (q 는 전체 합산값이다 — 유형별 q 가 필요하면 계량기를 유형별로 나눈다)")
+    if scored_types:
+        print("❗점추정만 인용하지 않는다 — 위 셋을 같이 적는다.")
+    # ❗**구간이 아니라 민감도다** (`#533` 리뷰, 강희진). Wilson 상·하한을
+    # `1-(1-q)^n` 에 통과시킨 것은 세션 확률의 신뢰구간이 아니라 *"q 가 그 값이면"* 의
+    # 범위다. 문면에 적어 둔다 — 안 적으면 다음 사람이 이 셋을 구간으로 재인용한다.
+        print("   (이 셋은 세션 확률의 신뢰구간이 **아니다** — q 가 그 값일 때의 민감도다)")
+    # ★ **여기 `return 0` 이 있었다** — 아래 두 줄이 한 번도 출력되지 않았다.
+    # 이 도구의 제목이 「한 번 돌린 값은 못 쓴다」인데 그 경고가 리포트에 안 실렸다.
+    # `thrown` 과 같은 부류(`#533` 리뷰, 강희진)이고 린터가 없어 아무것도 안 말해 준다.
     print("❗그리고 **한 번 돌린 값을 인용하지 않는다** — 이 검사는 비결정적이라 실행마다")
     print("   걸리는 항목이 다르다(머리말의 세 회차 참조). 여러 번 돌려 합산한다.")
+    print(f"❗인용할 때 이 줄을 같이 옮긴다 — 판 {provenance}")
+    return 0
 
 
 if __name__ == "__main__":

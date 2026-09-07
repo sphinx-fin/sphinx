@@ -257,6 +257,124 @@ def test_the_session_denominator_counts_only_interviewed_items() -> None:
     assert set(_rate_tool().interview_items(items)) == {"A", "B"}
 
 
+def test_the_rate_tool_reports_fully_when_nothing_was_scored(capsys, monkeypatch) -> None:
+    """★ **리포트를 절반 찍고 죽지 않는다** — 그리고 세션 분모가 행 순서에 안 매인다.
+
+    실물로 났다. 세션 확률이 루프 변수 `context` 를 읽고 있었다.
+
+        코퍼스 0행           UnboundLocalError — **리포트 절반만 찍고 죽었다**
+        ELS + 변액 섞임      마지막 행의 컨텍스트로 분모를 냈다(행 순서에 매인다)
+
+    `#533` 리뷰가 형제 도구에서 지적한 «`main()` 이 리포트를 절반 찍고 죽는 자리» 와 같은
+    부류다. LLM 을 안 부른다 — 코퍼스를 비워 돌린다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app import scoring
+
+    tool = _rate_tool()
+    monkeypatch.setattr(tool, "_jsonl", lambda path: [])
+    monkeypatch.setattr(tool, "preflight", lambda: "테스트 · 호출 0회")
+    # ❗`main()` 은 스크립트라 끝에서 `_PROBE_POOL` 을 닫는다(프로브가 done-callback 으로
+    #   `discarded_failed` 를 올리므로 닫고 읽어야 맞다). 그 풀은 **프로세스 공용**이라
+    #   테스트가 닫으면 뒤에 오는 병렬 테스트가 «cannot schedule new futures» 로 죽는다.
+    #   버릴 풀을 끼워 준다 — 실제로 8건이 그렇게 깨졌다.
+    monkeypatch.setattr(scoring, "_PROBE_POOL", ThreadPoolExecutor(max_workers=1))
+
+    assert tool.main() == 0
+
+    out = capsys.readouterr().out
+    assert "세션 확률을 못 낸다" in out, "분모가 없는데 세션 확률을 찍었거나 죽었다"
+    assert "한 번 돌린 값을 인용하지 않는다" in out, (
+        "이 도구의 결론이 리포트에 안 실렸다 — 예전에 `return 0` 이 그 앞에 있었다"
+    )
+    assert "인용할 때 이 줄을 같이 옮긴다" in out, "판 표식이 리포트 끝에 안 실렸다"
+
+
+def test_the_session_denominator_is_per_product_not_the_last_row(tmp_path, capsys, monkeypatch) -> None:
+    """★ **세션 분모가 코퍼스 행 순서에 안 매인다.**
+
+    루프 변수 `context` 가 새어 나가 **마지막 행의 컨텍스트**로 분모를 냈다. ELS 만 있는
+    지금은 눈에 안 보이지만, `variable.jsonl` 이 생기는 날 분모가 행 순서로 정해진다
+    (`#533` 리뷰가 형제 도구에서 지적한 부류). LLM 을 안 부른다 — `score` 를 대체한다.
+    """
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app import scoring
+    from app.schemas import Evidence, Grade, Judgment
+
+    tool = _rate_tool()
+
+    def _ctx(n_required: int, n_recommended: int) -> dict:
+        items, questions = {}, {}
+        for i in range(n_required + n_recommended):
+            key = f"I{i}"
+            items[key] = {
+                "item_id": key, "product_id": "p", "name": "항목",
+                "importance": "required" if i < n_required else "recommended",
+                "status": "extracted",
+            }
+            questions[key] = "질문"
+        return {"risk_items": items, "questions": questions}
+
+    (tmp_path / "data/context").mkdir(parents=True)
+    (tmp_path / "corpus").mkdir()
+    # ELS 는 required 2건, VARIABLE 은 5건 — 겹치면 어느 쪽을 썼는지 못 가른다.
+    for stem, ctx in (("els", _ctx(2, 1)), ("variable", _ctx(5, 2))):
+        (tmp_path / f"data/context/{stem}.json").write_text(
+            _json.dumps(ctx, ensure_ascii=False), encoding="utf-8")
+        (tmp_path / f"corpus/{stem}.jsonl").write_text(
+            _json.dumps({"sample_id": f"{stem}-1", "item_id": "I0",
+                         "product_type": stem.upper(), "utterance": "발화"},
+                        ensure_ascii=False) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(tool, "EVAL", tmp_path)
+    monkeypatch.setattr(tool, "PACE_SEC", 0.0)
+    monkeypatch.setattr(tool, "preflight", lambda: "테스트 · 호출 0회")
+    monkeypatch.setattr(scoring, "_PROBE_POOL", ThreadPoolExecutor(max_workers=1))
+    monkeypatch.setattr(scoring, "score", lambda **kw: Judgment(
+        item_id=kw["item_id"], grade=Grade.U1, confidence=0.9,
+        evidence=Evidence(utterance_quote="발화", rubric_clause="c"), reason="r"))
+
+    assert tool.main() == 0
+
+    out = capsys.readouterr().out
+    # ❗**두 유형이 각자 자기 분모로 나와야 한다.** 순서 의존이면 한쪽 숫자가 다른 쪽에 붙는다.
+    assert "[ELS] 전부 U1 인 2항목" in out, f"ELS 분모가 2가 아니다:\n{out}"
+    assert "[VARIABLE] 전부 U1 인 5항목" in out, f"VARIABLE 분모가 5가 아니다:\n{out}"
+
+
+def test_no_tool_has_a_statement_after_a_return() -> None:
+    """★ **`return` 뒤의 줄은 한 번도 안 돈다 — 그런데 초록이다.**
+
+    실물로 났다. `measure_selfconsistency_rate.main()` 의 `return 0` 뒤에 경고 두 줄이
+    있었고, 그 둘이 **이 도구의 제목**(*"한 번 돌린 값은 못 쓴다"*)인데 리포트에 한 번도
+    실리지 않았다. `#533` 리뷰가 `thrown`(죽은 계산)을 잡아 줬는데 같은 부류가 하나 더
+    있었던 것이다 — **린터가 어느 모듈에도 없어서**(CLAUDE.md) 아무것도 안 말해 준다.
+
+    ❗이 대조는 도구 전체에 건다. 한 파일만 보면 다음 도구에서 같은 일이 난다.
+    """
+    import ast
+
+    tools = sorted((Path(__file__).resolve().parents[1] / "tools").glob("*.py"))
+    assert tools, "도구가 하나도 안 잡혔다 — 경로가 바뀌었나"
+
+    dead: list[str] = []
+    for path in tools:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            body = getattr(node, "body", None)
+            if not isinstance(body, list):
+                continue
+            for i, stmt in enumerate(body[:-1]):
+                if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+                    nxt = body[i + 1]
+                    dead.append(f"{path.name}:{nxt.lineno} ({type(stmt).__name__} 뒤)")
+
+    assert not dead, "도는 일이 없는 줄이 있다 — 지우거나 순서를 고친다: " + ", ".join(dead)
+
+
 def test_the_session_denominator_matches_the_eval_context() -> None:
     """실물 컨텍스트에서도 게이트 분모와 같아야 한다 — 13 이 아니라 10 이다."""
     import json
