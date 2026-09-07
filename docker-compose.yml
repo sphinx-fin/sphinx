@@ -76,21 +76,6 @@ services:
       # 바꿔서, **이 스택을 내리고 나서야** 그 트리를 지운다 — 떠 있는 동안은 절대
       # 안전하다(scripts/deploy_ec2.sh 참조).
       - ./data:/data:ro
-      # ❗**업로드본은 여기 없다 — 이름 있는 볼륨이다**(F-EXT-001 · 이슈 #521).
-      # `/internal/parse` 는 경로를 받으므로(그쪽 ParseRequest) 업로드된 파일이 이 컨테이너에도
-      # 보여야 한다. 위 `./data` 는 배포마다 갈리는 호스트 트리라 거기에 쓰면 다음 배포에
-      # 사라지고, 애초에 `:ro` 이며 그건 결정 7.8(VERSION sha256 고정 · P2)의 근거다 —
-      # 고정된 코퍼스와 사람이 올린 것을 한 마운트에 섞지 않는다.
-      #
-      # 이 마운트는 `/data` 안쪽 경로라 위 bind mount 를 **덮어쓴다**(더 깊은 마운트가 이긴다).
-      # 그래서 ai-service 는 `documents/…` 와 `uploads/…` 를 같은 뿌리에서 보고, 그쪽
-      # `parsing.documents_root()` 가 *"전용 환경변수를 새로 만들지 않는다"* 로 둔 전제가
-      # 그대로 성립한다 — 이 배선에 ai-service 가 고칠 줄은 없다.
-      #
-      # ❗**여기서는 `:ro` 다.** 쓰는 것은 server 하나여야 한다 — 두 컨테이너가 같은 트리에
-      # 쓰면 누가 쓴 파일인지가 감사 로그와 어긋날 수 있고, 파서가 자기 입력을 고칠 수
-      # 있으면 재현성(P2)의 전제가 깨진다.
-      - uploads:/data/uploads:ro
       # ❗ contracts/ 도 런타임 의존이다. templates.py 의 assert_matches_contract() 가
       # contracts/samples/parsed_*.json 을 읽어 상품유형 템플릿과 대조하는데, **파일이 없으면
       # 예외도 로그도 없이 대조가 통째로 no-op** 이 된다(#37 코멘트 ②). data/ 와 달리 이건
@@ -186,12 +171,6 @@ services:
       - ./data/documents:/data/documents:ro
       # 위 합성 세션의 산출물. 추적하지 않는 생성물이라 배포 때 만들어진다.
       - ./data/synth_sessions:/data/synth_sessions:ro
-      # ❗**업로드된 상품 문서. 이 스택에서 유일한 쓰기 마운트다**(F-EXT-001 · 이슈 #521).
-      # `UploadedDocumentStore` 가 `uploads/<sha256>/<파일명>` 으로 쓰고, ai-service 가 같은
-      # 볼륨을 읽기로 붙어 파스한다. bind mount 가 아니라 named volume 인 이유는
-      # `mysql-data` 와 같다 — 배포가 호스트 트리를 통째로 갈아끼워도(#240) docker 가
-      # 들고 있어서 산다. 업로드본은 git 이 다시 만들어 주지 않는다.
-      - uploads:/data/uploads
     networks:
       internal: {}
       # web(다른 프로젝트, sphinx-edge)이 이 이름으로 찾아온다. blue/green 이 같은
@@ -215,19 +194,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 40s
-
-volumes:
-  # ❗**이름을 못 박는다 — 이 파일의 프로젝트명이 배포마다 갈리기 때문이다.**
-  # 이 스택은 `-p sphinx-blue` 와 `-p sphinx-green` 두 프로젝트로 번갈아 뜬다. `name:` 을
-  # 안 주면 Compose 가 `sphinx-blue_uploads` 와 `sphinx-green_uploads` **두 개의 다른
-  # 볼륨**을 만들고, blue 에서 올린 문서가 green 배포 뒤에 «사라진 것처럼» 보인다.
-  # `docker-compose.data.yml` 의 `mysql-data` 가 같은 함정을 같은 방법으로 피한다.
-  #
-  # `docker compose down` 은 볼륨을 안 지운다. `down -v` 가 지우고, 그러면 올린 상품
-  # 문서가 전부 사라진다 — `extracted_risk_items` 는 DB 에 남아 있으므로 항목은 보이는데
-  # 원문 조회(GET /products/{id}/document)와 재추출만 죽는, 알아채기 어려운 상태가 된다.
-  uploads:
-    name: sphinx_uploads
 
 networks:
   # server ↔ ai-service 만. 이 프로젝트(sphinx-blue 또는 sphinx-green) 안에서만

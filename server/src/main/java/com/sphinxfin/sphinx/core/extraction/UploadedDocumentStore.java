@@ -35,16 +35,23 @@ import java.util.regex.Pattern;
  * 읽기로 붙는다. {@code data/} 본체가 읽기 전용인 것(결정 7.8 · {@code VERSION} sha256
  * 고정)은 그대로다 — 고정된 코퍼스와 사람이 올린 것이 같은 마운트에 섞이지 않는다.
  *
- * <h2>경로는 내용이 정한다</h2>
+ * <h2>경로는 내용이 정한다 — 업로더가 준 이름은 경로에 안 들어간다</h2>
  *
  * <pre>
- *   uploads/&lt;sha256&gt;/&lt;정제한 파일명&gt;
+ *   uploads/&lt;sha256&gt;.pdf
  * </pre>
  *
- * <p>같은 바이트는 같은 경로다 — 재업로드가 디렉토리를 늘리지 않고, 덮어써도 내용이
- * 같으므로 <b>파스 결과가 안 바뀐다</b>(P2). 내용이 다르면 파일명이 같아도 다른
- * 디렉토리라 서로를 밟지 않는다. 업로더가 준 파일명을 그대로 디렉토리로 쓰면
- * {@code ../} 나 동명이인 문서가 문제가 되는데, 이름을 경로 결정에서 뺀 것이 그 답이다.
+ * <p>{@code data/uploads/README.md}(PR #532)가 근거 셋을 적어 뒀다. (1) 파일명이 해시면
+ * <b>{@code ..} 를 막는 코드가 아예 필요 없다</b>. (2) 같은 문서 재업로드가 자연히 한 벌이다.
+ * (3) 무결성 대조가 공짜다 — {@code GET /products/{id}/document} 가 낸 파일이 추출에 쓴 그
+ * 파일인지 <b>경로만으로</b> 답한다({@code evidence/} 가 {@code contentHash} 로 하는 것과
+ * 같은 문법이다).
+ *
+ * <p>같은 바이트는 같은 경로다 — 덮어써도 내용이 같으므로 <b>파스 결과가 안 바뀐다</b>(P2).
+ *
+ * <p>❗<b>원래 파일명은 버리지 않고 DB 행에 남긴다</b>({@code UploadedProduct.originalFilename}).
+ * 운영자가 무엇을 올렸는지 알아야 하고, 원문 조회의 {@code Content-Disposition} 이 그 값을
+ * 쓴다 — 경로에서 뽑으면 판매자가 받는 파일이 {@code 9f2a….pdf} 가 된다.
  */
 @Service
 @Slf4j
@@ -53,7 +60,13 @@ public class UploadedDocumentStore {
     /** {@code data-dir} 아래 업로드본이 사는 하위 디렉토리. 사전적재 {@code documents/} 와 가른다. */
     static final String UPLOADS = "uploads";
 
-    /** 파일명에서 살릴 문자. 나머지는 {@code _} 로 접는다 — 경로 구분자·제어문자가 여기서 죽는다. */
+    /**
+     * 표시용 파일명에서 살릴 문자. 나머지는 {@code _} 로 접는다.
+     *
+     * <p>❗<b>이 값은 경로에 안 들어간다</b>(경로는 sha256 이다) — 화면 문면과
+     * {@code Content-Disposition} 에만 쓴다. 그래도 정제하는 이유는 그 헤더에 개행·제어문자가
+     * 실리면 응답 헤더가 갈라지기 때문이다.
+     */
     private static final Pattern UNSAFE_NAME = Pattern.compile("[^A-Za-z0-9가-힣._-]+");
 
     /** 상품ID 슬러그에서 살릴 문자. ai-service {@code derive_document_id} 와 같은 모양이다. */
@@ -87,12 +100,18 @@ public class UploadedDocumentStore {
      * 같고, 반면 "있으면 건너뛴다" 는 반쯤 쓰인 파일(앞선 요청이 도중에 죽은 경우)을 영구히
      * 남긴다. 임시파일에 쓰고 원자적으로 옮기므로 반쯤 쓰인 상태가 관측되지 않는다.
      *
+     * <p>❗<b>배포에서 이 디렉토리는 이름 있는 도커 볼륨이다</b>({@code sphinx_uploads},
+     * PR #532). 그쪽이 없으면 여기서 {@code EACCES} 로 실패하고 500 이 된다 — 볼륨과
+     * 컨테이너 사용자 소유권이 맞아야 한다는 것이 그 PR 의 몫이다.
+     *
      * @throws UncheckedIOException 디렉토리를 못 만들거나 못 쓸 때(→ 500, 배포·권한 문제)
      */
     public Stored store(String originalFilename, byte[] bytes) {
         String filename = safeFilename(originalFilename);
         String sha256 = sha256(bytes);
-        String relative = UPLOADS + "/" + sha256 + "/" + filename;
+        // ❗업로더가 준 이름이 경로에 들어가지 않는다 — 그래서 `..` 을 막는 코드가 필요 없다
+        // (PR #532 의 근거 1번). 확장자를 .pdf 로 고정하는 것은 PDF 만 받기 때문이다.
+        String relative = UPLOADS + "/" + sha256 + ".pdf";
         // 기준 디렉토리 밖으로 나가지 않는 것을 쓰기 전에 확인한다 — sha256 과 정제된 파일명
         // 둘 다 우리가 만든 값이라 지금은 벗어날 수 없지만, 읽는 쪽(ProductDocuments)과 같은
         // 가드를 쓰는 자리에도 둬야 두 경계가 갈리지 않는다.

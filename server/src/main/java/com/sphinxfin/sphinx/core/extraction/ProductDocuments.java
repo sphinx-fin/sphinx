@@ -33,13 +33,15 @@ public class ProductDocuments {
 
     private final Path dataDir;
     private final ProductRiskItems productRiskItems;
+    private final ProductUploads productUploads;
 
     /**
      * 경로를 String 으로 받아 직접 {@link Path#of}로 변환한다 — {@code SimulatorProperties}가
      * 같은 이유(리소스 경로 변환기가 상대경로의 {@code ..}를 null 로 정규화)로 그렇게 한다.
      */
     public ProductDocuments(@Value("${sphinx.documents.data-dir}") String dataDir,
-                            ProductRiskItems productRiskItems) {
+                            ProductRiskItems productRiskItems,
+                            ProductUploads productUploads) {
         // 빈 값은 설정 오류다 — Spring 의 ${VAR:기본값} 은 환경변수가 빈 문자열이면 그것을
         // 값으로 취급해 기본값이 죽는다(SimulatorProperties 주석과 같은 함정).
         if (dataDir == null || dataDir.isBlank()) {
@@ -49,6 +51,7 @@ public class ProductDocuments {
         }
         this.dataDir = Path.of(dataDir);
         this.productRiskItems = productRiskItems;
+        this.productUploads = productUploads;
     }
 
     /** 조회 결과 — 파일명(Content-Disposition 용)과 바이트. */
@@ -77,11 +80,27 @@ public class ProductDocuments {
                     + "마운트됐는지 · SPHINX_DATA_DIR 을 확인하라, #433): " + resolved);
         }
         try {
-            return new Document(resolved.getFileName().toString(), Files.readAllBytes(resolved));
+            return new Document(filenameOf(productId, resolved), Files.readAllBytes(resolved));
         } catch (IOException e) {
             // 파일이 있는데 못 읽는 것은 설정·권한 문제다 — 400 이 아니라 500(INTERNAL_ERROR).
             throw new UncheckedIOException("상품 문서를 읽지 못했다: " + resolved, e);
         }
+    }
+
+    /**
+     * {@code Content-Disposition} 에 낼 파일명.
+     *
+     * <p>❗<b>경로에서 뽑지 않는다</b>(이슈 #521 · PR #532). 업로드본의 경로는 내용 주소
+     * ({@code uploads/<sha256>.pdf})라, 경로에서 뽑으면 판매자가 받는 파일이
+     * {@code 9f2a….pdf} 가 되어 <b>무엇을 받았는지 알 수 없다</b>. 원래 파일명은 업로드가
+     * DB 행에 남겨 뒀으므로 그것을 쓴다.
+     *
+     * <p>사전적재 데모 2종은 그 행이 없다 — 그쪽은 경로의 파일명이 곧 사람이 읽는 이름이라
+     * (예: {@code els_kiwoom_4181_simple_prospectus.pdf}) 예전 동작을 그대로 둔다.
+     */
+    private String filenameOf(String productId, Path resolved) {
+        return productUploads.originalFilenameOf(productId)
+                .orElseGet(() -> resolved.getFileName().toString());
     }
 
     /**

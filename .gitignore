@@ -12,10 +12,6 @@ __pycache__/
 node_modules
 dist/
 data/synth_sessions/*.json
-# 업로드된 상품 문서(F-EXT-001 · #521). 사람이 올린 런타임 산출물이라 절대 커밋하지 않는다 —
-# `data/documents/` 의 커밋된 공시 문서 2종과 성격이 다르다. 배포에서는 이 경로가 이름 있는
-# 도커 볼륨(`sphinx_uploads`)이고, 로컬·테스트에서는 여기에 그대로 쌓인다.
-data/uploads/
 eval/labeling/*.xlsx
 .DS_Store
 .pytest_cache/

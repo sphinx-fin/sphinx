@@ -120,9 +120,10 @@ class DocumentUploadWiringTest {
         assertThat(row.status()).isEqualTo("parsed");
         assertThat(row.originalFilename()).isEqualTo("els_prospectus.pdf");
         assertThat(row.documentPath())
-                .as("경로는 data-dir 상대여야 한다 — ai-service SPHINX_DATA_DIR 규약")
-                .startsWith("uploads/")
-                .endsWith("/els_prospectus.pdf");
+                .as("경로는 data-dir 상대이고 **내용 주소**다 — 업로더가 준 이름은 안 들어간다"
+                        + "(PR #532 규약). 그래서 `..` 을 막는 코드가 필요 없다")
+                .matches("uploads/[0-9a-f]{64}\\.pdf")
+                .doesNotContain("els_prospectus");
 
         // ① 바이트가 그대로 있다. **이 단정이 옛 스텁을 잡는 자리다** — 스텁도 200 을 냈다.
         Path stored = Path.of(dataDir, row.documentPath());
@@ -291,14 +292,42 @@ class DocumentUploadWiringTest {
 
         UploadedProduct row = uploads.findByProductId(productId).orElseThrow();
         assertThat(row.documentPath())
-                .as("업로더가 준 이름은 경로 결정에 안 쓴다 — 디렉토리는 sha256 이다")
-                .startsWith("uploads/")
-                .doesNotContain("..");
+                .as("업로더가 준 이름은 경로에 아예 안 들어간다 — 경로가 sha256 이다")
+                .matches("uploads/[0-9a-f]{64}\\.pdf")
+                .doesNotContain("..")
+                .doesNotContain("tmp");
         Path resolved = Path.of(dataDir, row.documentPath()).toAbsolutePath().normalize();
         assertThat(resolved)
                 .as("실제 파일이 기준 디렉토리 안에 있어야 한다")
                 .startsWith(Path.of(dataDir).toAbsolutePath().normalize());
         assertThat(Files.isRegularFile(resolved)).isTrue();
+    }
+
+    /* ── ⑧ 원문 조회가 원래 파일명을 낸다 ──────────────────────────────────── */
+
+    @Test
+    @DisplayName("★ 원문 조회의 파일명이 «올린 이름» 이다 — 경로에서 뽑으면 9f2a….pdf 를 받는다")
+    void theDownloadKeepsTheUploadersFilename() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+
+        String productId = upload("els_prospectus.pdf", "ELS", PDF);
+
+        mvc.perform(get("/products/{id}/document", productId))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Disposition",
+                                org.hamcrest.Matchers.containsString("els_prospectus.pdf")));
+    }
+
+    @Test
+    @DisplayName("★ 사전적재 상품은 예전대로 경로의 파일명을 쓴다 — 그쪽은 그게 사람이 읽는 이름이다")
+    void preloadedProductsKeepTheirPathFilename() throws Exception {
+        mvc.perform(get("/products/{id}/document", "doc-els-kiwoom-4181"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Disposition",
+                                org.hamcrest.Matchers.containsString(
+                                        "els_kiwoom_4181_simple_prospectus.pdf")));
     }
 
     /** 업로드 한 번. 발급된 productId 를 돌려준다. */

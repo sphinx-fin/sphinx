@@ -145,6 +145,17 @@ public class ProductUploads {
         return repository.findByProductId(productId).map(UploadedProduct::documentPath);
     }
 
+    /**
+     * 업로드된 상품의 <b>원래 파일명</b>. 아니면 empty(사전적재 데모 2종).
+     *
+     * <p>{@code Content-Disposition} 이 쓴다 — 저장 경로가 내용 주소라 경로에서 뽑으면
+     * 판매자가 받는 파일이 {@code 9f2a….pdf} 가 된다({@link ProductDocuments} 주석).
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> originalFilenameOf(String productId) {
+        return repository.findByProductId(productId).map(UploadedProduct::originalFilename);
+    }
+
     /** 업로드된 상품의 상품유형. 아니면 empty — 기본값을 지어내지 않는다. */
     @Transactional(readOnly = true)
     public Optional<String> productTypeOf(String productId) {
