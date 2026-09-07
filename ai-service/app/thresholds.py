@@ -35,6 +35,17 @@ THRESHOLDS_PATH = Path(__file__).resolve().parent / "scoring_thresholds.yaml"
 #: **숫자만 남고 왜인지가 사라진다** — 그러면 파일로 뺀 이유가 없어진다.
 FIELDS = ("value", "used_by", "reacts_to", "why")
 
+#: **선택 필드** — 실측으로 정한 값이 그 실측을 다시 낼 도구를 가리킨다 (`#529` 리뷰, 오준서).
+#:
+#: ❗**추론이 아니라 선언이다.** 처음엔 `why` 문면에서 「실측」 같은 표식을 찾아 인용을
+#: 요구했는데 **두 방향으로 다 틀렸다** — 이 파일의 주인공(`ngram_match`)은 표식에 안
+#: 걸리고, 걸린 둘은 *"이 값 자체는 실측이 아니다"* 라는 **부정문**이었다. 문면을 읽는
+#: 대조는 자기 설명문에 걸린다(`#308` 에서 밟은 그 함정).
+#:
+#: 그래서 숫자 옆에 **적게** 한다. 손목록을 테스트에 두지 않는 이유와 같다 — 목록이
+#: 데이터에 있으면 다음 임계값을 만드는 사람이 그 자리에서 본다.
+OPTIONAL_FIELDS = ("measured_by",)
+
 #: 정수여야 하는 id. **로더가 잡는다** (`#368` 리뷰, 강희진).
 #:
 #: `value: 2` 를 `2.0` 으로 적으면 로더는 통과하고 **쓸 때 터진다**
@@ -68,6 +79,12 @@ def _load() -> dict[str, float | int]:
     for name, body in entries.items():
         if not isinstance(body, dict):
             raise ThresholdError(f"{name}: 매핑이어야 한다 — 받은 값 {body!r}")
+        stray = sorted(set(body) - set(FIELDS) - set(OPTIONAL_FIELDS))
+        if stray:
+            raise ThresholdError(
+                f"{name}: 모르는 필드가 있다: {stray} — 허용은 "
+                f"{list(FIELDS)} + 선택 {list(OPTIONAL_FIELDS)}"
+            )
         missing = [f for f in FIELDS if not body.get(f)]
         if missing:
             raise ThresholdError(

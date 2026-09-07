@@ -223,20 +223,94 @@ def test_the_guard_actually_runs_when_only_this_file_changes(path: Path, what: s
 #
 # `#388` 에서 세운 규약과 같다 — 숫자를 적은 자리에 **그 숫자를 다시 낼 명령**이 없으면,
 # 값을 의심하는 다음 사람이 옮겨 적을 출처가 없어 스스로 다시 재고 또 다른 값을 낸다.
-# `ngram_match` 는 그 규약이 필요한 첫 사례다: `why` 가 코퍼스·모집단·셈을 다 적는다.
-_MEASURED_WHY = {"ngram_match": "tools/tune_ngram_threshold.py"}
+#
+# ❗**손목록으로 두지 않는다** (`#529` 리뷰, 오준서). 처음엔 `_MEASURED_WHY = {...}` 로
+# 이름을 적었는데, 그건 **이 파일이 100줄 위에서 금지한 것**이다 —
+# `test_no_module_still_hardcodes_a_threshold` docstring 이 *"이름을 하나씩 적으면 다음
+# 임계값을 만드는 사람이 이 목록을 모른 채 지나간다"* 로 세워 뒀다. **내용에서 유도한다.**
+
+def _thresholds_raw() -> dict:
+    return yaml.safe_load(thresholds.THRESHOLDS_PATH.read_text(encoding="utf-8"))["thresholds"]
 
 
-@pytest.mark.parametrize("threshold_id,tool", sorted(_MEASURED_WHY.items()))
-def test_measured_why_names_its_reproduction(threshold_id: str, tool: str) -> None:
-    """실측 수치를 든 `why` 는 그 수치를 다시 낼 도구를 이름 대야 한다."""
-    raw = yaml.safe_load(thresholds.THRESHOLDS_PATH.read_text(encoding="utf-8"))
-    entry = raw["thresholds"][threshold_id]
-    why = entry["why"]
-    assert tool in why, (
-        f"{threshold_id} 의 why 가 실측을 인용하면서 {tool} 을 안 가리킨다 — "
-        "값을 의심하는 다음 사람이 옮겨 적을 출처가 없다"
+def test_every_measured_by_points_at_a_tool_that_exists() -> None:
+    """★ 실측으로 정한 값은 **그 실측을 다시 낼 도구**를 가리킨다 (`#529` 리뷰, 오준서).
+
+    ❗**손목록도 문면 추론도 아니다.** 이 파일이 100줄 위에서 손목록을 금지했고
+    (*"다음 임계값을 만드는 사람이 이 목록을 모른 채 지나간다"*), 문면에서 「실측」 같은
+    표식을 찾는 방식은 **두 방향으로 다 틀렸다** — `ngram_match` 는 안 걸리고
+    *"이 값 자체는 실측이 아니다"* 라는 **부정문**이 걸렸다. 그래서 데이터가 선언한다.
+    """
+    raw = _thresholds_raw()
+    declared = {name: body["measured_by"] for name, body in raw.items() if body.get("measured_by")}
+    assert declared, (
+        "measured_by 를 선언한 임계값이 하나도 없다 — 이 대조가 0건을 보고 통과한다"
     )
-    assert (Path(__file__).resolve().parents[1] / tool).is_file(), (
-        f"why 가 부르는 도구가 없다: {tool}"
+    root = Path(thresholds.__file__).resolve().parents[1]
+    missing = sorted(f"{name} → {rel}" for name, rel in declared.items()
+                     if not (root / rel).is_file())
+    assert not missing, f"measured_by 가 가리키는 도구가 없다: {missing}"
+
+
+def test_a_why_that_cites_a_tool_also_declares_it() -> None:
+    """★ `why` 가 도구를 가리키면 `measured_by` 로도 **선언**해야 한다.
+
+    문면만 있으면 그 인용이 낡아도 아무도 모른다 — 위 대조가 파일 존재를 보는 자리는
+    `measured_by` 뿐이다. 접힌 스칼라(`why: >-`)는 물리 줄바꿈을 공백으로 접으므로
+    문면 쪽 인용은 **줄 감싸기에 취약하다**(`#529` 리뷰) — 선언이 그걸 안 탄다.
+    """
+    for name, body in _thresholds_raw().items():
+        folded = re.sub(r"\s+", "", body["why"])
+        cited = re.findall(r"(?<![\w/])tools/([A-Za-z0-9_.]+?\.py)", folded)
+        if not cited:
+            continue
+        assert body.get("measured_by"), (
+            f"{name}: why 가 {cited} 를 가리키는데 measured_by 가 없다 — "
+            "존재를 대조하는 자리는 그 필드뿐이다"
+        )
+
+
+def test_no_tool_or_doc_hardcodes_the_prompt_version() -> None:
+    """★ **판을 문자열로 박지 않는다** — 이 PR 이 규탄한 그 결함의 회귀 가드다.
+
+    `tune_ngram_threshold.py` 가 `F-SCR-001_v2` 를 print 에 박아 놓고, `#409` 가 v3 로
+    재채점한 뒤 **틀린 조건을 찍고 있었다.** 같은 하드코딩이 문서에도 남아 있었다.
+    판은 `eval/data/model.jsonl` 에서 읽는다.
+
+    `test_no_module_still_hardcodes_a_threshold` 와 같은 모양이다 — 소스 텍스트를 훑어
+    리터럴을 잡고, **그 정규식 자체를 먼저 테스트한다.**
+    """
+    shape = re.compile(r"F-SCR-001_v\d")
+    assert shape.search("판은 F-SCR-001_v2 다"), "★ 꼴이 안 맞으면 아래 스캔이 0줄을 본다"
+
+    live = {row["prompt_version"] for row in _model_rows() if row.get("prompt_version")}
+    assert live, "model.jsonl 에서 prompt_version 을 하나도 못 읽었다"
+
+    # ❗**「예전에 이랬다」는 서술은 인용이 아니다** (`#308` 에서 밟은 함정과 같다 —
+    #   *"대비를 설명하는 줄은 인용이 아니다"*). 그 줄을 못 가르면 낡은 값을 지목해 고친
+    #   기록 자체가 위반으로 잡히고, 그러면 다음 사람이 그 기록을 지운다.
+    historical = re.compile(r"예전에|였다|박아 뒀|낡았|바뀌었")
+
+    root = Path(thresholds.__file__).resolve().parents[1]
+    offenders: list[str] = []
+    for path in sorted((root / "tools").glob("*.*")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if historical.search(line):
+                continue
+            for found in shape.findall(line):
+                # 인용이 **지금 값과 같으면** 낡지 않았다. 다르면 그 줄이 곧 거짓이다.
+                if found not in live:
+                    offenders.append(f"{path.name}:{number} {found} (실물 {sorted(live)})")
+    assert not offenders, (
+        "판을 문자열로 박았고 그 값이 model.jsonl 과 다르다 — 파일에서 읽는다:\n  "
+        + "\n  ".join(offenders)
     )
+
+
+def _model_rows() -> list[dict]:
+    import json
+
+    path = Path(thresholds.__file__).resolve().parents[2] / "eval" / "data" / "model.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+

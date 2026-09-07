@@ -19,6 +19,8 @@ version: 1
 thresholds:
   ngram_match:
     value: 0.62
+    # ❗실측으로 정한 값이다 — 그 실측을 다시 낼 도구를 여기 적는다(`#529` 리뷰).
+    measured_by: tools/tune_ngram_threshold.py
     used_by: misconception.match — 2단계(문자 바이그램)
     reacts_to: 고객 발화와 오해 패턴의 문자 바이그램 포함도
     why: >-
