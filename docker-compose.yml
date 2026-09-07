@@ -23,6 +23,8 @@
 # 요청이 옛/새 버전에 무작위로 섞이므로, 별명은 반드시 색으로 갈라야 한다.
 #
 # 쓰는 법(배포는 scripts/deploy_ec2.sh 가 이 순서를 대신한다):
+#   docker volume create sphinx_uploads          # ❗앱 스택이 external 로 참조한다 — 없으면
+#                                                #   마지막 줄이 "external volume … not found"
 #   docker compose -f docker-compose.data.yml -p sphinx-data up -d
 #   docker compose -f docker-compose.edge.yml -p sphinx-edge up -d --build
 #   STACK=blue docker compose -f docker-compose.yml -p sphinx-blue up -d --build
@@ -76,6 +78,15 @@ services:
       # 바꿔서, **이 스택을 내리고 나서야** 그 트리를 지운다 — 떠 있는 동안은 절대
       # 안전하다(scripts/deploy_ec2.sh 참조).
       - ./data:/data:ro
+      # 업로드 원본(F-EXT-001 · 이슈 #521). **ai-service 는 읽기만 한다** — 쓰는 것은
+      # server 하나다. `/data` 아래에 두는 이유는 `document_path` 가 SPHINX_DATA_DIR 상대
+      # 경로라서다: `uploads/<sha256>/<파일명>` 이 `documents/…` 와 같은 문법으로 서고,
+      # /internal/parse 계약도 parsing.py 시그니처도 안 바뀐다.
+      # ❗위 `./data:/data:ro` 와 겹치므로 **호스트 `data/uploads/` 가 있어야 한다.** 없으면
+      # Docker 가 마운트 지점을 만들려 하고 부모가 읽기 전용이라 실패해서, 컨테이너가 아예
+      # 뜨지 않는다(실측: `create mountpoint for /data/uploads: read-only file system`).
+      # 그래서 그 빈 디렉토리를 커밋해 뒀다 — `data/uploads/README.md` 가 지우지 말라고 적는다.
+      - uploads:/data/uploads:ro
       # ❗ contracts/ 도 런타임 의존이다. templates.py 의 assert_matches_contract() 가
       # contracts/samples/parsed_*.json 을 읽어 상품유형 템플릿과 대조하는데, **파일이 없으면
       # 예외도 로그도 없이 대조가 통째로 no-op** 이 된다(#37 코멘트 ②). data/ 와 달리 이건
@@ -171,6 +182,16 @@ services:
       - ./data/documents:/data/documents:ro
       # 위 합성 세션의 산출물. 추적하지 않는 생성물이라 배포 때 만들어진다.
       - ./data/synth_sessions:/data/synth_sessions:ro
+      # ❗업로드 원본을 **쓰는 유일한 자리**(F-EXT-001 · 이슈 #521). 위 셋과 달리 rw 다.
+      # bind mount 로 두지 않는 이유: 호스트 트리가 배포마다 새 디렉토리라(mktemp -d -p /opt)
+      # 거기 쓴 업로드는 다음 배포에서 사라진다. 커밋된 원본 2종은 git 이 매 회차 다시
+      # 가져오지만 업로드본은 아무도 다시 만들어 주지 않는다.
+      #
+      # 그리고 이렇게 해야 `data/` 의 성격이 안 흐려진다 — 호스트 `data/` 트리에는
+      # `uploads/` 가 아예 생기지 않으므로, VERSION sha256 으로 고정한 코퍼스(결정 7.8 · P2)와
+      # 사용자가 올린 것이 한 곳에 살지 않는다. 컨테이너 안에서만 한 트리로 보이고 그건
+      # 위 경로 규약을 살리기 위한 것이다.
+      - uploads:/data/uploads
     networks:
       internal: {}
       # web(다른 프로젝트, sphinx-edge)이 이 이름으로 찾아온다. blue/green 이 같은
@@ -194,6 +215,27 @@ services:
       timeout: 3s
       retries: 5
       start_period: 40s
+
+volumes:
+  # 업로드 원본(F-EXT-001 · 이슈 #521). ❗**`external: true` 이므로 이 파일이 만들지 않는다.**
+  #
+  # 왜 여기서 만들지 않는가 — 실측 근거가 둘이다.
+  #
+  #   ① 색별 프로젝트가 각자 만들면 갈린다. 앱 스택은 `-p sphinx-blue|green` 으로 뜨고
+  #      (scripts/deploy_ec2.sh compose_app) Compose 는 볼륨 이름에 프로젝트를 접두로
+  #      붙인다. 고정 `name:` 을 주면 두 색이 같은 볼륨을 공유하는 것까지는 되지만,
+  #   ② 그때는 `down -v` 가 이 볼륨을 지운다(실측). `external: true` 는 `down -v` 로도
+  #      살아남는다(실측). DB·인증서를 볼륨으로 둔 것과 같은 이유이고, 업로드 원본은
+  #      복구 수단이 아예 없어서 그쪽보다 더 세게 막아야 한다.
+  #
+  # 만드는 자리는 배포 스크립트다(`docker volume create`, 멱등). 볼륨이 없으면 기동이
+  # `external volume "sphinx_uploads" not found` 로 **즉시** 실패한다 — 조용히 빈
+  # 디렉토리로 뜨지 않으므로, 손으로 compose 를 띄우는 사람도 그 자리에서 안다.
+  #
+  #   docker volume create sphinx_uploads
+  uploads:
+    external: true
+    name: sphinx_uploads
 
 networks:
   # server ↔ ai-service 만. 이 프로젝트(sphinx-blue 또는 sphinx-green) 안에서만

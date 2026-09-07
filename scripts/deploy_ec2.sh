@@ -248,7 +248,12 @@ fi
 # data/ 가 있어야 한다. 읽기 전용 볼륨의 원본이고, 없으면 docker 가 빈 디렉토리를 만들어
 # 마운트해서 **오해 라이브러리 없이 컨테이너가 뜬다** — ai-service 는 로딩 시점에 죽으니
 # 드러나지만, 원인이 "git clone 이 덜 됐다"라는 것은 로그만 봐서는 안 보인다.
-for d in data/timeseries data/misconception_library contracts/samples; do
+# ❗`data/uploads` 는 **비어 있는 마운트 지점**이라 여기 들어 있다(이슈 #521). ai-service 가
+# `./data:/data:ro` 로 통째 마운트하고 그 위에 볼륨을 겹치는데, 지점이 없으면 runc 가 만들려
+# 하고 부모가 읽기 전용이라 **컨테이너가 아예 안 뜬다.** 그 실패는 아래 `compose_app up` 에서
+# 나고 `set -e` 가 진단 블록과 정리까지 건너뛰게 만들므로, 여기서 먼저 멈추는 편이 낫다.
+# 비어 보여서 지우는 것이 현실적인 실수라(README 가 그걸 경고한다) 가드에 넣는다.
+for d in data/timeseries data/misconception_library contracts/samples data/uploads; do
   [ -d "$d" ] || { echo "$d 가 없다. 레포를 통째로 clone 했는지 확인한다." >&2; exit 1; }
 done
 
@@ -324,6 +329,12 @@ log_unhealthy sphinx-edge
 # DB(`sphinx_mysql-data`)가 그 안에 있고, 새 스택이 이름으로 그대로 물려받는 것이 이
 # 이관의 전제다. `docker rm` 은 named volume 을 지우지 않는다 — 여기에 `down -v` 를 쓰면
 # 인증서와 DB 가 같이 날아간다(재발급은 Let's Encrypt 발급 한도가 걸린다).
+# ❗업로드 원본(`sphinx_uploads`)도 같은 전제에 얹혀 있다(이슈 #521). `external: true` 라
+# `down -v` 로도 안 지워지지만 **`docker volume prune` 은 막지 못한다** — 그래서 위에서
+# `--label` 을 붙여 스크래치 볼륨과 구별되게 해 뒀다. 그쪽은 **복구 수단이
+# 아예 없다** — 인증서는 재발급되고 DB 는 스냅샷이 있지만, 사람이 올린 문서는 아무도 다시
+# 만들어 주지 않는다. `external: true` 라 `down -v` 로도 지워지지 않지만, `docker volume rm`
+# 은 막지 못한다.
 #
 # 라벨 필터는 **정확히 일치**라 `sphinx-edge`·`sphinx-data`·`sphinx-blue` 는 안 걸린다.
 # 이관이 끝난 박스에서는 걸리는 컨테이너가 0개라 이 블록은 아무 일도 안 한다 — 그게 정상
@@ -356,6 +367,32 @@ if [ -n "$legacy_cids" ]; then
   # `compose_data up -d` 가 만든다.
   compose_data restart mysql >/dev/null 2>&1 || true
 fi
+
+# ── 업로드 원본 볼륨 ─────────────────────────────────────────────────────────
+#
+# 업로드된 상품문서가 사는 곳(F-EXT-001 · 이슈 #521). **여기서 만든다** — 앱 스택은
+# `external: true` 로 참조만 하고, 없으면 `external volume "sphinx_uploads" not found`
+# 로 기동이 즉시 실패한다. 그래서 반드시 `compose_app` 보다 앞이어야 한다.
+#
+# ❗**`external: true` 를 고른 이유는 「Compose 가 못 만든다」가 아니다**(PR #532 리뷰 ④).
+# 이 파일에서는 두 서비스가 `uploads` 를 참조하므로, non-external 로 뒀다면 Compose 가
+# 만들었을 것이다. 진짜 이유는 **`down -v` 에서 살아남는 것** 하나다(실측 — 고정 `name:`
+# 만으로는 지워진다). 업로드 원본은 복구 수단이 아예 없어서 인증서·DB 보다 세게 막는다.
+# 그 대가로 이 줄이 필요하고, `docs/deployment.md` 의 로컬 절차에도 같은 줄이 있다.
+#
+# `--label` 을 붙이는 이유: 실패한 배포의 `compose_app down` 과 다음 `up` 사이에 이 볼륨은
+# **어느 컨테이너에도 안 붙어 있다.** 그 틈에 `docker volume prune` 이 돌면 확인 없이
+# 지우는데, `docker volume ls` 로는 스크래치 볼륨과 구별되지 않는다. 이 스크립트 자신이
+# 아래에서 prune 하는 습관이 있다.
+docker volume create --label com.sphinxfin.keep=업로드원본-복구수단없음 \
+    sphinx_uploads >/dev/null
+
+# ❗**소유권을 멱등하게 맞춘다.** server 는 비루트(10001:10001)로 돌고 `docker volume create`
+# 는 볼륨 루트를 `root:root` 로 만든다. 이미지에 구워서 Docker 의 copy-up 에 얹을 수도
+# 있지만 **그건 볼륨이 빈 동안에만 도는 일회성 부작용**이라, 한 번 root 소유로 굳으면 그
+# 뒤로는 모든 업로드가 EACCES 500 이고 배포는 아무 말도 안 한다(server/Dockerfile 참고).
+# 여기서 매번 맞추면 항상 옳다 — 디렉토리 안의 파일은 건드리지 않는다.
+docker run --rm -v sphinx_uploads:/v busybox chown 10001:10001 /v >/dev/null
 
 # ── data·edge 스택 — 상시 유지, 설정이 안 바뀌면 compose 가 아무것도 안 건드린다 ──
 echo "data 스택(mysql) 기동"

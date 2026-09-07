@@ -7,6 +7,7 @@
 | `documents/` | 파서 입력 공시 문서 원본 (ELS 간이투자설명서, 변액 상품요약서·운용설명서) | 추적 |
 | `dispute_cases/` | 오해 라이브러리 `source` 가 인용하는 금감원 보도자료 | 추적 |
 | `synth_sessions/` | F-DSH-003 산출물 | **제외** |
+| `uploads/` | 업로드된 상품문서(F-EXT-001 · #521). 배포에서 실제 파일은 도커 볼륨 `sphinx_uploads` 에 산다 — 이 디렉토리는 **비어 있어야 하는 마운트 지점**이고 지우면 ai-service 가 기동하지 않는다(`uploads/README.md`) | **제외**(README 만 추적) |
 
 `documents/` 는 private repo 이므로 추적한다(PR #30) — 파싱 재현성의 입력을 코드와 같은
 커밋에 고정한다. 제출물에는 5절 가명 처리 요구에 따라 발행사·회차 없이 조건 문면만 인용한다.
