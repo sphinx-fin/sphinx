@@ -41,6 +41,7 @@ export type ErrorCode =
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
   | "AI_SERVICE_UNAVAILABLE"    // 502 ai-service 호출 실패(non-2xx·연결 오류·미구현)  ← PR #67
   | "OVERRIDE_NOT_ELIGIBLE"     // 409 적색 아님·승인 대기 아님 — 오버라이드 불가        ← PR #68
+  | "DOCUMENT_UNPROCESSABLE"    // 400 이 문서로는 처리할 수 없다 — 문서를 고쳐 다시 올린다  ← #521
   | "INTERNAL_ERROR";           // 500 서버 내부 오류
 
 export interface ApiError {
