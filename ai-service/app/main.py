@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -299,6 +300,22 @@ async def _pii_handler(request: Request, exc: PiiDetected) -> JSONResponse:
     )
 
 
+#: 이 프로세스가 뜬 시각(UTC · ISO-8601). **모듈 로드 시점에 한 번** 잡는다.
+#:
+#: 운영 콘솔(`#522`·`#531`)이 server 와 ai-service 의 기동 시각을 나란히 놓아 **코드 세대가
+#: 갈리는 사고**를 한눈에 보게 하려는 값이다 — 핫재기동 뒤 한쪽만 새 판이면 `/internal/score`
+#: 가 422 로 떨어지는데, 그 원인은 응답 어디에도 안 보였다.
+#:
+#: ❗**이것만으로는 세대 사고를 못 잡는다.** 같은 시각에 뜬 두 컨테이너도 이미지가 다르면
+#: 갈린다. 그래서 아래 `prompt_versions`·`misconception_library_version` 을 같이 본다 —
+#: 「언제 떴나」와 「무엇이 떴나」는 다른 질문이다.
+#:
+#: ❗**로컬은 `uvicorn --reload` 라 이 값이 컨테이너가 아니라 「워커」의 기동 시각이다.**
+#: 파일을 고칠 때마다 바뀐다. 배포에는 `--reload` 가 없어 문제가 없지만, 로컬에서 두 값을
+#: 나란히 놓고 *"어긋났다"* 로 읽으면 오진이다.
+STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     """키 유무를 노출하지만 값은 절대 노출하지 않는다.
@@ -313,6 +330,7 @@ def healthz() -> dict:
     cfg = settings()
     return {
         "status": "ok",
+        "started_at": STARTED_AT,
         "llm_model": cfg.llm_model,
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,
