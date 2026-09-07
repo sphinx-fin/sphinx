@@ -628,6 +628,13 @@ def test_the_summary_endpoint_reports_the_meter() -> None:
 def test_not_run_is_visible_and_distinct_from_zero() -> None:
     """★ **이 엔드포인트가 존재하는 이유다.**
 
+    변이 방식을 적어 둔다 (`#538` 리뷰 — 재현 셈이 방식에 따라 달랐다):
+    `PolarityMeter.snapshot()` 의 `"not_run": self.not_run` 을 `"not_run": 0` 으로 바꾼다
+    → **2 failed**(이것과 `test_the_summary_endpoint_reports_the_meter`).
+    `schemas.PolaritySummary.not_run` **필드를 지우는** 방식이면 3 failed 다
+    (`test_reading_the_summary_does_not_reset_it` 의 완전일치 대조까지 걸린다).
+    어느 쪽이든 방향은 같다 — **어느 층을 건드렸는지가 셈을 바꾼다.**
+
     게이트는 실패하면 후보를 남기므로(P5 0.2절) `dropped == 0` 과 `not_run > 0` 이
     **판정에서 구별되지 않는다.** 결정 5.40 — 못 잰 값은 0 이 아니라 「모른다」다.
     """
