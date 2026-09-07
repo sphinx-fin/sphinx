@@ -85,7 +85,7 @@ core 에 둔 경계 인터페이스라(ADR-003) 어느 하위 패키지에도 �
 | `core/gate/` | `GateEngine`·`GateConfig` (판정) |
 | `core/pii/` | `PiiGateway` — P3 경계라 단독 패키지다 |
 | `core/aiservice/` | ai-service 호출 경계 |
-| `core/extraction/` | 상품별 추출 스냅샷 저장·조회 (F-EXT-002 배선). 저장 우선, MockData 폴백 |
+| `core/extraction/` | 상품 문서 업로드·저장 (F-EXT-001) + 추출 스냅샷 저장·조회 (F-EXT-002). 저장 우선, MockData 폴백 |
 | `core/persistence/` | `BaseEntity`·JPA 감사·컨버터 |
 | `core/simulator/` | `SimulatorProperties` (설정 주입. 계산 엔진은 최상위 `simulator/`) |
 
@@ -136,7 +136,7 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
 - **예외는 컨트롤러에서 처리하지 않고 `api/exception/GlobalExceptionHandler`(전역) 한 곳**에서
   `ApiResponse.fail(...)`로 변환한다. 코드: `NOT_FOUND`(404)·`VALIDATION_ERROR`(400)·
   `MALFORMED_REQUEST`(400)·`REEXPLAIN_NOT_ELIGIBLE`(400)·`REVERIFY_EXHAUSTED`(400)·
-  `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`UNAUTHORIZED`(401)·
+  `ILLEGAL_STATE_TRANSITION`(409)·`OVERRIDE_NOT_ELIGIBLE`(409)·`DOCUMENT_UNPROCESSABLE`(400)·`UNAUTHORIZED`(401)·
   `FORBIDDEN`(403)·`EVIDENCE_REQUIRED`(502)·`MEASUREMENT_INVALID`(502)·
   `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
@@ -144,6 +144,10 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
   네 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온)이 어긋나지
   않도록 `ErrorCodeContractTest`가 전부 대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
   (이슈 #316 — `UNAUTHORIZED`·`FORBIDDEN`·`MEASUREMENT_INVALID`가 없었다).
+  ❗**다섯 번째 자리가 있다** — `web/src/lib/errorText.ts`의 `Record<ErrorCode, string>`.
+  거기는 `ErrorCodeContractTest`가 아니라 **tsc가 잡는다**(코드를 더하고 문면을 안 쓰면
+  `npm run build`가 깨진다). 그래서 대조 테스트는 초록인데 웹 빌드만 빨간 상태가 생긴다 —
+  코드를 더했으면 `npm run build`까지 돌린다. 문면 규칙은 그 파일 주석에 있다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
