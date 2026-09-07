@@ -14,6 +14,19 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# ── 데모 답지 캡션을 이 빌드에 넣을지 (이슈 #539) ────────────────────────────
+#
+# S-03 질문 아래에 U1·U4 예시를 내는 진행자용 캡션이다. **고객 화면에 붙는 답지**라
+# 기본값은 꺼짐이고, `deploy.yml` 이 **alpha 에만** 준다(`SPHINX_DEMO_OPEN` 과 같은 배선).
+#
+# ❗**런타임 환경변수로는 못 한다 — `dist/` 는 이 단계에서 굳는다.** nginx 가 서빙하는 것은
+# 정적 산출물이라 기동 시점에 바꿀 수 있는 것이 없다. 그리고 그게 맞다: 꺼진 빌드에는
+# 답지 문자열이 **번들에 아예 없어야** 하고(vite.config.ts `__DEMO_CAPTIONS__` 주석),
+# 런타임 플래그였다면 문자열은 실려 나가고 화면만 안 그리는 것이 됐다.
+ARG VITE_SPHINX_DEMO_CAPTIONS=
+ENV VITE_SPHINX_DEMO_CAPTIONS=${VITE_SPHINX_DEMO_CAPTIONS}
+
 # `npm run build` 가 `tsc --noEmit && vite build` 다 — 타입 검사가 빌드의 일부라서
 # 타입이 깨진 채로는 이미지가 만들어지지 않는다.
 RUN npm run build

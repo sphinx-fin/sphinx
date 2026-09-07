@@ -395,7 +395,7 @@ location 을 고르기 전에 돌아서 그냥 두면 챌린지까지 튕긴다 
 # 박스에서 (aws ssm start-session --target <instance-id>)
 cd /opt/sphinx
 SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinxfin.duckdns.org SPHINX_DEMO_OPEN=1 \
-  ./scripts/deploy_ec2.sh --cert
+  SPHINX_DEMO_CAPTIONS=1 ./scripts/deploy_ec2.sh --cert
 ```
 
 발급하고 web 을 재기동하는 것까지 한 줄이다. 끝나면 `TLS 켜짐 — https://…` 이 찍힌다.
@@ -404,6 +404,10 @@ SSM_PREFIX=/sphinx/alpha SPHINX_PUBLIC_HOST=sphinxfin.duckdns.org SPHINX_DEMO_OP
 ❗**`SPHINX_DEMO_OPEN=1` 을 빼지 않는다(alpha 한정).** `--cert` 는 web 을 두 번 재기동하는데
 그때 넘어간 값으로 새로 뜬다 — 안 주면 개방 모드(§9.3)가 꺼진 채 돌아와 **인증서는 받았는데
 전 화면이 401** 이 된다. prod 는 애초에 개방 모드가 아니므로 붙이지 않는다.
+
+❗**`SPHINX_DEMO_CAPTIONS=1` 도 같은 이유로 뺄 수 없다(alpha 한정).** `--cert` 가 web 을
+`--build` 로 다시 만드는데, 이건 **빌드 인자**라 안 주면 답지 캡션(§9.6)이 **빠진 이미지**로
+돌아온다. 증상이 조용하다 — 화면은 멀쩡하고 캡션만 없어서 "왜 안 뜨지" 가 리허설에서 난다.
 
 `--cert` 는 `docker-compose.edge.yml`(프로젝트 `sphinx-edge`, `web`·`certbot` 만)만
 건드린다. **예전엔 여기 `--no-deps` 가 필수였다** — `web` 이 `server` 를 `depends_on` 하던
@@ -618,3 +622,53 @@ session:read             SELLER(own_session) · MGR(branch) · COMPL(org)
 ```bash
 AUTH=seller-01:$P BASE=$B scripts/walk_demo_session.sh
 ```
+
+### 9.6 데모 답지 캡션 — S-03 질문 아래의 U1·U4 예시 (이슈 #539)
+
+진행자가 답지를 종이로 들고 있지 않아도 되게, **S-03 질문 아래에 「예시 정답(U1) · 예시
+오답(U4)」과 「입력창에 넣기」 버튼**을 낸다. 항목 17종(ELS 10 · 변액 7)을 다 덮는다.
+
+```
+답지 데이터   web/src/lib/demoAnswers.ts     항목ID → { u1, u4 } · 문장마다 출처 태그
+화면          web/src/pages/S03_Interview.tsx  설계 판단 ⑤
+플래그        deploy.yml → SPHINX_DEMO_CAPTIONS → compose build.args → Dockerfile ARG
+```
+
+**alpha 에만 준다.** S-03 은 **고객 화면**이라(`role: CUST`) *"이렇게 답하면 통과"* 가
+상시로 붙으면 기획 7-4 역이용 방지와 부딪친다 — `#494` 가 루브릭을 판매자에게도 주지
+않기로 한 것보다 직접적이다. `SPHINX_DEMO_OPEN`(§9.3)과 같은 자리에서 환경으로 가른다.
+
+❗**빌드 인자다 — 기동 때 못 바꾼다.** web 이 서빙하는 것은 `vite build` 산출물이고, 값이
+바뀌면 이미지를 다시 만들어야 한다. 그리고 그게 요점이다: **꺼진 빌드에는 답지 문자열이
+번들에 아예 없다**(`display:none` 으로 가리면 페이지 소스에 그대로 남는다). CI 가 매번
+확인한다 — `ci.yml` 의 *"데모 답지가 기본 빌드에 없어야 한다"*.
+
+```bash
+# 켜졌는지 — 배포 로그가 매번 찍는다(컨테이너는 나중에 말해 줄 것이 없다)
+grep '데모 답지 캡션' /var/log/sphinx-deploy.log
+
+# 번들에 답지가 있는지 (prod 는 0 이어야 정상)
+docker compose -f docker-compose.edge.yml -p sphinx-edge exec web \
+  sh -c "grep -l '입력창에 넣기' /usr/share/nginx/html/assets/*.js" || echo "없음(정상)"
+```
+
+#### 답지의 출처가 셋이고, 화면이 그 셋을 구별해 적는다
+
+| 태그 | 무엇 | 어디서 |
+|---|---|---|
+| 라벨 합의 | 실제 발화 + 두 라벨러가 **일치한** 등급 | `eval/corpus/els.jsonl` · `eval/data/labels/*.jsonl` (합의 49/70) |
+| dev set 기대값 | 팀이 정한 기대 등급 | `ai-service/tests/fixtures/utterances/*.yaml` |
+| 루브릭에서 작성 | **사람 라벨이 아니다** — 루브릭을 보고 쓴 대본 | `ai-service/app/rubrics/*.yaml` |
+
+❗**변액 7종에는 사람 라벨이 전혀 없다**(`eval/corpus/` 에 변액이 없다 · 이슈 #539 ①).
+ELS 도 네 항목(`EARLY-REDEMPTION` · `ISSUER-CREDIT` · `MIDWAY-REDEMPTION` · `TOTAL-LOSS`)은
+U1 쪽 합의가 없어서 작성본이다. 그 구별은 **화면에 그대로 나온다** — 지우면 대본이 라벨된
+실측인 척한다. `eval/tools/build_demo_answers.py`(정세현 · #539 ②)가 나오면 ELS 의 라벨
+합의분은 그 산출물에서 생성하는 것이 맞고, 작성본은 그때도 이 파일에 남는다.
+
+❗**등급은 보장값이 아니다.** 채점은 회차마다 새로 도는 LLM 판정이라 같은 문장이 다른
+등급을 받을 수 있다(자기일관성 · `#533`). 화면 아래 한 줄이 그 사실을 적는다 — 안 적으면
+U1 예시가 U2 를 받은 것이 결함으로 올라온다.
+
+❗**「입력창에 넣기」는 붙여넣기로 기록된다.** 고객이 친 것이 아니므로 그렇게 적는 것이
+맞다(F-INT-003 입력 메타). 그래서 데모 세션의 코칭 정황에는 붙여넣기가 뜬다.
