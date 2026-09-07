@@ -373,7 +373,7 @@ public class AiServiceClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .onStatus(HttpStatusCode::isError, failure("/internal/parse"))
+                    .onStatus(HttpStatusCode::isError, parseFailure())
                     .body(ParsedDocument.class);
         } catch (AiServiceException e) {
             throw e;
@@ -490,13 +490,49 @@ public class AiServiceClient {
      * 나머지는 문자열</b>이다. 그 상태에서 전부 객체로 가정하면 나머지 경로가 죽는다.
      */
     private static ErrorHandler failure(String endpoint) {
+        return (req, resp) -> raise(endpoint, resp);
+    }
+
+    /** {@link #failure} 의 본체. {@link #parseFailure} 가 422 를 가른 뒤 나머지를 여기로 넘긴다. */
+    private static void raise(String endpoint,
+                              org.springframework.http.client.ClientHttpResponse resp) {
+        String code = errorCode(resp);
+        String where = "ai-service " + endpoint + " 실패: HTTP " + statusOf(resp);
+        if ("MEASUREMENT_INVALID".equals(code)) {
+            throw new MeasurementInvalidException(where + " — " + code);
+        }
+        throw new AiServiceException(where);
+    }
+
+    /** 상태코드 읽기가 IOException 을 던지는 계약이라 한 자리에서 접는다. */
+    private static String statusOf(org.springframework.http.client.ClientHttpResponse resp) {
+        try {
+            return String.valueOf(resp.getStatusCode().value());
+        } catch (java.io.IOException e) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * {@code /internal/parse} 전용 실패 분류 — <b>422 만 갈라낸다</b>(이슈 #521).
+     *
+     * <p>그쪽 라우트가 실패를 셋으로 갈라 놓았다: 경로 규칙 위반 400 · 파일 없음 404 ·
+     * <b>PDF 로 안 열림 422</b>. 앞의 둘은 우리가 넘긴 경로가 틀린 것이라 <b>서버 결함</b>
+     * 이고 502 로 나가는 게 맞다 — 업로드본이 볼륨에 안 보이는 상태가 대표적이다. 422 만
+     * 이 <b>문서</b>의 문제이고, 그것만 업로드 응답의 {@code parse_failed} 로 접힌다.
+     *
+     * <p>❗<b>{@link #failure} 를 그대로 쓰면 셋이 한 덩이가 된다.</b> 그러면 암호화 PDF 를
+     * 올린 운영자가 502 를 받고 «서비스 장애» 로 읽는다 — 고칠 자리(문서를 다시 넣는 것)에
+     * 아무도 못 간다. 반대로 셋 다 {@code parse_failed} 로 접으면 볼륨 마운트가 빠진 배포가
+     * <b>200 으로 조용히</b> 넘어간다.
+     */
+    private static ErrorHandler parseFailure() {
         return (req, resp) -> {
-            String code = errorCode(resp);
-            String where = "ai-service " + endpoint + " 실패: HTTP " + resp.getStatusCode();
-            if ("MEASUREMENT_INVALID".equals(code)) {
-                throw new MeasurementInvalidException(where + " — " + code);
+            if ("422".equals(statusOf(resp))) {
+                throw new DocumentUnreadableException(
+                        "문서를 열 수 없다(암호화·손상 PDF 인지 확인하라): HTTP 422");
             }
-            throw new AiServiceException(where);
+            raise("/internal/parse", resp);
         };
     }
 

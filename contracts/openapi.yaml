@@ -22,6 +22,13 @@ paths:
   /products/documents:
     post:
       summary: 문서 업로드 (F-EXT-001)
+      description: >
+        올린 파일을 저장하고 상품ID 를 발급한 뒤 파싱한다 (이슈 #521).
+        productId 는 **내용에서 나온다** — `doc-<파일명 슬러그>-<sha256 앞 8자>` 라,
+        같은 파일을 두 번 올리면 같은 상품이고 문서가 한 바이트라도 다르면 다른 상품이다.
+        ❗**추출은 따로 부른다** — `POST /products/{id}/extract`. 파싱만 된 상태와 추출까지
+        된 상태가 화면에서 갈려야 하고(고칠 자리가 다르다) 추출은 별개 권한이다.
+        상한: 파일 20MB · 요청 25MB. 넘으면 400 VALIDATION_ERROR.
       requestBody:
         required: true
         content:
@@ -30,14 +37,27 @@ paths:
               type: object
               required: [file]
               properties:
-                file:        {type: string, format: binary}
-                productType: {type: string, enum: [ELS, VARIABLE_INSURANCE], default: ELS}
+                file:        {type: string, format: binary, description: "PDF 만. 앞머리 5바이트가 %PDF- 여야 한다 — Content-Type 은 안 본다"}
+                productType: {type: string, enum: [ELS, VARIABLE_INSURANCE], default: ELS, description: "파싱이 판별한 유형이 이 값과 다르면 판별값을 쓴다"}
       responses:
         '200':
-          description: 업로드·파싱 결과
+          description: >
+            업로드·파싱 결과. 문서를 못 연 경우(암호화·손상 PDF)도 200 이고
+            `status: parse_failed` 다 — 그건 이 문서의 문제라 운영자가 문서를 다시 넣어
+            고친다. ai-service 장애는 502 로 나간다.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UploadApiResponse'}
+        '400':
+          description: PDF 아님 · 빈 파일 · 모르는 상품유형 · 크기 상한 초과 (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+        '502':
+          description: ai-service 에 닿지 못했다 (AI_SERVICE_UNAVAILABLE) — 문서 문제와 다르다
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
   /products/{id}/extract:
     post:
@@ -938,9 +958,12 @@ components:
     ProductSummary:
       type: object
       required: [productId, name, productType, status]
+      description: >
+        S-02 선택 목록 항목. 업로드된 상품이 먼저(최근 업로드 순), 사전적재 데모 2종이 뒤다.
+        ❗`parse_failed` 도 목록에 실린다 — 빼면 운영자가 올린 문서가 조용히 사라진다.
       properties:
         productId:   {type: string}
-        name:        {type: string}
+        name:        {type: string, description: "업로드본은 파일명에서 만든 표시명. 사전적재 2종은 가명(결정 1.11)"}
         productType: {type: string, enum: [ELS, VARIABLE_INSURANCE]}
         status:      {type: string, enum: [parsed, parse_failed]}
     ProductListApiResponse:
@@ -955,8 +978,8 @@ components:
       type: object
       required: [productId, status]
       properties:
-        productId: {type: string}
-        status:    {type: string, enum: [parsed, parse_failed]}
+        productId: {type: string, description: "발급된 상품ID. doc-<파일명 슬러그>-<sha256 앞 8자>"}
+        status:    {type: string, enum: [parsed, parse_failed], description: "parse_failed 는 문서를 못 열었다는 뜻 — 추출로 넘어가지 않고 문서를 다시 넣는다"}
     UploadApiResponse:
       type: object
       required: [success, data]

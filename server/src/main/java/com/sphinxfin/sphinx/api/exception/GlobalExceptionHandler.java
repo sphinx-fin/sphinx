@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api.exception;
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
+import com.sphinxfin.sphinx.core.extraction.ProductUploads;
 import com.sphinxfin.sphinx.core.session.OverrideNotEligibleException;
 import com.sphinxfin.sphinx.core.session.ReExplainNotEligibleException;
 import com.sphinxfin.sphinx.core.session.ReverifyExhaustedException;
@@ -16,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -66,6 +68,36 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> validationValue(ValidationException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", e.getMessage())));
+    }
+
+    /**
+     * 업로드 입력이 계약을 벗어났다 → 400 {@code VALIDATION_ERROR} (이슈 #521).
+     *
+     * <p>{@code core} 가 {@link ValidationException}(api 층)을 알면 안 되므로 서비스는 자기
+     * 예외를 던지고 여기서 같은 코드로 접는다 — 프론트가 보는 코드는 한 벌이어야 한다.
+     */
+    @ExceptionHandler(ProductUploads.UploadRejectedException.class)
+    public ResponseEntity<ApiResponse<Void>> onUploadRejected(ProductUploads.UploadRejectedException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", e.getMessage())));
+    }
+
+    /**
+     * 업로드가 상한을 넘었다 → 400 {@code VALIDATION_ERROR} (이슈 #521).
+     *
+     * <p>❗<b>새 에러 코드를 만들지 않는다.</b> 코드 목록은 네 벌(핸들러·openapi·CLAUDE.md·
+     * {@code web/src/api/types.ts})이 같아야 하고 {@code ErrorCodeContractTest} 가 대조한다 —
+     * 상한 초과는 "요청 값이 계약을 벗어났다" 의 한 경우라 기존 코드로 충분하다.
+     *
+     * <p>이 핸들러가 없으면 {@code Exception} 갈래로 떨어져 <b>500 «서버 내부 오류»</b> 다.
+     * 큰 PDF 를 올린 운영자가 서버 장애로 읽고, 파일을 줄이면 되는 것을 아무도 모른다.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> onTooLarge(MaxUploadSizeExceededException e) {
+        log.warn("업로드 크기 상한 초과: {}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR",
+                        "파일이 너무 큽니다(업로드 상한을 넘었습니다)")));
     }
 
     /**

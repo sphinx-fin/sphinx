@@ -27,6 +27,21 @@ spring:
     console:
       enabled: true                             # 개발용 DB 콘솔: http://localhost:8000/h2-console
       path: /h2-console
+  # ── 업로드 크기 (F-EXT-001 · 이슈 #521) ─────────────────────────────────────
+  #
+  # ❗**기본값을 그대로 두면 안 된다.** Spring Boot 기본은 max-file-size 1MB 이고, 실측한
+  # 공시 PDF 가 그 선에 걸쳐 있다 — 데모 문서만 봐도 0.33MB·0.51MB·1.63MB 다. 즉 기본값
+  # 상태에서는 **실물 상품설명서 중 일부가 업로드 단계에서 거부된다.**
+  #
+  # 상한을 넘으면 MaxUploadSizeExceededException 이고 GlobalExceptionHandler 가 400
+  # VALIDATION_ERROR 로 낸다. 핸들러가 없으면 500 «서버 내부 오류» 라 운영자가 파일을
+  # 줄이면 되는 것을 모른다.
+  #
+  # request 를 file 보다 크게 두는 이유: 같은 요청에 productType 필드가 함께 온다.
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 # actuator: 헬스체크만 노출
 management:

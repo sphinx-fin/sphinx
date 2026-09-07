@@ -6,6 +6,8 @@ import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.UploadResponse;
 import com.sphinxfin.sphinx.core.extraction.ProductDocuments;
 import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
+import com.sphinxfin.sphinx.core.extraction.ProductUploads;
+import com.sphinxfin.sphinx.core.extraction.UploadedProduct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -14,7 +16,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -56,28 +61,61 @@ public class ProductController {
 
     private final ProductRiskItems productRiskItems;
     private final ProductDocuments productDocuments;
+    private final ProductUploads productUploads;
 
     /**
      * S-02 상품 선택 목록. 기존 /products/* 는 전부 productId 를 이미 알아야 부를 수 있어서
      * "고를 수 있는 상품"을 주는 경로가 없었다.
-     * TODO(강희진): 업로드된 상품을 DB에서 조회 (F-EXT-001 연결 후). 지금은 데모 2종 목.
+     *
+     * <p><b>업로드된 상품이 먼저, 사전적재 데모 2종이 뒤</b>(이슈 #521). 방금 올린 것을 찾는
+     * 것이 이 목록을 부르는 이유라 최근 업로드가 위로 온다.
+     *
+     * <p>❗<b>{@code parse_failed} 도 목록에 낸다.</b> 빼면 운영자가 올린 문서가 조용히
+     * 사라지고 왜 안 보이는지 알 길이 없다 — 계약의 {@code ProductSummary.status} 가
+     * {@code parsed}/{@code parse_failed} 두 값을 든 이유가 그것이다(E-EXT-03 은폐 금지).
+     *
+     * <p>사전적재 2종은 {@code MockData.PRODUCTS} 가 계속 낸다 — 표시명이 <b>가명</b>이고
+     * (결정 1.11) 커밋된 공시 문서라 키 없는 환경에서도 데모가 돈다. 걷는 것은 #403 이다.
      */
     @PreAuthorize("@accessGuard.canAggregate('product:read')")
     @GetMapping
     public ApiResponse<List<ProductSummary>> list() {
-        return ApiResponse.ok(MockData.PRODUCTS);
+        List<ProductSummary> all = new ArrayList<>();
+        for (UploadedProduct p : productUploads.catalog()) {
+            all.add(new ProductSummary(p.productId(), p.displayName(), p.productType(), p.status()));
+        }
+        all.addAll(MockData.PRODUCTS);
+        return ApiResponse.ok(all);
     }
 
     /**
      * 문서 업로드. <b>audited</b> 다 — 누가 언제 상품을 등록했는지가 남아야 한다(결정 10.36).
      * 여기서 올린 문서가 {@code extract} 를 거쳐 게이트의 질문 목록이 된다.
+     *
+     * <p><b>실배선이다(이슈 #521).</b> 예전에는 {@code file} 과 {@code productType} 을 <b>둘 다
+     * 안 읽고</b> {@code mock-els-001} 을 냈다 — 파일은 버려지고 변액을 올려도 ELS 가 돌아왔다.
+     * 그런데도 이 경로는 audited 라 감사 로그에 <i>"상품을 등록했다"</i> 가 남았고,
+     * {@code evidence/} 는 append-only 라 그 기록을 나중에 못 지운다. 지금은 그 기록이
+     * 가리킬 실물이 있다.
+     *
+     * <p>❗<b>추출을 여기서 부르지 않는다.</b> {@code POST /{id}/extract} 가 게이트의 분모를
+     * 바꾸는 별개 action 이고, 파스만 된 상태와 추출까지 된 상태를 화면이 갈라야 한다
+     * (S-01 설계 판단 ③). 화면이 {@code status === "parsed"} 일 때만 추출로 넘어간다.
      */
     @PreAuthorize("@accessGuard.canAggregate('product:manage')")
     @PostMapping("/documents")
     public ApiResponse<UploadResponse> upload(@RequestParam MultipartFile file,
                                               @RequestParam(defaultValue = "ELS") String productType) {
-        // TODO(강희진): ai-service POST /internal/parse 프록시 (F-EXT-001)
-        return ApiResponse.ok(new UploadResponse("mock-els-001", "parsed"));
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            // 업로드 임시 저장에서 읽지 못한 것이라 요청 문제가 아니다 → 500.
+            throw new UncheckedIOException("업로드된 파일을 읽지 못했다", e);
+        }
+        ProductUploads.UploadResult result = productUploads.upload(
+                new ProductUploads.UploadCommand(file.getOriginalFilename(), productType, bytes));
+        return ApiResponse.ok(new UploadResponse(result.productId(), result.status()));
     }
 
     /**

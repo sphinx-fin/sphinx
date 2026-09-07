@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * ★ <b>{@code V1__init.sql} 이 엔티티보다 낡으면 여기서 빨개진다.</b>
+ * ★ <b>마이그레이션이 엔티티보다 낡으면 여기서 빨개진다.</b>
  *
  * <h2>왜 이 그물이 필요한가 — 같은 결함이 네 번 났다</h2>
  *
@@ -62,6 +62,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>❗<b>이미 배포에 적용된 뒤라면 V1 을 고치는 것이 아니라 V2 를 낸다.</b> Flyway 체크섬은
  * 파일 내용 전체라 주석 한 글자만 바뀌어도 적용해 둔 DB 가 검증에 실패한다.
+ *
+ * <h2>❗대조 대상은 V1 한 장이 아니라 {@code db/migration} 전부다</h2>
+ *
+ * <p>처음엔 {@code V1__init.sql} 만 읽었다. 마이그레이션이 한 장뿐이었으니 같은 말이었는데,
+ * <b>V2 가 생기는 순간 그 둘이 갈렸다</b> — 배포 DB 가 보는 것은 적용된 마이그레이션의
+ * <b>누적</b>이고, V1 만 보면 <i>"V2 에 제대로 넣은 테이블"</i> 을 빠진 것으로 신고한다.
+ * 실제로 {@code uploaded_products}(이슈 #521)에서 그렇게 났다. 반대 방향이 더 나쁘다:
+ * 파일 하나를 이름으로 박아 두면, V3 를 낸 사람이 그것을 안 고쳤을 때 <b>그물이 자기가
+ * 안 보는 파일을 늘려 놓고 초록</b>이 된다.
+ *
+ * <p>그래서 {@code V*.sql} 을 <b>전부</b> 읽어 합친다. 순서는 안 본다 — 재는 것이
+ * <i>"엔티티가 요구하는 이름이 어딘가에 있는가"</i> 이고, 순서·체크섬은 Flyway 가 본다.
+ * 지우는 마이그레이션({@code DROP TABLE})은 이 방식으로 안 잡히는데, 그건 이 레포에
+ * 없고 생기면 그때 이 문단이 근거가 된다.
  */
 @SpringBootTest
 @TestPropertySource(properties = {
@@ -81,8 +95,7 @@ class SchemaMirrorsEntitiesTest {
     /** Hibernate 가 뽑은 DDL. `build/` 안이라 소스 트리를 더럽히지 않는다. */
     static final String GENERATED = "build/generated-schema.sql";
 
-    private static final Path V1 =
-            Path.of("src/main/resources/db/migration/V1__init.sql");
+    private static final Path MIGRATIONS = Path.of("src/main/resources/db/migration");
 
     /** `create table [if not exists] `name` (` — 방언이 백틱을 쓰든 안 쓰든 문다. */
     private static final Pattern CREATE_TABLE = Pattern.compile(
@@ -102,27 +115,28 @@ class SchemaMirrorsEntitiesTest {
     private jakarta.persistence.EntityManagerFactory emf;
 
     @Test
-    @DisplayName("❗엔티티가 요구하는 테이블이 V1 에 전부 있다 — 없으면 배포가 기동을 거부한다")
-    void everyTableTheEntitiesNeedExistsInV1() throws IOException {
+    @DisplayName("❗엔티티가 요구하는 테이블이 마이그레이션에 전부 있다 — 없으면 배포가 기동을 거부한다")
+    void everyTableTheEntitiesNeedExistsInMigrations() throws IOException {
         Map<String, Set<String>> generated = parse(Files.readString(Path.of(GENERATED), StandardCharsets.UTF_8));
-        Map<String, Set<String>> v1 = parse(Files.readString(V1, StandardCharsets.UTF_8));
+        Map<String, Set<String>> migrated = migrations();
 
         assertThat(new TreeSet<>(generated.keySet()))
                 .as("""
-                    V1 에 없는 테이블이다. `ddl-auto: validate` 가 기동을 거부한다 —
-                    손으로 끼우지 말고 MySQL 8.4 에 `create` 로 만들게 한 뒤 mysqldump 로 다시 뽑는다.""")
-                .isSubsetOf(v1.keySet());
+                    어느 마이그레이션에도 없는 테이블이다. `ddl-auto: validate` 가 기동을 거부한다 —
+                    손으로 끼우지 말고 MySQL 8.4 에 `create` 로 만들게 한 뒤 mysqldump 로 다시 뽑고,
+                    이미 적용된 V1 을 고치는 대신 새 V2·V3 로 낸다.""")
+                .isSubsetOf(migrated.keySet());
     }
 
     @Test
-    @DisplayName("❗엔티티가 요구하는 컬럼이 V1 에 전부 있다 — 테이블만 맞아도 안 뜬다")
-    void everyColumnTheEntitiesNeedExistsInV1() throws IOException {
+    @DisplayName("❗엔티티가 요구하는 컬럼이 마이그레이션에 전부 있다 — 테이블만 맞아도 안 뜬다")
+    void everyColumnTheEntitiesNeedExistsInMigrations() throws IOException {
         Map<String, Set<String>> generated = parse(Files.readString(Path.of(GENERATED), StandardCharsets.UTF_8));
-        Map<String, Set<String>> v1 = parse(Files.readString(V1, StandardCharsets.UTF_8));
+        Map<String, Set<String>> migrated = migrations();
 
         Map<String, Set<String>> missing = new TreeMap<>();
         generated.forEach((table, columns) -> {
-            Set<String> there = v1.get(table);
+            Set<String> there = migrated.get(table);
             if (there == null) return;   // 테이블 자체가 없는 것은 위 테스트가 말한다
             Set<String> gone = new TreeSet<>(columns);
             gone.removeAll(there);
@@ -131,9 +145,34 @@ class SchemaMirrorsEntitiesTest {
 
         assertThat(missing)
                 .as("""
-                    V1 에 없는 컬럼이다. 엔티티에 필드가 늘었는데 V1 을 다시 안 뽑은 것이다 —
+                    어느 마이그레이션에도 없는 컬럼이다. 엔티티에 필드가 늘었는데 다시 안 뽑은 것이다 —
                     `#420`(canonical_version) · `#424`(current_reexplanation) 이 그렇게 났다.""")
                 .isEmpty();
+    }
+
+    /**
+     * {@code db/migration} 의 모든 {@code V*.sql} 을 합쳐 읽는다.
+     *
+     * <p>❗<b>파일을 하나도 못 찾으면 실패시킨다.</b> 디렉토리가 옮겨지거나 확장자가 바뀌면
+     * 아래 {@code isSubsetOf(빈 집합)} 이 <b>모든 테이블을 «없다»</b> 로 신고하는 대신,
+     * 첫 테스트가 통째로 빨개져서 원인이 안 보인다 — 여기서 원인을 이름으로 말한다.
+     */
+    private static Map<String, Set<String>> migrations() throws IOException {
+        StringBuilder all = new StringBuilder();
+        java.util.List<Path> files;
+        try (java.util.stream.Stream<Path> walk = Files.list(MIGRATIONS)) {
+            files = walk.filter(p -> p.getFileName().toString().matches("V\\d+__.*\\.sql"))
+                    .sorted()
+                    .toList();
+        }
+        assertThat(files)
+                .as("마이그레이션 파일을 하나도 못 찾았다 — 경로가 옮겨졌다(%s). "
+                        + "고치기 전까지 아래 대조는 아무것도 안 잰다", MIGRATIONS)
+                .isNotEmpty();
+        for (Path file : files) {
+            all.append(Files.readString(file, StandardCharsets.UTF_8)).append('\n');
+        }
+        return parse(all.toString());
     }
 
     /** `테이블 → 컬럼 집합`. 대소문자는 접어 둔다 — MySQL 식별자는 플랫폼마다 접힘이 다르다. */

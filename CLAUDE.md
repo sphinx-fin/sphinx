@@ -85,7 +85,7 @@ core 에 둔 경계 인터페이스라(ADR-003) 어느 하위 패키지에도 �
 | `core/gate/` | `GateEngine`·`GateConfig` (판정) |
 | `core/pii/` | `PiiGateway` — P3 경계라 단독 패키지다 |
 | `core/aiservice/` | ai-service 호출 경계 |
-| `core/extraction/` | 상품별 추출 스냅샷 저장·조회 (F-EXT-002 배선). 저장 우선, MockData 폴백 |
+| `core/extraction/` | 상품 문서 업로드·저장 (F-EXT-001) + 추출 스냅샷 저장·조회 (F-EXT-002). 저장 우선, MockData 폴백 |
 | `core/persistence/` | `BaseEntity`·JPA 감사·컨버터 |
 | `core/simulator/` | `SimulatorProperties` (설정 주입. 계산 엔진은 최상위 `simulator/`) |
 
