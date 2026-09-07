@@ -309,7 +309,11 @@ class CanonicalJsonTest {
                             + "\"itemId\":\"ELS-PRINCIPAL-LOSS-WARNING\","
                             + "\"misconceptionType\":null,"
                             + "\"promptVersion\":null,"
-                            + "\"reason\":\"원금 보장으로 오해\"}");
+                            + "\"reason\":\"원금 보장으로 오해\","
+                            // source 도 같은 모양으로 늘었다 (이슈 #518) — 상류가 안 싣는
+                            // 값이라 MEASURED 로 접혀 들어온다. 키가 **있다**는 것이 요지다:
+                            // 룰이 정한 U3(SKIPPED)와 측정된 U3 를 기록에서 갈라야 한다.
+                            + "\"source\":\"MEASURED\"}");
         }
 
         @Test

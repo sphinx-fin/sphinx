@@ -315,6 +315,39 @@ class AiServiceClientTest {
         server.verify();
     }
 
+    /**
+     * ❗<b>실제로 깨졌던 자리다</b> (이슈 #518 후속, 2026-09-07). 도메인 {@code Judgment} 에
+     * {@code source} 를 더한 배포 직후 알파에서 <b>재설명이 전부 실패</b>했다 —
+     * {@code /internal/reexplain} 이 422 를 냈고 화면에는 <i>"채점 서비스에 연결하지
+     * 못했어요"</i> 로 보였다. 저쪽 {@code Judgment} 는 {@code extra="forbid"} 라
+     * <b>모르는 키 하나에 요청 전체를 거절한다.</b>
+     *
+     * <p>도메인 레코드를 그대로 실으면 <b>도메인이 필드를 늘릴 때마다 이 경계가 조용히
+     * 넓어진다</b> — 그리고 그 실패는 컴파일도 단위 테스트도 안 잡고 배포에서만 난다.
+     * 그래서 나가는 모양을 {@code OutboundJudgment} 로 고정했고, 이 테스트가 그것을 잠근다.
+     */
+    @Test
+    @DisplayName("❗reExplain: 판정에 서버 소유 필드(source)를 안 싣는다 — 저쪽은 모르는 키에 422 다")
+    void reExplainDoesNotLeakServerOnlyFields() {
+        server.expect(requestTo(BASE + "/internal/reexplain"))
+                .andExpect(jsonPath("$.judgment.source").doesNotExist())
+                // 계약이 요구하는 것은 그대로 나가야 한다 — 안 그러면 이 테스트가
+                // "아무것도 안 보낸다" 로도 통과한다.
+                .andExpect(jsonPath("$.judgment.item_id").exists())
+                .andExpect(jsonPath("$.judgment.evidence.utterance_quote").exists())
+                .andExpect(jsonPath("$.judgment.escalate").exists())
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "content": "설명",
+                          "cited_spans": []
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        client.reExplain(ITEM, JUDGMENT, "senior", "none");
+        server.verify();
+    }
+
     @Test
     @DisplayName("reExplain: ageBand·experienceLevel이 null이면 null로 보낸다(선택 필드)")
     void reExplainNullOptionalsSerializeNull() {

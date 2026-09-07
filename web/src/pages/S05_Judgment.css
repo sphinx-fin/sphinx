@@ -15,7 +15,12 @@
   gap: var(--space-5);
   max-width: 60rem;
   margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-8);
+  /* 아래만 다른 화면(--space-8)보다 넓다. 이 화면은 **버튼 줄로 끝난다** —
+     확정·오버라이드·교부가 마지막 요소라, 스케일 기본값이면 판정을 누르는 손가락
+     위치에서 화면 끝이 바로 붙어 답답하다. 다른 화면은 문단이나 표로 끝나서 같은
+     값이 답답하지 않다. 토큰 밖 숫자를 새로 만들지 않으려고 스케일 안에서 더한다
+     (--scale 을 따라 같이 커진다). */
+  padding: var(--space-5) var(--space-4) calc(var(--space-8) + var(--space-6));
 }
 
 .s05__loading { color: var(--text-muted); padding: var(--space-6); }

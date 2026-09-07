@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.sphinxfin.sphinx.domain.EvidenceRequiredException;
+import com.sphinxfin.sphinx.domain.Grade;
 import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
@@ -326,8 +327,9 @@ public class AiServiceClient {
      */
     public ReExplanation reExplain(RiskItem riskItem, Judgment judgment,
                                    String ageBand, String experienceLevel) {
-        ReExplainRequest request =
-                new ReExplainRequest(riskItem, judgment, ageBand, experienceLevel);
+        // 도메인 판정을 그대로 싣지 않는다 — 경계 모양은 OutboundJudgment 가 고정한다.
+        ReExplainRequest request = new ReExplainRequest(
+                riskItem, OutboundJudgment.of(judgment), ageBand, experienceLevel);
         ReExplainResponse response;
         try {
             response = restClient.post()
@@ -609,8 +611,36 @@ public class AiServiceClient {
      * (risk_item, judgment, age_band, experience_level)와 1:1 (PR #60).
      * age_band·experience_level은 선택이라 null이면 null로 나간다.
      */
-    record ReExplainRequest(RiskItem riskItem, Judgment judgment,
+    record ReExplainRequest(RiskItem riskItem, OutboundJudgment judgment,
                             String ageBand, String experienceLevel) {}
+
+    /**
+     * ai-service 로 <b>나가는</b> 판정. 도메인 {@link Judgment} 를 그대로 싣지 않는다.
+     *
+     * <p>❗<b>{@code source} 를 뺀다</b> (이슈 #518 후속). 그건 <i>"이 판정을 무엇이
+     * 만들었는가"</i> 라는 <b>서버 소유 표시</b>이고 ai-service 의 입력이 아니다. 그런데
+     * 저쪽 {@code Judgment} 는 {@code extra="forbid"} 라 모르는 키 하나에 <b>422</b> 를
+     * 낸다 — 실제로 그렇게 깨졌다: 필드를 늘린 배포 직후 알파에서 재설명이 전부
+     * {@code AI_SERVICE_UNAVAILABLE} 이었다(2026-09-07, `/internal/reexplain` 422).
+     *
+     * <p>❗<b>저쪽에 필드를 더하는 것으로 풀지 않는다.</b> ai-service 의 {@code Judgment} 는
+     * <b>LLM 구조화 출력 스키마이기도 하다</b>({@code complete_json(model_cls=Judgment)}).
+     * 거기에 칸을 만들면 <b>모델이 자기 판정의 출처를 적게 되고</b>, 그건 정의상 서버가 아는
+     * 사실이다 — 채점 스키마가 답을 알 수 없는 필드를 갖는 모양이 된다.
+     *
+     * <p>그래서 <b>경계에서 모양을 고정한다.</b> 도메인이 필드를 늘려도 여기는 안 따라
+     * 늘어난다 — 늘리려면 이 레코드를 고쳐야 하고, 그 자리에서 저쪽 계약을 같이 본다.
+     */
+    record OutboundJudgment(String itemId, Grade grade, BigDecimal confidence,
+                            Judgment.Evidence evidence, String reason, String misconceptionType,
+                            String promptVersion, boolean escalate) {
+
+        static OutboundJudgment of(Judgment judgment) {
+            return new OutboundJudgment(judgment.itemId(), judgment.grade(),
+                    judgment.confidence(), judgment.evidence(), judgment.reason(),
+                    judgment.misconceptionType(), judgment.promptVersion(), judgment.escalate());
+        }
+    }
 
     /**
      * /internal/reexplain 응답. ai-service ReexplainResponse(item_id, content, cited_spans)와
