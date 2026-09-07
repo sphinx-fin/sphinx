@@ -422,3 +422,49 @@ def test_the_corporate_strip_does_not_reach_customer_text():
 
     assert pii.detect("문의 02-785-7424", scope="public_document") == []
     assert "ACCOUNT" in pii.detect("집 02-785-7424 로 연락 주세요", scope="customer")
+
+
+# ── 422 문면이 고칠 자리를 가리킨다 (#534 리뷰) ──────────────────────────────
+#
+# ❗예전에는 두 범위가 같은 문면이었다 — *"상류 PiiGateway를 거치지 않은 텍스트입니다"*.
+# 그 문장은 `public_document` 에서 **설계상 절대 참이 아니다**: 파스된 PDF 는
+# `PiiGateway.mask()` 를 지나지 않는다(그건 고객 텍스트의 단일 경로다).
+#
+# 그리고 이 완화를 좁혀 `ACCOUNT` 를 켜면 그 경로에 닿는 빈도가 **오히려 올라간다** —
+# 그러면 운영자가 `core/pii/` 에서 없는 버그를 찾는다(`#534` 리뷰, 오준서).
+def test_the_customer_scope_422_points_at_the_upstream_gateway():
+    """고객 경로의 원인은 **상류 마스킹 누락**이다."""
+    resp = client.post("/internal/score", json={
+        "item_id": "x", "question": "q", "answer_text": "가입자 900101-1234567",
+        "risk_item": {}, "product_type": "ELS"})
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["scope"] == "customer"
+    assert "PiiGateway" in body["detail"]
+
+
+def test_the_document_scope_422_does_not_blame_the_gateway(monkeypatch):
+    """★ 공시 문서 경로의 원인은 **올린 문서**다 — 상류를 지목하면 안 된다."""
+    resp = _extract(monkeypatch, pages=[{"page": 1, "text": "가입자 900101-1234567"}])
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["scope"] == "public_document"
+    assert "문서" in body["detail"]
+    assert "거치지 않은 텍스트" not in body["detail"], (
+        "이 경로는 애초에 PiiGateway 를 안 지난다 — 상류 누락으로 읽히면 없는 버그를 찾는다"
+    )
+
+
+def test_every_scope_has_its_own_detail():
+    """★ 범위가 늘면 문면도 늘어야 한다 — `KeyError` 로 500 이 되지 않게."""
+    from app import pii
+    from app.main import PiiGuardMiddleware
+
+    assert set(PiiGuardMiddleware._DETAIL) == set(pii.SCOPES), (
+        "범위와 문면이 안 맞는다 — 빠진 범위에서 422 가 KeyError 로 500 이 된다"
+    )
+    assert len(set(PiiGuardMiddleware._DETAIL.values())) == len(pii.SCOPES), (
+        "두 범위가 같은 문면이면 고칠 자리를 못 가른다 — 이 대조가 존재하는 이유다"
+    )

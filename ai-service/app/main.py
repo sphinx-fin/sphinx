@@ -130,6 +130,26 @@ class PiiGuardMiddleware:
     def _scope(self, path: str) -> str:
         return "public_document" if path in self.PUBLIC_DOCUMENT_PATHS else "customer"
 
+    #: 422 본문의 `detail`. **범위마다 고치는 자리가 다르다** (`#534` 리뷰, 오준서).
+    #:
+    #: ❗예전에는 둘 다 *"상류 PiiGateway를 거치지 않은 텍스트입니다"* 였는데, 그 문장은
+    #: `public_document` 에서 **설계상 절대 참이 아니다** — 파스된 PDF 는 `PiiGateway.mask()`
+    #: 를 지나지 않는다(그 게이트웨이는 고객 텍스트의 단일 경로다). 그런데 이 완화를 좁혀
+    #: `ACCOUNT` 를 켜면 그 경로에 닿는 빈도가 오히려 올라가고, 그러면 운영자가
+    #: **`core/pii/` 에서 없는 버그를 찾는다.**
+    #:
+    #: 고치는 자리를 문면이 가리켜야 한다:
+    #:
+    #:     customer         상류가 마스킹을 빠뜨렸다 → core/pii/PiiGateway
+    #:     public_document  올린 문서에 그 값이 인쇄돼 있다 → 문서를 바꾼다
+    _DETAIL = {
+        "customer": ("P3 위반 — 상류 PiiGateway를 거치지 않은 텍스트입니다. "
+                     "server 의 core/pii 경로를 봅니다."),
+        "public_document": ("공시 문서 본문에 개인정보 패턴이 있습니다. 이 경로는 "
+                            "PiiGateway 를 지나지 않으므로 상류 누락이 아니라 "
+                            "**올린 문서 자체**의 문제입니다 — 문서를 확인합니다."),
+    }
+
     def __init__(self, app) -> None:
         self.app = app
 
@@ -157,15 +177,18 @@ class PiiGuardMiddleware:
                 try:
                     assert_payload_clean(payload, scope=self._scope(scope.get("path", "")))
                 except PiiDetected as exc:
-                    log.warning("PII 차단: kinds=%s where=%s path=%s",
-                                exc.kinds, exc.where, scope.get("path"))
+                    detected_scope = self._scope(scope.get("path", ""))
+                    log.warning("PII 차단: kinds=%s where=%s path=%s scope=%s",
+                                exc.kinds, exc.where, scope.get("path"), detected_scope)
                     response = JSONResponse(
                         status_code=HTTP_422,
                         content={
                             "error": "pii_detected",
                             "kinds": exc.kinds,
                             "where": exc.where,
-                            "detail": "P3 위반 — 상류 PiiGateway를 거치지 않은 텍스트입니다.",
+                            # ❗범위를 같이 낸다 — 운영자가 어느 쪽을 볼지 응답만 보고 알아야 한다.
+                        "scope": detected_scope,
+                        "detail": self._DETAIL[detected_scope],
                         },
                     )
                     await response(scope, receive, send)
