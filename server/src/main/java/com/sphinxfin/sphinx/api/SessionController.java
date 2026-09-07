@@ -11,6 +11,7 @@ import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
+import com.sphinxfin.sphinx.api.dto.SkipRequest;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.security.CurrentActor;
@@ -203,6 +204,35 @@ public class SessionController {
         return ApiResponse.ok(JudgmentView.of(sessionService.recordJudgment(
                 sid, scored.judgment(), scored.maskedAnswer(), asked.text(), asked.source(),
                 body.domainInputMeta())));
+    }
+
+    /**
+     * E-INT-03 항목 건너뛰기 (이슈 #518). <b>채점하지 않는다</b> — 룰이 U3 를 정한다.
+     *
+     * <p>❗<b>{@code aiServiceClient} 를 안 부르는 것이 이 엔드포인트의 전부다.</b> 예전에는
+     * 화면이 {@code "(응답하지 않음)"} 을 {@code /answers} 에 실어 보냈고, 그러면 인용할
+     * 발화가 없는 판정을 모델이 만들어야 해서 502 가 났다({@link SkippedItem} javadoc에
+     * 실측). 무응답의 등급은 명세 8절이 이미 U3 로 정해 뒀다 — 측정이 아니라 룰이다(P1).
+     *
+     * <p>나머지는 {@link #submitAnswer} 와 <b>같은 규약</b>이다: 항목은 같은 목록에서 찾고
+     * (없으면 404), 채점에 쓴 질문 문면·출처를 함께 기록하며, 발화 자리에는 서버가 소유한
+     * 표시를 남긴다 — F-DET-002 가 세션 전체 발화를 입력으로 받으므로 그 자리가 비면
+     * 건너뛴 항목이 기록에서 <i>안 물어본 항목</i>과 같아진다.
+     *
+     * <p>권한: {@code session:answer} — 고객이 자기 세션에서 누르는 버튼이라 답변과 같다.
+     * 별도 action 을 만들면 <b>답변은 되는데 건너뛰기는 403</b> 인 상태가 가능해지고,
+     * 그건 이 버튼이 도움 경로라는 사실과 어긋난다(이슈 #315).
+     */
+    @PreAuthorize("@accessGuard.can('session:answer', #sid)")
+    @PostMapping("/{sid}/skips")
+    public ApiResponse<JudgmentView> skipItem(@PathVariable String sid,
+                                              @Valid @RequestBody SkipRequest body) {
+        Session session = sessionService.get(sid);
+        RiskItem item = riskItemOf(session, body.itemId());
+        AskedQuestion asked = askedQuestionFor(session, item);
+        return ApiResponse.ok(JudgmentView.of(sessionService.recordJudgment(
+                sid, SkippedItem.judgmentFor(item.itemId()), SkippedItem.UTTERANCE,
+                asked.text(), asked.source(), null)));
     }
 
     /**

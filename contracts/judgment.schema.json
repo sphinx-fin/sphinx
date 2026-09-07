@@ -61,6 +61,13 @@
     "prompt_version": {
       "type": "string",
       "description": "이 판정을 낸 채점 프롬프트 버전(ai-service scoring.PROMPT_VERSION, 예 F-SCR-001_v2). optional — 이 필드가 생기기 전 레코드는 없다. ❗confidence 의 정의가 프롬프트 버전마다 다르다: v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). evidence 는 append-only 라 두 정의가 같은 컬럼에 섞이면 감사 시점에 어느 쪽으로 해석할지 판단할 근거가 없어진다 — 그래서 값과 함께 남긴다(결정 10.38 · 이슈 #136)."
+    },
+    "source": {
+      "enum": [
+        "MEASURED",
+        "SKIPPED"
+      ],
+      "description": "이 판정을 무엇이 만들었는가. optional — ai-service 는 싣지 않고(모든 판정이 MEASURED 다) 이 필드가 생기기 전 레코드에도 없다. 없으면 MEASURED 로 읽는다. SKIPPED 는 고객이 항목을 건너뛰어 **서버의 룰이** U3 로 정한 판정이다(E-INT-03 · 이슈 #518) — 발화가 없으면 잴 것이 없으므로 채점을 부르지 않는다. ❗문면으로는 못 가른다: 룰이 정한 U3 도 레코드에서 측정된 U3 와 똑같이 생겼고, 그러면 감사 시점에 '이 등급을 모델이 잰 것인가'에 답할 수 없다(#136 3항과 같은 판단). ❗prompt_version 에 겹쳐 쓰지 않는다 — 저쪽은 confidence 의 정의를 가리키는 필드라 두 뜻을 가지면 안 된다."
     }
   }
 }

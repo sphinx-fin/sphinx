@@ -260,6 +260,10 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         item.put("misconceptionType", judgment.misconceptionType());   // nullable — 생략하지 않는다
         item.put("promptVersion", judgment.promptVersion());           // nullable — 위와 같은 이유
         item.put("escalate", judgment.escalate());                     // 상신 판단의 근거 — 아래 참조
+        // 이 판정을 **무엇이 만들었는가** (이슈 #518). 문면으로는 못 가른다 — 룰이 정한 U3 도
+        // 레코드에서 측정된 U3 와 똑같이 생긴다. questionSource 가 질문 문면에 하는 일과 같다.
+        // 이 필드가 생기기 전 레코드에는 없고, 그것들은 전부 측정이다(Judgment.Source javadoc).
+        item.put("source", judgment.source());
         return item;
     }
 }

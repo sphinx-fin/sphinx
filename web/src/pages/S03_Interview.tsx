@@ -283,15 +283,26 @@ export default function S03Interview() {
     }
   }
 
-  /** E-INT-03 건너뛰기 — 서버가 U3(미이해)로 처리하도록 빈 응답을 명시적으로 보낸다. */
+  /** E-INT-03 건너뛰기 — 채점이 아니라 **전용 경로**로 보낸다 (이슈 #518).
+   *
+   *  ❗**예전에는 `(응답하지 않음)` 을 `/answers` 에 발화인 척 실어 보냈다.** 그러면 그
+   *  문자열이 채점 프롬프트까지 가는데, 계약이 근거 인용을 강제하므로(`utterance_quote`
+   *  는 빈 문자열을 안 받는다) 모델이 **인용할 발화가 없는 판정**을 만들어야 했다. 빈
+   *  인용이 오면 스키마 위반 → 502 → 이 화면에는 *"채점 서비스가 잠시 멈췄어요"* 였다.
+   *  알파 실측에서 같은 발화 3회 모두 502 였고, 가끔 되던 것은 모델이 우연히 그 표시
+   *  문자열을 인용에 채운 회차다 — 성공이 운이었다.
+   *
+   *  표시 문자열은 이제 **서버가 소유한다**. 화면이 만들어 보내면 버튼 라벨과 기록 값이
+   *  갈릴 수 있는데, 그 둘이 같은 말이어야 한다는 것이 결정 6.26 이다.
+   *
+   *  ❗`inputMeta` 도 안 보낸다 — *"어떻게 입력했나"* 인데 입력이 없다. 0 을 보내면
+   *  기록에서 *"빈 입력을 쟀다"* 로 읽히고, `evidence/` 는 append-only 라 못 뺀다. */
   async function skip() {
     if (!askedItemId) return;
     setPhase("submitting");
     try {
-      await post<Judgment>(`/sessions/${sid}/answers`, {
+      await post<Judgment>(`/sessions/${sid}/skips`, {
         itemId: askedItemId,
-        text: "(응답하지 않음)",
-        inputMeta: meta.snapshot("", elderly),
       });
       if (reverifying) {
         clearReExplanation(sid);
