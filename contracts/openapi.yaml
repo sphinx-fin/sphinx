@@ -227,6 +227,37 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /sessions/{id}/skips:
+    post:
+      summary: 항목 건너뛰기 (E-INT-03) → 룰이 정한 U3 판정을 세션에 기록
+      description: >
+        고객이 「이 항목 건너뛰기」를 누른 경우다. **채점하지 않는다** — 발화가 없으면 잴 것이
+        없고, 무응답의 등급은 명세 8절 E-INT-03 이 U3 로 정해 뒀다. 측정이 아니라 룰의
+        결정이다(P1). 반환 Judgment 는 /answers 와 같은 모양이고 `source: SKIPPED` 로
+        구별된다 — 문면으로는 측정된 U3 와 못 가른다.
+        ❗**/answers 로 대신하면 안 된다.** 표시 문자열을 발화인 척 실어 보내면 ai-service 가
+        인용할 발화 없이 근거를 만들어야 하고, 그 판정은 계약 위반이라 502(AI_SERVICE_UNAVAILABLE)
+        가 된다 — 재판정으로도 안 풀린다(근거 검증이 아니라 스키마 단계에서 나므로).
+        권한: `session:answer` — 고객이 자기 세션에서 누르는 버튼이라 답변과 같다.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkipRequest'}
+      responses:
+        '200':
+          description: 룰이 정한 U3 판정(세션·불변 기록에 반영됨)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JudgmentApiResponse'}
+        '404':
+          description: NOT_FOUND — 세션이 없거나 그 상품의 항목이 아니다(/answers 와 같은 규약)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
   /sessions/{id}/re-explain:
     post:
       summary: 재설명 (F-INT-004) — 이해 부족 항목을 다시 설명, 이후 같은 항목 재답변이 재검증
@@ -1068,6 +1099,21 @@ components:
         text:      {type: string, description: "고객 발화(서버에서 마스킹)"}
         inputMeta:
           $ref: '#/components/schemas/InputMeta'
+
+    SkipRequest:
+      type: object
+      description: >-
+        E-INT-03 항목 건너뛰기. **본문은 항목뿐이다.**
+        ❗발화를 싣지 않는다 — 예전에는 화면이 `"(응답하지 않음)"` 을 AnswerRequest.text 에
+        실어 보냈고, 그러면 인용할 발화가 없는 판정을 모델이 만들어야 해서 502 가 났다
+        (judgment.schema.json 의 evidence.utterance_quote 는 빈 문자열을 안 받는다).
+        그 표시 문자열은 이제 서버가 소유한다.
+        ❗inputMeta 도 없다 — "어떻게 입력했나" 인데 입력이 없다. 0 을 남기면 기록에서
+        "빈 입력을 쟀다" 로 읽히고, evidence 는 append-only 라 나중에 못 뺀다.
+      required: [itemId]
+      additionalProperties: false
+      properties:
+        itemId:    {type: string}
 
     InputMeta:
       type: object
