@@ -30,7 +30,11 @@
 
 **여러 번 돌려 합산하고 구간을 같이 낸다.** 오늘 두 실행 합산은 `2/49 = 4.1%`
 (Wilson 95% `[1.1%, 13.7%]`)이고, 13항목 세션이 YELLOW 로 갈 확률로 옮기면
-`14% ~ 42% ~ 85%` 다. **점추정만 인용하지 않는다.**
+`11% ~ 34% ~ 77%` 다(분모는 **`required` 10건** — 아래). **점추정만 인용하지 않는다.**
+
+❗**세션 확률의 분모는 「세션에 판정이 쌓이는 항목」이다.** `R-06` 이 보는 것은 판정이고
+판정은 면담이 물은 항목에만 생기는데, 그 집합이 `required ∧ extracted` 다. 컨텍스트의
+13건을 그대로 쓰면 `recommended` 3건까지 세어 확률이 과대해진다(`#533` 리뷰, 강희진).
 
 ## 이 도구가 대답하지 않는 것
 
@@ -74,6 +78,20 @@ def wilson(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
     centre = (p + z * z / (2 * n)) / denom
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
     return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def interview_items(risk_items: dict) -> dict:
+    """세션에 **판정이 쌓이는** 항목 — `R-06` 의 분모다.
+
+    `ProductRiskItems.interviewItemsOf` 와 같은 규칙이다(required ∧ extracted). 여기서는
+    `status` 를 안 본다 — eval 컨텍스트는 추출이 끝난 스냅샷이라 전부 `extracted` 다.
+    실세션에서 추출 실패 항목이 있으면 분모가 더 줄고, 그때는 이 값이 **상한**이 된다.
+
+    ❗함수로 빼 둔 이유는 이 규칙이 조용히 낡기 때문이다. `len(risk_items)` 로 쓰면
+    `recommended` 까지 세어 세션 확률이 과대해지는데(42% ↔ 34%) **숫자가 그럴듯해서
+    안 보인다**(`#533` 리뷰, 강희진).
+    """
+    return {k: v for k, v in risk_items.items() if v.get("importance") == "required"}
 
 
 def main() -> None:
@@ -129,8 +147,18 @@ def main() -> None:
 
     # ❗**세션 단위로 옮겨 적는다.** R-06 이 allGrade U1 이므로 항목 하나만 캡을 맞아도
     # 세션이 GREEN 을 놓친다. 항목당 비율만 보면 이 크기가 안 보인다.
-    items_per_session = len(context.get("risk_items", {}))
+    #
+    # ❗**분모는 «세션에 판정이 쌓이는 항목» 이다 — 컨텍스트의 항목 수가 아니다**
+    # (`#533` 리뷰, 강희진). R-06 이 보는 것은 판정이고, 판정은 면담이 물은 항목에만
+    # 생긴다. 그 집합이 `ProductRiskItems.interviewItemsOf` = required ∧ extracted 라
+    # **`recommended` 는 애초에 안 물어지고 판정도 없다.** 컨텍스트 13건을 그대로 쓰면
+    # 세션 확률이 과대해진다(42% → 34%). 게이트의 분모와 맞춘다.
+    items = context.get("risk_items", {})
+    required = interview_items(items)
+    items_per_session = len(required)
     print(f"\n전부 U1 인 {items_per_session}항목 세션이 YELLOW 로 갈 확률")
+    print(f"  (분모는 required {len(required)}건 — 컨텍스트 전체 {len(items)}건이 아니다."
+          f" recommended 는 안 물어지므로 판정이 없다)")
     for label, q in (("하한", lo), ("점추정", rate), ("상한", hi)):
         print(f"  {label:4} {1 - (1 - q) ** items_per_session:.0%}")
     print("❗점추정만 인용하지 않는다 — 위 셋을 같이 적는다.")

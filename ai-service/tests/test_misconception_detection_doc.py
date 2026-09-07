@@ -228,3 +228,46 @@ def test_leak_citations_name_their_reproduction(relative: str) -> None:
         f"{relative} 가 누설 수치를 들면서 {_REPRO} 를 안 가리킨다 — "
         "값을 의심하는 다음 사람이 옮겨 적을 출처가 없다"
     )
+
+
+# ── 세션 확률의 분모는 게이트의 분모여야 한다 ────────────────────────────────
+#
+# `R-06`(`allGrade == 'U1'`)이 보는 것은 **판정**이고, 판정은 면담이 물은 항목에만 생긴다.
+# 그 집합이 `ProductRiskItems.interviewItemsOf` = `required ∧ extracted` 라
+# **`recommended` 는 안 물어지고 판정도 없다.** 컨텍스트 항목 수를 그대로 쓰면 세션
+# 확률이 과대해지는데, 숫자가 그럴듯해서 눈으로는 안 보인다 (`#533` 리뷰, 강희진).
+def _rate_tool():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "measure_selfconsistency_rate.py"
+    spec = importlib.util.spec_from_file_location("measure_selfconsistency_rate", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_session_denominator_counts_only_interviewed_items() -> None:
+    """★ `recommended` 는 분모에서 빠진다 — 판정이 안 생기는 항목이다."""
+    items = {
+        "A": {"importance": "required"},
+        "B": {"importance": "required"},
+        "C": {"importance": "recommended"},
+        "D": {},                              # importance 누락도 required 가 아니다
+    }
+    assert set(_rate_tool().interview_items(items)) == {"A", "B"}
+
+
+def test_the_session_denominator_matches_the_eval_context() -> None:
+    """실물 컨텍스트에서도 게이트 분모와 같아야 한다 — 13 이 아니라 10 이다."""
+    import json
+
+    context = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval" / "data" / "context" / "els.json")
+        .read_text(encoding="utf-8")
+    )
+    items = context["risk_items"]
+    required = _rate_tool().interview_items(items)
+    assert len(required) < len(items), (
+        "recommended 가 하나도 없으면 이 대조가 아무것도 안 잰다 — 컨텍스트가 바뀌었나"
+    )
+    assert len(required) == 10, f"required 가 {len(required)}건이다 — 도구의 분모를 다시 본다"
