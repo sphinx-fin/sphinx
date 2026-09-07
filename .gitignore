@@ -12,6 +12,11 @@ __pycache__/
 node_modules
 dist/
 data/synth_sessions/*.json
+# 업로드된 상품문서(#521). 배포에서는 도커 볼륨에 살지만, compose 없이 서버를 직접 돌리면
+# (SPHINX_DATA_DIR 기본값 ../data) 호스트 이 디렉토리에 쓴다. 디렉토리 자체는 마운트 지점이라
+# 커밋돼 있어야 한다 — README 만 추적한다(data/uploads/README.md).
+data/uploads/*
+!data/uploads/README.md
 eval/labeling/*.xlsx
 .DS_Store
 .pytest_cache/

@@ -324,6 +324,10 @@ log_unhealthy sphinx-edge
 # DB(`sphinx_mysql-data`)가 그 안에 있고, 새 스택이 이름으로 그대로 물려받는 것이 이
 # 이관의 전제다. `docker rm` 은 named volume 을 지우지 않는다 — 여기에 `down -v` 를 쓰면
 # 인증서와 DB 가 같이 날아간다(재발급은 Let's Encrypt 발급 한도가 걸린다).
+# ❗업로드 원본(`sphinx_uploads`)도 같은 전제에 얹혀 있다(이슈 #521). 그쪽은 **복구 수단이
+# 아예 없다** — 인증서는 재발급되고 DB 는 스냅샷이 있지만, 사람이 올린 문서는 아무도 다시
+# 만들어 주지 않는다. `external: true` 라 `down -v` 로도 지워지지 않지만, `docker volume rm`
+# 은 막지 못한다.
 #
 # 라벨 필터는 **정확히 일치**라 `sphinx-edge`·`sphinx-data`·`sphinx-blue` 는 안 걸린다.
 # 이관이 끝난 박스에서는 걸리는 컨테이너가 0개라 이 블록은 아무 일도 안 한다 — 그게 정상
@@ -356,6 +360,19 @@ if [ -n "$legacy_cids" ]; then
   # `compose_data up -d` 가 만든다.
   compose_data restart mysql >/dev/null 2>&1 || true
 fi
+
+# ── 업로드 원본 볼륨 ─────────────────────────────────────────────────────────
+#
+# 업로드된 상품문서가 사는 곳(F-EXT-001 · 이슈 #521). **여기서 만든다** — 앱 스택은
+# `external: true` 로 참조만 하고, 없으면 `external volume "sphinx_uploads" not found`
+# 로 기동이 즉시 실패한다. 그래서 반드시 `compose_app` 보다 앞이어야 한다.
+#
+# `docker-compose.yml` 의 volumes 절에 적어 두는 것으로는 안 된다 — **참조하는 서비스가
+# 없는 top-level 볼륨은 Compose 가 만들지 않는다**(실측). data 스택의 mysql 이 이 볼륨을
+# 쓸 이유도 없으므로 거기 얹어 만들 자리가 없다.
+#
+# 멱등이다. 이미 있으면 아무 일도 안 하고, 그 안의 파일도 건드리지 않는다.
+docker volume create sphinx_uploads >/dev/null
 
 # ── data·edge 스택 — 상시 유지, 설정이 안 바뀌면 compose 가 아무것도 안 건드린다 ──
 echo "data 스택(mysql) 기동"
