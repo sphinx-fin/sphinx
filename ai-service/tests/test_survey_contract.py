@@ -37,10 +37,19 @@ SURVEY_TS = Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "surve
 #: 파서를 들이면 그것이 또 하나의 유지 대상이 된다.
 _ENTRY = re.compile(r'id:\s*"(SUIT-[A-Z-]+)"\s*,\s*\n\s*text:\s*"([^"]+)"')
 
+#: 문항별 `options` 블록. **문면 해시(`_ENTRY`)가 안 보는 곳**이라 따로 읽는다 —
+#: 해시는 `id + text` 만 먹으므로 선택지만 바뀌면 초록으로 지나간다. 실제로 그랬다:
+#: `b84eb45`(8/28)가 `SUIT-PRODUCT-EXPERIENCE` 의 선택지를 바꿨는데 dev set 픽스처가
+#: 열흘 동안 죽은 문면을 들고 있었고 **아무 대조도 안 물었다.**
+_OPTIONS = re.compile(r'id:\s*"(SUIT-[A-Z-]+)"[\s\S]*?options:\s*\[([\s\S]*?)\]')
+
+#: 화면이 선언한 세트 버전. 픽스처가 든 값과 같아야 한다.
+_VERSION = re.compile(r'SURVEY_SCHEMA_VERSION\s*=\s*"([^"]+)"')
+
 #: 문항 ID + 문면의 해시. **문면이 바뀌면 이 값이 바뀌고 테스트가 깨진다.**
 #: 갱신은 손으로 한다 — 자동 갱신되면 검사의 뜻이 없어진다. 깨졌을 때 물어야 하는 것은
 #: "문면이 바뀌었는데 그 문항의 축이 그대로인가" 다.
-EXPECTED_DIGEST = "d74035c2"   # s02-survey-v1, 6문항 (2026-08-27 확인)
+EXPECTED_DIGEST = "d74035c2"   # s02-survey-v2, 6문항 (2026-09-07 재확인 — 문면은 v1 과 같다)
 
 
 def _entries() -> list[tuple[str, str]]:
@@ -92,3 +101,71 @@ def test_devset_uses_the_same_question_set():
         for case in spec["cases"]:
             used = {k for k in case["survey"] if k.startswith(mismatch.QUESTION_KEY_PREFIX)}
             assert used <= web_ids, f"{path.name}/{case['id']}: {sorted(used - web_ids)}"
+
+
+# ── 값이 살아 있는 선택지인가 ────────────────────────────────────────────────
+#
+# ❗**여기가 비어 있었다.** 기존 셋은 문항 **ID**(축 매핑)와 문항 **문면**(해시)을 본다.
+# 설문 값 — 즉 사용자가 고른 **선택지 문장** — 은 아무도 안 봤다. 그런데 그 문장이 곧
+# `recorded_answer` 이고 모순 판정(F-DET-002)이 대조하는 대상이다.
+#
+# `b84eb45` 가 `"있다 — 손실을 본 적은 없다"` → `"있고 이득을 봤다"` 로 바꿨을 때
+# ID 도 문항 텍스트도 안 바뀌어서 **대조 셋이 전부 초록이었고**, dev set 이 열흘 동안
+# 제품에 없는 문면으로 모순 판정을 재고 있었다.
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sessions" / "s02-survey-v2.yaml"
+
+
+def _live_options() -> dict[str, set[str]]:
+    """`survey.ts` 의 문항별 선택지."""
+    text = SURVEY_TS.read_text(encoding="utf-8")
+    found = {qid: set(re.findall(r'"([^"]+)"', block))
+             for qid, block in _OPTIONS.findall(text)}
+    assert found, "survey.ts 에서 선택지를 하나도 못 읽었다 — 리터럴 형태가 바뀌었나"
+    return found
+
+
+def _fixture() -> dict:
+    import yaml
+    return yaml.safe_load(FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_the_options_are_actually_read() -> None:
+    """★ 양성 대조. 선택지를 못 읽으면 아래 단정이 **빈 집합끼리** 견주고 통과한다."""
+    live = _live_options()
+    assert len(live) >= 6, f"문항이 6개 이상이어야 한다 — 읽은 것 {sorted(live)}"
+    for qid, options in live.items():
+        assert len(options) >= 2, f"{qid}: 선택지가 {options} — 하나뿐일 수 없다"
+
+
+def test_every_fixture_answer_is_a_live_option() -> None:
+    """★ dev set 의 설문 값이 **지금 화면에 있는 선택지**여야 한다."""
+    live = _live_options()
+    stale: list[str] = []
+    for case in _fixture()["cases"]:
+        for qid, value in case["survey"].items():
+            if qid.startswith("_"):      # `_surveySchemaVersion` 같은 메타키 (#98 ②)
+                continue
+            if qid in live and value not in live[qid]:
+                stale.append(f"{case['id']}: {qid} = {value!r} (지금 있는 것: {sorted(live[qid])})")
+    assert not stale, (
+        "제품에 없는 선택지 문면을 쓰고 있다 — 그 값은 실세션이 만들 수 없다:\n  "
+        + "\n  ".join(stale)
+    )
+
+
+def test_the_fixture_declares_the_live_set_version() -> None:
+    """픽스처가 든 세트 버전이 화면 정본과 같아야 한다.
+
+    위 단정이 값을 잡으므로 이건 **표기**를 맞추는 것이다 — 파일명·머리말이 낡으면
+    다음 사람이 어느 세트를 보는지 헷갈린다.
+    """
+    declared = _VERSION.search(SURVEY_TS.read_text(encoding="utf-8"))
+    assert declared, "survey.ts 에서 SURVEY_SCHEMA_VERSION 을 못 읽었다"
+    live = declared.group(1)
+    data = _fixture()
+    assert data["survey_schema_version"] == live, (
+        f"픽스처는 {data['survey_schema_version']} · 화면은 {live}"
+    )
+    assert FIXTURE.name == f"{live}.yaml", (
+        f"파일명이 세트 버전이다 — {FIXTURE.name} 인데 화면은 {live}"
+    )
