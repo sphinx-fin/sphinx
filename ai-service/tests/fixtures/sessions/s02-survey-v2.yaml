@@ -3,13 +3,21 @@
 # 항목 단위 dev set(`utterances/`)은 **한 발화 → 한 판정**을 본다. 모순은 세션 단위라
 # 그 형태로 검증할 수 없었다 — 입력이 설문 전체 + 세션 내 발화 전체다.
 #
-# 설문 키는 `s02-survey-v1`(오준서 확정, 이슈 #44)이다. 여기 값을 복사해 두는 이유:
+# 설문 키는 `s02-survey-v2` 다(v1 은 오준서 확정 · 이슈 #44). 여기 값을 복사해 두는 이유:
 # 화면 파일(`web/src/lib/survey.ts`)은 내 모듈이 아니고, 세트가 바뀌면 `SURVEY_SCHEMA_VERSION`
-# 이 올라간다고 합의했다. 파일명이 세트 버전이라 낡으면 파일 이름이 먼저 틀려 보인다.
+# 이 올라간다고 합의했다.
+#
+# ❗**그 합의만으로는 안 잡혔다.** `b84eb45`(8/28)가 v2 로 올리면서 SUIT-PRODUCT-EXPERIENCE
+# 의 **선택지 문면**을 바꿨는데("있다 — 손실을 본 적은 없다" → "있고 이득을 봤다") 이 파일이
+# 열흘 동안 죽은 문면 4건을 들고 있었다. 문항 ID 도 문항 텍스트도 안 바뀌어서 기존 대조
+# 셋이 전부 초록이었다 — **선택지는 아무도 안 보고 있었다.**
+#
+# 설문 값은 문장이고 그 문장이 곧 `recorded_answer` 라, 모순 판정이 대조하는 대상이다.
+# 그래서 `test_survey_contract.py` 가 이제 **값이 살아 있는 선택지인지** 를 잰다.
 #
 # `_surveySchemaVersion` 을 일부러 넣는다 — 실제 요청 모양이고, 메타키가 문항으로 새면
 # 안 된다는 것(#98 ②)이 여기서도 검증된다.
-survey_schema_version: s02-survey-v1
+survey_schema_version: s02-survey-v2
 
 cases:
   # ── 기획서 7-2 데모 메인 ─────────────────────────────────────────────────────
@@ -18,7 +26,7 @@ cases:
   - id: DEMO-SESSION-PRINCIPAL
     source: 기획서 7-2 데모 메인 ①③ · 이슈 #44 DEMO_SURVEY_ANSWERS
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 적극투자형
       SUIT-PRINCIPAL-LOSS: 손실이 나더라도 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 20%를 넘는 손실도 감수할 수 있다
@@ -41,13 +49,13 @@ cases:
   - id: CONSISTENT-RISK-TAKER
     source: 합성 — 설문과 발화가 일치. 모순 없음이 정답
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 적극투자형
       SUIT-PRINCIPAL-LOSS: 손실이 나더라도 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 20%를 넘는 손실도 감수할 수 있다
       SUIT-PURPOSE: 손실 위험을 감수하고 적극적인 수익을 원한다
       SUIT-HORIZON: 5년 이상 묶어둘 수 있다
-      SUIT-PRODUCT-EXPERIENCE: 있다 — 손실을 본 적이 있다
+      SUIT-PRODUCT-EXPERIENCE: 있지만 손실을 봤다
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
         text: 기초자산이 낙인 밑으로 가면 떨어진 만큼 원금이 깎입니다. 전에도 한 번 손실을 봤고 그 정도는 감당할 생각으로 왔어요.
@@ -61,13 +69,13 @@ cases:
   - id: HORIZON-ONLY
     source: 합성 — 기간 축 단독 모순. axis 고정(#113) 검증
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 위험중립형
       SUIT-PRINCIPAL-LOSS: 일부 손실까지만 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 10% 이내라면 감수할 수 있다
       SUIT-PURPOSE: 예금보다 조금 높은 수익을 원한다
       SUIT-HORIZON: 5년 이상 묶어둘 수 있다
-      SUIT-PRODUCT-EXPERIENCE: 있다 — 손실을 본 적은 없다
+      SUIT-PRODUCT-EXPERIENCE: 있고 이득을 봤다
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
         text: 원금이 좀 깎일 수 있는 건 압니다.
@@ -85,7 +93,7 @@ cases:
   - id: LOSS-CAPACITY-ONLY
     source: 합성 — 손실 폭 축 단독 모순. 문항 분리(#44)의 근거 검증
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 적극투자형
       SUIT-PRINCIPAL-LOSS: 손실이 나더라도 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 20%를 넘는 손실도 감수할 수 있다
@@ -106,7 +114,7 @@ cases:
   - id: TOO-SHORT-TO-JUDGE
     source: 합성 — 발화 한두 마디로 성향을 단정하면 오판이다
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-PRINCIPAL-LOSS: 손실이 나더라도 감수할 수 있다
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
@@ -119,7 +127,7 @@ cases:
   - id: METADATA-ONLY-SURVEY
     source: 합성 — 메타키가 문항으로 세면 이 케이스가 evaluated 로 나온다
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
         text: 은행에서 파는 거니까 원금은 지켜지는 거죠?
@@ -136,13 +144,13 @@ cases:
   - id: RISK-PROFILE-ONLY
     source: 기획서 3절 판결 동향 — 스스로 기재한 투자성향과 실제 발언의 괴리
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 적극투자형
       SUIT-PRINCIPAL-LOSS: 일부 손실까지만 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 10% 이내라면 감수할 수 있다
       SUIT-PURPOSE: 예금보다 조금 높은 수익을 원한다
       SUIT-HORIZON: 3~5년은 묶어둘 수 있다
-      SUIT-PRODUCT-EXPERIENCE: 있다 — 손실을 본 적은 없다
+      SUIT-PRODUCT-EXPERIENCE: 있고 이득을 봤다
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
         text: 저는 위험한 건 원래 안 합니다. 평생 예금만 했어요. 창구에서 성향 검사는 직원분이 골라주셨어요.
@@ -156,13 +164,13 @@ cases:
   - id: PURPOSE-ONLY
     source: 합성 — 목적 축 단독 모순. 결정로그 10.13 ③ 예적금 가입목적과 닿는다
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 위험중립형
       SUIT-PRINCIPAL-LOSS: 일부 손실까지만 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 10% 이내라면 감수할 수 있다
       SUIT-PURPOSE: 손실 위험을 감수하고 적극적인 수익을 원한다
       SUIT-HORIZON: 3~5년은 묶어둘 수 있다
-      SUIT-PRODUCT-EXPERIENCE: 있다 — 손실을 본 적은 없다
+      SUIT-PRODUCT-EXPERIENCE: 있고 이득을 봤다
     utterances:
       - item_id: ELS-PRINCIPAL-LOSS-WARNING
         text: 손실이 조금 날 수 있는 건 압니다. 그래도 저는 적금 만기 된 걸 그냥 옮겨두려고 온 거예요.
@@ -181,7 +189,7 @@ cases:
   - id: PRODUCT-UNDERSTANDING-ONLY
     source: 합성 — 경험 기재가 실제보다 낮다. survey_understates_tolerance 유일 케이스
     survey:
-      _surveySchemaVersion: s02-survey-v1
+      _surveySchemaVersion: s02-survey-v2
       SUIT-RISK-PROFILE: 안정추구형
       SUIT-PRINCIPAL-LOSS: 일부 손실까지만 감수할 수 있다
       SUIT-LOSS-TOLERANCE: 10% 이내라면 감수할 수 있다

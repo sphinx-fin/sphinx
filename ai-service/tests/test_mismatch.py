@@ -16,10 +16,10 @@ from app import mismatch
 from app.llm_client import LlmClient
 from app.schemas import Contradiction, SuitabilityMismatch, SurveyRef
 
-#: 문항 키는 #44 에서 확정된 `s02-survey-v1` 세트다. `_surveySchemaVersion` 을 **일부러**
+#: 문항 키는 #44 에서 확정된 세트이고 지금 판은 `s02-survey-v2` 다. `_surveySchemaVersion` 을 **일부러**
 #: 넣어 둔다 — 메타키가 문항으로 새는 결함(#98 ②)의 회귀 고정이다.
 SURVEY = {
-    "_surveySchemaVersion": "s02-survey-v1",
+    "_surveySchemaVersion": "s02-survey-v2",
     "SUIT-PRINCIPAL-LOSS": "손실이 나더라도 감수할 수 있다",
     "SUIT-HORIZON": "5년 이상 묶어둘 수 있다",
 }
@@ -227,7 +227,7 @@ def test_metadata_key_cannot_be_cited_as_survey_evidence():
     두면 이 경로는 그대로 남는다 — 그래서 입구에서 걸러야 한다.
     """
     bogus = _contradiction(
-        question_id="_surveySchemaVersion", recorded="s02-survey-v1", confidence=0.95,
+        question_id="_surveySchemaVersion", recorded="s02-survey-v2", confidence=0.95,
     )
     llm = FakeLlm(SuitabilityMismatch(
         session_id="S", status="evaluated", mismatch=True, confidence=0.95,
@@ -270,7 +270,7 @@ def test_unknown_survey_question_is_rejected_not_guessed():
 
 def test_survey_with_only_metadata_is_insufficient_not_evaluated():
     """메타키만 온 것은 '모순 없음'이 아니라 '판정 불가'다."""
-    out = mismatch.detect("S", {"_surveySchemaVersion": "s02-survey-v1"}, UTTERANCES)
+    out = mismatch.detect("S", {"_surveySchemaVersion": "s02-survey-v2"}, UTTERANCES)
     assert out.status == "insufficient_input"
     assert out.mismatch is False
 
