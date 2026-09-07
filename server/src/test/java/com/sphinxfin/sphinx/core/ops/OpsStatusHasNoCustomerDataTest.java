@@ -30,13 +30,39 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code note} 와 {@code facts[].value} 가 자유 문자열이라 <i>"진행 중 세션 3건"</i> 을
  * 넣는 데 문법적 저항이 하나도 없다.
  *
- * <h2>어떻게 보는가 — 타입 의존성을 대조한다</h2>
+ * <h2>❗어떻게 보는가 — <b>허용 목록</b>이다 (금지 목록이 아니다)</h2>
  *
- * <p>{@link OpsStatus} 가 <b>도달할 수 있는 타입 전부</b>를 재귀로 모아, 세션·판정·집계
- * 계열이 하나라도 있으면 실패시킨다. 누가 세션 수를 얹으려고 {@code SessionRepository} 의
- * 결과를 응답 타입에 넣으면 컴파일 의존성이 늘어나 빨강이 된다.
+ * <p>{@link OpsStatus} 가 <b>도달할 수 있는 타입 전부</b>를 재귀로 모아, <b>허용된 것
+ * 외에 하나라도 있으면</b> 실패시킨다. 허용되는 것은 {@code core.ops} 안에 선언된 것과
+ * {@link #ALLOWED} 의 기본형뿐이다.
  *
- * <p>❗<b>문자열로 우회하는 것은 못 막는다.</b> {@code new Fact("세션", "3건")} 은 이
+ * <p>처음에는 <i>금지 목록</i>이었다 — 세션·집계 패키지 + {@code domain/} 의 판정 타입 넷을
+ * 이름으로 열거했다. <b>PR #531 리뷰가 변이로 구멍 둘을 찾았다.</b>
+ *
+ * <pre>
+ * 변이 A   OpsStatus 가 core.session.Session 을 참조          → 빨강 (설계대로)
+ * 변이 B-1 OpsStatus 가 domain.SuitabilityMismatch 를 참조     → ❗초록
+ * 변이 B-2 OpsStatus 에 Map&lt;String, Object&gt; 필드         → ❗초록
+ * </pre>
+ *
+ * <p><b>B-1 은 이 파일이 스스로 비판한 방식이었다</b> — 아래 {@link #FORBIDDEN_ONE_OFF} 의
+ * 주석이 <i>"이름을 열거하면 새로 생긴 타입이 목록에 없어서 통과한다"</i> 라고 적고 있었는데,
+ * 정작 {@code domain/} 쪽을 그 방식으로 막았다. 그리고 하필 {@code SuitabilityMismatch} 가
+ * {@code List<Map<String, Object>> contradictions} 를 들고 그 Map 안에
+ * <b>{@code utterance_quote} — 고객 발화 원문</b>이 있다. 즉 옛 그물에서는 <b>고객 발화를
+ * 이 응답에 얹어도 초록</b>이었다.
+ *
+ * <p><b>B-2 는 타입 그래프로 재는 방식의 구조적 한계다.</b> {@code Map<String, Object>} 안에
+ * 무엇을 담아도 도달 타입에는 안 보인다. 그리고 그런 필드가 이 레포에 <b>이미 있다</b>
+ * (위 {@code contradictions}) — 가정이 아니다. 그래서 {@code Map}·{@code Object} 는
+ * 허용 목록에 <b>절대 넣지 않고</b>, 넣었는지를 {@link #theAllowListItselfForbidsOpaqueTypes()}
+ * 가 따로 본다.
+ *
+ * <p>뒤집은 결과 <b>새 타입이 붙는 순간 무조건 빨강</b>이고, 사람이 그때 판단한다. 지금
+ * {@code OpsStatus} 는 {@code String}·{@code long}·{@code Integer}·{@code List}·enum 만
+ * 쓰므로 허용 목록이 좁게 잡힌다.
+ *
+ * <p>❗<b>문자열로 우회하는 것은 여전히 못 막는다.</b> {@code new Fact("세션", "3건")} 은 이
  * 테스트를 통과한다 — 이 그물이 닫는 것은 <b>실수로 얹는 경로</b>이고, 일부러 넣는 것은
  * 정책 주석과 리뷰가 막는다. 이 한계를 여기 적어 두는 이유는, 초록을 보고 <i>"검사가
  * 다 하고 있다"</i> 로 읽으면 정작 리뷰가 느슨해지기 때문이다.
@@ -47,45 +73,79 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("/ops/status 응답에 고객 데이터가 없다")
 class OpsStatusHasNoCustomerDataTest {
 
-    /**
-     * 고객 데이터가 사는 패키지. <b>이름이 아니라 패키지로 막는다</b> — 클래스 이름을
-     * 열거하면 새로 생긴 타입이 목록에 없어서 통과한다.
-     */
-    private static final List<String> FORBIDDEN_PACKAGES = List.of(
-            "com.sphinxfin.sphinx.core.session",   // Session·발화·오버라이드
-            "com.sphinxfin.sphinx.aggregate",      // 집계 (ADR-001 이 ADMIN 에 닫은 쪽)
-            "com.sphinxfin.sphinx.evidence",       // 불변 기록 (판정 근거·발화 인용)
-            "com.sphinxfin.sphinx.simulator");     // 금액 계산 결과
+    /** 응답 타입이 살 수 있는 유일한 패키지. 여기 것은 전부 허용한다. */
+    private static final String OPS_PACKAGE = "com.sphinxfin.sphinx.core.ops";
 
     /**
-     * {@code domain/} 은 통째로 막을 수 없다 — 거기에 고객 데이터가 아닌 타입도 산다.
-     * 판정·측정 계열만 이름으로 막는다.
+     * {@code core.ops} 밖에서 <b>허용되는 전부.</b> 값을 나르기만 하고 아무것도 감추지 않는
+     * 타입들이다.
+     *
+     * <p>❗<b>{@code Map}·{@code Object}·{@code Optional} 을 넣지 않는다.</b> 그 셋은 타입으로
+     * 아무것도 약속하지 않으므로, 이 응답에서는 <b>있는 것 자체가 그물을 끄는 것</b>이다
+     * ({@code Map<String, Object>} 안에 고객 발화를 담아도 도달 타입에는 안 보인다).
+     * 누가 넣었는지를 {@link #theAllowListItselfForbidsOpaqueTypes()} 가 본다.
+     *
+     * <p>여기 무언가를 <b>더하기 전에</b> 물을 것: <i>"이 타입 안에 무엇이 들었는지 이 테스트가
+     * 볼 수 있는가."</i> 아니라면 더하지 않는다.
      */
-    private static final List<String> FORBIDDEN_TYPES = List.of(
-            "com.sphinxfin.sphinx.domain.Judgment",
-            "com.sphinxfin.sphinx.domain.InputMeta",
-            "com.sphinxfin.sphinx.domain.GateResult",
-            "com.sphinxfin.sphinx.domain.Utterance");
+    private static final Set<String> ALLOWED = Set.of(
+            "java.lang.String",
+            "java.lang.Integer", "java.lang.Long", "java.lang.Boolean",
+            "int", "long", "boolean",
+            // 원소 타입은 제네릭 인자로 풀어서 따로 검사한다 — 컨테이너 자체는 투명하다.
+            "java.util.List");
+
+    /**
+     * 허용 목록에 절대 들어가서는 안 되는 것. {@link #ALLOWED} 를 늘리는 사람이 그 문단을
+     * 안 읽었을 때 걸리는 자리다 — 리뷰 지적(PR #531)의 B-2 가 정확히 이 경로였다.
+     */
+    private static final Set<String> FORBIDDEN_ONE_OFF = Set.of(
+            "java.util.Map", "java.lang.Object", "java.util.Optional");
 
     @Test
-    @DisplayName("❗응답 타입이 세션·판정·집계 타입을 하나도 참조하지 않는다 — ADMIN 그랜트의 근거다")
-    void theResponseCannotReachCustomerData() {
+    @DisplayName("❗응답 타입이 core.ops 와 기본형 밖으로 나가지 않는다 — ADMIN 그랜트의 근거다")
+    void theResponseReachesNothingButOpsTypesAndPrimitives() {
         Set<Class<?>> reachable = reachableFrom(OpsStatus.class);
 
         Set<String> offending = new TreeSet<>();
         for (Class<?> type : reachable) {
             String name = type.getName();
-            if (FORBIDDEN_PACKAGES.stream().anyMatch(name::startsWith)
-                    || FORBIDDEN_TYPES.contains(name)) {
+            if (!name.startsWith(OPS_PACKAGE + ".") && !ALLOWED.contains(name)) {
                 offending.add(name);
             }
         }
 
         assertThat(offending)
                 .as("""
-                    /ops/status 응답이 고객 데이터 타입에 닿는다. `ops:status:read` 를 ADMIN 에게
-                    준 근거가 «응답에 데이터가 없다» 하나이므로, 이건 정책을 옮겨서 고칠 것이
-                    아니라 **응답에서 값을 빼서** 고친다 (ADR-001 · 기획 7-4).""")
+                    /ops/status 응답이 core.ops 밖의 타입에 닿는다. `ops:status:read` 를 ADMIN 에게
+                    준 근거가 «응답에 고객 데이터가 없다» 하나이므로, 이건 정책을 옮겨서 고칠 것이
+                    아니라 **응답에서 값을 빼서** 고친다 (ADR-001 · 기획 7-4).
+
+                    정말 필요한 값이면 core.ops 안의 record 로 옮겨 담는다 — 그러면 무엇이
+                    실리는지가 이 테스트에 보인다. Map·Object 로 감싸는 것은 답이 아니다:
+                    그건 값을 안전하게 만드는 게 아니라 검사를 끄는 것이다.""")
+                .isEmpty();
+    }
+
+    /**
+     * ★ <b>허용 목록 자체를 검사한다.</b>
+     *
+     * <p>위 단정은 {@link #ALLOWED} 를 신뢰한다. 그래서 거기 {@code java.util.Map} 한 줄이
+     * 들어오면 <b>단정은 그대로 초록인데 그물은 꺼진다</b> — PR #531 리뷰의 변이 B-2 가
+     * 그 경로였다. 목록을 늘리는 것은 정상 작업이므로(새 기본형이 필요할 수 있다) 막는 대신
+     * <b>무엇을 못 넣는지</b>를 여기서 못박는다.
+     */
+    @Test
+    @DisplayName("❗허용 목록에 Map·Object 가 없다 — 그건 값을 안전하게 만드는 게 아니라 검사를 끄는 것이다")
+    void theAllowListItselfForbidsOpaqueTypes() {
+        Set<String> opaque = new TreeSet<>(ALLOWED);
+        opaque.retainAll(FORBIDDEN_ONE_OFF);
+
+        assertThat(opaque)
+                .as("""
+                    허용 목록에 속을 볼 수 없는 타입이 들어왔다. 그러면 위 단정이 초록인 채로
+                    아무것도 안 잰다 — 그 안에 고객 발화를 담아도 도달 타입에는 안 보인다
+                    (`SuitabilityMismatch.contradictions` 가 실제로 그런 모양이다).""")
                 .isEmpty();
     }
 
