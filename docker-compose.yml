@@ -136,6 +136,12 @@ services:
       # Spring 완화 바인딩: sphinx.ai-service.base-url → SPHINX_AISERVICE_BASEURL
       # (점·하이픈을 없애고 대문자로). 이름이 낯설어 보이지만 이게 규칙대로다.
       SPHINX_AISERVICE_BASEURL: http://ai-service:8100
+      # ❗**server 도 자기 색을 알아야 한다**(F-OPS-001 · 이슈 #522). 예전에는 `STACK` 이
+      # 아래 네트워크 별명에만 쓰여서, 「지금 라이브가 blue 인가 green 인가」를 아는 것이
+      # 배포 스크립트뿐이었다 — 운영 콘솔이 그것을 화면에 낸다.
+      # 이름은 Spring 완화 바인딩이다: `sphinx.deployment.stack` → `SPHINX_STACK`.
+      # 로컬은 이 값이 없고, 빈 문자열이 정상이다(색이 없는 것이 정상).
+      SPHINX_STACK: ${STACK:?STACK 환경변수(blue 또는 green)가 필요하다}
       # ai-service 와 **같은 값**이어야 한다 — 다르면 `/internal/*` 이 전부 401 이 되고
       # 인터뷰·채점 경로가 통째로 죽는다. 위 SPHINX_API_USER 가 nginx 와 같은 값을
       # 쓰는 것과 같은 이유로, 출처를 SSM 하나로 둔다(scripts/deploy_ec2.sh).

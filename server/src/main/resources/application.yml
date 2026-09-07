@@ -44,6 +44,12 @@ sphinx:
     internal-token: ${SPHINX_INTERNAL_TOKEN:}
   gate:
     rules-path: classpath:gate_rules.yaml
+  deployment:
+    # ❗**로컬은 빈 문자열이 정상이다** — 색이 없는 것이 정상이고, 그걸 「모른다」로 그리면
+    # 로컬 콘솔이 상시 경고가 된다. 그래서 SimulatorProperties 처럼 빈 값을 세우지 않는다.
+    # 배포에서는 compose 가 넘긴다(blue 또는 green) — 지금 그 값을 아는 것은 배포 스크립트뿐
+    # 이라 「라이브가 어느 색인가」를 화면에서 볼 방법이 없었다(이슈 #522).
+    stack: ${SPHINX_STACK:}
   documents:
     # 상품 원문(PDF) 조회(GET /products/{id}/document, 이슈 #412)가 파일을 찾는 기준 디렉토리.
     # ProductRiskItems.DEMO_DOCUMENTS 의 경로가 이 디렉토리 상대(documents/…)다 — ai-service

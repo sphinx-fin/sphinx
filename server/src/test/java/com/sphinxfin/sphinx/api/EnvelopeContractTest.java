@@ -112,6 +112,14 @@ class EnvelopeContractTest {
     }
 
     @Test
+    @DisplayName("ops 계열 봉투 — 상류가 죽어 있어도 봉투다")
+    void opsEndpoints() throws Exception {
+        // ai-service 목이 health() 에 아무것도 안 준 상태(= HealthProbe null)로 부른다 —
+        // 상류가 죽어 있는 것이 이 화면의 정상 입력이고, 그때도 봉투여야 한다(#522).
+        assertEnveloped(mvc.perform(get("/ops/status")));
+    }
+
+    @Test
     @DisplayName("session 계열 전부 봉투 — simulate·report 포함")
     void sessionEndpoints() throws Exception {
         String sid = newSession();
