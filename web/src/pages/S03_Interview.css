@@ -281,3 +281,97 @@
   cursor: pointer;
 }
 .iv__link:hover { color: var(--text-muted); }
+
+/* ── 데모 답지 캡션 (S03 설계 판단 ⑤ · 이슈 #539) ─────────────────────────────
+   ❗**고객 화면에 얹힌 진행자용 물건이다.** 그래서 고객이 읽어야 하는 것(질문·입력창)의
+   위계를 흔들지 않는 크기·색으로 둔다 — 질문은 26px 인데 여기는 13~14px 이고, 카드가
+   아니라 점선 테두리다. "이건 화면의 일부가 아니다"를 배치가 말하게 하는 쪽이다.
+   ❗숨기는 CSS(`display:none`)를 두지 않는다 — 끄는 것은 빌드지 스타일이 아니다. */
+.iv__demo {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+
+.iv__demo-head {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.iv__demo-head b { color: var(--text); }
+
+.iv__demo-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* 왼쪽 색 띠 하나로 U1/U4 를 가른다. 신호등(S-05)과 같은 토큰이라 두 화면이 같은 말을 한다. */
+.iv__demo-row {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border);
+}
+.iv__demo-row--u1 { border-left-color: var(--green); }
+.iv__demo-row--u4 { border-left-color: var(--red); }
+
+.iv__demo-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.iv__demo-tag {
+  font-size: calc(12px * var(--scale));
+  line-height: calc(1.4 * var(--leading-scale));
+  letter-spacing: 0.0145em;
+  font-weight: 700;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+}
+.iv__demo-tag--u1 { background: var(--green-bg); color: var(--green); }
+.iv__demo-tag--u4 { background: var(--red-bg);   color: var(--red); }
+
+/* 출처 문면(라벨 합의 · dev set · 작성) — **작게 두되 지우지 않는다.** 이슈 #539 가
+   요구한 구별이 이 한 줄이고, 없으면 작성한 대본이 라벨된 실측인 척한다. */
+.iv__demo-src {
+  font-size: calc(12px * var(--scale));
+  line-height: calc(1.4 * var(--leading-scale));
+  color: var(--text-muted);
+}
+
+.iv__demo-text {
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  letter-spacing: -0.003em;
+  color: var(--text);
+  margin-bottom: var(--space-2);
+}
+
+.iv__demo-fill {
+  min-height: var(--control-h-sm);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: calc(13px * var(--scale));
+  line-height: calc(1.4 * var(--leading-scale));
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-spring), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
+}
+.iv__demo-fill:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+.iv__demo-fill:active:not(:disabled) { transform: scale(0.96); }
+.iv__demo-fill:disabled { opacity: 0.5; cursor: default; }
+
+.iv__demo-foot {
+  margin-top: var(--space-3);
+  font-size: calc(12px * var(--scale));
+  line-height: calc(1.5 * var(--leading-scale));
+  color: var(--text-muted);
+}
+.iv__demo-foot b { color: var(--text); }
