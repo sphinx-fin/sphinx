@@ -90,16 +90,20 @@ public class ProductDocuments {
     /**
      * {@code Content-Disposition} 에 낼 파일명.
      *
-     * <p>❗<b>경로에서 뽑지 않는다</b>(이슈 #521 · PR #532). 업로드본의 경로는 내용 주소
-     * ({@code uploads/<sha256>.pdf})라, 경로에서 뽑으면 판매자가 받는 파일이
-     * {@code 9f2a….pdf} 가 되어 <b>무엇을 받았는지 알 수 없다</b>. 원래 파일명은 업로드가
-     * DB 행에 남겨 뒀으므로 그것을 쓴다.
+     * <p>❗<b>업로드본은 경로에서 뽑지 않는다</b>(이슈 #521). 저장 경로의 이름은
+     * {@link UploadedDocumentStore#safeFilename} 이 걷은 값이라 한글 아닌 특수문자가
+     * {@code _} 로 접혀 있다 — 판매자가 받는 파일 이름은 <b>올린 그대로</b>여야 하므로
+     * 업로드가 DB 행에 남긴 원문을 쓴다.
      *
      * <p>사전적재 데모 2종은 그 행이 없다 — 그쪽은 경로의 파일명이 곧 사람이 읽는 이름이라
      * (예: {@code els_kiwoom_4181_simple_prospectus.pdf}) 예전 동작을 그대로 둔다.
      */
     private String filenameOf(String productId, Path resolved) {
+        // ❗DB 의 값은 **업로더가 준 원문**이라 개행·제어문자가 있을 수 있다. 그대로 헤더에
+        //   실으면 응답 헤더가 갈라지므로 저장에 쓰는 것과 같은 정제를 거친다 — 한글은 살고
+        //   경로 구분자·제어문자만 죽는다(UploadedDocumentStore.safeFilename).
         return productUploads.originalFilenameOf(productId)
+                .map(UploadedDocumentStore::safeFilename)
                 .orElseGet(() -> resolved.getFileName().toString());
     }
 

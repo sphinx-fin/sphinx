@@ -35,23 +35,30 @@ import java.util.regex.Pattern;
  * 읽기로 붙는다. {@code data/} 본체가 읽기 전용인 것(결정 7.8 · {@code VERSION} sha256
  * 고정)은 그대로다 — 고정된 코퍼스와 사람이 올린 것이 같은 마운트에 섞이지 않는다.
  *
- * <h2>경로는 내용이 정한다 — 업로더가 준 이름은 경로에 안 들어간다</h2>
+ * <h2>경로는 내용이 정한다 — 그리고 이름을 살린다</h2>
  *
  * <pre>
- *   uploads/&lt;sha256&gt;.pdf
+ *   uploads/&lt;sha256&gt;/&lt;정제한 파일명&gt;
  * </pre>
  *
- * <p>{@code data/uploads/README.md}(PR #532)가 근거 셋을 적어 뒀다. (1) 파일명이 해시면
- * <b>{@code ..} 를 막는 코드가 아예 필요 없다</b>. (2) 같은 문서 재업로드가 자연히 한 벌이다.
- * (3) 무결성 대조가 공짜다 — {@code GET /products/{id}/document} 가 낸 파일이 추출에 쓴 그
- * 파일인지 <b>경로만으로</b> 답한다({@code evidence/} 가 {@code contentHash} 로 하는 것과
- * 같은 문법이다).
+ * <p>같은 바이트는 같은 경로다 — 재업로드가 디렉토리를 늘리지 않고, 덮어써도 내용이 같으므로
+ * <b>파스 결과가 안 바뀐다</b>(P2). 내용이 다르면 파일명이 같아도 다른 디렉토리라 서로를
+ * 밟지 않는다. <b>디렉토리가 sha256 이라</b> 업로더가 준 이름은 경로 결정에 관여하지 않고,
+ * 그 이름은 {@link #safeFilename} 이 걷고 {@link ProductDocuments#resolveWithin} 이 뿌리
+ * 밖을 다시 거부한다.
  *
- * <p>같은 바이트는 같은 경로다 — 덮어써도 내용이 같으므로 <b>파스 결과가 안 바뀐다</b>(P2).
+ * <h2>❗왜 {@code uploads/&lt;sha256&gt;.pdf} 로 접지 않았나</h2>
  *
- * <p>❗<b>원래 파일명은 버리지 않고 DB 행에 남긴다</b>({@code UploadedProduct.originalFilename}).
- * 운영자가 무엇을 올렸는지 알아야 하고, 원문 조회의 {@code Content-Disposition} 이 그 값을
- * 쓴다 — 경로에서 뽑으면 판매자가 받는 파일이 {@code 9f2a….pdf} 가 된다.
+ * <p>이름을 아예 빼면 «{@code ..} 를 막는 코드가 필요 없다» 는 이점이 있고 그게 처음 제안된
+ * 형태였다(#521). 그런데 <b>이 볼륨은 복구 수단이 없는 유일한 자산</b>이다(PR #532 가 그것을
+ * 근거로 {@code external: true} 를 골랐다). DB 를 잃고 볼륨만 남은 상황에서
+ * {@code 9f2a….pdf} 만 있는 트리는 <b>어느 파일이 무엇인지 아무도 모른다</b> — 이름을 살리는
+ * 이유가 그것이다. 「무엇을 올렸는지」가 DB 한 곳에만 있으면 안 된다.
+ *
+ * <p>이름을 살려도 경로 안전은 <b>디렉토리가 해시</b>인 것으로 이미 성립한다 — 이름이
+ * 경로의 <i>마지막 조각</i>이라 {@code ..} 로 올라갈 자리가 없고, 그래도 쓰기 전에 한 번 더
+ * 본다. 즉 이점 하나(코드가 없다)를 이점 하나(사람이 읽을 수 있다)와 바꾼 것이고,
+ * 복구 불가 자산 쪽에 무게를 뒀다.
  */
 @Service
 @Slf4j
@@ -61,11 +68,11 @@ public class UploadedDocumentStore {
     static final String UPLOADS = "uploads";
 
     /**
-     * 표시용 파일명에서 살릴 문자. 나머지는 {@code _} 로 접는다.
+     * 파일명에서 살릴 문자. 나머지는 {@code _} 로 접는다 — 경로 구분자·제어문자가 여기서 죽는다.
      *
-     * <p>❗<b>이 값은 경로에 안 들어간다</b>(경로는 sha256 이다) — 화면 문면과
-     * {@code Content-Disposition} 에만 쓴다. 그래도 정제하는 이유는 그 헤더에 개행·제어문자가
-     * 실리면 응답 헤더가 갈라지기 때문이다.
+     * <p>한글을 살린다({@code 가-힣}) — 운영자가 올리는 공시 문서 이름이 대개 한글이고,
+     * 그걸 {@code _} 로 접으면 「무엇을 올렸는지」가 사라진다. 이 값은 저장 경로의 마지막
+     * 조각이면서 {@code Content-Disposition} 문면이기도 하다.
      */
     private static final Pattern UNSAFE_NAME = Pattern.compile("[^A-Za-z0-9가-힣._-]+");
 
@@ -109,9 +116,9 @@ public class UploadedDocumentStore {
     public Stored store(String originalFilename, byte[] bytes) {
         String filename = safeFilename(originalFilename);
         String sha256 = sha256(bytes);
-        // ❗업로더가 준 이름이 경로에 들어가지 않는다 — 그래서 `..` 을 막는 코드가 필요 없다
-        // (PR #532 의 근거 1번). 확장자를 .pdf 로 고정하는 것은 PDF 만 받기 때문이다.
-        String relative = UPLOADS + "/" + sha256 + ".pdf";
+        // 디렉토리가 sha256 이라 업로더가 준 이름은 경로 결정에 관여하지 않는다. 이름은
+        // 마지막 조각으로만 들어가고 safeFilename 이 걷은 뒤다 — 근거는 클래스 javadoc.
+        String relative = UPLOADS + "/" + sha256 + "/" + filename;
         // 기준 디렉토리 밖으로 나가지 않는 것을 쓰기 전에 확인한다 — sha256 과 정제된 파일명
         // 둘 다 우리가 만든 값이라 지금은 벗어날 수 없지만, 읽는 쪽(ProductDocuments)과 같은
         // 가드를 쓰는 자리에도 둬야 두 경계가 갈리지 않는다.

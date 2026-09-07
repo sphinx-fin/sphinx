@@ -120,10 +120,9 @@ class DocumentUploadWiringTest {
         assertThat(row.status()).isEqualTo("parsed");
         assertThat(row.originalFilename()).isEqualTo("els_prospectus.pdf");
         assertThat(row.documentPath())
-                .as("경로는 data-dir 상대이고 **내용 주소**다 — 업로더가 준 이름은 안 들어간다"
-                        + "(PR #532 규약). 그래서 `..` 을 막는 코드가 필요 없다")
-                .matches("uploads/[0-9a-f]{64}\\.pdf")
-                .doesNotContain("els_prospectus");
+                .as("경로는 data-dir 상대다 — ai-service SPHINX_DATA_DIR 규약. 디렉토리는 "
+                        + "sha256 이고 이름은 마지막 조각으로만 들어간다")
+                .matches("uploads/[0-9a-f]{64}/els_prospectus\\.pdf");
 
         // ① 바이트가 그대로 있다. **이 단정이 옛 스텁을 잡는 자리다** — 스텁도 200 을 냈다.
         Path stored = Path.of(dataDir, row.documentPath());
@@ -292,10 +291,11 @@ class DocumentUploadWiringTest {
 
         UploadedProduct row = uploads.findByProductId(productId).orElseThrow();
         assertThat(row.documentPath())
-                .as("업로더가 준 이름은 경로에 아예 안 들어간다 — 경로가 sha256 이다")
-                .matches("uploads/[0-9a-f]{64}\\.pdf")
+                .as("업로더가 준 이름은 경로 결정에 안 쓴다 — 디렉토리는 sha256 이고, "
+                        + "이름은 정제된 마지막 조각뿐이다")
+                .matches("uploads/[0-9a-f]{64}/[^/]+")
                 .doesNotContain("..")
-                .doesNotContain("tmp");
+                .doesNotContain("tmp/");
         Path resolved = Path.of(dataDir, row.documentPath()).toAbsolutePath().normalize();
         assertThat(resolved)
                 .as("실제 파일이 기준 디렉토리 안에 있어야 한다")
@@ -317,6 +317,24 @@ class DocumentUploadWiringTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().string("Content-Disposition",
                                 org.hamcrest.Matchers.containsString("els_prospectus.pdf")));
+    }
+
+    @Test
+    @DisplayName("★ 정제로 접힌 특수문자도 받는 파일명에는 원문 그대로다 — DB 가 원문을 든다")
+    void theDownloadUsesTheRawNameNotTheSanitisedPathSegment() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+
+        // 저장 경로에서는 괄호가 `_` 로 접힌다. 받는 파일 이름은 올린 그대로여야 한다.
+        String productId = upload("ELS(제4181회) 설명서.pdf", "ELS", PDF);
+
+        assertThat(uploads.findByProductId(productId).orElseThrow().documentPath())
+                .as("저장 경로는 정제된 이름이다")
+                .doesNotContain("(");
+        mvc.perform(get("/products/{id}/document", productId))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Content-Disposition",
+                                org.hamcrest.Matchers.containsString("4181")));
     }
 
     @Test
