@@ -43,6 +43,7 @@ public class DashboardController {
     private final CurrentActor currentActor;
     private final AuditLog auditLog;
     private final EvidenceMetrics evidenceMetrics;
+    private final com.sphinxfin.sphinx.core.pii.PiiMeter piiMeter;
 
     /**
      * 실세션 운영 지표 (F-CMN-002 · 이슈 #327 · #479). 폴백률·confidence 분포·소요시간·
@@ -65,6 +66,51 @@ public class DashboardController {
     @GetMapping("/evidence-metrics")
     public ApiResponse<EvidenceMetrics.Summary> evidenceMetrics() {
         return ApiResponse.ok(evidenceMetrics.summary());
+    }
+
+    /**
+     * P3 마스킹 계량 (F-CMN-001 · 이슈 #326 파트1). 경계를 지나간 호출 수와 종류별 삭제 건수.
+     *
+     * <p>보안·개인정보 주장이 전부 코드 주석과 정책 파일로만 있었다. 심사에서 <i>"개인정보는
+     * 어떻게 처리하나요"</i> 가 나오면 답이 <b>주석</b>이었고, 계량기가 붙은 뒤에도 꺼낼 길이
+     * {@code @PreDestroy} 종료 로그 하나였다 — <i>"프로세스가 끝날 때 로그를 보세요"</i> 가
+     * 답이 될 수 없다. 이 경로가 그것을 숫자로 만든다.
+     *
+     * <h2>❗{@code /audit-summary} 에 합치지 않는다 — 앞서 그러려고 했다</h2>
+     *
+     * <p>이슈 #326 에서 내가 <i>"audit 응답을 {access, pii, gate} 래퍼로 바꾼다"</i> 고 적었다.
+     * <b>그 판단을 되돌린다.</b> 이유가 응답 모양의 취향이 아니라 <b>기간</b>이다.
+     *
+     * <pre>
+     *   /audit-summary   from·to 를 받는다   불변 기록을 재생한다 (기간 질의가 성립한다)
+     *   PiiMeter         기간을 못 받는다     프로세스 메모리다 (누적 하나뿐이다)
+     * </pre>
+     *
+     * <p>한 응답에 담으면 <b>같은 {@code from}·{@code to} 아래 한쪽만 필터가 걸린다</b> —
+     * 사람은 두 숫자를 같은 기간으로 읽는데 {@code pii} 절은 언제나 프로세스 누적이다.
+     * 그건 <i>"한 응답에 두 뜻"</i> 이고 이 레포가 반복해서 막아 온 모양이다. 갈라 두면
+     * {@code since} 가 그 값의 창을 스스로 말한다.
+     *
+     * <p>기존 계약을 안 깨는 것은 부수 이득이다 — {@code /audit-summary} 는 이미 alpha 에
+     * 살아 있고 {@code web/src/api/types.ts} 가 미러한다.
+     *
+     * <h2>권한과 노출</h2>
+     *
+     * <p>{@code audit:read}(COMPL org)를 재사용한다. 같은 질문(<i>"경계가 실제로 작동했나"</i>)에
+     * 그랜트가 둘이 되면 한쪽만 좁히는 실수가 난다 — {@code /evidence-metrics} 가 같은 근거로
+     * 이 action 을 재사용한다. {@code /dashboard} 아래라 개방 모드 지도가 compl-01 을 실어 준다.
+     *
+     * <p>❗<b>이 응답에 개인이 식별될 조각이 하나도 없다</b> — 종류 이름·개수·시각뿐이다.
+     * 계량기가 원문·세션 축을 애초에 안 쌓기 때문이고(그 javadoc), <b>그것이 이 경로를 열 수
+     * 있는 근거</b>다. 세션별 집계를 여기 더하면 <i>"이 고객이 주민번호를 적었다"</i> 가
+     * 되므로, 그건 응답을 넓히는 것이 아니라 계량기를 고치는 일이다.
+     */
+    @PreAuthorize("@accessGuard.canAggregate('audit:read')")
+    @GetMapping("/pii-summary")
+    public ApiResponse<com.sphinxfin.sphinx.core.pii.PiiMeter.Summary> piiSummary() {
+        // ❗기간 파라미터를 받지 않는다. 받아 놓고 무시하면 화면이 좁힌 줄 알고 그린다 —
+        //   계량기가 답할 수 없는 질문은 애초에 받지 않는 편이 낫다(since 가 창을 말한다).
+        return ApiResponse.ok(piiMeter.snapshot());
     }
 
     /**

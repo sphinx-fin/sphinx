@@ -39,6 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class DashboardEndpointWiringTest {
 
     @Autowired private MockMvc mvc;
+    /** 계량기는 프로세스 싱글턴이라 이 컨텍스트가 쓰는 그 인스턴스다 — 직접 먹여서 잰다. */
+    @Autowired private com.sphinxfin.sphinx.core.pii.PiiMeter piiMeter;
 
     @Test
     @DisplayName("❗선행지표 뷰가 존재한다 — 계약과 집계는 있는데 엔드포인트만 없었다 (#178)")
@@ -49,6 +51,61 @@ class DashboardEndpointWiringTest {
                 .andExpect(jsonPath("$.data.scope").exists())
                 .andExpect(jsonPath("$.data.series").exists())
                 .andExpect(jsonPath("$.data.outliers").exists());
+    }
+
+    @Test
+    @DisplayName("❗P3 마스킹 계량은 COMPL 만, 안 걸린 종류도 0 으로 낸다 (#326 파트1)")
+    void piiSummaryIsComplOnlyAndKeepsZeroKinds() throws Exception {
+        mvc.perform(get("/dashboard/pii-summary").with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                // ❗since 없이 calls 를 읽으면 전체 기간으로 오해한다 — 재기동 직후의 낮은
+                //   값을 보고 "마스킹이 안 돈다" 로 읽는다.
+                .andExpect(jsonPath("$.data.since").exists())
+                .andExpect(jsonPath("$.data.calls").exists())
+                // 호출 수와 삭제 건수는 다른 질문이다. 감사가 묻는 것은 앞쪽이다.
+                .andExpect(jsonPath("$.data.callsWithRemovals").exists())
+                .andExpect(jsonPath("$.data.removedTotal").exists())
+                // ❗다섯 종류가 **전부** 있어야 한다. 키를 빼면 「0 건이다」와 「그런 패턴이
+                //   없다」가 화면에서 같아진다(결정 5.40 과 같은 구별).
+                .andExpect(jsonPath("$.data.removedByKind.EMAIL").exists())
+                .andExpect(jsonPath("$.data.removedByKind.RRN").exists())
+                .andExpect(jsonPath("$.data.removedByKind.CARD").exists())
+                .andExpect(jsonPath("$.data.removedByKind.PHONE").exists())
+                .andExpect(jsonPath("$.data.removedByKind.ACCOUNT").exists())
+                // ❗기간 파라미터가 없다 — 계량기가 답할 수 없는 질문은 받지 않는다.
+                .andExpect(jsonPath("$.data.from").doesNotExist())
+                .andExpect(jsonPath("$.data.to").doesNotExist());
+
+        // SELLER 는 접근 불가 — audit:read 는 COMPL 전용(ADR-001 · 기획서 7-4)
+        mvc.perform(get("/dashboard/pii-summary").with(user("seller-01").roles("SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("❗계량 응답에 원문 조각이 하나도 없다 — 지우려고 만든 경로가 새면 안 된다")
+    void piiSummaryNeverCarriesTheMaskedText() throws Exception {
+        // 실제 PII 모양을 마스킹 경계에 통과시킨 뒤 응답 전문을 훑는다. 종류·개수만 남는
+        // 것이 이 경로를 COMPL 에 열 수 있는 근거이므로, 그 근거를 단정으로 잠근다.
+        piiMeter.record(com.sphinxfin.sphinx.core.pii.PiiGateway.maskWithHits(
+                "제 번호는 010-1234-5678 이고 메일은 a@b.co.kr 입니다"));
+
+        String body = mvc.perform(get("/dashboard/pii-summary")
+                        .with(user("compl-01").roles("COMPL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.removedByKind.PHONE").value(
+                        org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.data.removedByKind.EMAIL").value(
+                        org.hamcrest.Matchers.greaterThanOrEqualTo(1)))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+        org.assertj.core.api.Assertions.assertThat(body)
+                .as("계량 응답에 원문 조각이 실렸다 — 무엇이 걸렸는지를 남기면 그게 곧 "
+                        + "PII 저장이고, 지우려고 만든 경로가 새는 자리가 된다")
+                .doesNotContain("010-1234-5678")
+                .doesNotContain("1234-5678")
+                .doesNotContain("a@b.co.kr")
+                .doesNotContain("제 번호는");
     }
 
     @Test
