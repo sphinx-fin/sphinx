@@ -82,6 +82,22 @@ public class UploadedDocumentStore {
     /** 슬러그 최대 길이. productId 는 여러 테이블의 varchar(255) 를 타므로 여유를 둔다. */
     private static final int SLUG_MAX = 40;
 
+    /**
+     * productId 에 싣는 sha256 접두 길이 = <b>64비트</b>.
+     *
+     * <p>❗<b>8자(32비트)로는 부족하다</b>(PR #527 리뷰). productId 의 식별력이 사실상 이
+     * 접두 하나이므로 — 슬러그는 한글 파일명에서 비고(아래 {@link #issueProductId} 참조) —
+     * 32비트에서 생기는 충돌이 <b>다른 문서를 조용히 내주는 상태</b>로 굳는다. 64비트면
+     * 그 확률이 실무에서 사라진다.
+     */
+    private static final int HASH_IN_ID = 16;
+
+    /** DB 에 남길 원래 파일명 최대 길이. {@code varchar(255)} 보다 넉넉히 짧게 둔다. */
+    private static final int DISPLAY_MAX = 200;
+
+    /** 표시용 이름에서 지울 것 — 제어문자·개행. 응답 헤더가 갈라지는 것을 막는 최소치다. */
+    private static final Pattern HEADER_UNSAFE = Pattern.compile("[\\p{Cntrl}]+");
+
     private final Path dataDir;
 
     /**
@@ -125,6 +141,20 @@ public class UploadedDocumentStore {
         Path target = ProductDocuments.resolveWithin(dataDir, relative);
         try {
             Files.createDirectories(target.getParent());
+            // ❗JVM 이 쓰기 도중에 죽으면 `.part` 가 남고 아무도 안 지운다. 디렉토리가
+            // sha256 이라 여기 있을 정상 파일은 하나뿐이므로, 같은 내용을 다시 쓰는 이 자리가
+            // 남은 조각을 치울 유일한 자연스러운 지점이다.
+            try (var stale = Files.list(target.getParent())) {
+                stale.filter(f -> f.getFileName().toString().startsWith(".upload-"))
+                        .forEach(f -> {
+                            try {
+                                Files.deleteIfExists(f);
+                                log.info("중단된 업로드 조각 정리: {}", f.getFileName());
+                            } catch (IOException ignored) {
+                                // 못 지워도 저장은 계속한다 — 용량만 샌다.
+                            }
+                        });
+            }
             // 같은 디렉토리 안 임시파일 → ATOMIC_MOVE. 다른 파일시스템을 건너면 원자성이
             // 보장되지 않으므로 임시파일을 /tmp 에 두지 않는다.
             Path temp = Files.createTempFile(target.getParent(), ".upload-", ".part");
@@ -169,10 +199,71 @@ public class UploadedDocumentStore {
         if (slug.length() > SLUG_MAX) {
             slug = slug.substring(0, SLUG_MAX).replaceAll("-+$", "");
         }
-        if (slug.isEmpty()) {
-            slug = "unnamed";
+        String hash = sha256.substring(0, HASH_IN_ID);
+        // ❗**빈 슬러그를 상수로 채우지 않는다.** 예전에는 "unnamed" 였는데, 한글 파일명이
+        //   ASCII 슬러그로는 통째로 비므로 **운영 코퍼스 거의 전부가 doc-unnamed-… 로
+        //   무너졌다**(PR #527 리뷰 ③) — 로그·감사에서 서로 구별이 안 되고 충돌 면적이
+        //   최대가 된다. 슬러그가 없으면 해시만 쓴다: 짧지만 서로 다르다.
+        return slug.isEmpty() ? "doc-" + hash : "doc-" + slug + "-" + hash;
+    }
+
+    /**
+     * DB 에 남길 <b>원래 파일명</b> — 길이를 자르고 제어문자만 지운다.
+     *
+     * <p>❗<b>{@link #safeFilename} 과 목적이 다르다.</b> 그쪽은 <i>경로 조각</i>이라 괄호·공백
+     * 까지 {@code _} 로 접는데, 이 값은 판매자가 받는 파일 이름이라 <b>올린 그대로에 가까워야</b>
+     * 한다. 둘을 한 함수로 쓰면 «올린 이름을 보여준다» 가 성립하지 않는다(경로에서 뽑는 것과
+     * 같아진다).
+     *
+     * <p>지우는 것은 <b>제어문자·개행뿐</b>이다 — 그것이 {@code Content-Disposition} 을 갈라
+     * 헤더 주입이 되는 자리이고, 비ASCII 는 {@code ContentDisposition.filename(name, UTF_8)}
+     * 가 RFC 5987 로 인코딩하므로 살려도 안전하다.
+     *
+     * <p>❗<b>길이를 여기서 자른다.</b> 예전에는 날것을 그대로 넣었는데
+     * {@code original_filename} 이 {@code varchar(255) NOT NULL} 이라, 긴 한글 공시 파일명
+     * 하나로 {@code Data too long} → <b>500 + 참조 없는 파일</b>이었다(PR #527 리뷰 ⑤).
+     * {@code null} 도 여기서 받는다 — {@code MultipartFile.getOriginalFilename()} 은
+     * 문서상 nullable 이라 그대로 넣으면 not-null 위반이다.
+     */
+    public static String displayFilename(String original) {
+        String base = original == null ? "" : HEADER_UNSAFE.matcher(original).replaceAll(" ").trim();
+        if (base.length() > DISPLAY_MAX) {
+            // 뒤를 남긴다 — 확장자와 회차번호가 뒤에 있어 그쪽이 사람에게 유용하다.
+            base = base.substring(base.length() - DISPLAY_MAX);
         }
-        return "doc-" + slug + "-" + sha256.substring(0, 8);
+        return base.isEmpty() ? "document.pdf" : base;
+    }
+
+    /**
+     * 참조 없는 업로드본을 지운다 — 저장은 됐는데 행이 안 남은 경우 (PR #527 리뷰 ⑦).
+     *
+     * <p>{@code store()} 가 행 삽입 <b>전에</b> 디스크에 쓴다(ai-service 가 경로를 받으므로
+     * 그 순서여야 한다). 그래서 파스가 «문서 문제» 가 아닌 이유로 실패하면 트랜잭션이 굴러
+     * 행은 사라지고 <b>파일만 남는다.</b> {@code uploads/} 를 지우는 코드가 레포에 없으므로
+     * (보존 정책은 발화만 본다) 참조 없는 바이트가 단조 증가한다.
+     *
+     * <p>❗<b>실패해도 던지지 않는다.</b> 이건 보상 동작이고, 여기서 던지면 <b>원래 실패
+     * 원인이 가려진다</b> — 운영자가 봐야 하는 것은 «파스가 왜 실패했나» 다. 못 지웠으면
+     * 로그에 남기고 넘어간다(다음 재업로드가 같은 경로를 덮으므로 새는 것은 용량뿐이다).
+     */
+    public void deleteQuietly(String relativePath) {
+        try {
+            Path target = ProductDocuments.resolveWithin(dataDir, relativePath);
+            Files.deleteIfExists(target);
+            // 디렉토리가 sha256 이라 이 파일 하나뿐이다 — 비었으면 같이 치운다.
+            Path parent = target.getParent();
+            if (parent != null && !parent.equals(dataDir.toAbsolutePath().normalize())) {
+                try (var entries = Files.list(parent)) {
+                    if (entries.findAny().isEmpty()) {
+                        Files.deleteIfExists(parent);
+                    }
+                }
+            }
+            log.info("참조 없는 업로드본 정리: path={}", relativePath);
+        } catch (IOException | RuntimeException e) {
+            log.warn("참조 없는 업로드본을 못 지웠다(용량만 샌다): path={} — {}",
+                    relativePath, e.toString());
+        }
     }
 
     /**

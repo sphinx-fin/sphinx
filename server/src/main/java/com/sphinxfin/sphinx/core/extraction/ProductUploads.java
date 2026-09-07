@@ -6,6 +6,7 @@ import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +57,7 @@ public class ProductUploads {
 
     private final UploadedDocumentStore store;
     private final UploadedProductRepository repository;
+    private final UploadedProductRegistry registry;
     private final AiServiceClient aiServiceClient;
 
     /** 업로드 명령 — web DTO 가 아니라 core 어휘로 받는다({@code api/} 절 규약). */
@@ -67,9 +69,14 @@ public class ProductUploads {
     /**
      * 파일을 저장하고 상품으로 만든다.
      *
+     * <p>❗<b>{@code @Transactional} 이 아니다</b>(PR #527 리뷰 ⑥·⑦). 행 삽입은
+     * {@link UploadedProductRegistry} 가 자기 트랜잭션에서 하고, 그래야 동시 삽입에서 진
+     * 쪽이 <b>바깥을 오염시키지 않고</b> «이미 있다» 로 받아넘길 수 있다. 그리고 파일 쓰기는
+     * 애초에 트랜잭션이 못 되돌리므로(디스크다) 한 트랜잭션으로 묶는 것이 <b>되돌려진다는
+     * 착각</b>만 만든다 — 되돌리는 것은 아래 보상 삭제가 명시적으로 한다.
+     *
      * @throws UploadRejectedException 빈 파일·PDF 아님·모르는 상품유형(→ 400)
      */
-    @Transactional
     public UploadResult upload(UploadCommand command) {
         String productType = normalizeType(command.productType());
         byte[] bytes = command.bytes();
@@ -83,60 +90,82 @@ public class ProductUploads {
 
         UploadedDocumentStore.Stored stored = store.store(command.filename(), bytes);
         String productId = store.issueProductId(command.filename(), stored.sha256());
-
-        // ❗파스 실패를 두 갈래로 가른다. **이 문서의 문제**는 200 봉투의 parse_failed 로
-        // 나가고, 그 밖(연결 실패·경로 오류)은 502 로 올라간다 — 그쪽은 운영자가 문서를
-        // 다시 넣어서 고칠 수 없는 것이라 같은 문면으로 접으면 안 된다.
-        //
-        // 「이 문서의 문제」가 둘이다(PR #534). 못 열었다(DocumentUnreadable)와 PII 입구
-        // 재검사에 걸렸다(DocumentRejected). 둘 다 parse_failed 지만 **문면이 다르다** —
-        // 앞은 다른 PDF 를 넣으라는 뜻이고 뒤는 그 문서의 그 값을 확인하라는 뜻이다.
-        // 두 예외 타입의 javadoc 이 그 구별을 적어 뒀다.
-        String status = "parsed";
-        String failureReason = null;
-        ParsedDocument parsed = null;
+        boolean registered = false;
         try {
-            parsed = aiServiceClient.parse(stored.documentPath(), productType);
-        } catch (DocumentUnreadableException | DocumentRejectedException e) {
-            status = "parse_failed";
-            failureReason = e.getMessage();
-            log.warn("업로드 문서를 파스하지 못했다 — product={} path={} : {}",
-                    productId, stored.documentPath(), e.getMessage());
-        }
+            // ❗파스 실패를 두 갈래로 가른다. **이 문서의 문제**는 200 봉투의 parse_failed 로
+            // 나가고, 그 밖(연결 실패·경로 오류·요청 스키마 드리프트)은 그대로 올라간다 —
+            // 그쪽은 운영자가 문서를 다시 넣어서 고칠 수 없으므로 같은 문면으로 접으면 안 된다.
+            //
+            // 「이 문서의 문제」가 둘이다(PR #534). 못 열었다(DocumentUnreadable)와 PII 입구
+            // 재검사에 걸렸다(DocumentRejected). 둘 다 parse_failed 지만 **문면이 다르다** —
+            // 앞은 다른 PDF 를 넣으라는 뜻이고 뒤는 그 문서의 그 값을 확인하라는 뜻이다.
+            String status = "parsed";
+            String failureReason = null;
+            ParsedDocument parsed = null;
+            try {
+                parsed = aiServiceClient.parse(stored.documentPath(), productType);
+            } catch (DocumentUnreadableException | DocumentRejectedException e) {
+                status = "parse_failed";
+                failureReason = e.getMessage();
+                log.warn("업로드 문서를 파스하지 못했다 — product={} path={} : {}",
+                        productId, stored.documentPath(), e.getMessage());
+            }
 
-        // 파스가 판별한 상품유형을 우선한다 — 요청값은 업로더가 고른 것이고, 문서가 실제로
-        // 무엇인지는 파스가 안다. 둘이 갈리면 요청값을 믿는 쪽이 위험하다: 변액 문서를 ELS
-        // 로 등록하면 오해 유형 필터(misconception.applies_to)가 조용히 틀린 채로 돈다.
-        String resolvedType = parsed != null && parsed.productType() != null
-                ? parsed.productType() : productType;
-        if (!resolvedType.equals(productType)) {
-            log.warn("업로드 상품유형이 요청과 다르다 — 파스 판별을 쓴다: product={} 요청={} 파스={}",
-                    productId, productType, resolvedType);
-        }
+            // 파스가 판별한 상품유형을 우선한다 — 요청값은 업로더가 고른 것이고, 문서가 실제로
+            // 무엇인지는 파스가 안다. 둘이 갈리면 요청값을 믿는 쪽이 위험하다: 변액 문서를 ELS
+            // 로 등록하면 오해 유형 필터(misconception.applies_to)가 조용히 틀린 채로 돈다.
+            String resolvedType = parsed != null && parsed.productType() != null
+                    ? parsed.productType() : productType;
+            if (!resolvedType.equals(productType)) {
+                log.warn("업로드 상품유형이 요청과 다르다 — 파스 판별을 쓴다: product={} 요청={} 파스={}",
+                        productId, productType, resolvedType);
+            }
 
-        // 같은 파일을 다시 올리면 같은 productId 다(내용 주소). 행을 늘리지 않고 갱신한다 —
-        // unique 제약이라 새로 넣으면 실패하고, 그건 "같은 문서를 두 번 올렸다"에 대한
-        // 답으로 500 을 주는 셈이다.
-        UploadedProduct row = repository.findByProductId(productId).orElse(null);
-        if (row == null) {
-            repository.save(UploadedProduct.builder()
-                    .productId(productId)
-                    .productType(resolvedType)
-                    .displayName(store.displayNameOf(command.filename()))
-                    .originalFilename(command.filename())
-                    .documentPath(stored.documentPath())
-                    .contentSha256(stored.sha256())
-                    .sizeBytes(stored.sizeBytes())
-                    .status(status)
-                    .failureReason(failureReason)
-                    .build());
-            log.info("상품 등록: product={} type={} status={} path={}",
-                    productId, resolvedType, status, stored.documentPath());
-        } else {
-            row.reparsed(resolvedType, status, failureReason);
-            log.info("같은 문서 재업로드 — 상품을 갱신했다: product={} status={}", productId, status);
+            UploadedProductRegistry.Registration registration = registration(
+                    command, productId, resolvedType, stored, status, failureReason);
+            try {
+                boolean created = registry.registerOrUpdate(registration);
+                log.info("{}: product={} type={} status={} path={}",
+                        created ? "상품 등록" : "같은 문서 재업로드 — 상품 갱신",
+                        productId, resolvedType, status, stored.documentPath());
+            } catch (DataIntegrityViolationException e) {
+                // 경쟁에서 졌다 — 상대가 방금 같은 productId 를 넣었다(리뷰 ⑥). 이 연산은
+                // 멱등이므로 실패가 아니다: 다시 부르면 그쪽 행을 찾아 갱신한다. 앞선 삽입이
+                // 자기 트랜잭션이라 여기 바깥은 오염되지 않았다(UploadedProductRegistry).
+                log.info("같은 문서 동시 업로드 — 상대 행을 갱신한다: product={}", productId);
+                registry.registerOrUpdate(registration);
+            }
+            registered = true;
+            return new UploadResult(productId, status);
+        } finally {
+            if (!registered) {
+                // ❗**행이 안 남았으면 바이트도 남기지 않는다**(리뷰 ⑦). 저장이 파스보다
+                //   앞이라(ai-service 가 경로를 받는다) 파스가 «문서 문제» 가 아닌 이유로
+                //   실패하면 파일만 남는다 — uploads/ 를 지우는 코드가 레포에 없어서
+                //   참조 없는 바이트가 단조 증가하고 운영자에게 보이는 신호가 없다.
+                store.deleteQuietly(stored.documentPath());
+            }
         }
-        return new UploadResult(productId, status);
+    }
+
+    /**
+     * 행에 적을 값들.
+     *
+     * <p>❗<b>원래 파일명을 날것으로 넣지 않는다</b>(리뷰 ⑤). 그 값은
+     * {@code varchar(255) NOT NULL} 인데 긴 한글 공시 파일명 하나로 {@code Data too long}
+     * → <b>500 + 참조 없는 파일</b>이었고, {@code MultipartFile.getOriginalFilename()} 은
+     * 문서상 nullable 이라 not-null 위반도 같은 자리에서 났다.
+     * {@link UploadedDocumentStore#displayFilename} 이 길이와 제어문자를 정리한다 —
+     * 경로용 {@code safeFilename} 과 달리 괄호·공백은 살린다(받는 파일 이름이라 그래야 한다).
+     */
+    private UploadedProductRegistry.Registration registration(
+            UploadCommand command, String productId, String resolvedType,
+            UploadedDocumentStore.Stored stored, String status, String failureReason) {
+        return new UploadedProductRegistry.Registration(
+                productId, resolvedType, store.displayNameOf(command.filename()),
+                UploadedDocumentStore.displayFilename(command.filename()),
+                stored.documentPath(), stored.sha256(), stored.sizeBytes(),
+                status, failureReason);
     }
 
     /** {@code GET /products} 가 낼 업로드본 목록. 최근 올린 것이 위다. */

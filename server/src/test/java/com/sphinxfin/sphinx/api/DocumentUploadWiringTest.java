@@ -375,6 +375,94 @@ class DocumentUploadWiringTest {
                                         "els_kiwoom_4181_simple_prospectus.pdf")));
     }
 
+    /* ── PR #527 리뷰가 찾은 자리들 ─────────────────────────────────────────── */
+
+    @Test
+    @DisplayName("❗한글 파일명이 전부 같은 productId 로 무너지지 않는다 — doc-unnamed-… 였다")
+    void koreanFilenamesDoNotCollapseIntoOneProductId() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+
+        // 실제 공시 코퍼스는 한글 파일명이 기본이다. ASCII 슬러그로는 통째로 비므로
+        // 예전에는 둘 다 doc-unnamed-<sha8> 이 됐고, 그게 충돌 면적을 최대로 키웠다.
+        String first = upload("상품설명서.pdf", "ELS", PDF);
+        String second = upload("운용설명서.pdf", "ELS",
+                "%PDF-1.7\n(다른 문서)\n%%EOF\n".getBytes(StandardCharsets.UTF_8));
+
+        assertThat(first).isNotEqualTo(second);
+        assertThat(first)
+                .as("슬러그가 비면 해시만 쓴다 — 상수로 채우면 서로 구별이 안 된다")
+                .doesNotContain("unnamed")
+                .matches("doc-[0-9a-f]{16}");
+    }
+
+    @Test
+    @DisplayName("❗productId 가 sha256 64비트를 든다 — 32비트로는 다른 문서를 조용히 내준다")
+    void theProductIdCarriesEnoughEntropy() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+
+        String productId = upload("els_prospectus.pdf", "ELS", PDF);
+
+        assertThat(productId).matches("doc-els-prospectus-[0-9a-f]{16}");
+    }
+
+    @Test
+    @DisplayName("❗아주 긴 파일명이 500 이 아니다 — varchar(255) 를 넘겨 Data too long 이었다")
+    void aVeryLongFilenameIsStoredNotCrashed() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+
+        String productId = upload("가".repeat(300) + ".pdf", "ELS", PDF);
+
+        UploadedProduct row = uploads.findByProductId(productId).orElseThrow();
+        assertThat(row.originalFilename().length())
+                .as("컬럼이 varchar(255) 다 — 저장할 때 자르지 않으면 500 + 참조 없는 파일이다")
+                .isLessThanOrEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("❗파스가 「문서 문제」가 아닌 이유로 실패하면 바이트도 안 남는다 — 참조 없는 파일이 쌓였다")
+    void bytesDoNotSurviveARolledBackUpload() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenThrow(new com.sphinxfin.sphinx.core.aiservice.AiServiceException(
+                        "ai-service 호출 실패"));
+
+        mvc.perform(multipart("/products/documents")
+                        .file(new MockMultipartFile("file", "orphan.pdf", "application/pdf", PDF))
+                        .param("productType", "ELS"))
+                .andExpect(status().isBadGateway());
+
+        assertThat(uploads.findAll()).isEmpty();
+        Path uploadsDir = Path.of(dataDir, "uploads");
+        if (Files.isDirectory(uploadsDir)) {
+            try (Stream<Path> walk = Files.walk(uploadsDir)) {
+                assertThat(walk.filter(Files::isRegularFile).toList())
+                        .as("행이 안 남았으면 바이트도 남지 않아야 한다 — uploads/ 를 지우는 "
+                                + "코드가 레포에 없어서 여기 새면 단조 증가한다")
+                        .isEmpty();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("❗재추출이 「문서 문제」를 502 로 내지 않는다 — 운영자가 문서를 의심하지 않았다")
+    void reExtractingAnUnreadableDocumentIsNotAnOutage() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString()))
+                .thenThrow(new com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException(
+                        "문서를 열 수 없다: HTTP 422"));
+
+        String body = mvc.perform(multipart("/products/documents")
+                        .file(new MockMultipartFile("file", "locked.pdf", "application/pdf", PDF))
+                        .param("productType", "ELS"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String productId = com.jayway.jsonpath.JsonPath.read(body, "$.data.productId");
+
+        // 같은 문서로 추출을 누르면 예전에는 502 AI_SERVICE_UNAVAILABLE 이었다 —
+        // ai-service 는 멀쩡한데 운영자가 서비스 장애로 읽고 문서를 영영 안 고쳤다.
+        mvc.perform(post("/products/{id}/extract", productId))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("DOCUMENT_UNPROCESSABLE"));
+    }
+
     /** 업로드 한 번. 발급된 productId 를 돌려준다. */
     private String upload(String filename, String productType, byte[] bytes) throws Exception {
         String body = mvc.perform(multipart("/products/documents")

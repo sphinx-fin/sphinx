@@ -3,6 +3,8 @@ package com.sphinxfin.sphinx.api.exception;
 import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
+import com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException;
+import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.core.extraction.ProductUploads;
 import com.sphinxfin.sphinx.core.session.OverrideNotEligibleException;
 import com.sphinxfin.sphinx.core.session.ReExplainNotEligibleException;
@@ -80,6 +82,32 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> onUploadRejected(ProductUploads.UploadRejectedException e) {
         return ResponseEntity.badRequest()
                 .body(ApiResponse.fail(ApiError.of("VALIDATION_ERROR", e.getMessage())));
+    }
+
+    /**
+     * 이 문서로는 처리할 수 없다 → 400 {@code DOCUMENT_UNPROCESSABLE} (PR #527 리뷰 ②).
+     *
+     * <p>❗<b>502 로 새면 운영자가 문서를 의심하지 않는다.</b> 두 예외는
+     * {@link AiServiceException} 을 상속하는데, 그 핸들러가 먼저 잡으면
+     * {@code AI_SERVICE_UNAVAILABLE} 이 되어 <i>"채점 서비스에 연결할 수 없습니다"</i> 가
+     * 나간다 — <b>ai-service 는 멀쩡하고 문서가 문제인데</b> 운영자는 서비스 장애로 읽고
+     * 문서는 영영 안 고친다. Spring 이 더 구체적인 핸들러를 고르므로 이 자리가 그것을 막는다.
+     *
+     * <p>업로드({@code POST /products/documents})는 이 둘을 <b>스스로 잡아</b> 200 봉투의
+     * {@code parse_failed} 로 바꾼다(계약이 그 값을 가졌다). 이 핸들러가 답하는 것은
+     * <b>재추출</b>({@code POST /products/{id}/extract})이다 — 그쪽 응답은
+     * {@code RiskItemsResponse} 라 실패를 담을 자리가 없으므로 에러 코드로 나가야 하고,
+     * 예전에는 그 경로에 {@code catch} 가 하나도 없어 502 였다.
+     *
+     * <p>❗<b>두 예외를 한 코드로 낸다.</b> «못 열었다» 와 «PII 로 거부됐다» 는 다음 행동이
+     * 같다 — <b>그 문서를 고쳐서 다시 올린다.</b> 문면은 예외 메시지가 가르므로 코드를 둘로
+     * 늘리지 않는다(코드 목록은 네 벌 대조 대상이라 늘리는 값이 싸지 않다).
+     */
+    @ExceptionHandler({DocumentUnreadableException.class, DocumentRejectedException.class})
+    public ResponseEntity<ApiResponse<Void>> onDocumentUnprocessable(AiServiceException e) {
+        log.warn("문서를 처리할 수 없다: {}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail(ApiError.of("DOCUMENT_UNPROCESSABLE", e.getMessage())));
     }
 
     /**

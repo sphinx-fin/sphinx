@@ -34,7 +34,8 @@ import lombok.experimental.Accessors;
  *
  * <h2>{@link #productId} 는 내용에서 나온다 (P2)</h2>
  *
- * <p>{@code doc-<파일명 슬러그>-<sha256 앞 8자>} 다({@link UploadedDocumentStore#issueProductId}).
+ * <p>{@code doc-<파일명 슬러그>-<sha256 앞 16자>} 다({@link UploadedDocumentStore#issueProductId}).
+ * 파일명이 한글뿐이면 ASCII 슬러그가 비어 {@code doc-<sha256 앞 16자>} 가 된다.
  * 같은 파일을 두 번 올리면 같은 상품이고(재업로드가 상품을 늘리지 않는다), 내용이 한 바이트
  * 달라지면 <b>다른 상품</b>이다 — 게이트가 물을 항목이 문서에서 나오므로, 문서가 바뀌면
  * 판정의 근거가 바뀐 것이라 같은 상품으로 뭉치면 안 된다.
@@ -96,16 +97,28 @@ public class UploadedProduct extends BaseEntity {
     private String failureReason;
 
     /**
-     * 같은 문서를 다시 올렸을 때 파스 결과만 갱신한다.
+     * 같은 productId 로 다시 올렸을 때 <b>이 행이 방금 올린 바이트를 가리키게</b> 한다.
      *
      * <p>❗<b>새 행을 넣지 않는다.</b> {@link #productId} 가 내용 주소라 같은 값이 나오고
      * unique 제약에 걸린다 — 같은 문서를 두 번 올린 것에 대한 답으로 500 을 주게 된다.
-     * 경로·sha256·크기는 내용이 같으므로 바뀔 것이 없고, 바뀔 수 있는 것은 파스 결과뿐이다
-     * (예: LLM 키가 없어 실패했다가 나중에 성공). {@code updatedAt} 이 그 시각을 잡는다.
+     *
+     * <p>❗<b>경로·sha256·크기도 같이 갱신한다</b>(PR #527 리뷰 ④). 처음에는 <i>"내용이
+     * 같으므로 바뀔 것이 없다"</i> 로 파스 결과만 고쳤는데, 그 전제는 <b>productId 가
+     * 충돌하지 않을 때만</b> 참이다. 충돌하면 이 행이 <b>이전 문서를 계속 가리키고</b>
+     * 응답은 «parsed» 라, 그 뒤의 원문 조회·재추출이 전부 <b>올린 적 없는 문서를 읽는다</b> —
+     * 조용히 다른 문서를 내주는 상태로 굳는다.
+     *
+     * <p>충돌 자체는 sha256 접두 64비트로 실무에서 사라졌지만
+     * ({@link UploadedDocumentStore} 의 {@code HASH_IN_ID}), <b>그때 행이 자기 모순이 아닌
+     * 것</b>은 별개 문제다 — 값싸게 지킬 수 있으므로 지킨다.
      */
-    public void reparsed(String productType, String status, String failureReason) {
+    public void reparsed(String productType, String status, String failureReason,
+                         String documentPath, String contentSha256, long sizeBytes) {
         this.productType = productType;
         this.status = status;
         this.failureReason = failureReason;
+        this.documentPath = documentPath;
+        this.contentSha256 = contentSha256;
+        this.sizeBytes = sizeBytes;
     }
 }
