@@ -413,6 +413,24 @@ class PolarityMeter:
             self.asked += 1
             self.not_run += 1
 
+    def snapshot(self) -> dict[str, object]:
+        """지금 값. **락 안에서 통째로 뜬다** — 안 그러면 합계와 내역이 다른 순간의 것이 섞인다.
+
+        `ConsistencyMeter.snapshot()` 과 같은 모양으로 둔다. 두 계량기가 다르게 읽히면
+        소비자가 둘을 따로 배워야 한다.
+
+        ❗**`by_type` 에 `M08-TYING` 이 들어온다.** 그 유형은 불공정영업 신호라 판매자
+        화면에 보이면 안 된다(기획 7-4 · `#147`·`#159`·`#145`). 이 값을 화면에 싣는 쪽은
+        `misconception_type` 과 **같은 경계**를 지나야 한다 — 그래서 이 요약은
+        `/internal/*`(인증) 뒤에 두고 `/healthz`(무인증)에는 안 싣는다.
+        """
+        with self._lock:
+            return {
+                "asked": self.asked, "kept": self.kept, "dropped": self.dropped,
+                "contradicted": self.contradicted, "not_run": self.not_run,
+                "by_type": dict(self.by_type),
+            }
+
     def summary(self) -> str:
         return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
                 f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건")
