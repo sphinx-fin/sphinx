@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -60,6 +61,23 @@ public class AiServiceClient {
             org.slf4j.LoggerFactory.getLogger(AiServiceClient.class);
 
     private final RestClient restClient;
+    /**
+     * {@code /healthz} 전용. <b>타임아웃이 다르다</b>(이슈 #522).
+     *
+     * <p>위 {@link #restClient} 는 LLM 왕복을 기다리게 잡혀 있다(사실상 무한). 운영 콘솔은
+     * 이걸 몇 초마다 부르므로 그 값을 물려받으면 <b>ai-service 가 응답만 안 하는 상태에서
+     * 콘솔이 통째로 멈춘다</b> — <i>"느리다"</i> 를 그려야 하는 쪽이 자기가 멈춘다.
+     *
+     * <p>❗<b>그래도 이 클래스 안에 둔다.</b> P3 가 정한 것은 <i>"마스킹을 거쳐라"</i> 가
+     * 아니라 <b>ai-service 로 나가는 길이 하나</b>라는 것이고, 길이 둘이 되면 그 단정이
+     * 코드에서 사라진다. base-url 이 두 벌이 되는 문제는 그 다음이다.
+     *
+     * <p>공유 시크릿을 <b>안 붙인다</b> — {@code /healthz} 는 {@code /internal/*} 밖이다
+     * (ai-service {@code GUARDED_PREFIX}). 안 붙이면 비밀이 도는 자리가 하나 줄어든다.
+     */
+    private final RestClient healthClient;
+    /** 서버가 공유 시크릿을 들고 있는가. 값이 아니라 유무만 든다 — 대칭 판정에 쓴다. */
+    private final boolean internalTokenPresent;
 
     /** P3 경계가 몇 번 작동했는지 센다 (이슈 #326). 원문은 안 담긴다 — PiiMeter 주석 참고. */
     private final PiiMeter piiMeter;
@@ -135,6 +153,9 @@ public class AiServiceClient {
                 .build();
         MappingJackson2HttpMessageConverter snakeConverter =
                 new MappingJackson2HttpMessageConverter(snakeMapper);
+        // 헬스 클라이언트도 같은 스네이크 매퍼를 쓴다 — /healthz 응답이 snake_case 다.
+        MappingJackson2HttpMessageConverter healthConverter =
+                new MappingJackson2HttpMessageConverter(snakeMapper);
         RestClient.Builder configured = builder
                 .baseUrl(baseUrl)
                 .messageConverters(converters -> {
@@ -148,7 +169,30 @@ public class AiServiceClient {
             configured = configured.defaultHeader(INTERNAL_TOKEN_HEADER, internalToken);
         }
         this.restClient = configured.build();
+        this.internalTokenPresent = internalToken != null && !internalToken.isBlank();
+        // ❗**clone() 이 필요하다.** RestClient.Builder 는 가변이라 같은 인스턴스를 다시
+        // 만지면 위에서 세운 설정(스네이크 매퍼·토큰 헤더)이 이쪽에도 실린다 — 헬스체크에
+        // 토큰이 붙는 것은 위 필드 주석이 일부러 피한 자리다.
+        SimpleClientHttpRequestFactory quick = new SimpleClientHttpRequestFactory();
+        quick.setConnectTimeout(HEALTH_CONNECT_TIMEOUT);
+        quick.setReadTimeout(HEALTH_READ_TIMEOUT);
+        this.healthClient = builder.clone()
+                .baseUrl(baseUrl)
+                .requestFactory(quick)
+                .messageConverters(converters -> {
+                    converters.removeIf(c -> c instanceof MappingJackson2HttpMessageConverter);
+                    converters.add(healthConverter);
+                })
+                .build();
     }
+
+    /**
+     * {@code /healthz} 왕복 상한. <b>짧아야 한다</b> — 콘솔이 5초마다 부르므로 이 값이 그
+     * 주기보다 길면 요청이 겹친다. 못 받으면 «닿지 않는다»(DOWN)로 그리는 것이 맞고,
+     * 그건 «느리다» 와 화면에서 같은 뜻이 아니다.
+     */
+    private static final java.time.Duration HEALTH_CONNECT_TIMEOUT = java.time.Duration.ofSeconds(2);
+    private static final java.time.Duration HEALTH_READ_TIMEOUT = java.time.Duration.ofSeconds(3);
 
     /**
      * F-SCR-001 채점 — 고객 발화를 ai-service로 보내 항목별 이해도 판정(측정값)을 받는다.
@@ -386,6 +430,81 @@ public class AiServiceClient {
             throw new AiServiceException("ai-service /internal/parse 응답이 비었다");
         }
         return parsed;
+    }
+
+    /**
+     * 서버가 공유 시크릿을 들고 있는가 (이슈 #522). <b>값은 안 낸다.</b>
+     *
+     * <p>«내부 인증이 대칭인가» 는 <b>한쪽만으로 못 판단한다</b> — {@code /healthz} 는
+     * <i>ai-service 가 인증을 켰는가</i> 만 말하고, <i>서버가 토큰을 들고 있는가</i> 는
+     * 서버가 자기 설정에서 안다. 둘을 맞춰 보는 것이 콘솔의 판정이라 그 재료를 여기서 낸다.
+     */
+    public boolean hasInternalToken() {
+        return internalTokenPresent;
+    }
+
+    /**
+     * ai-service {@code GET /healthz} 실측 (이슈 #522).
+     *
+     * <p>❗<b>실패를 예외로 올리지 않는다.</b> 이 호출의 목적이 <i>"닿는가"</i> 를 재는
+     * 것이라, 못 닿은 것은 이 메서드의 실패가 아니라 <b>측정 결과</b>다. 502 로 올리면
+     * 콘솔이 «ai-service 가 죽었다» 를 그리는 대신 자기가 죽는다.
+     *
+     * @return 왕복 결과. 못 닿았으면 {@code report} 가 null 이고 {@code error} 에 한 줄
+     */
+    public HealthProbe health() {
+        long startedNanos = System.nanoTime();
+        try {
+            AiHealth report = healthClient.get()
+                    .uri("/healthz")
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, resp) ->
+                            // 실패 코드를 갈라 쓰지 않는다 — 콘솔이 그리는 것은 «닿았는가» 이고,
+                            // /healthz 가 non-2xx 라는 것 자체가 «못 한다» 다.
+                            { throw new AiServiceException(
+                                    "ai-service /healthz 실패: HTTP " + resp.getStatusCode()); })
+                    .body(AiHealth.class);
+            int elapsedMs = (int) ((System.nanoTime() - startedNanos) / 1_000_000L);
+            if (report == null) {
+                return new HealthProbe(null, elapsedMs, "ai-service /healthz 응답이 비었다");
+            }
+            return new HealthProbe(report, elapsedMs, null);
+        } catch (AiServiceException | RestClientException e) {
+            // ❗지연을 안 싣는다 — 실패까지의 시간은 «응답 시간» 이 아니라 타임아웃이고,
+            //   그 값을 latencyMs 로 그리면 화면이 «3초 걸렸다» 로 읽는다.
+            return new HealthProbe(null, null, e.getMessage());
+        }
+    }
+
+    /** {@link #health()} 결과. {@code report} 가 null 이면 못 닿았다는 뜻이고 {@code error} 가 이유다. */
+    public record HealthProbe(AiHealth report, Integer latencyMs, String error) {}
+
+    /**
+     * ai-service {@code /healthz} 응답 (이슈 #522).
+     *
+     * <p>❗<b>{@code ignoreUnknown = true} 다.</b> 이 엔드포인트는 ai-service 가 자기 필요에
+     * 따라 필드를 늘리는 자리이고(그쪽 소유), 필드가 하나 늘 때마다 <b>운영 콘솔이 깨지는
+     * 것</b>은 방향이 반대다 — 콘솔은 «무엇이 안 되는가» 를 그리는 화면인데 그것 때문에
+     * 자기가 안 되게 된다. 이 클래스의 스네이크 매퍼는 {@code JsonMapper.builder()} 로
+     * 직접 만든 것이라 Spring Boot 의 관용 기본값이 안 걸린다 — 그래서 여기 명시한다.
+     *
+     * <p>{@code startedAt} 은 아직 안 올 수 있다(ai-service 쪽 추가 예정, #522 질문 2) —
+     * null 을 정상으로 다룬다. 그 값의 한계도 그쪽이 적어 뒀다: 로컬은 {@code --reload} 라
+     * <b>컨테이너가 아니라 워커의 기동 시각</b>이다.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public record AiHealth(String status, String llmModel, String llmBaseUrl, Boolean llmConfigured,
+                           List<String> envFiles, String logLevel, String logLevelRequested,
+                           String internalAuth, Boolean internalAuthRequired,
+                           String dataDir, String dataDirEnv,
+                           Integer misconceptionLibraryVersion,
+                           java.util.Map<String, String> promptVersions,
+                           String startedAt) {
+
+        /** ai-service 가 {@code /internal/*} 에 공유 시크릿을 요구하는가. */
+        public boolean internalAuthEnabled() {
+            return "enabled".equals(internalAuth);
+        }
     }
 
     /**

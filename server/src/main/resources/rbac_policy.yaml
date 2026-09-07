@@ -8,7 +8,7 @@
 #   ① 역할 부재 — 본부 영업·마케팅에 대응하는 역할이 존재하지 않는다 (명세서 0.4, ADR-001)
 #   ② 범위 분리 — 역할이 있어도 집계 데이터에 닿는 범위가 제한된다 (아래 scope)
 # ①만으로는 부족하다. SELLER 권한으로 대시보드가 열리면 같은 구멍이 난다.
-version: 8
+version: 9
 
 roles: [CUST, SELLER, MGR, COMPL, ADMIN]
 
@@ -203,6 +203,20 @@ permissions:
   # ADMIN 에 두는 것이 ADR-001 이 지키려는 것과 같은 방향이다. **데이터 action 을 ADMIN 에
   # 붙이지 않는다는 규칙은 그대로다** — 세션·집계 action 은 여전히 여기 오지 않는다.
   admin:role:assign:
+    - { roles: [ADMIN], scope: org }
+
+  # 운영 상태 조회 (F-OPS-001 · 이슈 #522). `GET /ops/status` 하나가 쓴다.
+  #
+  # ❗**이 자리에 둘 수 있는 근거는 「응답에 데이터가 없다」 하나다.** 위 금지가 막는 것은
+  # 데이터 action 을 ADMIN 에 붙이는 것이고, ADR-001 데이터 범위 표가 ADMIN 에게 닫아 둔
+  # 것은 개별 세션과 집계다. 세션 수 하나만 응답에 얹어도 이 action 이 그 우회 경로가 되고,
+  # 그때 고칠 자리는 **여기가 아니라 응답**이다 — 값을 뺀다.
+  # `OpsStatusHasNoCustomerDataTest` 가 그 전제를 타입 의존성으로 잠근다.
+  #
+  # SELLER·MGR 에 주지 않는다. *"지금 채점이 죽어 있다"* 를 아는 것은 **게이트가 느슨해지는
+  # 시점을 고를 수 있다**는 뜻이라 기획 7-4 가 막는 것과 같은 결이다. COMPL 도 아니다 —
+  # 그쪽이 보는 것은 기록(`audit:*`)이지 프로세스 상태가 아니다.
+  ops:status:read:
     - { roles: [ADMIN], scope: org }
 
 # AuditInterceptor가 기록할 대상. 여기 없는 요청은 로그를 남기지 않는다.

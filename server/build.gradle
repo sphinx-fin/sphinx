@@ -95,6 +95,25 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 
+    // ❗**SchemaMirrorsEntitiesTest 가 읽는 파일을 매번 비운다.**
+    //
+    // 그 테스트는 Hibernate 에게 MySQL 방언으로 DDL 스크립트를 뽑게 하고 그 이름 집합을
+    // 마이그레이션과 대조한다. 그런데 Hibernate 의 스크립트 생성은 **파일에 덮어쓰지 않고
+    // 이어 붙인다** — 그래서 이 파일이 실행마다 커지고, 테스트가 **지금 엔티티가 아니라
+    // 그동안 뽑힌 것 전부**를 대조한다.
+    //
+    // 실측: 엔티티를 하나 추가한 브랜치에서 한 번 돌린 뒤 그 엔티티가 없는 브랜치로
+    // 돌아가 다시 돌리면, **없는 테이블이 마이그레이션에 없다고 신고한다**(88개 create
+    // table 중 uploaded_products 가 24번 들어 있었다). 브랜치를 오가는 개발에서 그 빨강은
+    // 「테스트가 이상하다」로 읽히고, 그러면 다음에 진짜 빨강도 같이 무시된다.
+    //
+    // 반대 방향은 더 조용하다 — 누적된 파일은 항상 **초과집합**이라 «빠진 것» 은 계속
+    // 잡지만, `clean` 을 한 사람과 안 한 사람의 결과가 갈린다. 그물이 환경에 따라 다른
+    // 답을 내면 그 답을 근거로 쓸 수 없다.
+    doFirst {
+        delete layout.buildDirectory.file('generated-schema.sql')
+    }
+
     // ErrorCodeContractTest가 소스셋 밖의 contracts/를 읽는다. 입력으로 선언하지 않으면
     // 계약 파일만 바뀌었을 때 Gradle이 test를 UP-TO-DATE로 건너뛰어, 하필 계약 어긋남을
     // 잡아야 할 상황에서 테스트가 돌지 않는다.

@@ -831,6 +831,38 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorApiResponse'}
 
+  /ops/status:
+    get:
+      summary: 운영 상태 실측 (F-OPS-001 · 이슈 #522)
+      description: >
+        운영 콘솔(`/console`)이 읽는다. **매 호출이 실측이고 캐시하지 않는다** — 캐시하면
+        화면의 시각과 값이 갈려서 "방금 고쳤는데 화면이 안 바뀐다" 가 된다.
+        권한: `ops:status:read` — **ADMIN 전용이다.** SELLER·MGR 이 부재인 것은 의도다:
+        "지금 채점이 죽어 있다" 를 아는 것은 게이트가 느슨해지는 시점을 고를 수 있다는
+        뜻이라 기획 7-4 가 막는 것과 같은 결이다. COMPL 도 아니다 — 그쪽이 보는 것은
+        기록(`audit:*`)이지 프로세스 상태가 아니다. **audited 아님** — 고객 데이터를
+        안 읽으므로 "누가 무엇을 봤는가" 가 성립하지 않는다.
+        ❗**응답에 고객 데이터가 0건이다.** 그것이 위 ADMIN 그랜트가 성립하는 근거이고,
+        세션 수 하나만 얹어도 이 경로가 ADR-001 의 우회 경로가 된다.
+        ❗**`/actuator/health` 와 다른 질문이다.** 그쪽은 "재시작·컷오버해도 되는가" 를
+        답하고(배포 스크립트가 300초 기다린다) 이쪽은 "지금 무엇이 안 되는가" 를 답한다.
+        상류 검사를 헬스체크에 넣으면 LLM 키 하나가 비면 컷오버가 통째로 실패한다.
+        상류가 죽어 있어도 이 경로는 **200** 이고 그 구성요소가 `DOWN` 이다 — 상태를 그리는
+        경로가 상태 때문에 죽으면 화면이 아무것도 못 그린다.
+      responses:
+        '200':
+          description: 지금 상태. 상류 장애도 200 안에서 표현된다
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OpsStatusApiResponse'}
+        '403':
+          description: >
+            ADMIN 이 아니다. **화면이 "차단됨" 을 그려야 하므로 계약에 선언한다** —
+            링크가 있다는 것이 그 API 를 부를 권한이 있다는 뜻은 아니다.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorApiResponse'}
+
 components:
   schemas:
     # 공통 응답 봉투 — 모든 응답은 success + (data | error) 형태.
@@ -933,6 +965,60 @@ components:
       properties:
         success: {type: boolean, enum: [true]}
         data:    {type: object, additionalProperties: true}
+        error:   {type: object, nullable: true}
+
+    OpsStatus:
+      type: object
+      required: [checkedAt, deployment, components]
+      description: >
+        운영 콘솔이 그리는 실측. ❗**고객 데이터가 실리지 않는다** — 그 전제가 이 경로의
+        ADMIN 그랜트를 성립시킨다(위 경로 설명). 비밀은 값이 아니라 「설정됐는가」까지만
+        싣는다: ai-service `/healthz` 가 이미 그 규칙으로 만들어져 있고 그대로 잇는다.
+      properties:
+        checkedAt:  {type: string, format: date-time, description: "실측 시각. 캐시하지 않는다"}
+        deployment: {$ref: '#/components/schemas/OpsDeployment'}
+        components:
+          type: array
+          description: "server · database · ai-service · data-volumes 넷. 화면이 이 순서로 카드를 놓는다"
+          items: {$ref: '#/components/schemas/OpsComponent'}
+    OpsDeployment:
+      type: object
+      required: [profile, stack, startedAt, uptimeSec]
+      properties:
+        profile:   {type: string, description: "활성 프로파일. 없으면 default"}
+        stack:     {type: string, description: "blue 또는 green. ❗로컬은 빈 문자열 — 색이 없는 것이 정상이다"}
+        startedAt: {type: string, format: date-time}
+        uptimeSec: {type: integer}
+    OpsComponent:
+      type: object
+      required: [id, name, health, facts]
+      description: >
+        ❗`DEGRADED` 가 이 스키마의 요점이다. **떠 있는데 못 하는 상태**가 이 스택에서 실제로
+        자주 나는 실패다(키 없이 뜬 ai-service, 마운트가 빠진 채 뜬 server) — UP/DOWN 둘로만
+        그리면 그게 전부 정상으로 보인다.
+      properties:
+        id:        {type: string, enum: [server, database, ai-service, data-volumes]}
+        name:      {type: string, description: "사람이 읽는 이름"}
+        health:    {type: string, enum: [UP, DEGRADED, DOWN]}
+        latencyMs: {type: integer, nullable: true, description: "❗못 잰 자리는 null 이다 — 0 과 다르다"}
+        note:      {type: string, nullable: true, description: "정상이면 null. 한 줄만 — 스택트레이스는 서버 로그로"}
+        facts:
+          type: array
+          description: >
+            ❗**배열이다.** 화면이 읽는 순서가 곧 중요도인데 객체는 직렬화 순서가 구현에 달린다.
+          items: {$ref: '#/components/schemas/OpsFact'}
+    OpsFact:
+      type: object
+      required: [label, value]
+      properties:
+        label: {type: string}
+        value: {type: string, description: "비밀은 「설정됐는가」까지만. JDBC URL 은 ? 앞까지만"}
+    OpsStatusApiResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, enum: [true]}
+        data:    {$ref: '#/components/schemas/OpsStatus'}
         error:   {type: object, nullable: true}
 
     ProductSummary:
