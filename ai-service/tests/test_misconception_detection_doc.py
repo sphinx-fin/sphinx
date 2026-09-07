@@ -88,15 +88,24 @@ def test_reproduction_commands_point_at_files_that_exist() -> None:
     assert not missing, f"문서가 부르는 도구가 없다: {missing}"
 
 
-def test_the_measurement_tool_is_not_wired_into_scoring() -> None:
+_TOOLS_NEVER_IMPORTED = ("tune_ngram_threshold", "measure_selfconsistency_rate")
+
+
+@pytest.mark.parametrize("tool", _TOOLS_NEVER_IMPORTED)
+def test_the_measurement_tool_is_not_wired_into_scoring(tool: str) -> None:
     """측정 도구가 채점 경로에 들어가면 안 된다.
 
     `condition_counters` 와 같은 규약이다 — 도구는 근거를 만들 뿐 판정하지 않는다(P1).
 
+    ❗**목록으로 둔다.** 도구가 둘이 되는 순간 이름 하나만 보는 검사는 나머지를 안 본다 —
+    `EchoCapBelowR05Test` 가 캡이 셋이 되는 동안 하나만 보고 있던 것과 같은 모양이다.
+    그리고 이 도구들은 **실 LLM 을 호출**하므로, 배선되면 채점이 느려지고 요금이 는다
+    (결과는 맞게 나와서 **지연과 요금으로만** 드러난다).
+
     원문 grep 이 아니라 `ast` 로 **import 문만** 본다. 문면을 세면 주석에 도구 이름을 적은
     것까지 걸려서, 판별에 안 쓰이는 줄이 판별을 바꾼다(`#368` 에서 밟은 그 결함).
     """
-    offenders = importers_of("tune_ngram_threshold", APP)
+    offenders = importers_of(tool, APP)
     assert not offenders, f"app/ 이 측정 도구를 import 한다: {offenders}"
 
 
@@ -219,3 +228,46 @@ def test_leak_citations_name_their_reproduction(relative: str) -> None:
         f"{relative} 가 누설 수치를 들면서 {_REPRO} 를 안 가리킨다 — "
         "값을 의심하는 다음 사람이 옮겨 적을 출처가 없다"
     )
+
+
+# ── 세션 확률의 분모는 게이트의 분모여야 한다 ────────────────────────────────
+#
+# `R-06`(`allGrade == 'U1'`)이 보는 것은 **판정**이고, 판정은 면담이 물은 항목에만 생긴다.
+# 그 집합이 `ProductRiskItems.interviewItemsOf` = `required ∧ extracted` 라
+# **`recommended` 는 안 물어지고 판정도 없다.** 컨텍스트 항목 수를 그대로 쓰면 세션
+# 확률이 과대해지는데, 숫자가 그럴듯해서 눈으로는 안 보인다 (`#533` 리뷰, 강희진).
+def _rate_tool():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "tools" / "measure_selfconsistency_rate.py"
+    spec = importlib.util.spec_from_file_location("measure_selfconsistency_rate", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_session_denominator_counts_only_interviewed_items() -> None:
+    """★ `recommended` 는 분모에서 빠진다 — 판정이 안 생기는 항목이다."""
+    items = {
+        "A": {"importance": "required"},
+        "B": {"importance": "required"},
+        "C": {"importance": "recommended"},
+        "D": {},                              # importance 누락도 required 가 아니다
+    }
+    assert set(_rate_tool().interview_items(items)) == {"A", "B"}
+
+
+def test_the_session_denominator_matches_the_eval_context() -> None:
+    """실물 컨텍스트에서도 게이트 분모와 같아야 한다 — 13 이 아니라 10 이다."""
+    import json
+
+    context = json.loads(
+        (Path(__file__).resolve().parents[2] / "eval" / "data" / "context" / "els.json")
+        .read_text(encoding="utf-8")
+    )
+    items = context["risk_items"]
+    required = _rate_tool().interview_items(items)
+    assert len(required) < len(items), (
+        "recommended 가 하나도 없으면 이 대조가 아무것도 안 잰다 — 컨텍스트가 바뀌었나"
+    )
+    assert len(required) == 10, f"required 가 {len(required)}건이다 — 도구의 분모를 다시 본다"
