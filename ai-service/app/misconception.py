@@ -98,7 +98,7 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -385,6 +385,11 @@ class PolarityMeter:
     contradicted: int = 0
     #: ❗**못 돈 건수.** 0 건과 「모른다」를 가르는 유일한 자리 — 위 docstring 참조.
     not_run: int = 0
+    #: ❗**자리가 없어 순차로 떨어진 건수.** `ConsistencyMeter.no_slot` 과 같은 자리다.
+    #: *"병렬이 안 도네"* 를 보고 **설정 문제인지 부하 문제인지** 가르는 유일한 값이다 —
+    #: 스위치를 끈 것(`_polarity_parallel_enabled()`)과 자리가 찬 것은 원인이 다르다.
+    #: 판정에는 영향이 없다(순차로 같은 답을 낸다). 지연에만 나타난다.
+    no_slot: int = 0
     by_type: dict[str, int] = field(default_factory=dict)
     #: ❗**후보를 병렬로 확인하면서 필요해졌다** (이슈 #498). `+= 1` 은 원자적이지 않아
     #: 락 없이 여러 스레드가 동시에 세면 **건수가 샌다** — 그리고 그 샘은 조용하다.
@@ -413,9 +418,19 @@ class PolarityMeter:
             self.asked += 1
             self.not_run += 1
 
+    def record_no_slot(self) -> None:
+        """병렬 자리가 없어 이 후보를 호출 스레드에서 순차로 돌린다.
+
+        ❗`asked` 를 올리지 않는다. 판정은 그대로 나므로 `record_kept`·`record_dropped` 가
+        뒤이어 올린다 — 여기서 올리면 **한 후보가 두 번 세어진다.**
+        """
+        with self._lock:
+            self.no_slot += 1
+
     def summary(self) -> str:
         return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
-                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건")
+                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건"
+                f" · 자리 없어 순차 {self.no_slot}건")
 
 
 METER = PolarityMeter()
@@ -499,6 +514,22 @@ POLARITY_WORKERS = 4
 _POLARITY_POOL = ThreadPoolExecutor(max_workers=POLARITY_WORKERS,
                                     thread_name_prefix="det-polarity")
 
+#: ❗**자리 표 — 이게 없으면 동시 요청에서 예전보다 느려진다** (`#537` 리뷰, 오준서).
+#:
+#: `_POLARITY_POOL.map(...)` 은 워커가 차 있으면 **큐에 쌓고** 전부 끝날 때까지 막는다.
+#: 풀이 프로세스 전역이라 그 큐는 **다른 요청의 후보들** 뒤에 선다. 동시 요청 K · 후보 N ·
+#: 워커 W 로 놓으면 한 요청의 대기가 `⌈K·N/W⌉·L` 이고 순차는 `N·L` 이라 **K > W 부터
+#: 역전**한다 — 그리고 그때가 바로 지연이 문제되는 순간이다.
+#:
+#: `scoring._PROBE_SLOTS` 가 같은 문제를 이미 풀어 뒀다(`#437`). 그 파일이 적은 이유가
+#: 그대로 여기 걸린다 — *"큐에 쌓으면 대기가 오히려 늘어난다. 자리가 없으면 호출부가
+#: 예전처럼 순차로 간다."*
+#:
+#: ❗**후보 단위로 잡는다**(요청 단위가 아니다). 요청당 한 자리로 두면 한 요청이 자리
+#: 하나로 후보 N 개를 큐에 밀어 넣어 위 식이 그대로 남는다. 후보 단위면 프로세스 전체의
+#: 큐 깊이가 W 로 묶여 **최악이 순차로 캡된다.**
+_POLARITY_SLOTS = threading.BoundedSemaphore(POLARITY_WORKERS)
+
 
 def _polarity_parallel_enabled() -> bool:
     """후보를 동시에 확인할 것인가. **함수로 빼 둔 이유가 테스트다**(`#437` 과 같다).
@@ -535,7 +566,35 @@ def _verdicts(client, matches, text: str) -> list[bool]:
 
     if len(matches) == 1 or not _polarity_parallel_enabled():
         return [holds(m) for m in matches]
-    return list(_POLARITY_POOL.map(holds, matches))
+
+    # ❗**자리를 못 잡은 후보는 큐에 쌓지 않고 호출 스레드에서 돈다** (`#537` 리뷰, 오준서).
+    # 위 `_POLARITY_SLOTS` 주석 참조 — 이 층이 없으면 동시 요청 K > 워커 W 에서
+    # 이 최적화가 **역전**한다.
+    futures: list[Future | None] = []
+    for match in matches:
+        if not _POLARITY_SLOTS.acquire(blocking=False):
+            METER.record_no_slot()
+            futures.append(None)
+            continue
+
+        def run(match=match) -> bool:
+            try:
+                return holds(match)
+            finally:
+                _POLARITY_SLOTS.release()
+
+        futures.append(_POLARITY_POOL.submit(run))
+
+    # ❗**순차분을 먼저 돌린다.** 뒤에 돌리면 `f.result()` 가 먼저 막아서 병렬분이 도는
+    # 동안 호출 스레드가 놀고, 그만큼 겹칠 기회를 버린다.
+    verdicts: list[bool | None] = [None] * len(matches)
+    for i, (match, future) in enumerate(zip(matches, futures)):
+        if future is None:
+            verdicts[i] = holds(match)
+    for i, future in enumerate(futures):
+        if future is not None:
+            verdicts[i] = future.result()
+    return [bool(v) for v in verdicts]
 
 
 def apply_polarity_gate(

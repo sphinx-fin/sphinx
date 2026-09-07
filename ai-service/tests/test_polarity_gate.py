@@ -474,12 +474,23 @@ class _ThreadSafeVerdicts:
         self._lock = threading.Lock()
         self.threads: set[str] = set()
         self.calls = 0
+        #: ❗**동시에 안에 있던 최대 인원.** 벽시계 대신 이걸 본다 (`#537` 리뷰 ③, 오준서).
+        #: `threads` 는 «서로 다른 스레드를 썼다» 까지만 말하고 **겹쳤는지는 안 말한다** —
+        #: 풀에서 순차로 돌아도 태스크마다 다른 워커가 잡힐 수 있다.
+        self.in_flight = 0
+        self.max_in_flight = 0
 
     def complete_json(self, **kwargs):
         with self._lock:
             self.calls += 1
             self.threads.add(threading.current_thread().name)
-        time.sleep(0.05)                      # 병렬이면 겹치고 순차면 쌓인다
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            time.sleep(0.05)                  # 병렬이면 겹치고 순차면 쌓인다
+        finally:
+            with self._lock:
+                self.in_flight -= 1
         holds = not any(d in kwargs["prompt"] for d in self._drop)
         return misconception.PolarityVerdict(
             belief="(스텁)", holds=holds, polarity="positive" if holds else "negative")
@@ -512,7 +523,8 @@ def test_the_verdicts_keep_the_input_order(monkeypatch) -> None:
 def test_the_meter_counts_exactly_under_concurrency(monkeypatch) -> None:
     """★ `+= 1` 은 원자적이지 않다 — 락이 없으면 **건수가 조용히 샌다.**"""
     _parallel(monkeypatch)
-    misconception.METER.__init__()             # 이 테스트 안에서만 세기 위해 초기화
+    # ❗`METER.__init__()` 을 부르던 자리다. **`_reset_meter` 가 autouse 라 불필요했고**,
+    # 수동 초기화는 `_lock` 을 통째로 새로 만들어 오히려 위험하다(`#537` 리뷰 ②).
     matches = [_Match(f"M{i:02d}") for i in range(12)]
     client = _ThreadSafeVerdicts(drop={f"패턴-M{i:02d}" for i in range(0, 12, 2)})
 
@@ -534,7 +546,6 @@ def test_the_meter_does_not_leak_under_a_hammering(monkeypatch) -> None:
     그래서 `sys.setswitchinterval` 을 낮춰 **선점을 강제한다.** 그 조건에서 재면 실제로
     샌다(락 없이 16,000 중 11,065). 경합 테스트는 **경합을 만들어야** 대조가 된다.
     """
-    misconception.METER.__init__()
     original_interval = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)
     monkeypatch_undo = lambda: sys.setswitchinterval(original_interval)
@@ -571,12 +582,77 @@ def test_the_candidates_actually_run_at_the_same_time(monkeypatch) -> None:
     matches = [_Match(f"M{i:02d}") for i in range(4)]
     client = _ThreadSafeVerdicts()
 
-    started = time.perf_counter()
     misconception._verdicts(client, matches, "발화")
-    elapsed = time.perf_counter() - started
 
     assert len(client.threads) > 1, f"한 스레드에서만 돌았다: {client.threads}"
-    assert elapsed < 4 * 0.05, f"순차만큼 걸렸다({elapsed:.2f}s) — 병렬이 안 돈다"
+    # ❗**벽시계 단정을 뺐다** (`#537` 리뷰 ③, 오준서). 여유가 4배뿐이라 러너가 밀리는 날
+    # 깜빡이고, 깨졌을 때 뜻이 «병렬이 안 돈다» 가 아니라 «러너가 느렸다» 쪽이 더 크다.
+    #
+    # 대신 스텁이 **동시에 안에 있던 최대 인원**을 센다 — 이게 재려던 것 그 자체이고
+    # 시간에 안 매인다. `threads` 만으로는 부족하다: 순차로 돌아도 태스크마다 다른 워커가
+    # 잡히면 집합이 커진다(그래서 이 단정이 원래 반쪽이었다).
+    assert client.max_in_flight > 1, (
+        f"겹친 적이 없다(최대 {client.max_in_flight}명) — 스레드는 갈렸지만 순차로 돌았다"
+    )
+
+
+def test_a_full_slot_table_falls_back_to_sequential(monkeypatch) -> None:
+    """★ **자리가 없으면 큐에 쌓지 않고 순차로 간다** (`#537` 리뷰 ①, 오준서).
+
+    `_POLARITY_POOL.map(...)` 만 쓰면 워커가 찼을 때 **큐에 쌓고** 전부 끝날 때까지 막는다.
+    풀이 프로세스 전역이라 그 큐는 **다른 요청의 후보들** 뒤에 선다.
+
+        동시 요청 K · 후보 N · 워커 W    병렬 ⌈K·N/W⌉·L   vs   순차 N·L
+        → K > W 부터 역전한다 — 그리고 그때가 지연이 문제되는 순간이다
+
+    `scoring._PROBE_SLOTS` 가 같은 문제를 이미 풀어 뒀다(`#437`). 자리 표가 있으면
+    **최악이 순차로 캡된다.**
+
+    ❗여기서 자리를 전부 잡아 그 경로를 만든다. 판정은 그대로 나와야 한다 — 이 층은
+    지연만 바꾸고 결과를 안 바꾼다.
+    """
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(4)]
+    client = _ThreadSafeVerdicts(drop={"패턴-M01"})
+
+    held = [misconception._POLARITY_SLOTS.acquire(blocking=False)
+            for _ in range(misconception.POLARITY_WORKERS)]
+    assert all(held), "자리를 다 못 잡았다 — 앞 테스트가 자리를 반납하지 않았나"
+    try:
+        verdicts = misconception._verdicts(client, matches, "발화")
+    finally:
+        for _ in held:
+            misconception._POLARITY_SLOTS.release()
+
+    assert verdicts == [True, False, True, True], "순차 폴백이 판정을 바꿨다"
+    assert misconception.METER.no_slot == 4, (
+        f"자리 없음을 안 셌다({misconception.METER.no_slot}건) — "
+        "「스위치를 껐다」와 「자리가 찼다」를 못 가른다(결정 5.40)"
+    )
+    assert client.max_in_flight == 1, (
+        f"순차로 떨어졌는데 겹쳤다(최대 {client.max_in_flight}명) — 풀에 들어갔다"
+    )
+    assert client.threads == {threading.current_thread().name}, (
+        f"호출 스레드가 아닌 곳에서 돌았다: {client.threads}"
+    )
+
+
+def test_the_slot_table_is_returned_after_a_parallel_run(monkeypatch) -> None:
+    """★ **자리를 반납한다.** 안 하면 첫 요청 뒤로 이 층이 영구히 순차가 되고, 증상은
+    「예전과 같은 지연」이라 **아무도 안 본다.**
+    """
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(4)]
+
+    misconception._verdicts(_ThreadSafeVerdicts(), matches, "발화")
+
+    held = [misconception._POLARITY_SLOTS.acquire(blocking=False)
+            for _ in range(misconception.POLARITY_WORKERS)]
+    for ok in held:
+        if ok:
+            misconception._POLARITY_SLOTS.release()
+    assert all(held), f"자리가 안 돌아왔다: {held}"
+    assert misconception.METER.no_slot == 0, "자리가 있었는데 없음으로 셌다"
 
 
 def test_a_single_candidate_does_not_touch_the_pool(monkeypatch) -> None:
