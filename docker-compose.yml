@@ -80,7 +80,7 @@ services:
       - ./data:/data:ro
       # 업로드 원본(F-EXT-001 · 이슈 #521). **ai-service 는 읽기만 한다** — 쓰는 것은
       # server 하나다. `/data` 아래에 두는 이유는 `document_path` 가 SPHINX_DATA_DIR 상대
-      # 경로라서다: `uploads/<sha256>.pdf` 가 `documents/…` 와 같은 문법으로 서고,
+      # 경로라서다: `uploads/<sha256>/<파일명>` 이 `documents/…` 와 같은 문법으로 서고,
       # /internal/parse 계약도 parsing.py 시그니처도 안 바뀐다.
       # ❗위 `./data:/data:ro` 와 겹치므로 **호스트 `data/uploads/` 가 있어야 한다.** 없으면
       # Docker 가 마운트 지점을 만들려 하고 부모가 읽기 전용이라 실패해서, 컨테이너가 아예

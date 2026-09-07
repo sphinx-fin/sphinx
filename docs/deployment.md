@@ -275,13 +275,28 @@ docker-compose.yml`(각각 `-p sphinx-data`·`sphinx-edge`·`sphinx-blue`).
 ## 6. `data/` 와 `contracts/` 는 볼륨이다 — 이미지에 굽지 않는다
 
 `git clone` 하면 둘 다 통째로 온다(#30 이후 `documents/` 까지 추적). 그래서 bind mount 가
-그대로 성립한다.
+그대로 성립한다. (업로드 볼륨은 예외다 — 아래 표의 뒤 두 행)
 
 | 마운트 | 서비스 | 없으면 |
 |---|---|---|
 | `./data:/data:ro` | ai-service | 오해 라이브러리를 못 읽어 **로딩 시점에 죽는다** — 드러난다 |
 | `./contracts:/contracts:ro` | ai-service | ❗**조용히 no-op** — 아래 |
 | `./data/timeseries:/data/timeseries:ro` | server | 시뮬레이터 계산 불가 (경고 로그) |
+| `uploads:/data/uploads:ro` | ai-service | ❗**컨테이너가 아예 안 뜬다** — 아래 |
+| `uploads:/data/uploads` | server | 업로드가 저장될 곳이 없다. 이 스택의 **유일한 rw 마운트** |
+
+❗**뒤 두 행에는 호스트 전제가 하나 붙는다 — `data/uploads/` 디렉토리가 있어야 한다.**
+ai-service 는 `./data` 를 통째로 `:ro` 마운트하고 그 위에 볼륨을 겹치는데, 마운트 지점이
+없으면 runc 가 만들려 하고 부모가 읽기 전용이라 실패한다.
+
+```
+create mountpoint for /data/uploads mount: … read-only file system
+```
+
+그래서 빈 디렉토리를 커밋해 뒀고(`data/uploads/README.md` 가 지우지 말라고 적는다)
+`deploy_ec2.sh` 의 「레포를 통째로 clone 했는지」 가드가 그 경로를 함께 본다. **`server` 는
+같은 상황에서 정상 기동한다** — 그쪽은 `data/` 하위만 붙어서 `/data` 자체가 이미지 레이어다.
+즉 이 전제가 깨지면 **server 만 뜨고 ai-service 가 죽어** 채점이 전부 502 가 된다.
 
 `timeseries/` 를 이미지에 넣지 않는 이유는 18,089줄을 한 벌 더 두면 `data/timeseries/VERSION`
 의 sha256 으로 고정한 원본과 조용히 갈라지고, 시뮬레이터 출력이 달라진 원인이 코드인지
@@ -513,6 +528,11 @@ export SPHINX_API_PASSWORD=$P
 export SPHINX_INTERNAL_TOKEN=$(openssl rand -hex 32)
 export SPHINX_API_USERS=$(sed -n 's/^.*[^A-Za-z0-9_-]id:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' \
                             server/src/main/resources/demo_accounts.yaml | paste -sd, -)
+# ❗업로드 원본 볼륨을 먼저 만든다(이슈 #521). 앱 스택이 `external: true` 로 참조만 하므로,
+# 없으면 마지막 줄이 `external volume "sphinx_uploads" not found` 로 죽는다 —
+# 컨테이너를 하나도 안 만들고 멈춘다. 소유권까지 맞춰야 업로드가 EACCES 를 안 낸다.
+docker volume create sphinx_uploads
+docker run --rm -v sphinx_uploads:/v busybox chown 10001:10001 /v
 # 세 프로젝트 순서대로 — §1.1 참조. data·edge 는 상시 유지, app 은 색을 고른다(처음엔 blue).
 docker compose -f docker-compose.data.yml -p sphinx-data up -d
 docker compose -f docker-compose.edge.yml -p sphinx-edge up -d --build
