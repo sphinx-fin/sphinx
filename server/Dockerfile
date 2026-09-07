@@ -32,8 +32,30 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# root 로 돌리지 않는다. 마운트가 전부 :ro 라 쓰기 권한이 필요 없다.
+# root 로 돌리지 않는다.
 RUN useradd --system --uid 10001 --create-home sphinx
+
+# ❗**업로드 볼륨의 소유자를 이미지에 박아 둔다**(F-EXT-001 · 이슈 #521 · PR #532 리뷰).
+#
+# 예전 주석은 *"마운트가 전부 :ro 라 쓰기 권한이 필요 없다"* 였는데 `uploads` 가 **이
+# 스택의 첫 rw 마운트**라 그 전제가 깨졌다. 그런데 `docker volume create` 는 볼륨 루트를
+# `root:root 0755` 로 만들므로, 이 줄이 없으면 uid 10001 이 못 쓴다 — 업로드가 EACCES 로
+# 500 을 내고 화면에는 "서버 내부 오류" 만 뜬다.
+#
+# ❗**로컬에서는 안 드러난다.** `./gradlew bootRun` 은 개발자 uid 로 돌고 `../data/uploads`
+# 도 자기 소유라 그냥 써진다. 컨테이너에서만, 그러니까 알파에서만 나는 종류다(#37 · #433).
+#
+# Docker 는 **빈** 볼륨을 붙일 때 이미지의 그 경로 내용과 소유권을 복사한다. 실측:
+#
+#     빈 볼륨 + 이 줄 있음   →  /data/uploads 가 10001:999 로 뜬다 · 쓰기 성공
+#     빈 볼륨 + 이 줄 없음   →  root:root 로 남는다 · Permission denied
+#
+# ❗**이미 파일이 든 볼륨은 이 방법으로 고쳐지지 않는다**(실측 — 소유권 복사는 빈 볼륨에만
+# 걸린다). 그런 상태가 되면 손으로 고쳐야 한다:
+#
+#     docker run --rm -v sphinx_uploads:/v alpine chown -R 10001:999 /v
+RUN mkdir -p /data/uploads && chown sphinx:sphinx /data/uploads
+
 USER sphinx
 
 COPY --from=build /src/build/libs/*.jar /app/app.jar
