@@ -203,6 +203,38 @@ export interface Judgment {
 }
 
 /**
+ * 항목별 재검증 사용 상태 — `GET /sessions/{id}/judgments` 봉투에 실린다 (이슈 #506).
+ *
+ * ❗**상한 N 이 없다.** `exhausted` 불리언까지만 온다 — 서버가 룰 임계값을 문면에 안 넣기로
+ * 한 규약과 같은 방향이다(기획 7-4 역이용 방지). 화면도 「재설명 1회」·「소진」까지만
+ * 말하고 «2회 중 1회» 처럼 상한을 되짚지 않는다.
+ */
+export interface ReverifyStatus {
+  itemId: string;
+  /** 이 항목에 쓴 재검증 횟수. */
+  used: number;
+  /** 상한 도달 — 재설명 불가, 그 항목은 판정으로 간다. */
+  exhausted: boolean;
+}
+
+/**
+ * `GET /sessions/{id}/judgments` 봉투.
+ *
+ * ❗**`reverify` 를 {@link Judgment} 에 넣지 않는다.** 그 타입이 미러하는 것은 «판매자가
+ * 봐도 되는가» 로 잠긴 `JudgmentView` 이고(#144 · #147), 재검증 이력은 판정이 아니라 세션
+ * 진행 상태다. 그래서 서버도 봉투 레벨에 뒀다.
+ *
+ * `reverify` 에는 **재검증한 적 있는 항목만** 실린다 — 목록에 없는 항목은 `used = 0` 이다.
+ * 판정 수와 길이가 다른 것이 정상이므로 인덱스로 짝짓지 않는다.
+ */
+export interface JudgmentsResponse {
+  sessionId: string;
+  state: SessionState;
+  judgments: Judgment[];
+  reverify: ReverifyStatus[];
+}
+
+/**
  * 발화한 게이트 룰 하나 — ID 와 **사람이 읽는 문면** (이슈 #320).
  *
  * `label` 은 서버의 `gate_rules.yaml` 이 들고 있다. **web 에 ID→문면 표를 두지 않는다** —

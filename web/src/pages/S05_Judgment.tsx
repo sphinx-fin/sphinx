@@ -67,13 +67,23 @@
  *    신호등 3색을 쓸 수는 없다(설계 판단 ② · tokens.css 규칙 1). 그래서 **먹 한 색의 채움
  *    단계**로 무게를 준다 — 오해가 가장 진하고 이해가 가장 조용하다. 등급기호(U4)를
  *    라벨과 같이 내서 명도를 못 읽는 조건에서도 갈리게 한다.
+ *
+ * ⑩ **재설명을 몇 번 썼는지는 «눌러 본 이력» 이 아니라 서버 값이다** (이슈 #506)
+ *    예전에는 소진 여부를 아는 길이 「재설명」을 눌러 `REVERIFY_EXHAUSTED` 를 받는 것
+ *    하나뿐이었다. 그건 이 창의 상태라 새로고침하면 사라지고, 애초에 **그 창에서 눌러 본
+ *    적이 있어야** 생긴다 — S-02 가 이 화면을 새 창으로 여는 구조라(설계 판단 ⑧) 다른
+ *    창에서 열면 흔적이 없다. 지금은 `/judgments` 봉투의 `reverify[]` 가 출처다.
+ *
+ *    ❗**상한 N 은 안 받고 안 그린다.** 계약이 `exhausted` 불리언까지만 준다(7-4 역이용
+ *    방지). 화면도 「재설명 1회」·「소진」까지만 말하고 «2회 중 1회» 로 되짚지 않는다 —
+ *    그 숫자를 알면 판매자가 몇 번까지 밀어붙일 수 있는지를 세게 된다.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
-  GatePreview, GateResult, Grade, Judgment, ReExplainRequest, ReExplanation, RiskItem, RuleRef,
-  SessionResponse, Signal, SuitabilityStatus,
+  GatePreview, GateResult, Grade, Judgment, JudgmentsResponse, ReExplainRequest, ReExplanation,
+  ReverifyStatus, RiskItem, RuleRef, SessionResponse, Signal, SuitabilityStatus,
 } from "../api/types";
 import { reverifyPath, stashReExplanation } from "../lib/reexplain";
 import ErrorNote from "../components/ErrorNote";
@@ -175,6 +185,8 @@ export default function S05Judgment() {
   /** 재설명을 요청 중인 항목. 버튼 하나만 도는 것이 보여야 한다. */
   const [reExplaining, setReExplaining] = useState<string | null>(null);
   const [reNotes, setReNotes] = useState<ReExplainNote[]>([]);
+  /** 항목별 재검증 사용 상태. **서버가 출처다**(설계 판단 ⑩). */
+  const [reverify, setReverify] = useState<ReverifyStatus[]>([]);
 
   /* ── 적재 ────────────────────────────────────────────────────────────────
    * 세션·판정·항목명을 함께 받는다. 항목명이 필요한 이유는 판정이 `itemId` 만 들고
@@ -188,11 +200,12 @@ export default function S05Judgment() {
     try {
       const s = await get<SessionResponse>(`/sessions/${sid}`);
       const [js, ri] = await Promise.all([
-        get<{ judgments: Judgment[] }>(`/sessions/${sid}/judgments`),
+        get<JudgmentsResponse>(`/sessions/${sid}/judgments`),
         get<{ items: RiskItem[] }>(`/products/${s.productId}/risk-items`),
       ]);
       setSession(s);
       setJudgments(js.judgments ?? []);
+      setReverify(js.reverify ?? []);
       setItems(ri.items ?? []);
 
       // 확정된 세션에도 그대로 부른다 — 계약이 "이미 판정된 세션은 재계산하지 않고
@@ -297,6 +310,20 @@ export default function S05Judgment() {
     items.find((i) => i.itemId === itemId)?.name ?? itemId;
 
   const noteOf = (itemId: string) => reNotes.find((n) => n.itemId === itemId) ?? null;
+
+  /* 재검증한 적 없는 항목은 목록에 아예 없다 — 없는 것과 0 회는 같은 뜻이라 그대로 null. */
+  const reverifyOf = (itemId: string) =>
+    reverify.find((r) => r.itemId === itemId) ?? null;
+
+  /**
+   * 소진 판단. 서버 값이 먼저고, 그게 없을 때만 이 창에서 받은 400 을 본다.
+   *
+   * ❗**둘 다 본다.** 서버 값은 되읽기 사이에 낡을 수 있어서(방금 이 창에서 마지막 한 번을
+   * 썼는데 아직 안 읽었다) 눌러서 받은 `REVERIFY_EXHAUSTED` 를 버리면 버튼이 다시 열린다.
+   * 반대로 `reNotes` 만 보면 다른 창·새로고침에서 아무것도 안 보인다 — 그게 #506 이다.
+   */
+  const isExhausted = (itemId: string) =>
+    (reverifyOf(itemId)?.exhausted ?? false) || noteOf(itemId)?.kind === "exhausted";
 
   /* ── 재설명을 시작할 수 있는 상태인가 ─────────────────────────────────────
    * 상태머신이 `REQUEST_REEXPLAIN` 을 받는 상태는 `IN_PROGRESS` 와 `RE_VERIFY` 둘뿐이다.
@@ -476,6 +503,14 @@ export default function S05Judgment() {
                     {GRADE_LABEL[j.grade]}
                     <span className="s05__grade-code">{j.grade}</span>
                   </span>
+                  {/* 사용 이력이 있으면 배지 옆에 조용히. **상한을 같이 적지 않는다**
+                      (설계 판단 ⑩) — 「2회 중 1회」로 쓰면 서버가 안 싣기로 한 임계값을
+                      화면이 되돌려 놓는 셈이다. */}
+                  {(reverifyOf(j.itemId)?.used ?? 0) > 0 && (
+                    <span className="s05__reverify-used">
+                      재설명 {reverifyOf(j.itemId)?.used}회
+                    </span>
+                  )}
                 </div>
 
                 <p className="s05__reason">{j.reason}</p>
@@ -509,8 +544,7 @@ export default function S05Judgment() {
                       REEXPLAIN_NOT_ELIGIBLE 로 거절하므로, 누를 수 있게 두면 화면이
                       서버가 안 하는 일을 제안하는 셈이다. 상한 도달 항목도 같은 이유로
                       다시 열지 않는다(`exhausted`). */}
-                  {j.grade !== "U1" && reExplainOpen
-                    && noteOf(j.itemId)?.kind !== "exhausted" && (
+                  {j.grade !== "U1" && reExplainOpen && !isExhausted(j.itemId) && (
                     <button
                       type="button"
                       className="s05__btn s05__btn--sm"
@@ -522,8 +556,16 @@ export default function S05Judgment() {
                   )}
                 </div>
 
-                {noteOf(j.itemId) && (
+                {/* ❗**소진 문장은 상시 표시다**(설계 판단 ⑩). 눌러서 받은 거절 문장이
+                    있으면 그것을 쓰고(방금 일어난 일이라 더 구체적이다), 없으면 서버가
+                    실어 준 상태를 그대로 문장으로 낸다 — 이 창에서 아무것도 안 눌렀어도
+                    「다 썼다」가 보여야 한다. */}
+                {noteOf(j.itemId) ? (
                   <p className="s05__renote" role="status">{noteOf(j.itemId)?.text}</p>
+                ) : isExhausted(j.itemId) && (
+                  <p className="s05__renote">
+                    재설명 횟수를 다 썼어요. 이 항목은 판정으로 넘어가요.
+                  </p>
                 )}
               </li>
             ))}
