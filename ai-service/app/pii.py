@@ -43,6 +43,27 @@ PATTERNS: dict[str, re.Pattern[str]] = {**SPECIFIC, **BROAD}
 #:                     개인 휴대번호가 있다면 그건 문서 쪽 사고이므로 막아야 한다.
 SCOPES = ("customer", "public_document")
 
+#: `public_document` 에서 **끄는 넓은 패턴.** 나머지 넓은 패턴은 이 범위에서도 검사한다.
+#:
+#: ❗**완화를 측정된 오탐만큼만 준다.** 예전에는 `BROAD` 를 통째로 껐는데, 실제로 오탐을
+#: 내는 것이 무엇인지 재 본 적이 없었다. 커밋된 공시 문서 4건 전문을 훑으니 이랬다
+#: (재현: `tools/measure_public_document_pii.py`).
+#:
+#:     ACCOUNT  2건   '02-785-7424' · '02-2262-6600'  ← 둘 다 서울 지역번호다. 완화의 근거 그대로
+#:     EMAIL    0건
+#:     CARD     0건
+#:
+#: 그래서 `CARD` 는 이 범위에서도 검사한다. 16자리 카드번호가 상품설명서에 인쇄될
+#: 이유가 없고, 걸린다면 **올린 파일이 설명서가 아니라는 신호**다.
+#:
+#: `EMAIL` 은 끈 채로 둔다 — 발행사 문의 이메일은 법인 연락처라 `ACCOUNT` 와 같은 성격이고,
+#: 4건에서 0 이라는 것이 「없다」의 증거는 아니다(표본이 작다).
+#:
+#: ❗**이 완화의 모집단이 `#527`(업로드 실배선) 이후 바뀌었다.** 예전에는 이 자리에
+#: 사람이 고른 공시 문서만 왔고, 지금은 **ADMIN 이 올린 임의의 PDF** 가 온다. 완화를
+#: 좁히는 이유가 그것이다 — *"공시 자료라서 안전하다"* 가 이제 조건부다.
+RELAXED_IN_PUBLIC_DOCUMENT = frozenset({"EMAIL", "ACCOUNT"})
+
 
 class PiiDetected(Exception):
     """상류(P3) 위반. 요청을 거부하고 어떤 패턴인지 알린다 — 원문은 절대 담지 않는다."""
@@ -67,8 +88,9 @@ def detect(text: str, scope: str = "customer") -> list[str]:
         if pat.search(residual):
             kinds.append(name)
             residual = pat.sub(" ", residual)
-    if scope == "customer":
-        kinds.extend(name for name, pat in BROAD.items() if pat.search(residual))
+    relaxed = RELAXED_IN_PUBLIC_DOCUMENT if scope == "public_document" else frozenset()
+    kinds.extend(name for name, pat in BROAD.items()
+                 if name not in relaxed and pat.search(residual))
     return kinds
 
 

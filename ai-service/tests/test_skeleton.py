@@ -292,3 +292,62 @@ def test_no_duplicate_test_names():
         if dupes:
             problems.append(f"{path.name}: {sorted(dupes)}")
     assert not problems, f"중복 테스트 이름 — 앞의 것이 안 돈다: {problems}"
+
+
+# ── 완화는 «측정된 오탐」만큼만 준다 (P3 · #527 로 모집단이 바뀌었다) ──────────
+#
+# 위 `test_only_document_paths_relax_broad_pii_heuristics` 가 **어느 경로가** 완화되는지를
+# 지킨다. 아래 넷은 그 경로에서 **무엇이** 완화되는지를 지킨다 — 예전에는 `BROAD` 를
+# 통째로 껐고, 오탐을 내는 것이 무엇인지 잰 적이 없었다.
+#
+#     tools/measure_public_document_pii.py · 커밋된 공시 문서 4건 전문
+#     ACCOUNT 2건 ('02-785-7424' · '02-2262-6600' — 둘 다 서울 지역번호) · EMAIL 0 · CARD 0
+#
+# ❗그리고 `#527`(업로드 실배선) 이후 이 자리에 오는 것이 **사람이 고른 문서**에서
+# **ADMIN 이 올린 임의의 PDF** 로 바뀌었다. *"공시 자료라서 안전하다"* 가 조건부가 됐다.
+def test_a_card_number_is_still_caught_in_a_public_document():
+    """★ 카드번호는 공시 문서 범위에서도 막는다.
+
+    상품설명서에 16자리 카드번호가 인쇄될 이유가 없다. 걸린다면 **올린 파일이 설명서가
+    아니라는 신호**이고, 업로드가 붙은 뒤로는 그게 현실적인 운영 실수다.
+    """
+    from app import pii
+
+    assert "CARD" in pii.detect("결제수단 4111-1111-1111-1111", scope="public_document")
+
+
+def test_the_measured_false_positive_stays_relaxed():
+    """실측된 오탐(발행사 대표번호)은 통과해야 한다 — 막으면 추출이 422 로 죽는다."""
+    from app import pii
+
+    assert pii.detect("문의 02-785-7424", scope="public_document") == []
+    assert pii.detect("문의 02-2262-6600", scope="public_document") == []
+
+
+def test_the_narrow_patterns_are_never_relaxed():
+    """주민번호·개인 휴대번호는 어느 범위에서도 막는다."""
+    from app import pii
+
+    for scope in pii.SCOPES:
+        assert "RRN" in pii.detect("901201-1234567", scope=scope)
+        assert "PHONE" in pii.detect("010-1234-5678", scope=scope)
+
+
+def test_the_relaxation_names_are_real_and_partial():
+    """★ 완화 목록에 오타가 있으면 **아무것도 안 끄면서 조용히 통과**한다."""
+    from app import pii
+
+    unknown = pii.RELAXED_IN_PUBLIC_DOCUMENT - set(pii.BROAD)
+    assert not unknown, f"BROAD 에 없는 이름이 완화 목록에 있다: {sorted(unknown)}"
+    assert pii.RELAXED_IN_PUBLIC_DOCUMENT, "완화가 비면 정상 문서가 422 로 막힌다"
+    assert set(pii.BROAD) - pii.RELAXED_IN_PUBLIC_DOCUMENT, (
+        "넓은 패턴을 통째로 끄면 공시 문서 경로에 넓은 방어선이 하나도 안 남는다"
+    )
+
+
+def test_the_customer_scope_relaxes_nothing():
+    """고객 텍스트 범위는 무엇도 완화하지 않는다 — 거짓양성 비용이 낮은 쪽이다."""
+    from app import pii
+
+    assert "ACCOUNT" in pii.detect("계좌 123-456-7890", scope="customer")
+    assert "EMAIL" in pii.detect("메일 a@b.co.kr", scope="customer")
