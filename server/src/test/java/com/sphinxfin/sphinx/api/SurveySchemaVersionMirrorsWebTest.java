@@ -46,6 +46,17 @@ class SurveySchemaVersionMirrorsWebTest {
                         + "SurveySchema.ALLOWED_VERSIONS 도 같이 올린다. 안 그러면 배포된 화면의 "
                         + "세션 생성이 전부 400 이다")
                 .isTrue();
+
+        // 포함만 보면 집합에 뭐가 더 있어도 통과한다 — 그래서 죽은 값을 남겨 두는
+        // 상태가 초록이었다(PR #550 리뷰가 v3 로 올리는 상황을 만들어 확인했다).
+        // 세트 교체가 이 검증이 상정한 바로 그 순간이므로, 그때 서버 쪽 한 줄을 지우는
+        // 것을 잊으면 아무도 안 물어 준다. 그 자리를 이 단정이 막는다.
+        assertThat(SurveySchema.ALLOWED_VERSIONS)
+                .as("허용 집합에 살아 있는 세트 말고 다른 값이 있다 — 죽은 값을 남겨 두면 "
+                        + "낡은 번들이 그 값으로 불변 기록을 남길 수 있다. 세트를 올렸으면 "
+                        + "옛 값을 지운다. 배포 전환 창 때문에 둘을 받아야 한다면 그 이유와 "
+                        + "언제 지울지를 SurveySchema 주석에 적고 이 단정을 고친다")
+                .containsExactly(webVersion);
     }
 
     @Test
