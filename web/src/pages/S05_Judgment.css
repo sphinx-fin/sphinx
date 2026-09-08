@@ -172,6 +172,12 @@
 
 .s05__item-head {
   display: flex;
+  /* ❗이 파일의 다른 flex 줄은 전부 wrap 하는데 여기만 없었다 — 그리고 세 번째 고정폭
+     자식(「재검증 N회」 칩)이 붙었다. 긴 위험항목 이름 + 등급 배지 + 그 칩이면 h3 가
+     min-content 까지만 줄고 그 뒤로 카드 밖으로 넘친다. 좁은 화면(@media 40rem)과
+     고령자 모드(--scale 이 칩 글자·패딩을 같이 키운다)에서 더 빨리 닿는다.
+     PR #526 리뷰 ⑦. */
+  flex-wrap: wrap;
   gap: var(--space-3);
   align-items: baseline;
   justify-content: space-between;

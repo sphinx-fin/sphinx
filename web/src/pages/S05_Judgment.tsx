@@ -113,6 +113,14 @@ const GRADE_LABEL: Record<Grade, string> = {
  */
 const GRADE_ORDER: readonly Grade[] = ["U4", "U3", "U2", "U1"];
 
+/**
+ * 소진 문면. 상수로 올린 이유는 **두 갈래가 같은 말을 해야** 하기 때문이다 —
+ * 서버 값으로 그리는 자리와 눌러서 받은 400 을 그리는 자리(`noteFor`)에 각각
+ * 리터럴을 두면, 한쪽만 고쳤을 때 **어느 문장이 뜨는지가 「판매자가 눌렀는가」에
+ * 달린다**(PR #526 리뷰).
+ */
+const EXHAUSTED_TEXT = "재검증 횟수를 다 썼어요. 이 항목은 판정으로 넘어가요.";
+
 /** 신호등 라벨. 색과 **반드시** 함께 나간다(tokens.css 규칙 3). */
 const SIGNAL_LABEL: Record<Signal, string> = {
   GREEN: "통과",
@@ -197,21 +205,34 @@ export default function S05Judgment() {
     // 판매자가 보고 있던 판정이 몇 초마다 사라졌다 돌아온다 — 손으로 누른 새로고침과
     // 스스로 도는 되읽기는 **같은 데이터를 받아도 덮개를 씌우는지가 다르다.**
     if (!silent) setLoading(true);
+    // ❗**손으로 누른 새로고침은 낡은 노트를 지운다**(PR #526 리뷰 ②). 노트는 이 창에서
+    //   누른 결과라 `load()` 가 새 값을 다 읽어 와도 남아 있었고, 지우는 자리가 그 항목의
+    //   버튼을 다시 누를 때뿐이었다 — 그런데 소진되면 그 버튼이 사라진다. 그러면
+    //   «다시 시도해 주세요» 가 붙은 채 다시 시도할 방법이 없다.
+    //   조용한 되읽기에서는 안 지운다: 방금 받은 거절이 4초 뒤에 사라지면 안 된다.
+    if (!silent) setReNotes([]);
     try {
       const s = await get<SessionResponse>(`/sessions/${sid}`);
-      const [js, ri] = await Promise.all([
+      // ❗**세 호출을 한 배치로 묶는다.** `/gate-preview` 는 `sid` 하나에만 의존하는데
+      //   예전에는 뒤에서 따로 `await` 했다 — 매 로드마다 왕복이 하나 더 붙고, 그건
+      //   4초 폴링과 창 복귀 되읽기에도 그대로 걸린다(PR #526 리뷰).
+      const [js, ri, g] = await Promise.all([
         get<JudgmentsResponse>(`/sessions/${sid}/judgments`),
         get<{ items: RiskItem[] }>(`/products/${s.productId}/risk-items`),
+        // 확정된 세션에도 그대로 부른다 — 계약이 "이미 판정된 세션은 재계산하지 않고
+        // 기록값을 돌려준다(recorded=true)" 고 명시한다. 화면이 미리보기인지 확정인지는
+        // 세션 상태가 아니라 그 `recorded` 가 정한다(설계 판단 ⑥).
+        get<GatePreview>(`/sessions/${sid}/gate-preview`),
       ]);
-      setSession(s);
+      // ❗**상태는 판정과 «같은 읽기»에서 온 것을 쓴다**(PR #526 리뷰 ⑥). 세션 조회와
+      //   판정 조회가 따로 나가므로, 그 사이에 고객이 답하면 `s.state` 는 옛 RE_EXPLAIN
+      //   인데 `js.judgments`·`js.reverify` 는 그 뒤 값이다. 그러면 이미 지나간 판정
+      //   위에 「고객 응답 대기」 배너를 그리고 버튼을 전부 숨긴다 — 다음 폴링까지.
+      //   이 PR 이 실어 온 봉투의 `state` 가 그 어긋남을 공짜로 없앤다.
+      setSession({ ...s, state: js.state });
       setJudgments(js.judgments ?? []);
       setReverify(js.reverify ?? []);
       setItems(ri.items ?? []);
-
-      // 확정된 세션에도 그대로 부른다 — 계약이 "이미 판정된 세션은 재계산하지 않고
-      // 기록값을 돌려준다(recorded=true)" 고 명시한다. 화면이 미리보기인지 확정인지는
-      // 세션 상태가 아니라 그 `recorded` 가 정한다(설계 판단 ⑥).
-      const g = await get<GatePreview>(`/sessions/${sid}/gate-preview`);
       setGate(previewView(g));
       setError(null);
     } catch (e) {
@@ -311,9 +332,12 @@ export default function S05Judgment() {
 
   const noteOf = (itemId: string) => reNotes.find((n) => n.itemId === itemId) ?? null;
 
-  /* 재검증한 적 없는 항목은 목록에 아예 없다 — 없는 것과 0 회는 같은 뜻이라 그대로 null. */
-  const reverifyOf = (itemId: string) =>
-    reverify.find((r) => r.itemId === itemId) ?? null;
+  /* 재검증한 적 없는 항목은 목록에 아예 없다 — 없는 것과 0 회는 같은 뜻이라 그대로 null.
+   *
+   * 배열을 매번 훑지 않고 한 번만 색인한다 — 4초 폴링이 목록 전체를 다시 그리고, 카드마다
+   * 이 값을 네 번 이상 본다(칩 검사·칩 값·버튼 가드·문장 가드). PR #526 리뷰 지적. */
+  const reverifyByItem = new Map(reverify.map((r) => [r.itemId, r]));
+  const reverifyOf = (itemId: string) => reverifyByItem.get(itemId) ?? null;
 
   /**
    * 소진 판단. 서버 값이 먼저고, 그게 없을 때만 이 창에서 받은 400 을 본다.
@@ -478,7 +502,12 @@ export default function S05Judgment() {
 
         {/* 누르기 전에 결과를 적는다 — 재설명은 상태를 바꾸고, 그 상태에서는 확정이
             막힌다(설계 판단 ⑦). 누른 뒤에 알게 되면 그건 화면이 숨긴 것이다. */}
-        {reExplainOpen && judgments.some((j) => j.grade !== "U1") && (
+        {/* ❗소진까지 본다(PR #526 리뷰 ③). 항목이 전부 «U1 아님 + 소진» 이면 아래 버튼이
+            하나도 안 그려지는데, 그 상태에서 «재설명을 시작하면…» 을 말하면 시작할 수
+            있는 버튼이 없는 화면이 시작 방법을 안내하는 셈이다. 예전에는 소진을 눌러서만
+            알 수 있어 새로 연 화면이 이 상태에 닿을 수 없었다. */}
+        {reExplainOpen
+          && judgments.some((j) => j.grade !== "U1" && !isExhausted(j.itemId)) && (
           <p className="s05__items-note">
             재설명을 시작하면 고객이 다시 답할 때까지 판정을 확정할 수 없습니다.
             항목당 재검증은 상한이 있고, 상한에 닿으면 그 항목은 판정으로 넘어갑니다.
@@ -505,10 +534,17 @@ export default function S05Judgment() {
                   </span>
                   {/* 사용 이력이 있으면 배지 옆에 조용히. **상한을 같이 적지 않는다**
                       (설계 판단 ⑩) — 「2회 중 1회」로 쓰면 서버가 안 싣기로 한 임계값을
-                      화면이 되돌려 놓는 셈이다. */}
+                      화면이 되돌려 놓는 셈이다.
+
+                      ❗**「재설명」이 아니라 「재검증」이다**(PR #526 리뷰 ⑤). 서버는 고객이
+                      **재답변할 때** 이 값을 올린다(`SessionService.recordJudgment` —
+                      `state == RE_EXPLAIN` 인 경우에만). 즉 재설명을 발행하고 고객이 아직
+                      답하지 않은 동안은 안 오른다. 「재설명 N회」로 쓰면 판매자가 «내가 몇 번
+                      설명했나» 로 읽는데 그 값과 한 개 어긋난다. 계약과 서버 DTO 도 재검증
+                      이라 부르고, 이 화면의 위 안내 문장도 그 어휘를 쓴다. */}
                   {(reverifyOf(j.itemId)?.used ?? 0) > 0 && (
                     <span className="s05__reverify-used">
-                      재설명 {reverifyOf(j.itemId)?.used}회
+                      재검증 {reverifyOf(j.itemId)?.used}회
                     </span>
                   )}
                 </div>
@@ -556,16 +592,23 @@ export default function S05Judgment() {
                   )}
                 </div>
 
-                {/* ❗**소진 문장은 상시 표시다**(설계 판단 ⑩). 눌러서 받은 거절 문장이
-                    있으면 그것을 쓰고(방금 일어난 일이라 더 구체적이다), 없으면 서버가
-                    실어 준 상태를 그대로 문장으로 낸다 — 이 창에서 아무것도 안 눌렀어도
-                    「다 썼다」가 보여야 한다. */}
-                {noteOf(j.itemId) ? (
+                {/* ❗**소진 문장은 상시 표시다**(설계 판단 ⑩) — 이 창에서 아무것도 안
+                    눌렀어도 「다 썼다」가 보여야 한다.
+
+                    ❗**순서가 뒤집혔다**(PR #526 리뷰 ②). 예전에는 노트를 먼저 봤는데, 그러면
+                    마지막 한 번을 누른 요청이 응답만 깨진 경우 «다시 시도해 주세요» 가 남고
+                    **다시 시도할 버튼은 서버 값 때문에 이미 사라진** 상태가 된다. 서버가
+                    소진이라고 말하면 그것이 이 항목의 사실이므로 먼저 그린다.
+
+                    ❗**두 가드가 붙는다.** 예전에 이 문장은 눌러서 받은 400 에만 나왔고,
+                    그 클릭 자체가 «U1 아님 + 재설명 가능» 을 이미 통과한 뒤였다(버튼이
+                    그 조건으로 그려진다). 상시 표시로 옮기면서 그 전제가 사라졌다 —
+                    · U1 에 붙으면 통과한 항목에 한계 경고가 달린다(리뷰 ①)
+                    · 확정된 세션에 붙으면 «넘어가요» 가 미래형으로 남는다(리뷰 ④) */}
+                {isExhausted(j.itemId) && j.grade !== "U1" && !gate?.settled ? (
+                  <p className="s05__renote">{EXHAUSTED_TEXT}</p>
+                ) : noteOf(j.itemId) && (
                   <p className="s05__renote" role="status">{noteOf(j.itemId)?.text}</p>
-                ) : isExhausted(j.itemId) && (
-                  <p className="s05__renote">
-                    재설명 횟수를 다 썼어요. 이 항목은 판정으로 넘어가요.
-                  </p>
                 )}
               </li>
             ))}
@@ -690,10 +733,7 @@ export default function S05Judgment() {
 function noteFor(itemId: string, e: unknown): ReExplainNote {
   if (e instanceof ApiRequestError) {
     if (e.code === "REVERIFY_EXHAUSTED") {
-      return {
-        itemId, kind: "exhausted",
-        text: "재설명 횟수를 다 썼어요. 이 항목은 판정으로 넘어가요.",
-      };
+      return { itemId, kind: "exhausted", text: EXHAUSTED_TEXT };
     }
     if (e.code === "REEXPLAIN_NOT_ELIGIBLE") {
       return {
