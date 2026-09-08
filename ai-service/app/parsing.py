@@ -701,6 +701,15 @@ def _manual_override(path: Path, *, product_type: str,
     """
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError as exc:
+        # ❗**`OSError` 보다 먼저 잡는다.** `PermissionError` 는 `OSError` 의 하위라 아래
+        #   절이 먼저 오면 여기서 먹혀 「파스 출력을 못 읽는다」(422)가 된다 — 그건 거짓이다.
+        #   파일은 멀쩡하고 못 읽는 것이 우리 쪽이라, 고치는 자리가 **볼륨 소유권**이다.
+        #   `#548` 리뷰(윤지석)가 실측으로 잡았다: 이 예외는 밖으로 안 나가므로 호출자가
+        #   감싸도 **거기서는 절대 못 잡는다.**
+        raise DocumentAccessDenied(
+            f"수동 파스 출력을 읽을 권한이 없다: {path.name} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
     except (OSError, json.JSONDecodeError) as exc:
         # ❗PDF 로 폴백하지 않는다. 사람이 고쳐 둔 것이 안 읽히는데 파싱이 성공하면,
         # 그 사람은 고쳤다고 믿고 우리는 옛 결과를 쓴다.
@@ -751,12 +760,29 @@ def parse_upload(
     """
     path = resolve_document_path(document_path, root=root)
     if not path.is_file():
+        # ❗**`is_file()` 은 `EACCES` 를 삼키고 `False` 를 준다**(3.14 실측, `#548` 리뷰).
+        #   그래서 「파일이 없다」와 「상위 디렉토리를 못 본다」가 **같은 답**으로 온다.
+        #   뒤쪽은 볼륨 소유권 사고이고 고칠 자리가 전혀 다른데 `DocumentNotFound` 로
+        #   나가면 운영자가 업로드·마운트를 뒤진다. `stat()` 은 삼키지 않으므로 그것으로 가른다.
+        try:
+            path.stat()
+        except PermissionError as exc:
+            raise DocumentAccessDenied(
+                f"문서가 있는 자리를 읽을 권한이 없다: {document_path!r} — 볼륨 소유권을 본다"
+                f"(server 는 uid 10001 로 돈다)") from exc
+        except OSError:
+            pass    # 진짜 없다(ENOENT 등) — 아래 DocumentNotFound 가 맞다
         raise DocumentNotFound(f"문서가 없다: {document_path!r}")
 
     # ❗**권한을 미리 보지 않는다** — `os.access()` 로 앞서 확인하면 확인과 열기 사이에
     #   바뀔 수 있고(TOCTOU), 무엇보다 **실제 실패 지점에서 잡는 것이 정확하다.** 여기서
     #   감싸는 이유는 `PermissionError` 가 `ParseRefused` 계열 밖이라 그대로 새면 500 이
     #   되고 상류가 그것을 「ai-service 장애」로 오진하기 때문이다(#532 리뷰).
+    #
+    # ❗**이 절이 덮는 것은 `override.is_file()` 뿐이다.** JSON 을 실제로 읽는 자리는
+    #   `_manual_override` 안이고 **거기서 이미 갈라 낸다** — 그쪽이 `PermissionError` 를
+    #   밖으로 안 내므로 여기서는 잡을 수가 없다(`#548` 리뷰가 실측으로 잡았다). 감싸는
+    #   범위를 실물보다 넓게 적으면 다음 사람이 이 줄을 방어로 읽는다.
     try:
         override = path.with_suffix(".json")
         if override.is_file():
@@ -764,7 +790,7 @@ def parse_upload(
                                     document_id=document_id, parsed_at=parsed_at)
     except PermissionError as exc:
         raise DocumentAccessDenied(
-            f"파스 출력을 읽을 권한이 없다: {override.name!r} — 볼륨 소유권을 본다"
+            f"파스 출력이 있는지 볼 권한이 없다: {override.name!r} — 볼륨 소유권을 본다"
             f"(server 는 uid 10001 로 돈다)") from exc
 
     try:
@@ -779,9 +805,13 @@ def parse_upload(
         # 둘 다 입력 문제라 500 이 아니다.
         raise DocumentUnreadable(str(exc)) from exc
     except PermissionError as exc:
-        # ❗`_UNREADABLE` 보다 **먼저** 잡는다. pdfplumber 가 권한 오류를 자기 예외로
-        #   감싸면 「문서가 안 열린다」(422)로 보고되는데, 그건 거짓이다 — 문서는 멀쩡하고
-        #   못 읽는 것이 우리 쪽이다. 고치는 자리가 문서가 아니라 볼륨 소유권이다.
+        # ❗`_UNREADABLE` 보다 **먼저** 둔다 — 다만 지금 pdfplumber 는 권한 오류를 자기
+        #   예외로 **감싸지 않는다**(`#548` 리뷰 실측). 그러니 이 순서가 오늘 답을 바꾸지는
+        #   않는다. 순서를 지키는 이유는 감싸는 판이 오는 날을 위해서다 — 그날 `_UNREADABLE`
+        #   이 먼저면 「문서가 안 열린다」(422)가 되는데 그건 거짓이다. 문서는 멀쩡하고 못
+        #   읽는 것이 우리 쪽이라 고칠 자리가 볼륨 소유권이다.
+        #   ❗감싸는 판이 오면 이 절만으로는 부족하다 — `PdfminerException.__cause__` 를
+        #   봐야 하고, 그건 별건이다.
         raise DocumentAccessDenied(
             f"문서를 읽을 권한이 없다: {document_path!r} — 볼륨 소유권을 본다"
             f"(server 는 uid 10001 로 돈다)") from exc
