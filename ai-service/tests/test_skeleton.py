@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -338,3 +339,263 @@ def test_started_at_is_the_process_constant_not_the_request_time(monkeypatch):
 
     monkeypatch.setattr(main, "STARTED_AT", "1999-12-31T23:59:59+00:00")
     assert client.get("/healthz").json()["started_at"] == "1999-12-31T23:59:59+00:00"
+
+# ── 완화는 «측정된 오탐」만큼만 준다 (P3 · #527 로 모집단이 바뀌었다) ──────────
+#
+# 위 `test_only_document_paths_relax_broad_pii_heuristics` 가 **어느 경로가** 완화되는지를
+# 지킨다. 아래 넷은 그 경로에서 **무엇이** 완화되는지를 지킨다 — 예전에는 `BROAD` 를
+# 통째로 껐고, 오탐을 내는 것이 무엇인지 잰 적이 없었다.
+#
+#     tools/measure_public_document_pii.py · 커밋된 공시 문서 4건 전문
+#     ACCOUNT 2건 ('02-785-7424' · '02-2262-6600' — 둘 다 서울 지역번호) · EMAIL 0 · CARD 0
+#
+# ❗그리고 `#527`(업로드 실배선) 이후 이 자리에 오는 것이 **사람이 고른 문서**에서
+# **ADMIN 이 올린 임의의 PDF** 로 바뀌었다. *"공시 자료라서 안전하다"* 가 조건부가 됐다.
+def _extract(monkeypatch, *, pages=None, tables=None):
+    """미들웨어를 **실제로 지나게** 한다.
+
+    ❗`pii.detect()` 를 직접 부르면 `PiiGuardMiddleware._scope()` 나
+    `PUBLIC_DOCUMENT_PATHS` 가 어긋나도 전부 초록이다(`#534` 리뷰, 오준서).
+    기존 `test_corporate_phone_in_document_is_not_blocked` 의 관례를 따른다 —
+    핸들러를 대체해 실제 LLM 을 안 부른다.
+    """
+    from app import routes
+    from app.schemas import ExtractResponse
+
+    monkeypatch.setattr(routes.extraction, "extract",
+                        lambda *a, **k: ExtractResponse(items=[], warnings=[]))
+    document = {"document_id": "d", "product_type": "ELS", "parser_version": "x",
+                "pages": pages or [{"page": 1, "text": "본문"}]}
+    if tables is not None:
+        document["tables"] = tables
+    return client.post("/internal/extract",
+                       json={"product_id": "p", "parsed_document": document})
+
+
+def test_a_real_account_number_is_caught_in_a_public_document(monkeypatch):
+    """★ **이게 이 변경의 목적이다.** 예전에는 `ACCOUNT` 를 통째로 꺼서 검사 밖이었다.
+
+    법인 대표번호 하나가 오탐을 냈다는 이유로 진짜 계좌번호까지 놓쳤다 —
+    `CORPORATE_CONTACT` 가 그 오탐만 지우므로 이제 켠 채로 둘 수 있다.
+    """
+    resp = _extract(monkeypatch, pages=[{"page": 1, "text": "입금 계좌 110-234-567890"}])
+    assert resp.status_code == 422
+    assert resp.json()["kinds"] == ["ACCOUNT"]
+
+
+def test_a_corporate_landline_still_passes(monkeypatch):
+    """실측된 오탐 둘은 그대로 통과해야 한다 — 막으면 정상 문서의 추출이 죽는다.
+
+    ❗**형식을 넷으로 늘렸다** (`#534` 리뷰 ①, 오준서). 앞의 둘만 지키면 «서울 지역번호만»
+    을 재는 것이고, `080`(수신자부담)·`070`(인터넷전화)은 **이 PR 이 `ACCOUNT` 를 켜면서
+    새로 422 가 됐다** — 이 PR 이전에는 `BROAD` 가 통째로 꺼져 있어 통과하던 값이다.
+    회귀를 만든 방향이라 그물이 그 자리를 지켜야 한다.
+    """
+    for phone in ("02-785-7424", "02-2262-6600", "080-123-4567", "070-1234-5678"):
+        resp = _extract(monkeypatch, pages=[{"page": 1, "text": f"문의 {phone}"}])
+        assert resp.status_code == 200, f"{phone} 가 막혔다: {resp.json()}"
+
+
+def test_a_numeric_table_row_is_not_mistaken_for_a_card(monkeypatch):
+    """★ **`CARD` 를 켜면 죽는 자리**(`#534` 리뷰, 오준서).
+
+    `(?:\d{4}[-\s]?){3}\d{4}` 는 **공백으로 나뉜 4자리 넷이면 전부** 문다. ELS 설명서의
+    조기상환 평가일 표·지수 레벨 행이면 바로 닿고, pdfplumber 는 표 한 행을 공백으로
+    이어 붙인 한 줄로 낸다. 켜면 운영자가 올린 정상 문서가 422 로 죽는다.
+    """
+    from app import pii
+
+    for row in ("평가일 2024 2025 2026 2027 만기", "기초자산 지수 3245 1180 2870 4410"):
+        assert pii.BROAD["CARD"].search(row), f"전제가 깨졌다 — 이 문면이 CARD 에 안 걸린다: {row}"
+        resp = _extract(monkeypatch, pages=[{"page": 1, "text": row}])
+        assert resp.status_code == 200, f"숫자 표가 막혔다: {row} → {resp.json()}"
+
+
+def test_the_table_cells_are_checked_too(monkeypatch):
+    """★ `tables` 도 본문의 일부다 — 페이지 텍스트만 재면 **차단 표면보다 작은 데서** 잰다.
+
+    `assert_payload_clean` 은 `_walk_strings` 로 본문의 모든 문자열을 훑는다
+    (`#534` 리뷰, 오준서).
+    """
+    resp = _extract(monkeypatch,
+                    pages=[{"page": 1, "text": "본문에는 없다"}],
+                    tables=[{"page": 1, "rows": [["계좌", "110-234-567890"]]}])
+    assert resp.status_code == 422
+    assert resp.json()["kinds"] == ["ACCOUNT"]
+
+
+def test_the_measured_false_positive_stays_relaxed():
+    """실측된 오탐(발행사 대표번호)은 통과해야 한다 — 막으면 추출이 422 로 죽는다."""
+    from app import pii
+
+    for phone in ("02-785-7424", "02-2262-6600", "080-123-4567", "070-1234-5678"):
+        assert pii.detect(f"문의 {phone}", scope="public_document") == [], phone
+
+
+def test_the_broad_residual_is_built_in_one_place():
+    """★ **`detect()` 가 `residual_for_broad()` 를 실제로 부른다** (`#534` 리뷰 ②).
+
+    그 함수 docstring 이 *"`detect()` 와 도구가 이 함수를 같이 쓴다"* 로 단정하는데
+    한동안 **거짓이었다** — `_prestrip` 만 공유하고 SPECIFIC 제거를 각자 돌았다. 그래서
+    그 함수만 고치는 변이가 **도구의 숫자만 바꾸고 아무 테스트도 안 깨뜨렸다.**
+
+    소스를 보는 대조다. 결과만 재면 사본이 같은 답을 내는 동안 초록이고, 그게 이 결함이
+    오래 산 이유다(`#552` 에서 같은 이유로 소스 검사를 걸었다).
+    """
+    import inspect
+
+    from app import pii
+
+    # ❗**AST 로 호출 노드를 본다** (`#534` 리뷰 ⓑ, 오준서). 처음엔 `#` 줄만 걷었는데
+    #   **독스트링은 안 걷혔다** — 나중에 독스트링에 그 이름을 적으면 코드가 안 불러도
+    #   통과한다. 문면을 걷는 방식은 걷는 종류를 하나씩 늘리게 되고, 그 목록이 곧 구멍이다.
+    #   `#368`(내가 방금 단 주석이 검사를 만족시킨다)의 다음 칸이다.
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(pii.detect)))
+    called = {n.func.id for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "residual_for_broad" in called, (
+        f"`detect` 가 residual_for_broad 를 안 부른다 — 잔여를 여기서 또 만든다: {sorted(called)}"
+    )
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert "items" in attrs, "SPECIFIC 이름 수집이 사라졌다 — 이 대조가 뜻을 잃는다"
+
+
+def test_a_phone_is_not_also_reported_as_an_account():
+    """★ **좁은 패턴을 지운 뒤에 넓은 패턴을 본다** — 그 제거가 실제로 도는지 잰다.
+
+    `BROAD` 주석이 이유를 적어 뒀다: *"겹친 채로 두면 전화번호가 `ACCOUNT` 로도 보고돼
+    상류 P3 위반을 추적할 때 오도한다."* 그런데 **그 제거를 지워도 아무 테스트가 안
+    깨졌다** — `#534` 리뷰 ②를 고치면서 변이를 걸어 보고 알았다(오준서의 그 변이가
+    `detect()` 까지 오게 된 뒤에도 초록이었다).
+
+        residual_for_broad 에서 SPECIFIC 제거를 뺀다
+          detect("제 번호 010-1234-5678", "customer")  →  ['PHONE', 'ACCOUNT']
+                                                          운영자는 계좌번호를 찾으러 간다
+    """
+    from app import pii
+
+    for scope in pii.SCOPES:
+        assert pii.detect("제 번호 010-1234-5678", scope=scope) == ["PHONE"], scope
+        assert pii.detect("가입자 900101-1234567", scope=scope) == ["RRN"], scope
+        # ❗**좁은 패턴끼리 겹치는 입력**을 같이 잰다 (`#534` 리뷰 ③). 위 둘은 안 겹쳐서
+        #   이 자리를 못 본다 — `010123-1234567` 은 2001-01-23 생의 평범한 주민번호이고
+        #   `PHONE` 이 그 안의 `010123-1234` 를 문다. 결정 9.17(모집단)의 또 한 판본이다.
+        assert pii.detect("가입자 010123-1234567", scope=scope) == ["RRN"], scope
+        assert pii.detect("연락 0101231234567", scope=scope) == ["RRN"], scope
+
+
+def test_the_narrow_patterns_are_never_relaxed():
+    """주민번호·개인 휴대번호는 어느 범위에서도 막는다."""
+    from app import pii
+
+    for scope in pii.SCOPES:
+        assert "RRN" in pii.detect("901201-1234567", scope=scope)
+        assert "PHONE" in pii.detect("010-1234-5678", scope=scope)
+
+
+def test_the_relaxation_names_are_real_and_partial():
+    """★ 완화 목록에 오타가 있으면 **아무것도 안 끄면서 조용히 통과**한다.
+
+    범위를 늘려도 같이 돈다 — 표를 순회한다(`#534` 리뷰, 오준서).
+    """
+    from app import pii
+
+    for scope, rule in pii.SCOPE_RULES.items():
+        unknown = rule["relaxed"] - set(pii.BROAD)
+        assert not unknown, f"{scope}: BROAD 에 없는 이름이 완화 목록에 있다: {sorted(unknown)}"
+        assert set(pii.BROAD) - rule["relaxed"], (
+            f"{scope}: 넓은 패턴을 통째로 끄면 넓은 방어선이 하나도 안 남는다"
+        )
+    assert pii.SCOPE_RULES["public_document"]["relaxed"], (
+        "공시 문서 완화가 비면 정상 문서가 422 로 막힌다 — 그게 이 범위가 존재하는 이유다"
+    )
+    assert not pii.SCOPE_RULES["customer"]["relaxed"], (
+        "고객 범위는 무엇도 완화하지 않는다 — 거짓양성 비용이 낮은 쪽이다(P3)"
+    )
+
+
+def test_the_scope_table_is_the_only_place_that_declares_a_scope():
+    """★ **범위를 반쪽만 들이는 경로가 없어야 한다** (`#534` 리뷰, 오준서).
+
+    예전에는 이 사실이 세 곳의 `scope == "public_document"` 조건으로 흩어져 있었다.
+    범위가 하나 늘 때 두 곳만 고쳐도 조용히 돌던 자리다.
+    """
+    from app import pii
+
+    assert set(pii.SCOPES) == set(pii.SCOPE_RULES), "SCOPES 가 표에서 파생되지 않는다"
+    for scope, rule in pii.SCOPE_RULES.items():
+        assert set(rule) == {"relaxed", "prestrip"}, f"{scope}: 표의 칸이 다르다 — {sorted(rule)}"
+    with pytest.raises(ValueError):
+        pii.detect("본문", scope="branch_office")
+
+
+def test_the_customer_scope_relaxes_nothing():
+    """고객 텍스트 범위는 무엇도 완화하지 않는다 — 거짓양성 비용이 낮은 쪽이다."""
+    from app import pii
+
+    assert "ACCOUNT" in pii.detect("계좌 123-456-7890", scope="customer")
+    assert "EMAIL" in pii.detect("메일 a@b.co.kr", scope="customer")
+
+
+def test_the_corporate_strip_does_not_reach_customer_text():
+    """★ 법인 연락처 선지우기가 **고객 범위로 새면 안 된다.**
+
+    유선번호는 개인 집전화일 수 있다. 그 범위는 거짓양성 비용이 낮은 쪽이라(P3) 지우지
+    않는다 — 지우면 고객 발화의 집전화가 조용히 통과한다.
+
+    ❗이 대조가 없으면 범위 조건을 지우는 변이가 안 잡힌다. 기존 대조가 쓰던
+    `123-456-7890` 은 지역번호로 안 시작해 `CORPORATE_CONTACT` 에 애초에 안 걸린다.
+    """
+    from app import pii
+
+    assert pii.detect("문의 02-785-7424", scope="public_document") == []
+    assert "ACCOUNT" in pii.detect("집 02-785-7424 로 연락 주세요", scope="customer")
+
+
+# ── 422 문면이 고칠 자리를 가리킨다 (#534 리뷰) ──────────────────────────────
+#
+# ❗예전에는 두 범위가 같은 문면이었다 — *"상류 PiiGateway를 거치지 않은 텍스트입니다"*.
+# 그 문장은 `public_document` 에서 **설계상 절대 참이 아니다**: 파스된 PDF 는
+# `PiiGateway.mask()` 를 지나지 않는다(그건 고객 텍스트의 단일 경로다).
+#
+# 그리고 이 완화를 좁혀 `ACCOUNT` 를 켜면 그 경로에 닿는 빈도가 **오히려 올라간다** —
+# 그러면 운영자가 `core/pii/` 에서 없는 버그를 찾는다(`#534` 리뷰, 오준서).
+def test_the_customer_scope_422_points_at_the_upstream_gateway():
+    """고객 경로의 원인은 **상류 마스킹 누락**이다."""
+    resp = client.post("/internal/score", json={
+        "item_id": "x", "question": "q", "answer_text": "가입자 900101-1234567",
+        "risk_item": {}, "product_type": "ELS"})
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["scope"] == "customer"
+    assert "PiiGateway" in body["detail"]
+
+
+def test_the_document_scope_422_does_not_blame_the_gateway(monkeypatch):
+    """★ 공시 문서 경로의 원인은 **올린 문서**다 — 상류를 지목하면 안 된다."""
+    resp = _extract(monkeypatch, pages=[{"page": 1, "text": "가입자 900101-1234567"}])
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["scope"] == "public_document"
+    assert "문서" in body["detail"]
+    assert "거치지 않은 텍스트" not in body["detail"], (
+        "이 경로는 애초에 PiiGateway 를 안 지난다 — 상류 누락으로 읽히면 없는 버그를 찾는다"
+    )
+
+
+def test_every_scope_has_its_own_detail():
+    """★ 범위가 늘면 문면도 늘어야 한다 — `KeyError` 로 500 이 되지 않게."""
+    from app import pii
+    from app.main import PiiGuardMiddleware
+
+    assert set(PiiGuardMiddleware._DETAIL) == set(pii.SCOPES), (
+        "범위와 문면이 안 맞는다 — 빠진 범위에서 422 가 KeyError 로 500 이 된다"
+    )
+    assert len(set(PiiGuardMiddleware._DETAIL.values())) == len(pii.SCOPES), (
+        "두 범위가 같은 문면이면 고칠 자리를 못 가른다 — 이 대조가 존재하는 이유다"
+    )

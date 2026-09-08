@@ -385,10 +385,16 @@ class Dense:
 
         그래서 `norm` 은 BM25·containment 만 쓴다.
         """
-        # ❗공시 상품문서다(기획 7-3) — 넓은 휴리스틱을 끄고 `SPECIFIC`(RRN·PHONE)만
-        # 본다. **끄는 이유를 아는 자리가 여기다.** 실측: `parsed_els_sample.json`
-        # (13,248자·16쪽)에서 발행사 고객센터 번호 `02-785-7424` 가 ACCOUNT 패턴에
-        # 걸린다 — `customer` 로 두면 임베딩이 422 로 막힌다(`#358` 리뷰, 강희진).
+        # ❗공시 상품문서다(기획 7-3). **범위를 명시하는 이유를 아는 자리가 여기다** —
+        # 무엇이 완화되는지는 `pii.SCOPE_RULES` 가 정하고 여기 안 베낀다.
+        # 실측: `parsed_els_sample.json`(13,248자·16쪽)에서 발행사 고객센터 번호
+        # `02-785-7424` 가 ACCOUNT 패턴에 걸린다 — `customer` 로 두면 임베딩이 422 로
+        # 막힌다(`#358` 리뷰, 강희진).
+        #
+        # ❗`#534` 로 그 오탐을 막는 방식이 바뀌었다. 예전에는 이 범위가 `ACCOUNT` 를
+        # **껐지만**, 지금은 법인 유선번호만 선지우고 `ACCOUNT` 는 **켜 둔다** — 그래서
+        # 이 경로에서도 진짜 계좌번호는 422 로 막힌다. 위 실측은 여전히 이 인자가
+        # 필요한 근거이고, 그 이유가 «ACCOUNT 를 끈다» 가 아닌 것만 다르다.
         return cls(client.embed([c.text for c in chunks], model=model,
                                 pii_scope="public_document"))
 
