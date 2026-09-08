@@ -113,6 +113,66 @@
   color: var(--text-muted);
 }
 
+/* ── 예외 승인 (F-GTE-002 · 설계 판단 ⑪) ─────────────────────────────────────
+   배너 바로 아래에 서지만 **판정이 아니다** — 승인은 게이트가 하지 않은, 사람의 결정이다.
+   그래서 판정 3색을 쓰지 않고 재설명 배너와 같은 계열(중립면 + 카드)로 둔다. 여기에
+   적/녹을 쓰기 시작하면 화면에 신호등이 두 개가 되고, 판매자는 어느 쪽이 게이트의 말인지
+   구별할 수 없게 된다(설계 판단 ②).
+
+   왼쪽 색 막대만 배너와 같은 어휘로 남긴다 — 「이 판정에 붙은 것」임을 위치와 형태로
+   말하되, 면을 채우지 않아 신호 배너와 목소리 크기가 갈린다. */
+.s05__override {
+  border: 0;
+  border-left: calc(6px * var(--scale)) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  background: var(--surface);
+  padding: var(--space-4) var(--space-5);
+}
+/* 승인 대기는 «아직 아무 일도 일어나지 않았다» 라 조용하게, 승인은 기록에 남는 사건이라
+   강조면(라피스)으로 한 단계 올린다. 판정 3색이 아니므로 신호와 다투지 않는다. */
+.s05__override--approved { border-left-color: var(--accent); }
+
+.s05__override-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+}
+/* 배지는 알약이다(tokens.css 모서리 규칙). 색이 아니라 **글자**로 상태를 말한다 —
+   색만으로 구분하지 않는다(설계 판단 ⑤). */
+.s05__override-badge {
+  padding: calc(2px * var(--scale)) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: calc(15px * var(--scale));
+  font-weight: 700;
+}
+.s05__override--approved .s05__override-badge {
+  background: var(--accent-bg);
+  color: var(--accent-hover);
+}
+.s05__override-meta {
+  font-size: calc(13px * var(--scale));
+  color: var(--text-muted);
+}
+.s05__override-desc {
+  margin-top: var(--space-2);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.55 * var(--leading-scale));
+  max-width: 62ch;
+}
+.s05__override-reason { margin-top: var(--space-3); }
+/* 인용 막대는 근거 문장(`s05__quote`)과 같은 어휘다 — 둘 다 «누가 한 말» 이라 화면에서
+   같은 모양으로 읽혀야 한다. */
+.s05__override-reason blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-3);
+  font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+}
+
 /* ── 룰 트레이스 ────────────────────────────────────────────────────────────
    감사 대상이라 접거나 숨기지 않는다. */
 .s05__trace {
