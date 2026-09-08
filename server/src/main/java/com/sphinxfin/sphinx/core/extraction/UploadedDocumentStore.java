@@ -176,14 +176,66 @@ public class UploadedDocumentStore {
                 Files.deleteIfExists(temp);
             }
         } catch (IOException e) {
-            // 여기서 실패하는 것은 마운트·권한 문제다(볼륨이 ro 로 붙은 경우가 대표적)
-            // — 잘못된 요청이 아니라 배포 설정이라 500 으로 나간다.
-            throw new UncheckedIOException(
-                    "업로드 문서를 저장하지 못했다(uploads 볼륨이 쓰기로 붙었는지 확인하라, "
-                    + "#521): " + target, e);
+            throw storeFailed(target, e);
         }
         log.info("업로드 문서 저장: path={} bytes={} sha256={}", relative, bytes.length, sha256);
         return new Stored(relative, filename, sha256, bytes.length);
+    }
+
+    /**
+     * 저장 실패를 <b>원인별 문면</b>으로 (이슈 #560).
+     *
+     * <h2>❗뭉친 문면이 원문 예외보다 나빴다</h2>
+     *
+     * <p>예전에는 모든 {@code IOException} 을 한 문면으로 냈다 —
+     * <i>"uploads 볼륨이 쓰기로 붙었는지 확인하라"</i>. 그 주석이
+     * <i>"여기서 실패하는 것은 마운트·권한 문제다"</i> 로 단정했는데, <b>{@code #557} 에서
+     * 그 단정이 거짓이었다.</b>
+     *
+     * <pre>
+     *   실제 원인          파일명이 352 바이트 (캡이 120 「자」 · ext4 한계는 255 「바이트」)
+     *   운영자가 받은 것   "uploads 볼륨이 쓰기로 붙었는지 확인하라"
+     *   운영자가 할 일     볼륨 마운트를 뒤진다 — 아무것도 안 고쳐진다
+     * </pre>
+     *
+     * <p>이 자리에 올 수 있는 것이 넷이고 <b>고칠 자리가 전부 다르다</b>.
+     *
+     * <pre>
+     *   EACCES        볼륨 소유권·ro 마운트   ← 옛 문면이 맞는 유일한 경우
+     *   ENOSPC        디스크가 찼다           #554 (상한·정리 없음)
+     *   ENAMETOOLONG  이름이 너무 길다        #558 이 예방했지만 경로 전체가 길면 여전히 가능
+     *   EROFS         읽기 전용 파일시스템     배포 설정
+     * </pre>
+     *
+     * <p>{@code ENOSPC} 가 특히 걸린다 — 30GB 루트에 상한 없는 트리가 붙어 있고({@code #554}),
+     * 그게 차는 날 <b>볼륨은 정상으로 붙어 있으므로 확인해도 아무 문제가 안 보인다.</b>
+     *
+     * <h2>확신이 없으면 원인을 적지 않는다</h2>
+     *
+     * <p>{@link java.nio.file.AccessDeniedException} 만 타입으로 확실히 갈린다 — 그때만
+     * 옛 문면을 쓴다. {@link java.nio.file.FileSystemException} 은 {@code getReason()} 이
+     * OS 문면을 들고 있으므로 <b>그것을 그대로 싣는다</b>({@code No space left on device} ·
+     * {@code File name too long}). 나머지는 <b>추측하지 않고 원문 예외를 보여준다.</b>
+     *
+     * <p>❗<b>이것이 {@code #557} 의 교훈이다</b> — 뭉친 문면은 <i>틀린 곳을 가리키므로</i>
+     * 아무 문면도 없는 것보다 나쁘다. 그리고 이 팀이 지금 세 군데서 고치는 것과 같은 부류다
+     * ({@code #548} 예외 타입 · {@code #551} HTTP 표 · {@code #556} {@code raise()}).
+     */
+    private static UncheckedIOException storeFailed(Path target, IOException e) {
+        if (e instanceof java.nio.file.AccessDeniedException) {
+            // 타입으로 확실한 유일한 경우다 — 소유권까지 짚는다(#532 의 uid 10001 건).
+            return new UncheckedIOException(
+                    "업로드 문서를 저장할 권한이 없다 — uploads 볼륨이 쓰기로 붙었는지, "
+                    + "소유자가 컨테이너 사용자(uid 10001)인지 확인하라 (#521 · #532): " + target, e);
+        }
+        if (e instanceof java.nio.file.FileSystemException fse && fse.getReason() != null) {
+            // OS 가 준 사유를 그대로 싣는다. 우리가 번역하면 그 번역이 틀리는 날이 온다.
+            return new UncheckedIOException(
+                    "업로드 문서를 저장하지 못했다(" + fse.getReason() + "): " + target, e);
+        }
+        // ❗추측하지 않는다. 원문 예외가 유일하게 확실한 정보다.
+        return new UncheckedIOException(
+                "업로드 문서를 저장하지 못했다: " + target + " — " + e, e);
     }
 
     /**
