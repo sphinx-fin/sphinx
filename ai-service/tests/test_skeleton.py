@@ -446,11 +446,21 @@ def test_the_broad_residual_is_built_in_one_place():
 
     from app import pii
 
-    # 주석에도 그 이름이 나오므로 **코드 줄만** 본다 — 문면으로 통과하면 이 대조가 거짓이 된다.
-    code = "\n".join(line for line in inspect.getsource(pii.detect).splitlines()
-                     if not line.lstrip().startswith("#"))
-    assert "residual_for_broad(" in code, "넓은 패턴이 볼 잔여를 여기서 따로 만든다 — 사본이다"
-    assert "SPECIFIC.items()" in code, "SPECIFIC 이름 수집이 사라졌다 — 이 대조가 뜻을 잃는다"
+    # ❗**AST 로 호출 노드를 본다** (`#534` 리뷰 ⓑ, 오준서). 처음엔 `#` 줄만 걷었는데
+    #   **독스트링은 안 걷혔다** — 나중에 독스트링에 그 이름을 적으면 코드가 안 불러도
+    #   통과한다. 문면을 걷는 방식은 걷는 종류를 하나씩 늘리게 되고, 그 목록이 곧 구멍이다.
+    #   `#368`(내가 방금 단 주석이 검사를 만족시킨다)의 다음 칸이다.
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(pii.detect)))
+    called = {n.func.id for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "residual_for_broad" in called, (
+        f"`detect` 가 residual_for_broad 를 안 부른다 — 잔여를 여기서 또 만든다: {sorted(called)}"
+    )
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert "items" in attrs, "SPECIFIC 이름 수집이 사라졌다 — 이 대조가 뜻을 잃는다"
 
 
 def test_a_phone_is_not_also_reported_as_an_account():
@@ -470,6 +480,11 @@ def test_a_phone_is_not_also_reported_as_an_account():
     for scope in pii.SCOPES:
         assert pii.detect("제 번호 010-1234-5678", scope=scope) == ["PHONE"], scope
         assert pii.detect("가입자 900101-1234567", scope=scope) == ["RRN"], scope
+        # ❗**좁은 패턴끼리 겹치는 입력**을 같이 잰다 (`#534` 리뷰 ③). 위 둘은 안 겹쳐서
+        #   이 자리를 못 본다 — `010123-1234567` 은 2001-01-23 생의 평범한 주민번호이고
+        #   `PHONE` 이 그 안의 `010123-1234` 를 문다. 결정 9.17(모집단)의 또 한 판본이다.
+        assert pii.detect("가입자 010123-1234567", scope=scope) == ["RRN"], scope
+        assert pii.detect("연락 0101231234567", scope=scope) == ["RRN"], scope
 
 
 def test_the_narrow_patterns_are_never_relaxed():

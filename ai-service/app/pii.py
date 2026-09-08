@@ -166,17 +166,29 @@ def detect(text: str, scope: str = "customer") -> list[str]:
         raise ValueError(f"알 수 없는 검사 범위 {scope!r}. 허용: {list(SCOPES)}")
     if not text:
         return []
-    # ❗**넓은 패턴이 보는 잔여는 `residual_for_broad()` 가 만든다** (`#534` 리뷰 ②, 오준서).
-    #   그 함수 docstring 이 *"`detect()` 와 도구가 이 함수를 같이 쓴다"* 라고 적어 뒀는데
-    #   **여기가 안 불렀다** — `_prestrip` 만 공유하고 SPECIFIC 제거 루프를 한 벌 더 들고
-    #   있었다. 그래서 그 함수만 고치는 변이가 **도구의 숫자만 조용히 바꾸고 아무 테스트도
-    #   안 깨뜨렸다.** 사본이 사라진 게 아니라 작아져 있었고, 이 PR 이 「거짓이 된 주석 넷」
-    #   을 고치며 세운 기준에 그 함수 자신이 안 맞는 상태였다.
+    # ❗**좁은 패턴끼리도 「지워 가며」 본다** (`#534` 리뷰 ③, 오준서). 한 문자열에 전부
+    #   걸면 `RRN` 하나가 `PHONE` 으로도 보고된다 — `010123-1234567`(2001-01-23 생)에서
+    #   `PHONE` 이 `010123-1234` 를 문다(실측). `PHONE` 이 `01[016789]` 로 시작하므로
+    #   **2001년 1·6~12월 출생분이 통째로** 이 겹침에 들어간다.
+    #
+    #   `BROAD` 주석이 적어 둔 *"겹친 채로 두면 상류 P3 위반을 추적할 때 오도한다"* 가
+    #   SPECIFIC 안에서도 성립한다. 거부되는 것은 어느 쪽이든 같으니 구멍은 아니고
+    #   **진단이 틀리는 자리**다 — 주민번호만 든 필드에 「PHONE 도 있다」가 붙으면
+    #   운영자가 없는 전화번호를 찾으러 간다.
     specific_residual = _prestrip(text, scope)
-    kinds = [name for name, pat in SPECIFIC.items() if pat.search(specific_residual)]
+    kinds = []
+    for name, pat in SPECIFIC.items():
+        if pat.search(specific_residual):
+            kinds.append(name)
+            specific_residual = pat.sub(" ", specific_residual)
+
+    # ❗**넓은 패턴이 보는 잔여는 `residual_for_broad()` 가 만든다** (`#534` 리뷰 ②).
+    #   ❗**한 번만 부른다** (같은 리뷰 ⓐ). 제너레이터 안에 두면 `customer` 에서 3회 돌고
+    #   (완화가 없어 `and` 가 단락되지 않는다) 31,600자 입력에서 3.3ms → 2.0ms 차이였다.
+    broad_residual = residual_for_broad(text, scope)
     relaxed = SCOPE_RULES[scope]["relaxed"]
     kinds.extend(name for name, pat in BROAD.items()
-                 if name not in relaxed and pat.search(residual_for_broad(text, scope)))
+                 if name not in relaxed and pat.search(broad_residual))
     return kinds
 
 
