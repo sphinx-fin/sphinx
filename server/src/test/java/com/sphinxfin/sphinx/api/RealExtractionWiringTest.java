@@ -154,21 +154,21 @@ class RealExtractionWiringTest {
     }
 
     @Test
-    @DisplayName("저장된 추출이 없으면 MockData 폴백이다 — 키 없는 환경의 데모가 계속 돈다")
-    void fallsBackToMockDataWithoutAStoredExtraction() throws Exception {
-        stubQuestion();
+    @DisplayName("❗저장된 추출이 없으면 404 다 — 목으로 덮으면 「추출을 안 돌렸다」가 감춰진다 (#478)")
+    void withoutAStoredExtractionItIsNotFound() throws Exception {
+        // 예전에는 여기서 MockData 폴백이 ELS 목 2건을 200 으로 냈다. 그 값이 `RiskItem` 으로
+        // 나가는 순간 **출처 표시가 없어서**(그 레코드에 필드가 없다) 화면·게이트·교부 문서가
+        // 실물로 받았고, "이 항목이 진짜 문서에서 나온 것인가" 에 답할 수 없었다.
+        //
+        // ❗prod 에서 반드시 물리는 자리였다 — 빈 DB 에 폴백이 있으면 extract 를 돌리기 전에
+        //   목이 나가고, 그게 「추출을 안 돌렸다」를 감춘다. 404 는 그것을 드러내는 신호다.
+        mvc.perform(get("/products/{id}/risk-items", ELS))
+                .andExpect(status().isNotFound());
 
-        String body = mvc.perform(get("/products/{id}/risk-items", ELS))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        assertThat(JsonPath.<List<String>>read(body, "$.data.items[*].itemId"))
-                .containsExactly("ELS-PRINCIPAL-LOSS-WARNING", "ELS-NO-DEPOSIT-INSURANCE");
-
+        // 세션 경유도 같다 — 면담이 물을 항목이 없으면 물을 수 없다고 답해야 한다.
         String sid = createSession();
         mvc.perform(post("/sessions/{sid}/questions/next", sid))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.itemId").value("ELS-PRINCIPAL-LOSS-WARNING"))
-                .andExpect(jsonPath("$.data.total").value(2));
+                .andExpect(status().isNotFound());
     }
 
     /** 목에는 없는 이름의 extracted 항목 하나. */

@@ -45,6 +45,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("응답 봉투 일괄 적용")
 class EnvelopeContractTest {
 
+    /**
+     * 데모 상품에 추출 스냅샷을 심는다 — 폴백을 걷었으므로(이슈 #478) 이 픽스처가 필요하다.
+     *
+     * <p>예전에는 프로덕션 폴백({@code MockDataFallbackCatalog})이 추출 없는 상품에도 목
+     * 2건을 냈고, 이 테스트는 아무것도 심지 않고 세션을 만들었다 — 즉 <b>프로덕션 코드가
+     * 테스트 픽스처 노릇</b>을 하고 있었다. 그 값이 화면·게이트·교부 문서로도 흘렀고
+     * {@code RiskItem} 에 출처 필드가 없어 구별되지 않았다.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void seedDemoExtraction() {
+        com.sphinxfin.sphinx.core.extraction.DemoExtractionFixture.seedEls(demoExtractionRepository);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository
+            demoExtractionRepository;
+
     @Autowired
     private MockMvc mvc;
     @Autowired

@@ -113,7 +113,7 @@ public class SessionController {
     public ApiResponse<RiskItemsResponse> riskItems(@PathVariable String sid) {
         Session session = sessionService.get(sid);   // 없는 세션이면 404
         // 추출(F-EXT-002)이 붙었다 — session.productId() 의 저장된 스냅샷을 읽고, 없으면
-        // MockData 폴백이다(ProductRiskItems). 세션을 실제로 조회한 뒤 내는 규약은 그대로다 —
+        // 저장된 추출뿐이다(ProductRiskItems — 없으면 404, #478). 세션을 실제로 조회한 뒤 내는 규약은 그대로다 —
         // 그래야 없는 세션과 남의 세션이 여기서 걸린다.
         log.debug("세션 {} (상품 {}) 의 이해항목을 낸다", session.id(), session.productId());
         return ApiResponse.ok(new RiskItemsResponse(
@@ -143,7 +143,7 @@ public class SessionController {
         // 보완하면 서버가 물어볼 항목 수와 어긋나 조용히 틀린 진행률이 나온다.
         //
         // 항목 출처는 ProductRiskItems 다(F-EXT-002 배선) — 추출 스냅샷이 있으면 그것을
-        // 순서대로 묻고, 없으면 MockData 폴백이다. 분모(total)도 같은 목록에서 나온다.
+        // 순서대로 묻는다. 추출이 없으면 404 다(#478) — 분모(total)도 같은 목록에서 나온다.
         // ❗required 만 묻는다(#435) — recommended 는 루브릭이 없어 채점에서 502 다. 게이트
         // 분모(SessionService.unmeasuredCount)도 같은 interviewItemsOf 를 써야 어긋나지 않는다.
         var session = sessionService.get(sid);
@@ -333,7 +333,7 @@ public class SessionController {
     }
 
     /**
-     * 세션의 상품 항목에서 risk_item 을 찾는다(F-EXT-002 배선 — 저장 우선, MockData 폴백).
+     * 세션의 상품 항목에서 risk_item 을 찾는다(F-EXT-002 배선 — 저장된 추출뿐, #478).
      * 목록에 없으면 404(NoSuchElementException)로 드러낸다 — submitAnswer·reExplain 이
      * 같은 규약을 쓰도록 한 곳으로 모은다.
      */
@@ -363,7 +363,7 @@ public class SessionController {
     public ApiResponse<SessionService.ReExplanation> reExplain(
             @PathVariable String sid, @Valid @RequestBody ReExplainRequest body) {
         // F-INT-004: 이해 부족 항목 재설명 → 이후 같은 항목 재답변이 재검증이 된다.
-        // risk_item 은 세션 상품의 항목(저장 우선, MockData 폴백)에서 찾아 넘긴다 — 서비스가
+        // risk_item 은 세션 상품의 항목(저장된 추출뿐, #478)에서 찾아 넘긴다 — 서비스가
         // ai-service /internal/reexplain 에 실어 눈높이 재설명을 생성한다. 적격성(대상 아님·
         // 상한 도달) 판단은 서비스가 한다. 재검증 질문도 ai-service 가 만든다 — 고정 문항이면
         // 사전에 확보돼 게이트가 뚫린다(기획서 7-4 1단계). 상품 유형은 여기서 넘긴다 —
