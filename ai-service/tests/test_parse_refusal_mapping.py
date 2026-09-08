@@ -129,6 +129,11 @@ def test_the_real_hierarchy_is_fully_mapped() -> None:
 
     ❗**`app.` 안에서 선언된 것만** 계약이다. 다른 테스트가 만든 임시 하위가 아직 수거되지
     않았을 수 있고, 그것까지 요구하면 이 대조가 **실행 순서에 따라 갈린다.**
+
+    ❗**기동 검사와 같은 한계를 공유한다** (`#551` 리뷰 1, 정세현). 수집 시점에 로드된
+    것만 훑으므로, 늦게 로드되는 `app.` 모듈에 거부가 생기면 **실행 순서에 따라 걸리기도
+    하고 안 걸리기도 한다.** 지금 거부는 전부 `parsing.py` 안이라 그 경우가 없다 —
+    조건이 바뀌면 이 단정도 같이 본다.
     """
     unmapped = sorted(cls.__name__ for cls in routes._refusal_subclasses()
                       if cls.__module__.startswith("app.")

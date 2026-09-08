@@ -112,6 +112,7 @@ def _measurement_invalid(exc: scoring.MeasurementInvalid) -> HTTPException:
 #: 아무도 안 알려준다"** 였다. 그 차이가 고칠 자리를 바꾼다 — 기반을 잡으면 넷이 한 코드로
 #: 뭉쳐서 `ParseRefused` docstring 이 금지한 상태가 되고, 표로 두면 하위를 추가하는 사람이
 #: 여기 한 줄을 더하게 된다. 안 더하면 **기동에서 죽는다**(아래 검사).
+#: ❗**단, `parsing.py` 안에 정의하는 한** — 그 검사의 조건 절을 본다.
 #:
 #: 두 번째 칸은 `detail` 에 실을 기계용 코드다. `None` 이면 사람이 읽는 문자열을 그대로
 #: 둔다 — 지금 계약(결정 10.40)이 내부 오류 본문 형식을 안 정해서, **다른 방법이 없는
@@ -123,7 +124,10 @@ _REFUSAL_RESPONSE: dict[type[parsing.ParseRefused], tuple[int, str | None]] = {
     parsing.DocumentNotFound: (status.HTTP_404_NOT_FOUND, None),
     #: PDF 로 안 열림 — 고칠 자리는 **문서 자체**다. 502 로 내면 상류 장애로 오진된다
     #: (`/extract` 의 413 과 같은 이유, PR #60 리뷰).
-    parsing.DocumentUnreadable: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+    #: ❗상수명 대신 리터럴이다 — starlette 버전에 따라 `UNPROCESSABLE_ENTITY` /
+    #: `UNPROCESSABLE_CONTENT` 로 갈리고 1.6.0 에서 앞쪽이 deprecated 다.
+    #: `main.py:31` 이 같은 이유로 `HTTP_422 = 422` 를 두고 있다 — 그 규약을 따른다.
+    parsing.DocumentUnreadable: (422, None),
     #: 권한 거부 — 고칠 자리는 **볼륨 소유권**이다(`#548`).
     #:
     #: ❗**4xx 로 두지 않는다.** 요청도 문서도 정상이고 못 읽는 것이 우리 쪽이다. 특히
@@ -168,6 +172,18 @@ def _assert_every_refusal_is_mapped(
 
     *"조용한 실패를 로딩 시점으로 끌어올린다"* 를 이 파일에 적용한 것이다 — 배포가
     `ddl-auto: validate` 로 스키마 어긋남에 기동을 거부하는 것과 같은 층이다(CLAUDE.md).
+
+    ## ❗조건 — **이 모듈이 import 될 때 이미 로드된 하위**만 본다
+
+    `__subclasses__()` 는 그 시점까지 **정의된** 것만 준다(`#551` 리뷰 1, 정세현 실측).
+
+        parsing.py 안에 정의한다        이 모듈이 parsing 을 import 하므로 반드시 보인다
+        늦게 로드되는 app. 모듈에 둔다   검사를 지나가고, 그 거부는 500 으로 나간다
+
+    지금 파싱 거부 하위가 `parsing.py` 밖에 생길 이유는 없어서 동작 결함은 아니다.
+    다만 **단정을 조건보다 넓게 적으면 다음 사람이 그 보장을 믿는다** — 그래서 조건을
+    적는다. 넓히려면 import 시점이 아니라 **첫 요청 시점**에 다시 보거나 거부를 한
+    모듈에 모으는 규약이 필요하고, 둘 다 이 PR 범위 밖이다.
     """
     table = _REFUSAL_RESPONSE if mapping is None else mapping
     missing = sorted(cls.__name__ for cls in _refusal_subclasses(root)
@@ -195,7 +211,10 @@ def _refused(exc: parsing.ParseRefused) -> HTTPException:
         if mapped is not None:
             code, error_code = mapped
             break
-    else:  # pragma: no cover — 기동 검사가 막는다. 삼키지 않는 것이 요점이다.
+    else:  # pragma: no cover
+        # ❗**기동 검사가 못 본 하위**(늦게 로드되는 `app.` 모듈)면 여기로 온다 — 그
+        #   검사는 import 시점에 로드된 것만 본다(`#551` 리뷰 1). 삼키지 않고 그대로
+        #   올리는 것이 요점이다: 500 으로 나가더라도 **원인이 스택에 남는다.**
         raise exc
     if error_code is None:
         return HTTPException(status_code=code, detail=str(exc))
