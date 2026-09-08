@@ -51,12 +51,19 @@ class EnvelopeContractTest {
     private SessionRepository repository;
     @Autowired
     private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository extractedRiskItems;
+    @Autowired
+    private com.sphinxfin.sphinx.core.extraction.UploadedProductRepository uploadedProducts;
 
     @org.junit.jupiter.api.AfterEach
     void cleanUpExtraction() {
         // productEndpoints 가 추출 스냅샷을 영속한다 — 같은 컨텍스트(H2)를 공유하는 다른
         // 테스트가 MockData 폴백 대신 그 스냅샷을 읽지 않도록 지운다.
         extractedRiskItems.deleteAll();
+        // ❗업로드도 실배선이라(#521) 같은 이유로 지운다. 안 지우면 `GET /products` 가
+        //   데모 2종 + 여기서 올린 것 = 3건이 되고, 목록 길이를 세는 테스트
+        //   (SessionControllerTest.productListIsSelectable)가 **실행 순서에 따라** 깨진다.
+        //   실제로 그렇게 났다 — 봉투를 보는 테스트가 남긴 부작용이 다른 파일에서 드러난다.
+        uploadedProducts.deleteAll();
     }
 
     /**
@@ -107,8 +114,19 @@ class EnvelopeContractTest {
                                 new RiskItem.Condition("원문", new RiskItem.SourceSpan(1, 0, 2)))),
                         List.of()));
         assertEnveloped(mvc.perform(post("/products/doc-els-kiwoom-4181/extract")));
+        // 업로드도 실배선이다(#521) — 실제 PDF 앞머리가 아니면 400 이라 200 봉투를 못 본다.
+        // Content-Type 이 아니라 앞머리 5바이트가 근거인 이유는 ProductUploads 주석에 있다.
         assertEnveloped(mvc.perform(multipart("/products/documents")
-                .file(new MockMultipartFile("file", "a.pdf", "application/pdf", "x".getBytes()))));
+                .file(new MockMultipartFile("file", "a.pdf", "application/pdf",
+                        "%PDF-1.7\n%%EOF\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)))));
+    }
+
+    @Test
+    @DisplayName("ops 계열 봉투 — 상류가 죽어 있어도 봉투다")
+    void opsEndpoints() throws Exception {
+        // ai-service 목이 health() 에 아무것도 안 준 상태(= HealthProbe null)로 부른다 —
+        // 상류가 죽어 있는 것이 이 화면의 정상 입력이고, 그때도 봉투여야 한다(#522).
+        assertEnveloped(mvc.perform(get("/ops/status")));
     }
 
     @Test

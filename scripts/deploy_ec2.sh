@@ -521,6 +521,18 @@ compose_data ps
 compose_edge ps
 compose_app "$NEWCOLOR" ps
 echo
+# ❗**데모 답지 캡션은 로그로만 보인다** (이슈 #539). 개방 모드는 엔트리포인트가 기동 때
+# 모드를 찍지만(`15-demo-mode.sh`), 이건 **빌드 시점에 굳는 것**이라 컨테이너가 나중에
+# 말해 줄 것이 없다. 조용히 켜져 있으면 안 되는 종류라 여기서 매번 찍는다 —
+# 켠 채로 prod 에 간 것을 알아채는 자리도 여기뿐이다.
+if [ "${SPHINX_DEMO_CAPTIONS:-}" = "1" ]; then
+  echo "⚠ 데모 답지 캡션 — S-03 질문 아래에 U1·U4 예시가 나오는 빌드다(진행자용)."
+  echo "  고객이 보는 화면이므로 alpha 시연 외에는 켜지 않는다. 끄려면 SPHINX_DEMO_CAPTIONS 를"
+  echo "  비우고 다시 배포한다(빌드 인자라 재빌드가 필요하다)."
+else
+  echo "데모 답지 캡션 — 꺼짐(기본값). 답지 문자열은 번들에 들어 있지 않다."
+fi
+echo
 echo "확인:"
 # `#162` 로 nginx 가 사이트 전체에 auth_basic 을 건 뒤로 자격증명 없는 GET / 는 401 이다.
 # 예전 문구(`curl -fsS`)는 -f 때문에 비영점으로 죽었고, 붙여 넣은 사람이 **정상 동작을
