@@ -341,6 +341,31 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("죽은 설문 세트 버전은 세션 생성에서 400 — 낡은 번들이 틀린 근거를 기록에 못 남긴다 (#546)")
+    void deadSurveySchemaVersionIsRejectedAtCreate() throws Exception {
+        // 낡은 캐시가 보내는 죽은 세트 → VALIDATION_ERROR. 불변 기록·교부 문서에 실리기 전에 막는다.
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대",
+                                 "surveySchemaVersion":"s02-survey-v1"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+
+        // 살아 있는 세트는 통과
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대",
+                                 "surveySchemaVersion":"s02-survey-v2"}"""))
+                .andExpect(status().isOk());
+
+        // 세트 없이(설문 없는 세션)도 통과 — 검증이 잡는 건 «있는데 죽은» 것이다
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대"}"""))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
     void unknownProductTypeFailsLoudly() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)

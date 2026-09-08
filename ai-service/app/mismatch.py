@@ -161,7 +161,7 @@ def survey_questions(survey_result: dict[str, Any]) -> dict[str, Any]:
 
     걸러내지 않으면 두 곳이 동시에 틀린다.
 
-    1. 프롬프트에 `- _surveySchemaVersion: s02-survey-v1` 이 설문 문항으로 들어간다.
+    1. 프롬프트에 `- _surveySchemaVersion: s02-survey-v2` 이 설문 문항으로 들어간다.
     2. **`_is_traceable` 이 그걸 통과시킨다** — 대조가 `question_id in survey_result` 뿐이고
        메타키도 맵에 있기 때문이다. 문항이 아닌 것을 근거로 든 모순이 "설문 근거 있음"으로
        살아남는다. P4 의 뜻에 어긋나는데 코드는 초록이다.

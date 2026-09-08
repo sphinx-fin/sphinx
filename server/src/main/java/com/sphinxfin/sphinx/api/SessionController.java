@@ -12,6 +12,8 @@ import com.sphinxfin.sphinx.api.dto.ReExplainRequest;
 import com.sphinxfin.sphinx.api.dto.SessionResponse;
 import com.sphinxfin.sphinx.api.dto.SimulateRequest;
 import com.sphinxfin.sphinx.api.dto.SkipRequest;
+import com.sphinxfin.sphinx.api.dto.SurveySchema;
+import com.sphinxfin.sphinx.api.exception.ValidationException;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.security.CurrentActor;
@@ -57,6 +59,15 @@ public class SessionController {
     @PreAuthorize("@accessGuard.canCreate('session:create')")
     @PostMapping
     public ApiResponse<SessionResponse> create(@Valid @RequestBody CreateSessionRequest body) {
+        // ❗설문 세트 버전은 «있으면» 살아 있는 값이어야 한다(이슈 #546). 낡은 번들이 죽은
+        // 버전을 보내면 불변 기록·교부 문서가 틀린 세트를 말하는데(append-only 라 못 고친다),
+        // 그건 API 경계에서 막는다 — 명부 계정이 아니라 클라이언트가 보내는 값이라 여기가 자리다.
+        // 없는 것은 막지 않는다(설문 없는 세션은 계약상 허용, SurveySchema 주석).
+        if (!SurveySchema.isAcceptable(body.surveySchemaVersion())) {
+            throw new ValidationException(
+                    "알 수 없는 설문 세트 버전이다: " + body.surveySchemaVersion()
+                    + " — 화면 번들이 낡았을 수 있다(살아 있는 세트: " + SurveySchema.ALLOWED_VERSIONS + ")");
+        }
         // 귀속은 인증 주체에서만 온다 — 본문에 없다(CreateSessionRequest 주석).
         Session session = sessionService.create(
                 body.toCommand(currentActor.actorId(), currentActor.branchId()));
