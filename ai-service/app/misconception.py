@@ -97,6 +97,8 @@
 """
 from __future__ import annotations
 
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -383,27 +385,71 @@ class PolarityMeter:
     contradicted: int = 0
     #: ❗**못 돈 건수.** 0 건과 「모른다」를 가르는 유일한 자리 — 위 docstring 참조.
     not_run: int = 0
+    #: ❗**자리가 없어 순차로 떨어진 건수.** `ConsistencyMeter.no_slot` 과 같은 자리다.
+    #: *"병렬이 안 도네"* 를 보고 **설정 문제인지 부하 문제인지** 가르는 유일한 값이다 —
+    #: 스위치를 끈 것(`_polarity_parallel_enabled()`)과 자리가 찬 것은 원인이 다르다.
+    #: 판정에는 영향이 없다(순차로 같은 답을 낸다). 지연에만 나타난다.
+    no_slot: int = 0
     by_type: dict[str, int] = field(default_factory=dict)
+    #: ❗**후보를 병렬로 확인하면서 필요해졌다** (이슈 #498). `+= 1` 은 원자적이지 않아
+    #: 락 없이 여러 스레드가 동시에 세면 **건수가 샌다** — 그리고 그 샘은 조용하다.
+    #: 비교·표시 대상이 아니라 `repr`·`==` 에서 뺀다.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def record_kept(self) -> None:
-        self.asked += 1
-        self.kept += 1
+        with self._lock:
+            self.asked += 1
+            self.kept += 1
 
     def record_dropped(self, type_id: str, *, contradicted: bool) -> None:
-        self.asked += 1
-        self.dropped += 1
-        if contradicted:
-            self.contradicted += 1
-        self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
+        # ❗락은 **본문 전체**를 감싼다. 앞의 둘만 감싸면 `by_type` 의 read-modify-write 가
+        # 밖에 남아 같은 유형 두 건이 동시에 들어올 때 하나가 사라진다 — 그리고 그 샘은
+        # 합계(`dropped`)와 내역(`by_type`)이 **서로 안 맞는** 모양으로만 드러난다.
+        with self._lock:
+            self.asked += 1
+            self.dropped += 1
+            if contradicted:
+                self.contradicted += 1
+            self.by_type[type_id] = self.by_type.get(type_id, 0) + 1
 
     def record_not_run(self) -> None:
         """게이트가 못 돌았다. 후보는 남는다 — 판정만 보면 게이트가 없는 것과 같다."""
-        self.asked += 1
-        self.not_run += 1
+        with self._lock:
+            self.asked += 1
+            self.not_run += 1
+
+    def record_no_slot(self) -> None:
+        """병렬 자리가 없어 이 후보를 호출 스레드에서 순차로 돌린다.
+
+        ❗`asked` 를 올리지 않는다. 판정은 그대로 나므로 `record_kept`·`record_dropped` 가
+        뒤이어 올린다 — 여기서 올리면 **한 후보가 두 번 세어진다.**
+        """
+        with self._lock:
+            self.no_slot += 1
+
+    def snapshot(self) -> dict[str, object]:
+        """지금 값. **락 안에서 통째로 뜬다** — 안 그러면 합계와 내역이 다른 순간의 것이 섞인다.
+
+        `ConsistencyMeter.snapshot()` 과 같은 모양으로 둔다. 두 계량기가 다르게 읽히면
+        소비자가 둘을 따로 배워야 한다.
+
+        ❗**`by_type` 에 `M08-TYING` 이 들어온다.** 그 유형은 불공정영업 신호라 판매자
+        화면에 보이면 안 된다(기획 7-4 · `#147`·`#159`·`#145`). 이 값을 화면에 싣는 쪽은
+        `misconception_type` 과 **같은 경계**를 지나야 한다 — 그래서 이 요약은
+        `/internal/*`(인증) 뒤에 두고 `/healthz`(무인증)에는 안 싣는다.
+        """
+        with self._lock:
+            return {
+                "asked": self.asked, "kept": self.kept, "dropped": self.dropped,
+                "contradicted": self.contradicted, "not_run": self.not_run,
+                "no_slot": self.no_slot,
+                "by_type": dict(self.by_type),
+            }
 
     def summary(self) -> str:
         return (f"극성 게이트 {self.asked}건 · 남김 {self.kept}건 · 뺌 {self.dropped}건"
-                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건")
+                f"(자기모순 {self.contradicted}건) · 못 돈 것 {self.not_run}건"
+                f" · 자리 없어 순차 {self.no_slot}건")
 
 
 METER = PolarityMeter()
@@ -473,6 +519,103 @@ def _polarity_holds(client, misconception_text: str, utterance: str, type_id: st
     return holds
 
 
+#: 극성 확인을 동시에 돌리는 워커 수 (이슈 #498).
+#:
+#: 한 답변의 **후보 수만큼** 호출이 필요하고 그 호출들은 서로 독립이다 — 같은 프롬프트
+#: 구조에 다른 입력이라 순서를 지킬 이유가 없다. 순차로 두면 채점 본체(병렬, ~2~3초) 뒤에
+#: 후보 수만큼 왕복이 **그대로 얹힌다.**
+#:
+#: ❗**호출 수는 안 바뀐다.** `#437`(투기적 재질의)은 등급을 보기 전에 던지느라 **버리는
+#: 호출**이 생겨서 계량기가 그 낭비를 세야 했지만, 여기서는 필요한 N 건을 동시에 부를 뿐이다.
+#: 그래서 *"쿼터가 왜 늘었나"* 라는 질문이 없고, 새 계량기도 안 만든다.
+POLARITY_WORKERS = 4
+
+_POLARITY_POOL = ThreadPoolExecutor(max_workers=POLARITY_WORKERS,
+                                    thread_name_prefix="det-polarity")
+
+#: ❗**자리 표 — 이게 없으면 동시 요청에서 예전보다 느려진다** (`#537` 리뷰, 오준서).
+#:
+#: `_POLARITY_POOL.map(...)` 은 워커가 차 있으면 **큐에 쌓고** 전부 끝날 때까지 막는다.
+#: 풀이 프로세스 전역이라 그 큐는 **다른 요청의 후보들** 뒤에 선다. 동시 요청 K · 후보 N ·
+#: 워커 W 로 놓으면 한 요청의 대기가 `⌈K·N/W⌉·L` 이고 순차는 `N·L` 이라 **K > W 부터
+#: 역전**한다 — 그리고 그때가 바로 지연이 문제되는 순간이다.
+#:
+#: `scoring._PROBE_SLOTS` 가 같은 문제를 이미 풀어 뒀다(`#437`). 그 파일이 적은 이유가
+#: 그대로 여기 걸린다 — *"큐에 쌓으면 대기가 오히려 늘어난다. 자리가 없으면 호출부가
+#: 예전처럼 순차로 간다."*
+#:
+#: ❗**후보 단위로 잡는다**(요청 단위가 아니다). 요청당 한 자리로 두면 한 요청이 자리
+#: 하나로 후보 N 개를 큐에 밀어 넣어 위 식이 그대로 남는다. 후보 단위면 프로세스 전체의
+#: 큐 깊이가 W 로 묶여 **최악이 순차로 캡된다.**
+_POLARITY_SLOTS = threading.BoundedSemaphore(POLARITY_WORKERS)
+
+
+def _polarity_parallel_enabled() -> bool:
+    """후보를 동시에 확인할 것인가. **함수로 빼 둔 이유가 테스트다**(`#437` 과 같다).
+
+    이 레포의 스텁 상당수가 호출 순서에 매여 있거나 호출 인자를 리스트에 모아 두고 그
+    순서를 단정한다. 병렬로 돌면 그 순서가 회차마다 갈리는데, **운영에서는 후보들이 서로
+    독립이라 없는 문제**이고 스텁의 성질이다. 그래서 `conftest.py` 가 이 함수를 덮어
+    기본을 순차로 두고, 병렬 경로는 스레드 안전한 스텁으로 따로 잰다.
+    """
+    return True
+
+
+def _verdicts(client, matches, text: str) -> list[bool]:
+    """후보별 극성 판정. **입력 순서를 그대로 돌려준다.**
+
+    `executor.map` 이 입력 순서대로 결과를 주므로 호출자가 `zip` 으로 다시 짝지어도
+    후보와 판정이 안 섞인다.
+
+    ❗**후보가 하나면 스레드를 안 쓴다.** 얻는 것이 없고 풀에 넣었다 꺼내는 값만 든다.
+
+    ❗**여기서 예외가 새면 게이트가 채점을 죽인다.** `_polarity_holds` 는 스스로 전부
+    잡아 `True` 로 떨어지지만(P5 0.2절), `executor.map` 은 안에서 난 예외를 **결과를 꺼낼
+    때** 올리므로 그 계약이 나중에 깨지면 여기가 조용히 위험해진다. 게이트는 과탐을 줄이는
+    장치이지 판정을 만드는 장치가 아니므로(P1) 한 겹 더 막는다.
+    """
+    def holds(match) -> bool:
+        try:
+            return _polarity_holds(client, match.matched_pattern, text, match.type_id)
+        except Exception as exc:                    # noqa: BLE001 — 게이트가 채점을 죽이면 안 된다
+            log.info("F-DET-001 극성 게이트가 예외로 끝났다: %s — 후보를 그대로 둔다(P5 0.2절). type_id=%s",
+                     type(exc).__name__, match.type_id)
+            METER.record_not_run()
+            return True
+
+    if len(matches) == 1 or not _polarity_parallel_enabled():
+        return [holds(m) for m in matches]
+
+    # ❗**자리를 못 잡은 후보는 큐에 쌓지 않고 호출 스레드에서 돈다** (`#537` 리뷰, 오준서).
+    # 위 `_POLARITY_SLOTS` 주석 참조 — 이 층이 없으면 동시 요청 K > 워커 W 에서
+    # 이 최적화가 **역전**한다.
+    futures: list[Future | None] = []
+    for match in matches:
+        if not _POLARITY_SLOTS.acquire(blocking=False):
+            METER.record_no_slot()
+            futures.append(None)
+            continue
+
+        def run(match=match) -> bool:
+            try:
+                return holds(match)
+            finally:
+                _POLARITY_SLOTS.release()
+
+        futures.append(_POLARITY_POOL.submit(run))
+
+    # ❗**순차분을 먼저 돌린다.** 뒤에 돌리면 `f.result()` 가 먼저 막아서 병렬분이 도는
+    # 동안 호출 스레드가 놀고, 그만큼 겹칠 기회를 버린다.
+    verdicts: list[bool | None] = [None] * len(matches)
+    for i, (match, future) in enumerate(zip(matches, futures)):
+        if future is None:
+            verdicts[i] = holds(match)
+    for i, future in enumerate(futures):
+        if future is not None:
+            verdicts[i] = future.result()
+    return [bool(v) for v in verdicts]
+
+
 def apply_polarity_gate(
     response: MisconceptionResponse, text: str, *, client
 ) -> MisconceptionResponse:
@@ -487,10 +630,8 @@ def apply_polarity_gate(
     """
     if not response.matches:
         return response
-    kept = [
-        m for m in response.matches
-        if _polarity_holds(client, m.matched_pattern, text, m.type_id)
-    ]
+    kept = [m for m, holds in zip(response.matches, _verdicts(client, response.matches, text))
+            if holds]
     if len(kept) == len(response.matches):
         return response
     log.info(

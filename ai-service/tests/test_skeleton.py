@@ -176,6 +176,12 @@ def test_only_document_paths_relax_broad_pii_heuristics():
         #   짧을수록 좋다. 이 줄이 있는 이유는 **경로가 늘면 사람이 분류하게** 하려는
         #   것이다(이 단정이 그 트립와이어다 — 실제로 이 경로를 추가할 때 울렸다).
         "/internal/rubrics", "/internal/rubrics/{item_id}",
+        # ❗**여기도 본문 없는 GET 인데, 완화하면 안 되는 이유가 하나 더 있다**
+        #   (극성 게이트 계량기 · 이슈 `#483`). 응답의 `by_type` 에 `M08-TYING` 이 들어올
+        #   수 있고 그건 불공정영업 신호라 **판매자 화면 비노출**이다(기획 7-4).
+        #   `/healthz` 는 `GUARDED_PREFIX` 밖이라 **무인증**이라 이 값을 거기 못 싣는다 —
+        #   그래서 `/internal/*` 뒤에 뒀다.
+        "/internal/polarity/summary",
     }
 
     # ❗**왜 안전한지를 목록이 아니라 스키마에서 유도한다** (이슈 #474 ①).
@@ -292,3 +298,43 @@ def test_no_duplicate_test_names():
         if dupes:
             problems.append(f"{path.name}: {sorted(dupes)}")
     assert not problems, f"중복 테스트 이름 — 앞의 것이 안 돈다: {problems}"
+
+
+# ── 운영 콘솔이 읽는 값 (#522 · #531) ────────────────────────────────────────
+def test_healthz_reports_when_this_process_started():
+    """`started_at` 은 **서버와 ai-service 의 코드 세대가 갈리는 사고**를 보이려는 값이다.
+
+    핫재기동 뒤 한쪽만 새 판이면 `/internal/score` 가 422 로 떨어지는데, 그 원인이 응답
+    어디에도 안 보였다(`#522`, 오준서).
+    """
+    from datetime import datetime
+
+    body = client.get("/healthz").json()
+    started = body["started_at"]
+    parsed = datetime.fromisoformat(started)
+    assert parsed.tzinfo is not None, f"타임존이 없다: {started!r} — 두 값을 비교할 수 없다"
+
+
+def test_healthz_carries_the_three_generation_markers():
+    """★ 「언제 떴나」와 「무엇이 떴나」를 같이 낸다.
+
+    ❗`started_at` **만으로는 세대 사고를 못 잡는다** — 같은 시각에 뜬 두 컨테이너도
+    이미지가 다르면 갈린다. 콘솔이 셋을 같이 그려야 그 경우가 보인다.
+    """
+    body = client.get("/healthz").json()
+    assert body["started_at"]
+    assert body["prompt_versions"]["F-SCR-001"]
+    assert isinstance(body["misconception_library_version"], int)
+
+
+def test_started_at_is_the_process_constant_not_the_request_time(monkeypatch):
+    """★ **프로세스 기동 시각이다 — 요청 시각이 아니다.**
+
+    ❗두 호출을 비교하는 것으로는 안 잡힌다. `isoformat(timespec="seconds")` 라 같은 초
+    안의 두 요청은 요청 시각으로 계산해도 **값이 같다** — 실제로 그 변이가 통과했다.
+    그래서 상수를 표식으로 바꿔 놓고 응답이 그것을 되돌려 주는지 본다.
+    """
+    from app import main
+
+    monkeypatch.setattr(main, "STARTED_AT", "1999-12-31T23:59:59+00:00")
+    assert client.get("/healthz").json()["started_at"] == "1999-12-31T23:59:59+00:00"

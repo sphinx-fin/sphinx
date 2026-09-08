@@ -29,8 +29,12 @@ import java.util.NoSuchElementException;
 public class ProductRiskItems {
 
     /**
-     * 데모 상품 → 문서 경로 (SPHINX_DATA_DIR 상대 — ai-service /internal/parse 규약).
-     * 업로드(F-EXT-001 POST /documents)가 실배선되면 업로드 산출물 경로로 대체된다.
+     * <b>사전적재</b> 데모 상품 → 문서 경로 (SPHINX_DATA_DIR 상대 — ai-service /internal/parse 규약).
+     *
+     * <p>업로드가 실배선된 뒤(이슈 #521) 이 표는 <b>폴백</b>이다 — {@link #documentPathOf} 가
+     * 업로드된 상품을 먼저 보고, 없으면 여기로 떨어진다. 표를 지우지 않는 이유는
+     * {@link FallbackCatalog} 를 남겨 둔 것과 같다: 이 둘이 커밋된 공시 문서 2종으로
+     * <b>키 없는 환경에서도 데모가 돌게</b> 한다. 걷는 것은 #403 이 따로 한다.
      */
     private static final Map<String, String> DEMO_DOCUMENTS = Map.of(
             "doc-els-kiwoom-4181", "documents/els_kiwoom_4181_simple_prospectus.pdf",
@@ -39,6 +43,7 @@ public class ProductRiskItems {
     private final ExtractedRiskItemRepository repository;
     private final AiServiceClient aiServiceClient;
     private final FallbackCatalog fallbackCatalog;
+    private final ProductUploads productUploads;
 
     /** 추출 결과 — 영속된 항목과 경고. 경고는 실패 은폐 금지(E-EXT-03)의 통로다. */
     public record Extraction(List<RiskItem> items, List<AiServiceClient.Warning> warnings) {}
@@ -158,7 +163,7 @@ public class ProductRiskItems {
     }
 
     /**
-     * 상품유형 — 저장된 추출이 있으면 그 파스가 판별한 값, 없으면 카탈로그(MockData).
+     * 상품유형 — 저장된 추출이 있으면 그 파스가 판별한 값, 다음이 업로드본(#521), 없으면 카탈로그(MockData).
      * 둘 다 모르면 404 다. <b>기본값을 두지 않는다</b> — product_type 은 오해 유형 필터의
      * 입력이라(misconception.applies_to) 지어낸 값이 판정을 조용히 틀리게 한다.
      *
@@ -170,7 +175,10 @@ public class ProductRiskItems {
         if (!stored.isEmpty()) {
             return stored.get(0).productType();
         }
-        return fallbackCatalog.productType(productId)
+        // 추출 전 업로드본은 파스가 판별한 유형을 들고 있다(이슈 #521) — 이 자리가 없으면
+        // 올린 직후 추출(POST /{id}/extract)이 상품유형을 못 찾아 404 로 죽는다.
+        return productUploads.productTypeOf(productId)
+                .or(() -> fallbackCatalog.productType(productId))
                 .orElseThrow(() -> new NoSuchElementException(
                         "상품유형을 알 수 없다(상품 목록에 없음): " + productId));
     }
@@ -185,7 +193,10 @@ public class ProductRiskItems {
      * @throws NoSuchElementException 등록된 문서가 없는 상품(→ 404)
      */
     public String documentPathOf(String productId) {
-        String documentPath = DEMO_DOCUMENTS.get(productId);
+        // ❗업로드본이 먼저다. 순서가 반대면 업로드한 파일명이 우연히 사전적재 상품ID 와
+        // 같아지는 날 «올린 문서가 아닌 것» 을 파스하고, 그 결과가 그 상품의 항목이 된다.
+        String documentPath = productUploads.documentPathOf(productId)
+                .orElseGet(() -> DEMO_DOCUMENTS.get(productId));
         if (documentPath == null) {
             throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
         }
