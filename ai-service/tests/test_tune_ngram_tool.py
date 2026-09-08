@@ -90,9 +90,15 @@ def test_the_agreement_is_not_vacuous(tool, loaded, monkeypatch) -> None:
     fired = [k for k in keys if _floor_fires(corpus, k)]
     assert fired, "0.30 에서도 발동이 0건이다 — 이 대조가 아무것도 안 재고 있다"
 
-    for key in fired:
+    # ❗**양방향으로 잰다** (`#552` 리뷰 2, 정세현). 처음엔 `fired` 만 돌아서
+    #   「floor 는 울었는데 도구가 낮다」만 봤다 — **도구가 과대하게 내는 쪽**은 안 봤고,
+    #   `related` 필터를 빼는 변이가 정확히 그 방향이라 이 테스트를 그냥 통과했다.
+    disagreements = []
+    for key in keys:
         score, _, _ = tool.best_related(corpus, key)
-        assert score >= 0.30, f"{key}: floor 는 울었는데 도구 점수가 {score:.3f} 다"
+        if (score >= 0.30) != _floor_fires(corpus, key):
+            disagreements.append(f"{key} 도구 {score:.3f} · floor {_floor_fires(corpus, key)}")
+    assert not disagreements, "0.30 에서 도구와 floor 가 갈렸다:\n  " + "\n  ".join(disagreements)
 
 
 def test_the_tool_does_not_reimplement_the_matcher(tool) -> None:
@@ -116,13 +122,17 @@ def test_the_related_filter_comes_from_the_rubric(tool, loaded) -> None:
     자리에서 목록을 만들면 두 규칙이 갈리고, 갈린 뒤에는 어느 쪽이 참인지 알 수 없다.
     """
     corpus, _, _, keys = loaded
-    key = keys[0]
-    item_id = corpus[key]["item_id"]
-    declared = set(rubrics.get(item_id).related_misconceptions)
-
-    _, type_id, _ = tool.best_related(corpus, key)
-    if type_id is not None:
-        assert type_id in declared, f"{type_id} 가 루브릭 related 밖이다"
+    # ❗**한 행만 보면 코퍼스가 바뀔 때 조용히 무해해진다** (`#552` 리뷰 3, 정세현).
+    #   그 행이 우연히 related 밖 유형에서 더 높은 점수를 낼 때만 무는 구조였다.
+    checked = 0
+    for key in keys:
+        _, type_id, _ = tool.best_related(corpus, key)
+        if type_id is None:
+            continue
+        declared = set(rubrics.get(corpus[key]["item_id"]).related_misconceptions)
+        assert type_id in declared, f"{key}: {type_id} 가 루브릭 related 밖이다"
+        checked += 1
+    assert checked, "유형을 하나도 안 봤다 — 이 대조가 0건을 재고 통과했다"
 
 
 # ── 조건 줄이 이 측정이 읽은 행만 말한다 (#543 ⓐⓑⓒⓓ) ──────────────────────────
@@ -148,12 +158,18 @@ def test_provenance_names_the_model_too(tool, loaded) -> None:
     assert model[keys[0]]["model"] in line, line
 
 
-def test_a_missing_prompt_version_stops_the_run(tool) -> None:
-    """★ **무르게 실패하지 않는다.** 조용히 빠지면 「판이 없는 파일」과 구별이 안 된다."""
-    model = {("s", "i"): {"grade": "U1", "model": "m"}}      # prompt_version 없음
+@pytest.mark.parametrize("dropped", ["prompt_version", "model"])
+def test_a_missing_condition_field_stops_the_run(tool, dropped: str) -> None:
+    """★ **무르게 실패하지 않는다.** 조용히 빠지면 「기록이 없는 파일」과 구별이 안 된다.
+
+    ❗**두 필드를 같은 강도로 요구한다** (`#552` 리뷰 1). 처음엔 `model` 만 무르게
+    넘어가서, 이 검사가 없애려던 *"(기록 없음)"* 문면이 모델 칸에 그대로 남아 있었다.
+    """
+    row = {"grade": "U1", "prompt_version": "F-SCR-001_v3", "model": "gpt-5-mini"}
+    del row[dropped]
     with pytest.raises(SystemExit) as caught:
-        tool.provenance(model, [("s", "i")])
-    assert "prompt_version" in str(caught.value)
+        tool.provenance({("s", "i"): row}, [("s", "i")])
+    assert dropped in str(caught.value), str(caught.value)
 
 
 def test_versions_sort_by_number_not_by_text(tool) -> None:

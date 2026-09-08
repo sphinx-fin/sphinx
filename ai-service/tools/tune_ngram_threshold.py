@@ -88,20 +88,26 @@ def provenance(model: dict, keys: list[tuple[str, str]]) -> str:
     읽는 시점으로 끌어올린다.
     """
     known = [k for k in keys if k in model]
-    missing = [k for k in known if not model[k].get("prompt_version")]
-    if missing:
-        raise SystemExit(
-            f"❗model.jsonl 에 prompt_version 이 없는 행이 {len(missing)}건이다"
-            f"(예: {missing[0]}). 이 측정의 조건을 적을 수 없으므로 멈춘다 — "
-            "그 파일을 만든 도구를 본다"
-        )
+    # ❗**두 필드를 같은 강도로 요구한다** (`#552` 리뷰 1, 정세현). 처음엔 `model` 만
+    #   `or "(기록 없음)"` 로 무르게 넘겼는데, 그건 이 검사가 없애려던 바로 그 문면이다 —
+    #   「기록이 없는 파일」과 「필드를 빠뜨린 파일」을 구별하지 못한다. 그리고 모델 칸을
+    #   만든 이유가 *"`#266` 이 모델을 통째로 옮긴 프로젝트라 그 칸이 비면 못 되짚는다"*
+    #   이므로, 무르게 넘기면 그 칸이 막으려던 것을 못 막는다.
+    for field in ("prompt_version", "model"):
+        missing = [k for k in known if not model[k].get(field)]
+        if missing:
+            raise SystemExit(
+                f"❗model.jsonl 에 {field} 가 없는 행이 {len(missing)}건이다"
+                f"(예: {missing[0]}). 이 측정의 조건을 적을 수 없으므로 멈춘다 — "
+                "그 파일을 만든 도구를 본다"
+            )
     if not known:
         raise SystemExit("❗model.jsonl 에서 이 측정이 쓸 행을 하나도 못 찾았다 — 키가 갈렸다")
     versions = _natural_sorted({model[k]["prompt_version"] for k in known})
     # ❗**모델도 같이 적는다** (`#543` ⓒ). 이 도구는 LLM 을 안 부르지만 model.jsonl 은
     #   모델 산물이라, 판만 적으면 «어느 모델의 v3 인가» 가 빠진다. `#266` 이 모델을
     #   통째로 옮긴 프로젝트라 그 칸이 비면 나중에 못 되짚는다.
-    models = _natural_sorted({model[k].get("model") or "(기록 없음)" for k in known})
+    models = _natural_sorted({model[k]["model"] for k in known})
     return (f"판 {' · '.join(versions)} · 모델 {' · '.join(models)} · "
             f"이 측정이 읽은 행 {len(known)}/{len(keys)}")
 
@@ -139,6 +145,11 @@ def best_related(corpus: dict, key: tuple[str, str]) -> tuple[float, str | None,
     바로 그 자리를 대체 후보로 보고 있으니 가정이 아니다.
 
     지금은 `match()` 를 부르고 **floor 와 같은 자리에서** `related` 를 건다.
+
+    ❗**`match()` 는 점수를 `round(score, 4)` 로 담는다**(`misconception.py:534`). 옛
+    사본은 안 했다 — 이 코퍼스에서는 출력이 한 글자도 안 달라지지만, 문턱 경계에 4자리
+    밖 값이 놓이면 **사본 시절의 기록과 갈릴 수 있다**(`#552` 리뷰 4, 정세현). 실물을
+    부르는 쪽이 옳은 방향이므로 고치지 않고 적어 둔다.
 
     ## ❗이 값은 상한이다 — 3단계 게이트가 빠져 있다
 
