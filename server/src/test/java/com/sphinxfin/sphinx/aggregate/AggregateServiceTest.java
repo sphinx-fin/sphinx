@@ -67,7 +67,7 @@ class AggregateServiceTest {
     private void seed(String product, String branchId, String sellerId, String ageBand,
                       Channel channel, String itemId, Grade grade) {
         Session session = Session.create(new CreateSessionCommand(
-                product, channel, ageBand, null, null, null, "s02-survey-v1", Map.of(),
+                product, channel, ageBand, null, null, null, "s02-survey-v2", Map.of(),
                 sellerId, branchId));
         session.recordJudgment(judgment(itemId, grade));
         em.persist(session);
@@ -83,7 +83,7 @@ class AggregateServiceTest {
     private void seedAttrs(String ageBand, String experienceLevel, Grade grade) {
         Session session = Session.create(new CreateSessionCommand(
                 PRODUCT, Channel.FACE_TO_FACE, ageBand, experienceLevel, null, null,
-                "s02-survey-v1", Map.of(), "seller-x", "BR-1"));
+                "s02-survey-v2", Map.of(), "seller-x", "BR-1"));
         session.recordJudgment(judgment(ITEM, grade));
         em.persist(session);
     }
@@ -529,7 +529,7 @@ class AggregateServiceTest {
             // other 로 떨어지고, 그러면 같은 세션이 코칭 경로와 집계 경로에서 다르게 분류된다.
             Session session = Session.create(new CreateSessionCommand(
                     PRODUCT, Channel.MOBILE, "30대", "3년이상", "5천만원대", null,
-                    "s02-survey-v1", Map.of(), "seller-m", "BR-1"));
+                    "s02-survey-v2", Map.of(), "seller-m", "BR-1"));
             session.recordSuitability(SuitabilityStatus.MISMATCH);
             session.recordJudgment(judgment(ITEM, Grade.U4));
             em.persist(session);
@@ -584,7 +584,7 @@ class AggregateServiceTest {
                              OverrideStatus override, int unmeasured) {
         Session session = Session.create(new CreateSessionCommand(
                 PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
-                "s02-survey-v1", Map.of(), "seller-d", "BR-1"));
+                "s02-survey-v2", Map.of(), "seller-d", "BR-1"));
         if (reexplained) {
             // 재설명을 거친 항목은 재검증 횟수가 오른다 — SessionService 가 RE_EXPLAIN
             // 상태에서 recordReverify 를 부른다. 여기서는 그 결과 상태를 직접 만든다.
@@ -622,7 +622,7 @@ class AggregateServiceTest {
         for (int i = 0; i < count; i++) {
             Session s = Session.create(new CreateSessionCommand(
                     PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
-                    "s02-survey-v1", Map.of(), COACHED, "BR-1"));
+                    "s02-survey-v2", Map.of(), COACHED, "BR-1"));
             // 조사·어미만 다르다. 코칭의 실물이 이 모양이다.
             s.recordAnswer(ITEM, "낙인 하회하면 원금 손실 난다고 들었어요" + (i % 2 == 0 ? "." : ""),
                     judgment(ITEM, Grade.U1));
@@ -641,7 +641,7 @@ class AggregateServiceTest {
         for (int i = 0; i < count; i++) {
             Session s = Session.create(new CreateSessionCommand(
                     PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
-                    "s02-survey-v1", Map.of(), NORMAL, "BR-1"));
+                    "s02-survey-v2", Map.of(), NORMAL, "BR-1"));
             s.recordAnswer(ITEM, answers[i % answers.length],
                     judgment(ITEM, i % 3 == 0 ? Grade.U3 : Grade.U1));
             if (i % 3 == 0) {
@@ -696,7 +696,7 @@ class AggregateServiceTest {
         for (int i = 0; i < count; i++) {
             Session s = Session.create(new CreateSessionCommand(
                     PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
-                    "s02-survey-v1", Map.of(), seller, "BR-1"));
+                    "s02-survey-v2", Map.of(), seller, "BR-1"));
             InputMeta meta = ms == null ? null
                     : new InputMeta(300, ms, false, 2, 60, false);
             s.recordAnswer(ITEM, VARIED[i % VARIED.length], judgment(ITEM, Grade.U2), meta);
@@ -759,7 +759,7 @@ class AggregateServiceTest {
         for (int i = 0; i < 30; i++) {
             Session s = Session.create(new CreateSessionCommand(
                     PRODUCT, Channel.FACE_TO_FACE, "30대", null, null, null,
-                    "s02-survey-v1", Map.of(), "seller-reexplained", "BR-1"));
+                    "s02-survey-v2", Map.of(), "seller-reexplained", "BR-1"));
             // ❗발화를 진짜로 다르게 둔다. 숫자만 바꾼 같은 문장이면 균질도가 0.79 로
             // 튀어서 **이 테스트가 재려는 것(1차 통과 구분) 대신 균질도를 잰다.**
             s.recordAnswer(ITEM, VARIED[i % VARIED.length], judgment(ITEM, Grade.U3));
@@ -921,7 +921,7 @@ class AggregateServiceTest {
         // 진행 중 세션: 재설명은 했고 **아직 재채점 전이라 U3 인 채**다. 판정이 없다.
         Session inflight = Session.create(new CreateSessionCommand(
                 PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
-                "s02-survey-v1", Map.of(), "seller-e", "BR-1"));
+                "s02-survey-v2", Map.of(), "seller-e", "BR-1"));
         inflight.recordJudgment(judgment(ITEM, Grade.U3));
         inflight.recordReverify(ITEM);
         em.persist(inflight);
@@ -940,7 +940,7 @@ class AggregateServiceTest {
         seedDecided(Signal.RED, Grade.U4, false, OverrideStatus.PENDING_APPROVAL, 0);
         Session inflight = Session.create(new CreateSessionCommand(
                 PRODUCT, Channel.FACE_TO_FACE, "60대", null, null, null,
-                "s02-survey-v1", Map.of(), "seller-f", "BR-1"));
+                "s02-survey-v2", Map.of(), "seller-f", "BR-1"));
         inflight.recordJudgment(judgment(ITEM, Grade.U4));
         inflight.requestOverride("판정 전 요청");
         em.persist(inflight);
