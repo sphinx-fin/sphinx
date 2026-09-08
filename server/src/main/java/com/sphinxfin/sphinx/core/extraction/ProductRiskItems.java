@@ -12,13 +12,25 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 /**
  * 상품별 이해항목의 단일 출처 (F-EXT-002 배선, 이슈 #355). 소유: 강희진
  *
- * <p><b>저장 우선, MockData 폴백.</b> 추출({@link #extract})이 한 번이라도 성공한 상품은
- * 그 스냅샷이 답이고, 없는 상품은 {@link FallbackCatalog}(=MockData)로 떨어진다 — LLM 키가
- * 없는 환경에서도 데모 흐름이 계속 돌아야 해서 목을 아직 안 걷는다(걷는 건 후속).
+ * <h2>❗폴백이 없다 — 추출을 안 돌렸으면 404 다 (이슈 #478)</h2>
+ *
+ * <p>추출({@link #extract})이 한 번이라도 성공한 상품은 그 스냅샷이 답이고, <b>없으면
+ * 404</b> 다. 예전에는 {@code MockDataFallbackCatalog} 가 조용히 목 2건을 냈다 — 화면·게이트·
+ * 교부 문서가 그것을 실물로 받았고, {@code RiskItem} 에 출처 필드가 없어서 <b>응답만 봐서는
+ * 어느 쪽인지 구별되지 않았다.</b>
+ *
+ * <p>그 폴백이 스스로 <i>"키 없는 데모용 임시 가드"</i> 라고 적어 뒀는데 <b>그 전제가
+ * 사라졌다</b> — LLM 키가 살아 있고 실추출이 두 상품 다 돈다. 즉 아무것도 안 지키면서
+ * 조용히 틀릴 수만 있는 상태였다.
+ *
+ * <p>❗<b>prod 에서 반드시 물렸다.</b> 빈 DB 에 폴백이 있으면 extract 를 돌리기 전에 목
+ * 2건이 나가고, 그게 «추출을 안 돌렸다» 를 감춘다. 없으면 404 로 드러난다 —
+ * {@code #463}(추출 실패 required → 미측정 RED)과 같은 결이다.
  *
  * <p>컨트롤러 셋(Product·Session)이 전부 여기서 항목을 받는다. 항목 출처가 두 곳이면
  * 게이트가 물을 분모가 화면과 어긋난다 — 진행률이 조용히 틀리는 그 결함이다.
@@ -29,20 +41,32 @@ import java.util.NoSuchElementException;
 public class ProductRiskItems {
 
     /**
-     * <b>사전적재</b> 데모 상품 → 문서 경로 (SPHINX_DATA_DIR 상대 — ai-service /internal/parse 규약).
+     * <b>사전적재</b> 데모 상품 — 문서 경로(SPHINX_DATA_DIR 상대)와 상품유형.
      *
-     * <p>업로드가 실배선된 뒤(이슈 #521) 이 표는 <b>폴백</b>이다 — {@link #documentPathOf} 가
-     * 업로드된 상품을 먼저 보고, 없으면 여기로 떨어진다. 표를 지우지 않는 이유는
-     * {@link FallbackCatalog} 를 남겨 둔 것과 같다: 이 둘이 커밋된 공시 문서 2종으로
-     * <b>키 없는 환경에서도 데모가 돌게</b> 한다. 걷는 것은 #403 이 따로 한다.
+     * <p>커밋된 공시 문서 2종이다. 업로드가 실배선된 뒤(이슈 #521) 이 표는 <b>폴백</b>이다 —
+     * {@link #documentPathOf}·{@link #productTypeOf} 가 업로드된 상품을 먼저 보고 없으면
+     * 여기로 떨어진다. 걷는 것은 #403 이 따로 한다(업로드 흐름으로 등록하는 쪽).
+     *
+     * <h2>❗상품유형을 여기로 합쳤다 (이슈 #478)</h2>
+     *
+     * <p>예전에는 경로가 여기, 상품유형이 {@code MockData.PRODUCTS} 에 있었다 — <b>같은 두
+     * 상품에 출처가 둘</b>이었고 한쪽만 고쳐질 수 있었다. 폴백 카탈로그를 걷으면서 합쳤다.
+     *
+     * <p>❗<b>이 표는 이해항목을 내지 않는다.</b> 그게 걷어 낸 폴백과의 차이다 — 경로와
+     * 상품유형은 <b>커밋된 코퍼스의 사실</b>이고 추출을 시작하는 데 필요한 값인데, 이해항목은
+     * <b>측정 결과</b>라 지어내면 화면·게이트·교부 문서가 그것을 실물로 받는다.
      */
-    private static final Map<String, String> DEMO_DOCUMENTS = Map.of(
-            "doc-els-kiwoom-4181", "documents/els_kiwoom_4181_simple_prospectus.pdf",
-            "doc-var-samsung-b2601", "documents/var_samsung_b2601_product_summary.pdf");
+    private static final Map<String, Preloaded> PRELOADED = Map.of(
+            "doc-els-kiwoom-4181",
+            new Preloaded("documents/els_kiwoom_4181_simple_prospectus.pdf", "ELS"),
+            "doc-var-samsung-b2601",
+            new Preloaded("documents/var_samsung_b2601_product_summary.pdf", "VARIABLE_INSURANCE"));
+
+    /** 사전적재 상품 하나 — 원문 경로와 상품유형. 이해항목은 여기 없다(위 javadoc). */
+    private record Preloaded(String documentPath, String productType) {}
 
     private final ExtractedRiskItemRepository repository;
     private final AiServiceClient aiServiceClient;
-    private final FallbackCatalog fallbackCatalog;
     private final ProductUploads productUploads;
 
     /** 추출 결과 — 영속된 항목과 경고. 경고는 실패 은폐 금지(E-EXT-03)의 통로다. */
@@ -91,24 +115,26 @@ public class ProductRiskItems {
     }
 
     /**
-     * 상품의 이해항목 — 저장된 추출이 있으면 그것, 없으면 폴백(MockData). <b>저장 추출도 없고
-     * 맞는 폴백도 없으면 404</b>({@link #productTypeOf} 와 같은 규약, 결정 10.81 · 이슈 #427).
-     * 폴백은 상품유형이 맞는 상품에만 목 목록을 낸다({@link FallbackCatalog#riskItems}) — 없는
-     * 상품ID 나 유형이 다른 상품에 목 목록을 내주면 조용히 틀린 목록(예: 변액 세션에 ELS 질문)이
-     * 된다. 그 둘은 여기서 404 로 드러난다.
+     * 상품의 이해항목 — <b>저장된 추출뿐</b>이다. 없으면 404 (이슈 #478 · 결정 10.81 · #427).
      *
-     * @throws NoSuchElementException 저장 추출도 맞는 폴백도 없는 상품(→ 404)
+     * <p>❗<b>목으로 채우지 않는다.</b> 예전에는 폴백이 ELS 목 2건을 냈고, 그 값이
+     * {@code RiskItem} 으로 나가는 순간 <b>출처 표시가 없다</b> — 화면·게이트·교부 문서가
+     * 실물로 받고 <i>"이 항목이 진짜 문서에서 나온 것인가"</i> 에 답할 수 없다. 리포트에
+     * 남는 값이라 그 답이 필요하다.
+     *
+     * <p>404 는 <b>«추출을 안 돌렸다» 를 드러내는 신호</b>다. 빈 DB(신규 배포)에서 폴백이
+     * 있으면 그 사실이 감춰지고, 그건 조용한 오답이다.
+     *
+     * @throws NoSuchElementException 저장된 추출이 없는 상품(→ 404)
      */
     @Transactional(readOnly = true)
     public List<RiskItem> riskItemsOf(String productId) {
         List<ExtractedRiskItem> stored = repository.findByProductIdOrderByItemIndexAsc(productId);
-        if (!stored.isEmpty()) {
-            return stored.stream().map(ExtractedRiskItem::toDomain).toList();
+        if (stored.isEmpty()) {
+            throw new NoSuchElementException(
+                    "이해항목을 알 수 없다(저장된 추출이 없다 — 추출을 먼저 돌려라): " + productId);
         }
-        return fallbackCatalog.riskItems(productId)
-                .orElseThrow(() -> new NoSuchElementException(
-                        "이해항목을 알 수 없다(저장 추출도, 상품유형이 맞는 폴백도 없다 — "
-                                + "추출을 먼저 돌려라): " + productId));
+        return stored.stream().map(ExtractedRiskItem::toDomain).toList();
     }
 
     /**
@@ -163,7 +189,7 @@ public class ProductRiskItems {
     }
 
     /**
-     * 상품유형 — 저장된 추출이 있으면 그 파스가 판별한 값, 다음이 업로드본(#521), 없으면 카탈로그(MockData).
+     * 상품유형 — 저장된 추출이 있으면 그 파스가 판별한 값, 다음이 업로드본(#521), 없으면 사전적재 표.
      * 둘 다 모르면 404 다. <b>기본값을 두지 않는다</b> — product_type 은 오해 유형 필터의
      * 입력이라(misconception.applies_to) 지어낸 값이 판정을 조용히 틀리게 한다.
      *
@@ -178,9 +204,9 @@ public class ProductRiskItems {
         // 추출 전 업로드본은 파스가 판별한 유형을 들고 있다(이슈 #521) — 이 자리가 없으면
         // 올린 직후 추출(POST /{id}/extract)이 상품유형을 못 찾아 404 로 죽는다.
         return productUploads.productTypeOf(productId)
-                .or(() -> fallbackCatalog.productType(productId))
+                .or(() -> Optional.ofNullable(PRELOADED.get(productId)).map(Preloaded::productType))
                 .orElseThrow(() -> new NoSuchElementException(
-                        "상품유형을 알 수 없다(상품 목록에 없음): " + productId));
+                        "상품유형을 알 수 없다(업로드본도 사전적재도 아니다): " + productId));
     }
 
     /**
@@ -196,7 +222,8 @@ public class ProductRiskItems {
         // ❗업로드본이 먼저다. 순서가 반대면 업로드한 파일명이 우연히 사전적재 상품ID 와
         // 같아지는 날 «올린 문서가 아닌 것» 을 파스하고, 그 결과가 그 상품의 항목이 된다.
         String documentPath = productUploads.documentPathOf(productId)
-                .orElseGet(() -> DEMO_DOCUMENTS.get(productId));
+                .orElseGet(() -> Optional.ofNullable(PRELOADED.get(productId))
+                        .map(Preloaded::documentPath).orElse(null));
         if (documentPath == null) {
             throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
         }
