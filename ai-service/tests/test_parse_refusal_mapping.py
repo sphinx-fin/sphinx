@@ -57,14 +57,31 @@ def test_every_mapped_refusal_gets_its_declared_status(refusal, monkeypatch) -> 
         assert detail == {"code": error_code, "message": "(테스트) 거부"}, detail
 
 
-def test_the_four_statuses_are_distinct() -> None:
-    """★ 넷이 한 코드로 뭉치면 `AiServiceClient` 가 못 가른다.
+def test_every_refusal_is_distinguishable_downstream() -> None:
+    """★ 두 거부가 **소비자에게 같은 값**으로 보이면 `AiServiceClient` 가 못 가른다.
 
     `ParseRefused` docstring 이 *"고치는 자리가 전부 다르다"* 로 그 이유를 적어 뒀다.
-    개수만 세면 둘이 같은 값이 돼도 통과하므로 **집합 크기**로 본다.
+    개수만 세면 둘이 같아져도 통과하므로 **집합 크기**로 본다.
+
+    ## ❗상태가 아니라 **(상태, 본문 코드) 쌍**으로 본다
+
+    처음엔 상태 코드만 서로 다른지 봤는데, 그 단정이 **이 파일이 세운 규약과 어긋났다**
+    (`#551` 리뷰 · 강희진·정세현이 각자 짚었다). 규약은 *"상태로 못 가르면 본문에 코드를
+    싣는다"* 인데, 상태만 보는 대조는 **그 규약대로 만든 다섯째를 막는다.**
+
+        DocumentAccessDenied  (502, "DOCUMENT_ACCESS_DENIED")   볼륨 소유권
+        DocumentMountMissing  (502, "DOCUMENT_MOUNT_MISSING")   마운트 선언  ← 정당한데 빨강이었다
+
+    강희진이 그 다섯째를 실제로 만들어 재현했고, **가상이 아니다** — uid 10001 소유권과
+    «볼륨이 아예 안 붙었다»(`#37` 계열)는 고치는 자리가 다르다.
+
+    쌍으로 보면 «본문 코드 없는 502 가 둘» 은 여전히 빨강이다(그건 진짜로 못 가르는
+    상태다). 상태 코드 공간이 갈래보다 좁아지는 순간이 온다는 그쪽 진단 그대로다.
     """
-    statuses = [code for code, _ in routes._REFUSAL_RESPONSE.values()]
-    assert len(set(statuses)) == len(statuses), f"코드가 겹친다: {statuses}"
+    pairs = list(routes._REFUSAL_RESPONSE.values())
+    assert len(set(pairs)) == len(pairs), (
+        f"(상태, 본문 코드) 쌍이 겹친다 — 소비자가 두 거부를 못 가른다: {pairs}"
+    )
 
 
 def test_permission_denied_does_not_go_out_as_a_document_problem(monkeypatch) -> None:
