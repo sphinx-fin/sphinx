@@ -101,6 +101,26 @@ gid 를 `Dockerfile` 에서 `groupadd --gid 10001` 로 못 박아 뒀다 — 안
 `ai-service` 는 같은 지점을 `:ro` 로 붙어서 읽기만 한다 — 파서가 자기 입력을 고칠 수
 있으면 재현성(P2)의 전제가 깨진다.
 
+## ❗지워지는 경로가 하나 있다 — 그리고 DB 는 안 지워진다 (PR #532 리뷰, 윤지석)
+
+`external: true` 라 `docker compose down -v` 로는 안 지워진다. **`docker volume rm
+sphinx_uploads` 는 지운다.**
+
+지워도 `extracted_risk_items` 행은 DB 에 그대로 남으므로, 화면에서는 **항목이 정상으로
+보이고** 원문 조회(`GET /products/{id}/document`)와 재추출만 죽는다. 즉 고장이 목록에
+안 나타나고 그 문서를 실제로 열어 보는 사람에게만 나타난다 — 알아채기까지 걸리는 시간이
+이 자산에서 제일 위험한 부분이다.
+
+```
+docker volume rm sphinx_uploads     볼륨만 사라진다
+extracted_risk_items                남는다 → 항목은 보인다
+GET /products/{id}/document         죽는다
+재추출                              죽는다
+```
+
+복구 수단이 없다 — 「레이아웃은 …」 절이 `external: true` 와 파일명 결정의 근거로 든 바로
+그 사실이다. 이 볼륨을 지우는 명령을 치기 전에 그것을 확인하라는 것이 이 절의 전부다.
+
 ## 경로 방어는 아직 반쪽이다 (PR #532 리뷰 ⑥)
 
 이 문서가 「이중 방어」로 인용했던 두 층의 실제 상태다.
