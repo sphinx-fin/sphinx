@@ -384,8 +384,14 @@ def test_a_real_account_number_is_caught_in_a_public_document(monkeypatch):
 
 
 def test_a_corporate_landline_still_passes(monkeypatch):
-    """실측된 오탐 둘은 그대로 통과해야 한다 — 막으면 정상 문서의 추출이 죽는다."""
-    for phone in ("02-785-7424", "02-2262-6600"):
+    """실측된 오탐 둘은 그대로 통과해야 한다 — 막으면 정상 문서의 추출이 죽는다.
+
+    ❗**형식을 넷으로 늘렸다** (`#534` 리뷰 ①, 오준서). 앞의 둘만 지키면 «서울 지역번호만»
+    을 재는 것이고, `080`(수신자부담)·`070`(인터넷전화)은 **이 PR 이 `ACCOUNT` 를 켜면서
+    새로 422 가 됐다** — 이 PR 이전에는 `BROAD` 가 통째로 꺼져 있어 통과하던 값이다.
+    회귀를 만든 방향이라 그물이 그 자리를 지켜야 한다.
+    """
+    for phone in ("02-785-7424", "02-2262-6600", "080-123-4567", "070-1234-5678"):
         resp = _extract(monkeypatch, pages=[{"page": 1, "text": f"문의 {phone}"}])
         assert resp.status_code == 200, f"{phone} 가 막혔다: {resp.json()}"
 
@@ -422,8 +428,48 @@ def test_the_measured_false_positive_stays_relaxed():
     """실측된 오탐(발행사 대표번호)은 통과해야 한다 — 막으면 추출이 422 로 죽는다."""
     from app import pii
 
-    assert pii.detect("문의 02-785-7424", scope="public_document") == []
-    assert pii.detect("문의 02-2262-6600", scope="public_document") == []
+    for phone in ("02-785-7424", "02-2262-6600", "080-123-4567", "070-1234-5678"):
+        assert pii.detect(f"문의 {phone}", scope="public_document") == [], phone
+
+
+def test_the_broad_residual_is_built_in_one_place():
+    """★ **`detect()` 가 `residual_for_broad()` 를 실제로 부른다** (`#534` 리뷰 ②).
+
+    그 함수 docstring 이 *"`detect()` 와 도구가 이 함수를 같이 쓴다"* 로 단정하는데
+    한동안 **거짓이었다** — `_prestrip` 만 공유하고 SPECIFIC 제거를 각자 돌았다. 그래서
+    그 함수만 고치는 변이가 **도구의 숫자만 바꾸고 아무 테스트도 안 깨뜨렸다.**
+
+    소스를 보는 대조다. 결과만 재면 사본이 같은 답을 내는 동안 초록이고, 그게 이 결함이
+    오래 산 이유다(`#552` 에서 같은 이유로 소스 검사를 걸었다).
+    """
+    import inspect
+
+    from app import pii
+
+    # 주석에도 그 이름이 나오므로 **코드 줄만** 본다 — 문면으로 통과하면 이 대조가 거짓이 된다.
+    code = "\n".join(line for line in inspect.getsource(pii.detect).splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "residual_for_broad(" in code, "넓은 패턴이 볼 잔여를 여기서 따로 만든다 — 사본이다"
+    assert "SPECIFIC.items()" in code, "SPECIFIC 이름 수집이 사라졌다 — 이 대조가 뜻을 잃는다"
+
+
+def test_a_phone_is_not_also_reported_as_an_account():
+    """★ **좁은 패턴을 지운 뒤에 넓은 패턴을 본다** — 그 제거가 실제로 도는지 잰다.
+
+    `BROAD` 주석이 이유를 적어 뒀다: *"겹친 채로 두면 전화번호가 `ACCOUNT` 로도 보고돼
+    상류 P3 위반을 추적할 때 오도한다."* 그런데 **그 제거를 지워도 아무 테스트가 안
+    깨졌다** — `#534` 리뷰 ②를 고치면서 변이를 걸어 보고 알았다(오준서의 그 변이가
+    `detect()` 까지 오게 된 뒤에도 초록이었다).
+
+        residual_for_broad 에서 SPECIFIC 제거를 뺀다
+          detect("제 번호 010-1234-5678", "customer")  →  ['PHONE', 'ACCOUNT']
+                                                          운영자는 계좌번호를 찾으러 간다
+    """
+    from app import pii
+
+    for scope in pii.SCOPES:
+        assert pii.detect("제 번호 010-1234-5678", scope=scope) == ["PHONE"], scope
+        assert pii.detect("가입자 900101-1234567", scope=scope) == ["RRN"], scope
 
 
 def test_the_narrow_patterns_are_never_relaxed():

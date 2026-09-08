@@ -53,8 +53,22 @@ PATTERNS: dict[str, re.Pattern[str]] = {**SPECIFIC, **BROAD}
 #: `public_document` 범위에서만 생기고, 그 범위의 잔여 위험은 `SCOPE_RULES` 에 적혀
 #: 있다(모집단이 «ADMIN 이 올린 임의의 PDF» 로 바뀌었다는 것).
 CORPORATE_CONTACT: dict[str, re.Pattern[str]] = {
-    # 지역번호(02 · 031~069) + 국번 + 4자리. 휴대폰은 SPECIFIC 의 PHONE 이 먼저 먹는다.
-    "landline": re.compile(r"\b0(?:2|[3-6]\d)-\d{3,4}-\d{4}\b"),
+    # 지역번호(02 · 030~069)에 더해 070(인터넷전화)·080(수신자부담)까지 — 셋 다 법인
+    # 대표번호 형식이고 셋 다 `ACCOUNT` 에 걸린다. 휴대폰은 SPECIFIC 의 PHONE 이 먼저 먹는다.
+    #
+    # ❗**070·080 은 이 PR 이 만든 회귀였다** (`#534` 리뷰 ①, 오준서). 예전 완화는
+    # `BROAD` 를 통째로 꺼서 이 둘도 그냥 통과했는데, `ACCOUNT` 를 되켜면서 **선지우기가
+    # 못 따라간 형식만 새로 422** 가 됐다 — `02-785-7424` 가 F-EXT-002 를 멈춘 그 사고와
+    # 글자 그대로 같은 모양이고 지역번호만 달랐다.
+    #
+    #     public_document   이 PR 이전   고치기 전   지금
+    #     080-123-4567      통과         ❌ 422      통과
+    #     070-1234-5678     통과         ❌ 422      통과
+    #     110-234-567890    통과(구멍)    ACCOUNT    ACCOUNT
+    #
+    # 0505(평생번호)·1588(대표번호)은 여기 없어도 된다 — 앞이 4자리라 `ACCOUNT` 의
+    # `\d{2,3}` 에 애초에 안 걸린다(실측).
+    "landline": re.compile(r"\b0(?:2|[3-6]\d|70|80)-\d{3,4}-\d{4}\b"),
 }
 
 #: ★ **범위마다 무엇을 완화하고 무엇을 선지우는지의 단일 표** (`#534` 리뷰, 오준서).
@@ -152,15 +166,17 @@ def detect(text: str, scope: str = "customer") -> list[str]:
         raise ValueError(f"알 수 없는 검사 범위 {scope!r}. 허용: {list(SCOPES)}")
     if not text:
         return []
-    kinds = []
-    residual = _prestrip(text, scope)
-    for name, pat in SPECIFIC.items():
-        if pat.search(residual):
-            kinds.append(name)
-            residual = pat.sub(" ", residual)
+    # ❗**넓은 패턴이 보는 잔여는 `residual_for_broad()` 가 만든다** (`#534` 리뷰 ②, 오준서).
+    #   그 함수 docstring 이 *"`detect()` 와 도구가 이 함수를 같이 쓴다"* 라고 적어 뒀는데
+    #   **여기가 안 불렀다** — `_prestrip` 만 공유하고 SPECIFIC 제거 루프를 한 벌 더 들고
+    #   있었다. 그래서 그 함수만 고치는 변이가 **도구의 숫자만 조용히 바꾸고 아무 테스트도
+    #   안 깨뜨렸다.** 사본이 사라진 게 아니라 작아져 있었고, 이 PR 이 「거짓이 된 주석 넷」
+    #   을 고치며 세운 기준에 그 함수 자신이 안 맞는 상태였다.
+    specific_residual = _prestrip(text, scope)
+    kinds = [name for name, pat in SPECIFIC.items() if pat.search(specific_residual)]
     relaxed = SCOPE_RULES[scope]["relaxed"]
     kinds.extend(name for name, pat in BROAD.items()
-                 if name not in relaxed and pat.search(residual))
+                 if name not in relaxed and pat.search(residual_for_broad(text, scope)))
     return kinds
 
 
