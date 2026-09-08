@@ -196,7 +196,14 @@ jobs:
           # 는 **ai-service 만 뜨고 정작 무는 eval 이 안 떴다.** 세 번째 같은 결함이다.
           # `README\.md$` 는 `^` 앵커라 **루트만** 문다 — `web/README.md`·`server/README.md`
           # 는 안 걸린다(재봤다). 라벨러 표기가 바뀌면 이 목록도 같이 는다.
-          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$)' && ev=true
+          #
+          # `docs/proposal.md` 도 같은 이유다(이슈 #566). 그 파일은 **기획서 정본**이고 제출
+          # PDF 를 거기서 뽑는데, 평가 표본 수를 인용한다 — `eval/tests/test_proposal_sample_size.py`
+          # 가 그 인용을 `eval/corpus` 실물과 대조한다. 빼면 **기획서만 고치는 PR 에서 그 대조가
+          # 안 돌고**, 정본이 실물보다 큰 표본을 주장하는 상태로 심사 PDF 가 나간다. 실제로
+          # 그렇게 났다 — v1.2 를 70 기준으로 정정한 회차에 기획서가 안 따라왔고 아무것도
+          # 빨개지지 않았다. `docs/` 를 통짜로 넓히지 않는 것은 위 server 쪽과 같은 이유다.
+          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$|docs/proposal\.md$)' && ev=true
 
           echo "── 판별 ── server=$server ai-service=$ai web=$web eval=$ev"
           { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; echo "eval=$ev"; } >> "$GITHUB_OUTPUT"
