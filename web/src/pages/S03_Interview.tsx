@@ -45,6 +45,21 @@
  *    못 읽는다 — `session:read` 는 CUST 에게 없다(#166). 표시가 없는 재검증 진입은 여전히
  *    일반 흐름으로 떨어진다. 표시는 «받았어야 하는데 못 받았다» 를 알아채게 할 뿐이고,
  *    완전히 닫히는 것은 계약에 재설명 조회가 생길 때다(#492 ⓑ).
+ *
+ * ⑤ **데모 답지 캡션은 «렌더하지 않는 것»으로 끈다 — 가리는 것이 아니다** (이슈 #539)
+ *    진행자가 답지를 따로 들고 있지 않아도 되게 질문 아래에 U1·U4 예시를 낸다. 그런데
+ *    여기는 **고객 화면**이라(`role: CUST`) *"이렇게 답하면 통과"* 가 상시로 붙으면 기획
+ *    7-4 역이용 방지와 정면으로 부딪친다 — `#494` 가 루브릭을 판매자에게도 주지 않기로
+ *    한 것보다 직접적이다. 그래서 **빌드 플래그로 가른다**(`__DEMO_CAPTIONS__`).
+ *
+ *    ❗**`display:none` 으로 가리면 안 된다.** DOM 에 남으면 답지가 페이지 소스에 그대로
+ *    있다. 조건이 **빌드 시점 리터럴**인 이유도 같다 — `false && …` 가 접히면서 캡션
+ *    JSX 와 `lib/demoAnswers` 모듈이 **번들에서 통째로 빠진다.** 런타임 플래그였다면
+ *    문자열은 그대로 실려 나가고 화면만 안 그리는 것이 된다. 그 사실(기본 빌드에 답지
+ *    문자열이 없다)은 CI 가 매번 확인한다 — `.github/workflows/ci.yml`.
+ *
+ *    플래그를 켜는 것은 배포다: `deploy.yml` 이 **alpha 에만** 준다. `SPHINX_DEMO_OPEN`
+ *    (개방 모드)이 환경으로 갈려 있는 것과 같은 배선이고, 같은 이유다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -52,6 +67,7 @@ import { ApiRequestError, get, post } from "../api/client";
 import type { Judgment, NextQuestion, ReExplanation, RiskItem } from "../api/types";
 import { useElderlyMode } from "../hooks/useElderlyMode";
 import { useInputMeta } from "../hooks/useInputMeta";
+import { SOURCE_LABEL, demoAnswersFor } from "../lib/demoAnswers";
 import { detectPii } from "../lib/pii";
 import { REVERIFY_PARAM, clearReExplanation, readReExplanation } from "../lib/reexplain";
 import "./S03_Interview.css";
@@ -143,6 +159,14 @@ export default function S03Interview() {
 
   const charCount = text.replace(/\s/g, "").length;
   const piiKinds = useMemo(() => detectPii(text), [text]);
+
+  /* 데모 답지(설계 판단 ⑤). 플래그가 없으면 `demoAnswersFor` 를 부르지도 않는다 — 아래
+     렌더 조건과 **같은 리터럴**을 앞에 두어야 번들에서 모듈이 빠진다. 재검증에서도 같은
+     항목이므로 `askedItemId` 하나로 고른다. */
+  const demoAnswers = useMemo(
+    () => (__DEMO_CAPTIONS__ ? demoAnswersFor(askedItemId) : null),
+    [askedItemId],
+  );
 
   /* ── 질문 요청 ─────────────────────────────────────────────────────────── */
   const loadQuestion = useCallback(async () => {
@@ -237,6 +261,20 @@ export default function S03Interview() {
     setIdlePrompt(false);
     meta.reset();
     setPhase("asking");
+  }
+
+  /* ── 데모 답지를 입력창에 넣는다 (설계 판단 ⑤ · 이슈 #539) ────────────────
+     ❗**붙여넣기로 기록한다.** 이 버튼이 채운 문장은 고객이 친 것이 아니므로, `meta` 를
+     건드리지 않으면 입력 메타가 *"첫 키 입력 없이 긴 답이 제출됐다"* 로 남는다 —
+     `pasteDetected:false` 인 채로 `totalInputMs:0` 이라, **실제와 다른 모양의 정황**이
+     F-DET-002 코칭 스코어에 들어간다. 실제로 일어난 일이 붙여넣기이므로 그렇게 적는다.
+     (그래서 데모 세션의 코칭 정황에는 붙여넣기가 뜬다. 그게 맞는 기록이다.) */
+  function fillDemoAnswer(value: string) {
+    setText(value);
+    setShortWarned(false);
+    setIdlePrompt(false);
+    meta.onPaste();
+    textareaRef.current?.focus();
   }
 
   /* ── 제출이 끝나면 경로에서 표시를 뗀다 (#492) ───────────────────────────
@@ -336,12 +374,14 @@ export default function S03Interview() {
 
      ❗**자동으로 잇지 않는 경우 둘:**
      - `reverifying` — 재검증 뒤에 다음 항목을 자동으로 물으면 그 답이 재검증으로
-       기록된다(설계 판단 ④). 사람이 「다음 질문」을 직접 눌러야 일반 흐름으로 돌아간다.
+       기록된다(설계 판단 ④). 그리고 재검증의 목적지는 다음 항목이 아니라 **판정 화면**
+       이라, 그 카드의 1차 버튼도 「판정 결과로」다 — 여기서 자동으로 이으면 사람이 그
+       버튼을 보기도 전에 화면이 다음 질문으로 넘어간다.
      - `interviewDone` — 끝났으면 완료 화면이 목적지다. 자동으로 넘길 다음 항목이 없다.
 
      실패 처리는 그대로다 — `nextQuestion()` 이 던지면 지금도 `phase="failed"` 로 간다.
-     「다음 질문」 버튼을 지우지 않는 이유가 이것이다: 이 자동 연결이 실패하기 전까지는
-     안 보이지만, 조건이 안 맞아 자동으로 못 잇는 경우(재검증 뒤)의 유일한 수동 경로다. */
+     「다음 질문」 버튼을 일반 흐름에서 지우지 않는 이유가 이것이다: 이 자동 연결이
+     실패하기 전까지는 안 보이지만, 실패했을 때의 유일한 수동 경로다. */
   useEffect(() => {
     if (phase !== "answered" || reverifying || interviewDone) return;
     nextQuestion();
@@ -491,17 +531,37 @@ export default function S03Interview() {
                   : "다음 항목으로 넘어가시겠어요?"}
             </p>
             <div className="iv__actions">
-              {/* 끝났으면 그리지 않는다. 예전에는 상시 노출이라 마지막 답변 뒤에도 눌렸고,
+              {/* ❗**재검증 뒤의 목적지는 다음 항목이 아니라 판정 화면이다.**
+
+                  재검증은 판매자가 S-05 에서 시작해서 이리로 온 것이라(`session:interview`
+                  는 SELLER 다) 되돌아갈 곳도 거기다 — 그 답이 등급을 바꿨는지는 S-05 에서만
+                  보인다. 예전에는 이 자리에 「다음 질문」이 있었는데, 재검증 직후에 그걸
+                  누르면 **일반 흐름의 다음 항목**을 받아 온다(`nextQuestion` 이 `reExplain`
+                  을 비운다). 판정하러 온 사람에게 인터뷰를 이어 붙이는 셈이라, 목적지가
+                  화면 밖에 있는 것을 사람이 알아서 찾아가야 했다.
+
+                  ❗**재검증일 때만 바꾼다.** 일반 흐름에서는 다음 항목이 맞는 목적지이고,
+                  그 분기의 `!interviewDone` 가드도 그대로 둔다 — 끝난 뒤에도 눌리던 시절에
                   그 한 번이 `done=true` 를 받아 **빈 질문 화면**을 띄웠다. */}
-              {!interviewDone && (
+              {reverifying ? (
                 <button
                   type="button"
                   className="iv__btn iv__btn--primary"
-                  onClick={nextQuestion}
-                  disabled={busy}
+                  onClick={() => navigate(`/judgment/${sid}`)}
                 >
-                  다음 질문
+                  판정 결과로
                 </button>
+              ) : (
+                !interviewDone && (
+                  <button
+                    type="button"
+                    className="iv__btn iv__btn--primary"
+                    onClick={nextQuestion}
+                    disabled={busy}
+                  >
+                    다음 질문
+                  </button>
+                )
               )}
               <button
                 type="button"
@@ -515,10 +575,14 @@ export default function S03Interview() {
                 화면으로 나가는 링크를 원래 두지 않는다(위 `handoff-lost` 분기의 "S-05 로
                 가지 않는다" 주석 — `SecurityConfig` 가 `permitAll()` 이라 아래에서 막아
                 주는 층도 없다). 그런데도 재검증 직후 이 한 자리에만 조용한 2차 링크를
-                둔다: 사용자 피드백(10번)이 재검증 답변 뒤 나갈 길이 없다고 지적했고,
-                지금 데모 동선에는 담당자가 재검증 결과를 바로 확인할 다른 길이 없다.
+                둔다: 사용자 피드백(10번)이 재검증 답변 뒤 나갈 길이 없다고 지적했다.
                 그래서 ⑴ 재검증 직후 상태에서만(`reverifying`), ⑵ 1차 버튼이 아니라
                 라벨로 대상을 못박은 2차 링크로, ⑶ 위 두 줄로 예외 이유를 남긴다.
+
+                ❗**«나갈 길이 없다» 는 이제 위 1차 버튼(「판정 결과로」)이 푼다.** 이 링크가
+                남아 있는 이유는 목적지가 다르기 때문이다 — 그쪽은 이 세션의 판정이고
+                여기는 집계다. 예외의 근거가 그만큼 얇아졌으므로, 아래 재검토 때
+                **먼저 없앨 후보**가 이 링크다.
                 **데모 뒤 재검토** — 역할 가드(`Role`·`rbac_policy.yaml`)가 생기면 이
                 링크는 그 가드 뒤로 옮기거나 없앤다. */}
             {reverifying && (
@@ -543,6 +607,56 @@ export default function S03Interview() {
             {/* 재검증이면 재설명 응답의 변형 질문이다 — 직전 질문을 다시 띄우지 않는다
                 (계약 `ReExplanation.reverifyQuestion`). 고르는 자리는 `askedText` 한 곳. */}
             <h1 className="iv__question">{askedText}</h1>
+
+            {/* ── 데모 답지 (설계 판단 ⑤ · 이슈 #539) ────────────────────────
+                ❗**조건 맨 앞이 빌드 리터럴이어야 한다.** `demoAnswers` 만 보면 값이
+                런타임에 정해져 번들러가 이 블록을 못 지운다 — 그러면 답지 문자열이
+                **꺼진 빌드에도 실려** 나가고, 화면에 안 보일 뿐 페이지 소스에는 있다.
+                `__DEMO_CAPTIONS__` 는 vite.config.ts 가 `false`/`true` 로 치환한다. */}
+            {__DEMO_CAPTIONS__ && demoAnswers && (
+              <aside className="iv__demo">
+                <p className="iv__demo-head">
+                  <span aria-hidden="true">🎬</span>
+                  <span>
+                    <b>진행자·테스터용 답지입니다.</b> 데모 빌드(alpha)에서만 나옵니다.
+                    고객에게 이 화면을 그대로 넘기지 마세요.
+                  </span>
+                </p>
+                <ul className="iv__demo-list">
+                  {(["u1", "u4"] as const).map((grade) => {
+                    const example = demoAnswers[grade];
+                    return (
+                      <li key={grade} className={`iv__demo-row iv__demo-row--${grade}`}>
+                        <p className="iv__demo-line">
+                          <span className={`iv__demo-tag iv__demo-tag--${grade}`}>
+                            {grade === "u1" ? "예시 정답 · U1 이해" : "예시 오답 · U4 오해"}
+                          </span>
+                          <span className="iv__demo-src">{SOURCE_LABEL[example.source]}</span>
+                        </p>
+                        <p className="iv__demo-text">{example.text}</p>
+                        <button
+                          type="button"
+                          className="iv__demo-fill"
+                          onClick={() => fillDemoAnswer(example.text)}
+                          disabled={busy}
+                        >
+                          입력창에 넣기
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {/* ❗**보장값이 아니라는 것을 적는다.** 채점은 회차마다 새로 도는 LLM
+                    판정이라 같은 문장이 늘 같은 등급으로 나오지 않는다(자기일관성 캡이
+                    재고 있는 그 변동 · `#533`). 이 줄이 없으면 U1 예시가 U2 를 받은 것이
+                    결함으로 올라온다. */}
+                <p className="iv__demo-foot">
+                  등급은 <b>사람이 매긴 라벨(또는 dev set 기대값)</b>이지 채점 결과의
+                  보장이 아닙니다 — 같은 문장이 회차마다 다른 등급을 받을 수 있습니다.
+                  「입력창에 넣기」로 채운 답변은 <b>붙여넣기로 기록</b>됩니다(F-INT-003).
+                </p>
+              </aside>
+            )}
 
             <div className="iv__field">
               <label htmlFor="answer" className="sr-only">

@@ -25,6 +25,10 @@
 """
 from __future__ import annotations
 
+import sys
+import threading
+import time
+
 import logging
 
 import pytest
@@ -455,3 +459,309 @@ def test_keeping_the_tying_candidate_keeps_the_signal(_reset_meter) -> None:
 
     assert [m.type_id for m in out.matches] == [_M_KEEP, _M_TYING], "M02 만 빠져야 한다"
     assert out.escalate, "M08 이 남았는데 꺾기 신호가 꺼졌다"
+
+
+# ── 병렬 경로 (이슈 #498) ────────────────────────────────────────────────────
+#
+# `conftest.py` 가 스위트 전체에서 이 층을 **순차로** 덮는다(스텁이 호출 순서에 매여 있다).
+# 그래서 병렬 경로는 여기서 **스레드 안전한 스텁으로** 따로 잰다 —
+# `test_parallel_consistency.py` 가 `#437` 에 대해 하는 것과 같은 자리다.
+class _ThreadSafeVerdicts:
+    """호출 순서에 안 매인 스텁. 패턴 문면으로 답을 정한다."""
+
+    def __init__(self, drop: set[str] | None = None) -> None:
+        self._drop = drop or set()
+        self._lock = threading.Lock()
+        self.threads: set[str] = set()
+        self.calls = 0
+        #: ❗**동시에 안에 있던 최대 인원.** 벽시계 대신 이걸 본다 (`#537` 리뷰 ③, 오준서).
+        #: `threads` 는 «서로 다른 스레드를 썼다» 까지만 말하고 **겹쳤는지는 안 말한다** —
+        #: 풀에서 순차로 돌아도 태스크마다 다른 워커가 잡힐 수 있다.
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    def complete_json(self, **kwargs):
+        with self._lock:
+            self.calls += 1
+            self.threads.add(threading.current_thread().name)
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            time.sleep(0.05)                  # 병렬이면 겹치고 순차면 쌓인다
+        finally:
+            with self._lock:
+                self.in_flight -= 1
+        holds = not any(d in kwargs["prompt"] for d in self._drop)
+        return misconception.PolarityVerdict(
+            belief="(스텁)", holds=holds, polarity="positive" if holds else "negative")
+
+
+class _Match:
+    def __init__(self, type_id: str) -> None:
+        self.type_id = type_id
+        self.matched_pattern = f"패턴-{type_id}"
+
+
+def _parallel(monkeypatch):
+    monkeypatch.setattr(misconception, "_polarity_parallel_enabled", lambda: True)
+
+
+def test_the_verdicts_keep_the_input_order(monkeypatch) -> None:
+    """★ 후보와 판정이 **안 섞인다.** 섞이면 엉뚱한 후보가 빠지는데 조용하다."""
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(6)]
+    # ❗**기대값이 회문이면 안 된다.** 처음엔 {M01, M04} 를 뺐는데 그러면 기대값이
+    #   [T,F,T,T,F,T] 라 **뒤집어도 같아서** 순서가 섞이는 변이가 통과했다.
+    client = _ThreadSafeVerdicts(drop={"패턴-M00", "패턴-M01"})
+
+    holds = misconception._verdicts(client, matches, "발화")
+
+    assert holds == [False, False, True, True, True, True]
+    assert holds != list(reversed(holds)), "기대값이 회문이면 이 대조가 순서를 안 잰다"
+
+
+def test_the_meter_counts_exactly_under_concurrency(monkeypatch) -> None:
+    """★ `+= 1` 은 원자적이지 않다 — 락이 없으면 **건수가 조용히 샌다.**"""
+    _parallel(monkeypatch)
+    # ❗`METER.__init__()` 을 부르던 자리다. **`_reset_meter` 가 autouse 라 불필요했고**,
+    # 수동 초기화는 `_lock` 을 통째로 새로 만들어 오히려 위험하다(`#537` 리뷰 ②).
+    matches = [_Match(f"M{i:02d}") for i in range(12)]
+    client = _ThreadSafeVerdicts(drop={f"패턴-M{i:02d}" for i in range(0, 12, 2)})
+
+    misconception._verdicts(client, matches, "발화")
+
+    assert misconception.METER.asked == 12
+    assert misconception.METER.kept + misconception.METER.dropped == 12
+    # 합계와 내역이 어긋나는 것이 by_type 락 누락의 유일한 증상이다
+    assert sum(misconception.METER.by_type.values()) == misconception.METER.dropped
+
+
+def test_the_meter_does_not_leak_under_a_hammering(monkeypatch) -> None:
+    """★ 락이 진짜 필요한지 — **경합을 만들어서** 잰다.
+
+    ❗**두 번 약했다.** ① 후보 12건을 병렬로 도는 것만으로는 안 난다(워커 4개 · 호출마다
+    sleep 이라 겹칠 확률이 낮다). ② 계량기를 직접 두드려도 **기본 전환 간격(5ms)에서는
+    안 난다** — 락을 빼는 변이가 3,200회 두드림을 그대로 통과했다.
+
+    그래서 `sys.setswitchinterval` 을 낮춰 **선점을 강제한다.** 그 조건에서 재면 실제로
+    샌다(락 없이 16,000 중 11,065). 경합 테스트는 **경합을 만들어야** 대조가 된다.
+    """
+    original_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    monkeypatch_undo = lambda: sys.setswitchinterval(original_interval)
+    workers, per_worker = 8, 2000
+
+    def hammer():
+        for _ in range(per_worker):
+            misconception.METER.record_dropped("M01", contradicted=True)
+
+    try:
+        threads = [threading.Thread(target=hammer) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        monkeypatch_undo()
+
+    total = workers * per_worker
+    assert misconception.METER.dropped == total
+    assert misconception.METER.contradicted == total
+    assert misconception.METER.by_type["M01"] == total, (
+        "합계와 내역이 어긋난다 — by_type 의 read-modify-write 가 락 밖에 있다"
+    )
+
+
+def test_the_candidates_actually_run_at_the_same_time(monkeypatch) -> None:
+    """★ 「병렬로 만들었다」가 참인지 — 스레드가 실제로 갈리는지 본다.
+
+    배선이 맞아도 도는지는 다른 층이다. 여기서 안 재면 `_verdicts` 가 순차로 떨어져도
+    위 두 단정이 그대로 통과한다.
+    """
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(4)]
+    client = _ThreadSafeVerdicts()
+
+    misconception._verdicts(client, matches, "발화")
+
+    assert len(client.threads) > 1, f"한 스레드에서만 돌았다: {client.threads}"
+    # ❗**벽시계 단정을 뺐다** (`#537` 리뷰 ③, 오준서). 여유가 4배뿐이라 러너가 밀리는 날
+    # 깜빡이고, 깨졌을 때 뜻이 «병렬이 안 돈다» 가 아니라 «러너가 느렸다» 쪽이 더 크다.
+    #
+    # 대신 스텁이 **동시에 안에 있던 최대 인원**을 센다 — 이게 재려던 것 그 자체이고
+    # 시간에 안 매인다. `threads` 만으로는 부족하다: 순차로 돌아도 태스크마다 다른 워커가
+    # 잡히면 집합이 커진다(그래서 이 단정이 원래 반쪽이었다).
+    assert client.max_in_flight > 1, (
+        f"겹친 적이 없다(최대 {client.max_in_flight}명) — 스레드는 갈렸지만 순차로 돌았다"
+    )
+
+
+def test_a_full_slot_table_falls_back_to_sequential(monkeypatch) -> None:
+    """★ **자리가 없으면 큐에 쌓지 않고 순차로 간다** (`#537` 리뷰 ①, 오준서).
+
+    `_POLARITY_POOL.map(...)` 만 쓰면 워커가 찼을 때 **큐에 쌓고** 전부 끝날 때까지 막는다.
+    풀이 프로세스 전역이라 그 큐는 **다른 요청의 후보들** 뒤에 선다.
+
+        동시 요청 K · 후보 N · 워커 W    병렬 ⌈K·N/W⌉·L   vs   순차 N·L
+        → K > W 부터 역전한다 — 그리고 그때가 지연이 문제되는 순간이다
+
+    `scoring._PROBE_SLOTS` 가 같은 문제를 이미 풀어 뒀다(`#437`). 자리 표가 있으면
+    **최악이 순차로 캡된다.**
+
+    ❗여기서 자리를 전부 잡아 그 경로를 만든다. 판정은 그대로 나와야 한다 — 이 층은
+    지연만 바꾸고 결과를 안 바꾼다.
+    """
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(4)]
+    client = _ThreadSafeVerdicts(drop={"패턴-M01"})
+
+    held = [misconception._POLARITY_SLOTS.acquire(blocking=False)
+            for _ in range(misconception.POLARITY_WORKERS)]
+    assert all(held), "자리를 다 못 잡았다 — 앞 테스트가 자리를 반납하지 않았나"
+    try:
+        verdicts = misconception._verdicts(client, matches, "발화")
+    finally:
+        for _ in held:
+            misconception._POLARITY_SLOTS.release()
+
+    assert verdicts == [True, False, True, True], "순차 폴백이 판정을 바꿨다"
+    assert misconception.METER.no_slot == 4, (
+        f"자리 없음을 안 셌다({misconception.METER.no_slot}건) — "
+        "「스위치를 껐다」와 「자리가 찼다」를 못 가른다(결정 5.40)"
+    )
+    assert client.max_in_flight == 1, (
+        f"순차로 떨어졌는데 겹쳤다(최대 {client.max_in_flight}명) — 풀에 들어갔다"
+    )
+    assert client.threads == {threading.current_thread().name}, (
+        f"호출 스레드가 아닌 곳에서 돌았다: {client.threads}"
+    )
+
+
+def test_the_slot_table_is_returned_after_a_parallel_run(monkeypatch) -> None:
+    """★ **자리를 반납한다.** 안 하면 첫 요청 뒤로 이 층이 영구히 순차가 되고, 증상은
+    「예전과 같은 지연」이라 **아무도 안 본다.**
+    """
+    _parallel(monkeypatch)
+    matches = [_Match(f"M{i:02d}") for i in range(4)]
+
+    misconception._verdicts(_ThreadSafeVerdicts(), matches, "발화")
+
+    held = [misconception._POLARITY_SLOTS.acquire(blocking=False)
+            for _ in range(misconception.POLARITY_WORKERS)]
+    for ok in held:
+        if ok:
+            misconception._POLARITY_SLOTS.release()
+    assert all(held), f"자리가 안 돌아왔다: {held}"
+    assert misconception.METER.no_slot == 0, "자리가 있었는데 없음으로 셌다"
+
+
+def test_a_single_candidate_does_not_touch_the_pool(monkeypatch) -> None:
+    """후보가 하나면 스레드를 안 쓴다 — 얻는 것 없이 넣었다 꺼내는 값만 든다."""
+    _parallel(monkeypatch)
+    client = _ThreadSafeVerdicts()
+
+    misconception._verdicts(client, [_Match("M01")], "발화")
+
+    assert client.threads == {threading.current_thread().name}
+
+
+def test_an_exception_does_not_kill_scoring(monkeypatch) -> None:
+    """★ 게이트는 **과탐을 줄이는 장치이지 판정을 만드는 장치가 아니다**(P1).
+
+    `_polarity_holds` 는 스스로 전부 잡지만, `executor.map` 은 안에서 난 예외를 결과를
+    꺼낼 때 올린다 — 그 계약이 깨지면 게이트가 채점을 죽인다. 한 겹 더 막았는지 잰다.
+    """
+    _parallel(monkeypatch)
+    monkeypatch.setattr(misconception, "_polarity_holds",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("(테스트)")))
+
+    holds = misconception._verdicts(object(), [_Match("M01"), _Match("M02")], "발화")
+
+    assert holds == [True, True], "실패는 후보를 남기는 쪽으로 떨어져야 한다 (P5 0.2절)"
+
+
+# ── 계량기 조회 경로 (이슈 #483) ─────────────────────────────────────────────
+#
+# `#327` ①~④ 는 evidence 에 이미 쌓여 있어 세는 코드만 없었는데, 이 계량기는 **애초에
+# 기록으로 안 간다.** 그래서 조회 경로가 먼저 필요하다.
+def test_the_summary_endpoint_reports_the_meter() -> None:
+    """★ 계량기 값이 그대로 나온다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    misconception.METER.__init__()
+    misconception.METER.record_kept()
+    misconception.METER.record_dropped("M08-TYING", contradicted=True)
+    misconception.METER.record_not_run()
+
+    body = TestClient(app).get("/internal/polarity/summary").json()
+
+    assert body == {"asked": 3, "kept": 1, "dropped": 1, "contradicted": 1,
+                    "not_run": 1, "no_slot": 0, "by_type": {"M08-TYING": 1}}
+
+
+def test_not_run_is_visible_and_distinct_from_zero() -> None:
+    """★ **이 엔드포인트가 존재하는 이유다.**
+
+    변이 방식을 적어 둔다 (`#538` 리뷰 — 재현 셈이 방식에 따라 달랐다):
+    `PolarityMeter.snapshot()` 의 `"not_run": self.not_run` 을 `"not_run": 0` 으로 바꾼다
+    → **2 failed**(이것과 `test_the_summary_endpoint_reports_the_meter`).
+    `schemas.PolaritySummary.not_run` **필드를 지우는** 방식이면 3 failed 다
+    (`test_reading_the_summary_does_not_reset_it` 의 완전일치 대조까지 걸린다).
+    어느 쪽이든 방향은 같다 — **어느 층을 건드렸는지가 셈을 바꾼다.**
+
+    게이트는 실패하면 후보를 남기므로(P5 0.2절) `dropped == 0` 과 `not_run > 0` 이
+    **판정에서 구별되지 않는다.** 결정 5.40 — 못 잰 값은 0 이 아니라 「모른다」다.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    client = TestClient(app)
+
+    misconception.METER.__init__()
+    quiet = client.get("/internal/polarity/summary").json()
+
+    misconception.METER.__init__()
+    misconception.METER.record_not_run()
+    misconception.METER.record_not_run()
+    broken = client.get("/internal/polarity/summary").json()
+
+    assert quiet["dropped"] == broken["dropped"] == 0, "판정 쪽 증상이 같다는 것이 전제다"
+    assert quiet["not_run"] == 0 and broken["not_run"] == 2, "그 둘을 가르는 값이 이것뿐이다"
+
+
+def test_reading_the_summary_does_not_reset_it() -> None:
+    """읽기가 값을 바꾸면 두 소비자가 서로의 값을 지운다."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    client = TestClient(app)
+
+    misconception.METER.__init__()
+    misconception.METER.record_kept()
+
+    first = client.get("/internal/polarity/summary").json()
+    second = client.get("/internal/polarity/summary").json()
+
+    assert first == second == {"asked": 1, "kept": 1, "dropped": 0, "contradicted": 0,
+                               "not_run": 0, "no_slot": 0, "by_type": {}}
+
+
+def test_the_summary_is_behind_internal_auth() -> None:
+    """★ `by_type` 에 `M08-TYING` 이 들어온다 — **무인증 자리에 두면 안 된다**(기획 7-4).
+
+    `/healthz` 가 `GUARDED_PREFIX` 밖이라 거기 실을 수 없는 이유이고, 이 경로가
+    `/internal/` 접두어를 지키는지가 그 경계다.
+    """
+    from app.main import GUARDED_PREFIX
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    paths = [p for p in TestClient(app).get("/openapi.json").json()["paths"]
+             if "polarity" in p]
+    assert paths, "요약 경로가 스키마에 없다"
+    assert all(p.startswith(GUARDED_PREFIX) for p in paths), (
+        f"인증 밖에 있다: {paths} — by_type 이 M08-TYING 을 담는다"
+    )

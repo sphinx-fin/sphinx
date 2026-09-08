@@ -217,3 +217,118 @@ def test_the_guard_actually_runs_when_only_this_file_changes(path: Path, what: s
     # 검사가 ci.yml 에서 **빗나간다** — 변이가 실제로 걸렸는데 초록이었다.
     assert "app/scoring.py" not in joined.replace("\\", ""), (
         f"{path.name}: 옛 경로(app/scoring.py)가 남아 있다 — 값은 이제 그 파일에 없다")
+
+
+# ── 실측을 든 why 는 재현 경로를 같이 든다 ──────────────────────────────────
+#
+# `#388` 에서 세운 규약과 같다 — 숫자를 적은 자리에 **그 숫자를 다시 낼 명령**이 없으면,
+# 값을 의심하는 다음 사람이 옮겨 적을 출처가 없어 스스로 다시 재고 또 다른 값을 낸다.
+#
+# ❗**손목록으로 두지 않는다** (`#529` 리뷰, 오준서). 처음엔 `_MEASURED_WHY = {...}` 로
+# 이름을 적었는데, 그건 **이 파일이 100줄 위에서 금지한 것**이다 —
+# `test_no_module_still_hardcodes_a_threshold` docstring 이 *"이름을 하나씩 적으면 다음
+# 임계값을 만드는 사람이 이 목록을 모른 채 지나간다"* 로 세워 뒀다. **내용에서 유도한다.**
+
+def _thresholds_raw() -> dict:
+    return yaml.safe_load(thresholds.THRESHOLDS_PATH.read_text(encoding="utf-8"))["thresholds"]
+
+
+def test_every_measured_by_points_at_a_tool_that_exists() -> None:
+    """★ 실측으로 정한 값은 **그 실측을 다시 낼 도구**를 가리킨다 (`#529` 리뷰, 오준서).
+
+    ❗**손목록도 문면 추론도 아니다.** 이 파일이 100줄 위에서 손목록을 금지했고
+    (*"다음 임계값을 만드는 사람이 이 목록을 모른 채 지나간다"*), 문면에서 「실측」 같은
+    표식을 찾는 방식은 **두 방향으로 다 틀렸다** — `ngram_match` 는 안 걸리고
+    *"이 값 자체는 실측이 아니다"* 라는 **부정문**이 걸렸다. 그래서 데이터가 선언한다.
+    """
+    raw = _thresholds_raw()
+    declared = {name: body["measured_by"] for name, body in raw.items() if body.get("measured_by")}
+    assert declared, (
+        "measured_by 를 선언한 임계값이 하나도 없다 — 이 대조가 0건을 보고 통과한다"
+    )
+    root = Path(thresholds.__file__).resolve().parents[1]
+    missing = sorted(f"{name} → {rel}" for name, rel in declared.items()
+                     if not (root / rel).is_file())
+    assert not missing, f"measured_by 가 가리키는 도구가 없다: {missing}"
+
+
+def test_a_why_that_cites_a_tool_also_declares_it() -> None:
+    """★ `why` 가 도구를 가리키면 `measured_by` 로도 **선언**해야 한다.
+
+    문면만 있으면 그 인용이 낡아도 아무도 모른다 — 위 대조가 파일 존재를 보는 자리는
+    `measured_by` 뿐이다. 접힌 스칼라(`why: >-`)는 물리 줄바꿈을 공백으로 접으므로
+    문면 쪽 인용은 **줄 감싸기에 취약하다**(`#529` 리뷰) — 선언이 그걸 안 탄다.
+    """
+    for name, body in _thresholds_raw().items():
+        folded = re.sub(r"\s+", "", body["why"])
+        cited = re.findall(r"(?<![\w/])tools/([A-Za-z0-9_.]+?\.py)", folded)
+        if not cited:
+            continue
+        assert body.get("measured_by"), (
+            f"{name}: why 가 {cited} 를 가리키는데 measured_by 가 없다 — "
+            "존재를 대조하는 자리는 그 필드뿐이다"
+        )
+
+
+def test_no_tool_or_doc_hardcodes_the_prompt_version() -> None:
+    """★ **판을 문자열로 박지 않는다** — 이 PR 이 규탄한 그 결함의 회귀 가드다.
+
+    `tune_ngram_threshold.py` 가 `F-SCR-001_v2` 를 print 에 박아 놓고, `#409` 가 v3 로
+    재채점한 뒤 **틀린 조건을 찍고 있었다.** 같은 하드코딩이 문서에도 남아 있었다.
+    판은 `eval/data/model.jsonl` 에서 읽는다.
+
+    `test_no_module_still_hardcodes_a_threshold` 와 같은 모양이다 — 소스 텍스트를 훑어
+    리터럴을 잡고, **그 정규식 자체를 먼저 테스트한다.**
+    """
+    shape = re.compile(r"F-SCR-001_v\d")
+    assert shape.search("판은 F-SCR-001_v2 다"), "★ 꼴이 안 맞으면 아래 스캔이 0줄을 본다"
+
+    live = {row["prompt_version"] for row in _model_rows() if row.get("prompt_version")}
+    assert live, "model.jsonl 에서 prompt_version 을 하나도 못 읽었다"
+
+    # ❗**「예전에 이랬다」를 문면으로 알아내지 않는다** (`#529` 리뷰 ③, 정세현).
+    #
+    #   예전에는 `예전에|였다|박아 뒀|낡았|바뀌었` 로 서술 줄을 걸러 냈는데, 그 방식이
+    #   **두 방향으로 틀렸다.** 이 PR 이 ④에서 버린 바로 그 방식이 여기 남아 있었다.
+    #
+    #       거짓 양성  "v2 판(F-SCR-001_v2)에서는 …"        정확한 역사 기록이 위반이 된다
+    #       거짓 음성  "판이 바뀌었으니 F-SCR-001_v2 로 …"   진짜 하드코딩이 `바뀌었` 로 샌다
+    #
+    #   ★ **그래서 추론을 없애고 규약으로 간다** — 옛 판은 `F-SCR-001_v2` 꼴로 적지 않고
+    #   **「v2 판」처럼 적는다.** 이 스캔이 그 꼴만 보므로 제외 규칙 자체가 필요 없어지고,
+    #   두 오작동이 **함께** 사라진다. ④의 `measured_by` 와 같은 방향이다: 문면 추론 대신
+    #   규약·선언.
+    #
+    #   잃는 것은 옛 판을 정확한 이름으로 못 적는 것 하나인데, 그 자리에서 필요한 정보는
+    #   *"어느 판이었나"* 이고 「v2 판」이 그것을 다 말한다.
+    root = Path(thresholds.__file__).resolve().parents[1]
+    offenders: list[str] = []
+    seen = 0
+    for path in sorted((root / "tools").glob("*.*")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for found in shape.findall(line):
+                seen += 1
+                # 인용이 **지금 값과 같으면** 낡지 않았다. 다르면 그 줄이 곧 거짓이다.
+                if found not in live:
+                    offenders.append(f"{path.name}:{number} {found} (실물 {sorted(live)})")
+    # ★ **0줄을 보고도 통과하면 아무것도 안 잰다.** 인용이 전부 사라지면 이 스캔은
+    #   영원히 초록이고, 그 상태가 「판을 안 박았다」와 구별되지 않는다.
+    assert seen, (
+        "tools/ 에서 판 인용을 한 줄도 못 봤다 — 스캔이 아무것도 안 재고 있다. "
+        "정말로 인용이 없어졌다면 이 단정을 지우고 그 사실을 적는다"
+    )
+    assert not offenders, (
+        "판을 문자열로 박았고 그 값이 model.jsonl 과 다르다 — 파일에서 읽는다.\n"
+        "옛 판을 가리키는 서술이라면 `F-SCR-001_v2` 대신 **「v2 판」**으로 적는다 "
+        "(그 꼴만 이 스캔에 걸린다):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def _model_rows() -> list[dict]:
+    import json
+
+    path = Path(thresholds.__file__).resolve().parents[2] / "eval" / "data" / "model.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+
