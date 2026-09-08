@@ -33,13 +33,15 @@ public class ProductDocuments {
 
     private final Path dataDir;
     private final ProductRiskItems productRiskItems;
+    private final ProductUploads productUploads;
 
     /**
      * 경로를 String 으로 받아 직접 {@link Path#of}로 변환한다 — {@code SimulatorProperties}가
      * 같은 이유(리소스 경로 변환기가 상대경로의 {@code ..}를 null 로 정규화)로 그렇게 한다.
      */
     public ProductDocuments(@Value("${sphinx.documents.data-dir}") String dataDir,
-                            ProductRiskItems productRiskItems) {
+                            ProductRiskItems productRiskItems,
+                            ProductUploads productUploads) {
         // 빈 값은 설정 오류다 — Spring 의 ${VAR:기본값} 은 환경변수가 빈 문자열이면 그것을
         // 값으로 취급해 기본값이 죽는다(SimulatorProperties 주석과 같은 함정).
         if (dataDir == null || dataDir.isBlank()) {
@@ -49,6 +51,7 @@ public class ProductDocuments {
         }
         this.dataDir = Path.of(dataDir);
         this.productRiskItems = productRiskItems;
+        this.productUploads = productUploads;
     }
 
     /** 조회 결과 — 파일명(Content-Disposition 용)과 바이트. */
@@ -77,11 +80,31 @@ public class ProductDocuments {
                     + "마운트됐는지 · SPHINX_DATA_DIR 을 확인하라, #433): " + resolved);
         }
         try {
-            return new Document(resolved.getFileName().toString(), Files.readAllBytes(resolved));
+            return new Document(filenameOf(productId, resolved), Files.readAllBytes(resolved));
         } catch (IOException e) {
             // 파일이 있는데 못 읽는 것은 설정·권한 문제다 — 400 이 아니라 500(INTERNAL_ERROR).
             throw new UncheckedIOException("상품 문서를 읽지 못했다: " + resolved, e);
         }
+    }
+
+    /**
+     * {@code Content-Disposition} 에 낼 파일명.
+     *
+     * <p>❗<b>업로드본은 경로에서 뽑지 않는다</b>(이슈 #521). 저장 경로의 이름은
+     * {@link UploadedDocumentStore#safeFilename} 이 걷은 값이라 한글 아닌 특수문자가
+     * {@code _} 로 접혀 있다 — 판매자가 받는 파일 이름은 <b>올린 그대로</b>여야 하므로
+     * 업로드가 DB 행에 남긴 원문을 쓴다.
+     *
+     * <p>사전적재 데모 2종은 그 행이 없다 — 그쪽은 경로의 파일명이 곧 사람이 읽는 이름이라
+     * (예: {@code els_kiwoom_4181_simple_prospectus.pdf}) 예전 동작을 그대로 둔다.
+     */
+    private String filenameOf(String productId, Path resolved) {
+        // ❗DB 의 값은 **업로더가 준 원문**이라 개행·제어문자가 있을 수 있다. 그대로 헤더에
+        //   실으면 응답 헤더가 갈라지므로 저장에 쓰는 것과 같은 정제를 거친다 — 한글은 살고
+        //   경로 구분자·제어문자만 죽는다(UploadedDocumentStore.safeFilename).
+        return productUploads.originalFilenameOf(productId)
+                .map(UploadedDocumentStore::safeFilename)
+                .orElseGet(() -> resolved.getFileName().toString());
     }
 
     /**
