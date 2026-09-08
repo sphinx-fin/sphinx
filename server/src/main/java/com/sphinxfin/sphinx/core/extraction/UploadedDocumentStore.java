@@ -95,6 +95,16 @@ public class UploadedDocumentStore {
     /** DB 에 남길 원래 파일명 최대 길이. {@code varchar(255)} 보다 넉넉히 짧게 둔다. */
     private static final int DISPLAY_MAX = 200;
 
+    /**
+     * 저장 파일명 최대 <b>바이트</b>. 리눅스 ext4·overlayfs 한도가 255 바이트다.
+     *
+     * <p>❗<b>글자 수가 아니다.</b> 한글은 UTF-8 로 세 바이트라 그 차이가 세 배다 —
+     * 자세한 근거와 실측은 {@link #truncateToBytes} 에 있다. 200 으로 둔 것은 한도에
+     * 붙이지 않으려는 것이고(같은 디렉토리에 임시 {@code .upload-*.part} 가 생긴다)
+     * 그래도 한글 66 자가 들어간다.
+     */
+    private static final int MAX_NAME_BYTES = 200;
+
     /** 표시용 이름에서 지울 것 — 제어문자·개행. 응답 헤더가 갈라지는 것을 막는 최소치다. */
     private static final Pattern HEADER_UNSAFE = Pattern.compile("[\\p{Cntrl}]+");
 
@@ -299,10 +309,52 @@ public class UploadedDocumentStore {
         base = UNSAFE_NAME.matcher(base).replaceAll("_");
         // 점만으로 된 이름(".", "..")은 정제 후에도 위험하다 — 통째로 바꾼다.
         base = base.replaceAll("^\\.+$", "");
-        if (base.length() > 120) {
-            base = base.substring(base.length() - 120);
-        }
+        base = truncateToBytes(base, MAX_NAME_BYTES);
         return base.isEmpty() ? "document.pdf" : base;
+    }
+
+    /**
+     * 뒤에서 {@code maxBytes} 만큼만 남긴다 — 글자가 아니라 <b>바이트</b> 기준.
+     *
+     * <h2>❗글자 수로 자르면 리눅스에서 업로드가 500 이 된다</h2>
+     *
+     * <p>파일시스템의 파일명 한도는 <b>바이트</b>다 — ext4·overlayfs 가 255 바이트다.
+     * 한글은 UTF-8 로 세 바이트라 120 글자면 360 바이트이고, 그건 리눅스에서
+     * {@code ENAMETOOLONG} 이다. 그러면 {@code store()} 가 {@code UncheckedIOException}
+     * 을 던져 <b>운영자가 500 을 받는다.</b>
+     *
+     * <p>❗<b>macOS 에서는 안 드러난다.</b> 실측으로 갈렸다(2026-09-08).
+     *
+     * <pre>
+     *   macOS(APFS)        364 바이트 파일명 생성 성공
+     *   리눅스(ext4)        255 바이트 초과 → ENAMETOOLONG
+     * </pre>
+     *
+     * <p>로컬은 macOS 라 전건 초록인데 CI(리눅스)에서만 빨개졌다 — 실제로 그렇게 났고
+     * ({@code #529} 의 CI 가 잡았다) 그건 <b>배포에서만 나는 결함</b>이었다. 이 레포가
+     * 반복해서 밟은 그 양식이다({@code #37}·{@code #433}·{@code #252}).
+     *
+     * <p><b>뒤를 남기는 이유</b>는 확장자와 회차번호가 뒤에 있어 사람에게 그쪽이
+     * 유용하기 때문이다({@link #displayFilename} 과 같은 판단).
+     *
+     * <p>❗<b>글자 중간에서 자르지 않는다.</b> 바이트로 잘라 붙이면 깨진 코드포인트가 남고,
+     * 그 이름은 파일시스템에 따라 거부되거나 화면에서 {@code �} 가 된다.
+     */
+    static String truncateToBytes(String value, int maxBytes) {
+        if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= maxBytes) {
+            return value;
+        }
+        // 앞에서 한 글자씩 떼며 한도 안으로 들어올 때까지 줄인다. 코드포인트 단위로
+        // 떼므로 잘린 자리에 깨진 문자가 생기지 않는다.
+        int start = 0;
+        while (start < value.length()) {
+            start += Character.charCount(value.codePointAt(start));
+            String tail = value.substring(start);
+            if (tail.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= maxBytes) {
+                return tail;
+            }
+        }
+        return "";
     }
 
     private static String sha256(byte[] bytes) {
