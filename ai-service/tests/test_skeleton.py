@@ -176,6 +176,12 @@ def test_only_document_paths_relax_broad_pii_heuristics():
         #   짧을수록 좋다. 이 줄이 있는 이유는 **경로가 늘면 사람이 분류하게** 하려는
         #   것이다(이 단정이 그 트립와이어다 — 실제로 이 경로를 추가할 때 울렸다).
         "/internal/rubrics", "/internal/rubrics/{item_id}",
+        # ❗**여기도 본문 없는 GET 인데, 완화하면 안 되는 이유가 하나 더 있다**
+        #   (극성 게이트 계량기 · 이슈 `#483`). 응답의 `by_type` 에 `M08-TYING` 이 들어올
+        #   수 있고 그건 불공정영업 신호라 **판매자 화면 비노출**이다(기획 7-4).
+        #   `/healthz` 는 `GUARDED_PREFIX` 밖이라 **무인증**이라 이 값을 거기 못 싣는다 —
+        #   그래서 `/internal/*` 뒤에 뒀다.
+        "/internal/polarity/summary",
     }
 
     # ❗**왜 안전한지를 목록이 아니라 스키마에서 유도한다** (이슈 #474 ①).
