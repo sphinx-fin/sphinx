@@ -198,35 +198,66 @@ public class UploadedDocumentStore {
      *   운영자가 할 일     볼륨 마운트를 뒤진다 — 아무것도 안 고쳐진다
      * </pre>
      *
-     * <p>이 자리에 올 수 있는 것이 넷이고 <b>고칠 자리가 전부 다르다</b>.
+     * <p>이 자리에 올 수 있는 것이 넷이고 <b>고칠 자리가 전부 다르다</b>. 어느 갈래로 오는지는
+     * <b>실측해서 적었다</b>(JDK 21 · 2026-09-08 · PR #561 리뷰).
      *
      * <pre>
-     *   EACCES        볼륨 소유권·ro 마운트   ← 옛 문면이 맞는 유일한 경우
-     *   ENOSPC        디스크가 찼다           #554 (상한·정리 없음)
-     *   ENAMETOOLONG  이름이 너무 길다        #558 이 예방했지만 경로 전체가 길면 여전히 가능
-     *   EROFS         읽기 전용 파일시스템     배포 설정
+     *   EACCES        볼륨 소유권 (chown 안 된 볼륨)  AccessDeniedException  reason=null
+     *   EROFS         ro 마운트                      FileSystemException    "Read-only file system"
+     *   ENOSPC        디스크가 찼다 (#554)            FileSystemException    "No space left on device"
+     *   ENAMETOOLONG  경로 전체가 PATH_MAX 초과       FileSystemException    "File name too long"
      * </pre>
+     *
+     * <p>❗<b>{@code EROFS} 는 첫째 갈래가 아니다.</b> 전용 서브클래스가 없어서 {@code getReason()}
+     * 갈래로 온다 — 그래서 첫 문면에 <i>"쓰기로 붙었는지"</i> 를 적으면 <b>도달할 수 없는 안내</b>가
+     * 된다. 첫째 갈래에 실제로 오는 것은 <b>소유권 불일치 하나</b>다.
+     *
+     * <p>❗<b>{@code ENAMETOOLONG} 은 파일명으로는 못 온다</b>({@code #558} 뒤). 파일명이
+     * {@link #MAX_NAME_BYTES}=200 &lt; {@code NAME_MAX}=255 로 캡됐고, 경로 전체는
+     * {@code dataDir + "uploads/" + sha256(64) + "/" + 200 = dataDir + 273} 이라
+     * <b>{@code dataDir} 이 3,823 바이트를 넘어야</b> {@code PATH_MAX}(4096)에 닿는다.
+     * 남은 도달 경로는 배포 설정 사고뿐이므로 <b>파일명 쪽을 다시 의심하지 않는다.</b>
      *
      * <p>{@code ENOSPC} 가 특히 걸린다 — 30GB 루트에 상한 없는 트리가 붙어 있고({@code #554}),
      * 그게 차는 날 <b>볼륨은 정상으로 붙어 있으므로 확인해도 아무 문제가 안 보인다.</b>
      *
      * <h2>확신이 없으면 원인을 적지 않는다</h2>
      *
-     * <p>{@link java.nio.file.AccessDeniedException} 만 타입으로 확실히 갈린다 — 그때만
-     * 옛 문면을 쓴다. {@link java.nio.file.FileSystemException} 은 {@code getReason()} 이
-     * OS 문면을 들고 있으므로 <b>그것을 그대로 싣는다</b>({@code No space left on device} ·
-     * {@code File name too long}). 나머지는 <b>추측하지 않고 원문 예외를 보여준다.</b>
+     * <p>{@link java.nio.file.AccessDeniedException} 만 타입으로 확실히 갈린다.
+     * {@link java.nio.file.FileSystemException} 은 {@code getReason()} 이 OS 문면을 들고
+     * 있으므로 <b>그것을 그대로 싣는다</b>. 나머지는 <b>추측하지 않고 원문 예외를 보여준다.</b>
+     *
+     * <h2>순서 — 오늘은 안 바뀌지만 그 사실에 의존하지 않는다</h2>
+     *
+     * <p>{@code AccessDeniedException.getReason()} 은 <b>null</b> 이다(실측: macOS APFS ·
+     * 리눅스 ext4, JDK 21). 그래서 두 검사를 뒤집어도 그것이 {@code getReason() != null}
+     * 조건에 안 걸려 결국 같은 갈래로 온다 — <b>변이로 확인했다. 뒤집어도 초록이다.</b>
+     *
+     * <p>❗<b>그런데 그건 규격이 아니다.</b> {@code AccessDeniedException} 은 3-인자 생성자로
+     * {@code reason} 을 받을 수 있고, 지금 null 인 것은 JDK 의 {@code UnixException}·
+     * {@code WindowsException} 번역기가 null 을 넘기기 때문이다. 어느 플랫폼이 그 자리를
+     * 채우는 날 <b>순서가 결과를 정하게 된다</b> — 그래서 타입으로 확실한 쪽을 먼저 둔다.
+     * 지금 순서는 그 값이 null 이든 아니든 같은 답을 낸다.
+     *
+     * <p>패키지 가시성인 이유는 {@code getReason()} 갈래를 <b>직접</b> 재기 위해서다 —
+     * {@code ENOSPC} 를 테스트에서 만들 수는 없지만 예외를 만들어 넣을 수는 있고, 그러면
+     * 플랫폼에 갈리는 하드코딩도 안 생긴다(PR #561 리뷰, 윤지석).
      *
      * <p>❗<b>이것이 {@code #557} 의 교훈이다</b> — 뭉친 문면은 <i>틀린 곳을 가리키므로</i>
      * 아무 문면도 없는 것보다 나쁘다. 그리고 이 팀이 지금 세 군데서 고치는 것과 같은 부류다
      * ({@code #548} 예외 타입 · {@code #551} HTTP 표 · {@code #556} {@code raise()}).
      */
-    private static UncheckedIOException storeFailed(Path target, IOException e) {
+    static UncheckedIOException storeFailed(Path target, IOException e) {
+        // 타입으로 확실한 쪽을 먼저 본다 — reason 이 채워지는 플랫폼이 생겨도 답이 안 바뀐다
+        // (오늘은 null 이라 순서와 무관하다. 근거와 실측은 위 javadoc).
         if (e instanceof java.nio.file.AccessDeniedException) {
-            // 타입으로 확실한 유일한 경우다 — 소유권까지 짚는다(#532 의 uid 10001 건).
+            // ❗마운트를 말하지 않는다. ro 마운트는 EROFS 이고 그건 아래 갈래로 온다 —
+            //   여기 오는 것은 소유권 불일치 하나다. uid 를 맞추는 주체는 배포 스크립트다
+            //   (결정 7.54 — docker volume create + 멱등 chown 10001:10001).
             return new UncheckedIOException(
-                    "업로드 문서를 저장할 권한이 없다 — uploads 볼륨이 쓰기로 붙었는지, "
-                    + "소유자가 컨테이너 사용자(uid 10001)인지 확인하라 (#521 · #532): " + target, e);
+                    "업로드 문서를 저장할 권한이 없다 — uploads 볼륨의 소유자가 컨테이너 "
+                    + "사용자(uid 10001)인지 확인하라 (결정 7.54). ro 마운트는 이 갈래가 "
+                    + "아니라 «Read-only file system» 으로 나온다: " + target, e);
         }
         if (e instanceof java.nio.file.FileSystemException fse && fse.getReason() != null) {
             // OS 가 준 사유를 그대로 싣는다. 우리가 번역하면 그 번역이 틀리는 날이 온다.

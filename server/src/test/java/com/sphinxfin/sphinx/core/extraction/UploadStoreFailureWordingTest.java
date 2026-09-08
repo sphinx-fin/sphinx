@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -48,27 +49,75 @@ class UploadStoreFailureWordingTest {
             assertThatThrownBy(() -> store.store("x.pdf", PDF))
                     .isInstanceOf(UncheckedIOException.class)
                     .hasMessageContaining("권한이 없다")
-                    // #532 에서 찾은 것이 정확히 이 자리다 — 볼륨은 붙었는데 소유자가 root 다.
-                    .hasMessageContaining("uid 10001");
+                    // 결정 7.54 가 uid 를 맞추는 주체다 — 볼륨은 붙었는데 소유자가 root 인 상태.
+                    .hasMessageContaining("uid 10001")
+                    // ❗ro 마운트 안내를 여기 두면 도달 불가능한 문면이 된다(위 테스트 참조).
+                    .hasMessageNotContaining("쓰기로 붙었는지");
         } finally {
             uploads.toFile().setWritable(true);
         }
     }
 
     @Test
-    @DisplayName("❗원인을 모르면 추측하지 않는다 — 원문 예외를 그대로 보여준다")
-    void anUnknownFailureShowsTheOriginalException(@TempDir Path dataDir) {
-        // uploads 를 **파일**로 만들어 둔다 — 디렉토리 생성이 실패하는데 권한 문제가 아니다
-        // (리눅스는 NotDirectory/FileAlreadyExists 계열, macOS 도 권한이 아니다).
+    @DisplayName("❗권한이 아닌 실패는 원인을 문면에 싣는다 — 어느 갈래로 가든")
+    void aNonPermissionFailureCarriesItsCause(@TempDir Path dataDir) throws IOException {
+        // uploads 를 **파일**로 만들어 둔다 — 디렉토리 생성이 실패하는데 권한 문제가 아니다.
+        Files.write(dataDir.resolve("uploads"), PDF);
         UploadedDocumentStore store = new UploadedDocumentStore(dataDir.toString());
-        assertThatThrownBy(() -> {
-            Files.write(dataDir.resolve("uploads"), PDF);
-            store.store("x.pdf", PDF);
-        })
-                .isInstanceOf(UncheckedIOException.class)
-                .as("우리가 원인을 지어내면 그 추측이 틀리는 날이 온다(#557)")
-                // 옛 문면이 새 자리에 남아 있으면 안 된다 — 그게 이 이슈의 요점이다.
-                .hasMessageNotContaining("쓰기로 붙었는지");
+
+        UncheckedIOException thrown = org.assertj.core.api.Assertions.catchThrowableOfType(
+                () -> store.store("x.pdf", PDF), UncheckedIOException.class);
+
+        assertThat(thrown).isNotNull();
+        // 옛 문면이 새 자리에 남아 있으면 안 된다.
+        assertThat(thrown).hasMessageNotContaining("쓰기로 붙었는지");
+
+        // ❗**기대값을 던져진 원인에서 만든다**(PR #561 리뷰, 정세현). 문면을 하드코딩하면
+        //   플랫폼에 갈린다 — macOS 는 "Not a directory" 인데 리눅스에서는
+        //   FileAlreadyExistsException(reason null)일 수 있고, 그러면 CI 에서만 빨개진다
+        //   (#558 이 방금 다룬 그 부류다). 원인 쪽에서 만들면 어느 갈래로 가든 같은 답이다.
+        //
+        // 그리고 이 단정이 «원인이 하나도 없는 문면» 을 막는다 — 예전에는
+        // hasMessageNotContaining 하나뿐이라 통째로 뭉친 문면도 초록이었다.
+        IOException cause = thrown.getCause();
+        String expected = cause instanceof FileSystemException fse && fse.getReason() != null
+                ? fse.getReason() : cause.toString();
+        assertThat(thrown)
+                .as("우리가 원인을 지어내면 그 추측이 틀리는 날이 온다(#557) — 원인을 그대로 싣는다")
+                .hasMessageContaining(expected);
+    }
+
+    @Test
+    @DisplayName("★ getReason() 갈래를 직접 잰다 — #557 을 고치는 갈래가 이것인데 테스트가 없었다")
+    void theOsReasonBranchIsMeasuredDirectly() {
+        // ENOSPC 를 테스트에서 만들 수는 없지만 예외를 만들어 넣을 수는 있다. 그러면
+        // 플랫폼에 갈리는 하드코딩도 안 생긴다(PR #561 리뷰, 윤지석).
+        // ❗#554(상한·정리 없음)가 실제로 나는 날 이 문면이 맞게 나가는 것을 미리 보장한다.
+        UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
+                Path.of("/data/uploads/abc/x.pdf"),
+                new FileSystemException("/data/uploads/abc/x.pdf", null,
+                        "No space left on device"));
+
+        assertThat(thrown)
+                .hasMessageContaining("No space left on device")
+                .as("디스크가 찬 것을 「볼륨이 쓰기로 붙었는지」로 안내하면 볼륨은 정상이므로 "
+                        + "확인해도 아무 문제가 안 보인다")
+                .hasMessageNotContaining("쓰기로 붙었는지")
+                .hasMessageNotContaining("uid 10001");
+    }
+
+    @Test
+    @DisplayName("❗ro 마운트는 첫째 갈래가 아니다 — 그 문면이 도달 불가능한 안내였다")
+    void aReadOnlyMountGoesToTheReasonBranch() {
+        // 실측(JDK 21 · docker `-v …:ro`): FileSystemException / reason="Read-only file system".
+        // AccessDeniedException 이 아니다 — 그래서 첫 문면의 「쓰기로 붙었는지」는 이 상황에
+        // 닿을 수 없었다(PR #561 리뷰, 오준서).
+        UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
+                Path.of("/data/uploads/abc/x.pdf"),
+                new FileSystemException("/data/uploads/abc/x.pdf", null,
+                        "Read-only file system"));
+
+        assertThat(thrown).hasMessageContaining("Read-only file system");
     }
 
     @Test
