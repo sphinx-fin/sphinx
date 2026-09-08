@@ -53,7 +53,10 @@ class ProductDocumentsTest {
         // 같은 코드로 접으면 S-02 에서 원본 404 가 상품 문제인지 배포 문제인지 안 갈린다.
         ProductRiskItems risk = mock(ProductRiskItems.class);
         when(risk.documentPathOf("doc-x")).thenReturn("documents/missing.pdf");
-        ProductDocuments docs = new ProductDocuments(dataDir.toString(), risk);
+        // 업로드 조회는 이 단정과 무관하다 — 파일명(Content-Disposition)에만 쓰이고, 여기서
+        // 재는 것은 파일이 없을 때의 예외 종류다. 목이 empty 를 내면 예전 경로 그대로다.
+        ProductUploads uploads = mock(ProductUploads.class);
+        ProductDocuments docs = new ProductDocuments(dataDir.toString(), risk, uploads);
 
         assertThatThrownBy(() -> docs.open("doc-x"))
                 .isInstanceOf(IllegalStateException.class)   // → 500 INTERNAL_ERROR, 404 아님

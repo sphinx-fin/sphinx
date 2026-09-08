@@ -106,6 +106,10 @@ map \$uri \$sphinx_api_auth {
     # 없다. S-01(/upload) 이 이 둘을 부른다. 조회(product:read)는 SELLER 도 있어 default 로
     # 둔다 — 판매자가 읽은 것을 admin 이 읽은 것으로 감사에 남기지 않는다.
     ~^/api/products/(documents|[^/]+/extract)$  "Basic $(b64 "$admin")";
+    # 운영 상태 조회 (F-OPS-001 · 이슈 #522) — ADMIN 뿐이다(`ops:status:read`).
+    # ❗`~^/api/ops/` 로 넓히지 않는다. 위 주석이 짚어 둔 자리다 — 나중에 `/ops/` 아래에
+    # ADMIN 이 아닌 action 이 붙으면 그때 **초록인 채로** 조용히 틀린다.
+    ~^/api/ops/status$                      "Basic $(b64 "$admin")";
 }
 EOF
     chmod 640 "$MODE_CONF"

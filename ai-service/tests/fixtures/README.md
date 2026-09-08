@@ -38,8 +38,16 @@ dev set 이 쓰는 RiskItem 은 `contracts/samples/*.json` 의 `_expected_risk_i
 `sessions/` 를 따로 둔 이유: 모순은 **세션 단위 판정**이라 한 발화로 검증할 수 없다.
 설문 기재와 발화의 짝이 입력이므로 항목 단위 케이스에 끼워넣을 자리가 없었다.
 
-파일명이 설문 세트 버전이다(`s02-survey-v1.yaml`). 문항 세트가 바뀌면
-`SURVEY_SCHEMA_VERSION` 이 올라가고(오준서, 이슈 #44) 파일명이 먼저 틀려 보인다.
+파일명이 설문 세트 버전이다(`s02-survey-v2.yaml`). 문항 세트가 바뀌면
+`SURVEY_SCHEMA_VERSION` 이 올라간다(오준서, 이슈 #44).
+
+❗**「파일명이 먼저 틀려 보인다」에 기대면 안 된다.** 실제로 안 봤다 — `b84eb45`(8/28)가
+v2 로 올리면서 `SUIT-PRODUCT-EXPERIENCE` 의 **선택지 문면**을 바꿨는데, 이 픽스처가
+열흘 동안 v1 이름과 **제품에 없는 선택지 4건**을 들고 있었다. 문항 ID 도 문항 텍스트도
+안 바뀌어서 기존 대조가 전부 초록이었다.
+
+지금은 `test_survey_contract.py` 가 **값이 살아 있는 선택지인지** 를 잰다 — 이름이 아니라
+값을 본다. 설문 값은 문장이고 그 문장이 곧 `recorded_answer` 라 모순 판정의 대조 대상이다.
 
 두 세트 다 `python tools/run_devset.py` 가 돈다. 케이스 id 부분일치로 필터된다.
 

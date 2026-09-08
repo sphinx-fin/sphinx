@@ -315,6 +315,39 @@ class AiServiceClientTest {
         server.verify();
     }
 
+    /**
+     * ❗<b>실제로 깨졌던 자리다</b> (이슈 #518 후속, 2026-09-07). 도메인 {@code Judgment} 에
+     * {@code source} 를 더한 배포 직후 알파에서 <b>재설명이 전부 실패</b>했다 —
+     * {@code /internal/reexplain} 이 422 를 냈고 화면에는 <i>"채점 서비스에 연결하지
+     * 못했어요"</i> 로 보였다. 저쪽 {@code Judgment} 는 {@code extra="forbid"} 라
+     * <b>모르는 키 하나에 요청 전체를 거절한다.</b>
+     *
+     * <p>도메인 레코드를 그대로 실으면 <b>도메인이 필드를 늘릴 때마다 이 경계가 조용히
+     * 넓어진다</b> — 그리고 그 실패는 컴파일도 단위 테스트도 안 잡고 배포에서만 난다.
+     * 그래서 나가는 모양을 {@code OutboundJudgment} 로 고정했고, 이 테스트가 그것을 잠근다.
+     */
+    @Test
+    @DisplayName("❗reExplain: 판정에 서버 소유 필드(source)를 안 싣는다 — 저쪽은 모르는 키에 422 다")
+    void reExplainDoesNotLeakServerOnlyFields() {
+        server.expect(requestTo(BASE + "/internal/reexplain"))
+                .andExpect(jsonPath("$.judgment.source").doesNotExist())
+                // 계약이 요구하는 것은 그대로 나가야 한다 — 안 그러면 이 테스트가
+                // "아무것도 안 보낸다" 로도 통과한다.
+                .andExpect(jsonPath("$.judgment.item_id").exists())
+                .andExpect(jsonPath("$.judgment.evidence.utterance_quote").exists())
+                .andExpect(jsonPath("$.judgment.escalate").exists())
+                .andRespond(withSuccess("""
+                        {
+                          "item_id": "ELS-PRINCIPAL-LOSS-WARNING",
+                          "content": "설명",
+                          "cited_spans": []
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        client.reExplain(ITEM, JUDGMENT, "senior", "none");
+        server.verify();
+    }
+
     @Test
     @DisplayName("reExplain: ageBand·experienceLevel이 null이면 null로 보낸다(선택 필드)")
     void reExplainNullOptionalsSerializeNull() {
@@ -608,6 +641,78 @@ class AiServiceClientTest {
 
         assertThatThrownBy(() -> client.parse("data/documents/x.pdf", "ELS"))
                 .isInstanceOf(AiServiceException.class);
+        server.verify();
+    }
+
+    /* ── 422 가 두 뜻이다 (이슈 #521 · PR #534) ──────────────────────────────
+     *
+     * ai-service 가 두 자리에서 422 를 낸다. 라우트가 «PDF 로 안 열림», 미들웨어가
+     * «PII 입구 재검사 위반». 문면이 갈리지 않으면 카드번호로 막힌 업로드가
+     * *"암호화·손상 PDF 인지 확인하라"* 로 보이고, 운영자가 다른 파일을 넣어 보고 같은
+     * 결과를 받는다 — **문서는 멀쩡히 열리기 때문**이다.
+     *
+     * ❗이 둘은 `DocumentUploadWiringTest` 가 못 잡는다. 그쪽은 AiServiceClient 를 목으로
+     * 대신하므로 **이 갈래 자체가 안 돈다** — 분류는 여기서 잰다.                        */
+
+    @Test
+    @DisplayName("★ parse: 422 + error=pii_detected → DocumentRejected (못 열은 것과 다른 뜻이다)")
+    void parsePiiRejectionIsItsOwnKind() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\": \"pii_detected\", \"kinds\": [\"CARD\"], "
+                                + "\"where\": \"parsed_document.pages[0].text\", "
+                                + "\"detail\": \"P3 위반\"}"));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+                .isInstanceOf(DocumentRejectedException.class)
+                // 패턴 **이름**만 싣는다. 걸린 값은 ai-service 가 애초에 안 보낸다.
+                .hasMessageContaining("CARD")
+                .hasMessageContaining("개인정보")
+                .hasMessageNotContaining("암호화");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("★ parse: 422 인데 PII 응답이 아니면 DocumentUnreadable — 두 갈래가 안 뭉친다")
+    void parsePlain422StaysUnreadable() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\": \"file is not a readable pdf\"}"));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+                .isInstanceOf(DocumentUnreadableException.class)
+                .isNotInstanceOf(DocumentRejectedException.class)
+                .hasMessageContaining("암호화");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("❗parse: 422 · PII 응답인데 kinds 가 비어도 DocumentRejected 다 — null 과 빈 목록을 가른다")
+    void parsePiiRejectionWithoutKindsIsStillARejection() {
+        // 「PII 응답이 아니다」(null)와 「PII 응답인데 이름이 안 왔다」(빈 목록)를 한 값으로
+        // 접으면, 이름이 안 온 날 문면이 «문서를 열 수 없다» 로 되돌아간다.
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\": \"pii_detected\"}"));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+                .isInstanceOf(DocumentRejectedException.class);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("❗parse: 422 인데 본문이 JSON 이 아니면 DocumentUnreadable — 읽기 실패를 PII 로 읽지 않는다")
+    void parse422WithNonJsonBodyStaysUnreadable() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                        .contentType(MediaType.TEXT_PLAIN).body("not json"));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+                .isInstanceOf(DocumentUnreadableException.class)
+                .isNotInstanceOf(DocumentRejectedException.class);
         server.verify();
     }
 
