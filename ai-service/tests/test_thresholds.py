@@ -286,23 +286,41 @@ def test_no_tool_or_doc_hardcodes_the_prompt_version() -> None:
     live = {row["prompt_version"] for row in _model_rows() if row.get("prompt_version")}
     assert live, "model.jsonl 에서 prompt_version 을 하나도 못 읽었다"
 
-    # ❗**「예전에 이랬다」는 서술은 인용이 아니다** (`#308` 에서 밟은 함정과 같다 —
-    #   *"대비를 설명하는 줄은 인용이 아니다"*). 그 줄을 못 가르면 낡은 값을 지목해 고친
-    #   기록 자체가 위반으로 잡히고, 그러면 다음 사람이 그 기록을 지운다.
-    historical = re.compile(r"예전에|였다|박아 뒀|낡았|바뀌었")
-
+    # ❗**「예전에 이랬다」를 문면으로 알아내지 않는다** (`#529` 리뷰 ③, 정세현).
+    #
+    #   예전에는 `예전에|였다|박아 뒀|낡았|바뀌었` 로 서술 줄을 걸러 냈는데, 그 방식이
+    #   **두 방향으로 틀렸다.** 이 PR 이 ④에서 버린 바로 그 방식이 여기 남아 있었다.
+    #
+    #       거짓 양성  "v2 판(F-SCR-001_v2)에서는 …"        정확한 역사 기록이 위반이 된다
+    #       거짓 음성  "판이 바뀌었으니 F-SCR-001_v2 로 …"   진짜 하드코딩이 `바뀌었` 로 샌다
+    #
+    #   ★ **그래서 추론을 없애고 규약으로 간다** — 옛 판은 `F-SCR-001_v2` 꼴로 적지 않고
+    #   **「v2 판」처럼 적는다.** 이 스캔이 그 꼴만 보므로 제외 규칙 자체가 필요 없어지고,
+    #   두 오작동이 **함께** 사라진다. ④의 `measured_by` 와 같은 방향이다: 문면 추론 대신
+    #   규약·선언.
+    #
+    #   잃는 것은 옛 판을 정확한 이름으로 못 적는 것 하나인데, 그 자리에서 필요한 정보는
+    #   *"어느 판이었나"* 이고 「v2 판」이 그것을 다 말한다.
     root = Path(thresholds.__file__).resolve().parents[1]
     offenders: list[str] = []
+    seen = 0
     for path in sorted((root / "tools").glob("*.*")):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if historical.search(line):
-                continue
             for found in shape.findall(line):
+                seen += 1
                 # 인용이 **지금 값과 같으면** 낡지 않았다. 다르면 그 줄이 곧 거짓이다.
                 if found not in live:
                     offenders.append(f"{path.name}:{number} {found} (실물 {sorted(live)})")
+    # ★ **0줄을 보고도 통과하면 아무것도 안 잰다.** 인용이 전부 사라지면 이 스캔은
+    #   영원히 초록이고, 그 상태가 「판을 안 박았다」와 구별되지 않는다.
+    assert seen, (
+        "tools/ 에서 판 인용을 한 줄도 못 봤다 — 스캔이 아무것도 안 재고 있다. "
+        "정말로 인용이 없어졌다면 이 단정을 지우고 그 사실을 적는다"
+    )
     assert not offenders, (
-        "판을 문자열로 박았고 그 값이 model.jsonl 과 다르다 — 파일에서 읽는다:\n  "
+        "판을 문자열로 박았고 그 값이 model.jsonl 과 다르다 — 파일에서 읽는다.\n"
+        "옛 판을 가리키는 서술이라면 `F-SCR-001_v2` 대신 **「v2 판」**으로 적는다 "
+        "(그 꼴만 이 스캔에 걸린다):\n  "
         + "\n  ".join(offenders)
     )
 

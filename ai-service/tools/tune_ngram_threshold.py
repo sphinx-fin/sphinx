@@ -152,7 +152,7 @@ def main() -> None:
         print(f"  {key[0]} 사람 {grade} · 모델 {seen} · {score:.3f} · {type_id} {pattern!r}")
         print(f"      {effect}")
     print("  합계 " + " · ".join(f"{k} {v}" for k, v in tally.items()))
-    # ❗**판을 파일에서 읽는다. 문자열로 박지 않는다.** 예전에는 여기 `F-SCR-001_v2` 가
+    # ❗**판을 파일에서 읽는다. 문자열로 박지 않는다.** 예전에는 여기 **v2 판**이
     # 박혀 있었는데 `#409`(9/6)가 v3 로 재채점하면서 **도구가 틀린 조건을 찍게 됐다** —
     # 조건을 적으라고 만든 도구가 조건을 틀리는 것이 제일 나쁘다.
     versions = sorted({r for r in prompt_versions if r})
