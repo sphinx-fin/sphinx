@@ -143,14 +143,24 @@ class ConsistencyMeter:
     no_slot: int = 0
     #: 스위치가 꺼져 있어 순차로 돈 횟수 (설정)
     disabled: int = 0
-    #: 재질의 호출 자체가 죽은 횟수 — 확신도를 못 깎았다. **0 건과 다르다**
+    #: 재질의 호출 자체가 죽은 횟수 — **확신도를 못 깎았다.** 0 건과 다르다.
+    #: ❗**필요했던 호출이 죽은 것만 센다.** 아무도 안 원한 투기 프로브의 실패는
+    #: `discarded_failed` 다 — 둘을 한 숫자로 합치면 *"완전히 측정된 실행"* 에 대고
+    #: *"그만큼은 못 쟀다"* 를 말하게 된다(`#533` 리뷰, 오준서).
     failed: int = 0
+    #: 버려질 프로브가 죽은 횟수. **판정에 영향이 없다** — 아무도 그 답을 안 기다렸다.
+    discarded_failed: int = 0
+    #: ❗**캡이 실제로 걸린 횟수.** 등급이 갈려 확신도 상한을 씌운 사건이다.
+    #: 도구가 `confidence == CAP` 으로 세면 **모델이 그냥 0.5 를 낸 판정까지** 센다
+    #: (`schemas.py` 가 [0,1] 아무 값이나 허용한다). 사건은 여기서만 샌다.
+    disagreed: int = 0
 
     def snapshot(self) -> dict[str, int]:
         return {
             "needed": self.needed, "speculated": self.speculated, "used": self.used,
             "discarded": self.discarded, "no_slot": self.no_slot,
             "disabled": self.disabled, "failed": self.failed,
+            "discarded_failed": self.discarded_failed, "disagreed": self.disagreed,
         }
 
 
@@ -657,7 +667,7 @@ def _discard_probe(probe: Future | None) -> None:
     def _log(f: Future) -> None:
         exc = f.exception()
         if exc is not None:
-            METER.failed += 1
+            METER.discarded_failed += 1
             log.info("F-SCR-001 버린 재질의가 실패했다: %s — 판정에 영향 없다", type(exc).__name__)
 
     probe.add_done_callback(_log)
@@ -728,6 +738,7 @@ def cap_confidence_if_inconsistent(
         judgment.item_id, judgment.grade.value, second.grade.value,
         DISAGREEMENT_CONFIDENCE_CAP,
     )
+    METER.disagreed += 1
     return judgment.model_copy(update={
         "confidence": DISAGREEMENT_CONFIDENCE_CAP,
         # ❗**두 번째 등급을 안 적는다** (#370 리뷰). 이 문자열은 `JudgmentView.reason`

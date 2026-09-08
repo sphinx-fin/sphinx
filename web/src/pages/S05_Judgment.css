@@ -172,11 +172,33 @@
 
 .s05__item-head {
   display: flex;
+  /* ❗이 파일의 다른 flex 줄은 전부 wrap 하는데 여기만 없었다 — 그리고 세 번째 고정폭
+     자식(「재검증 N회」 칩)이 붙었다. 긴 위험항목 이름 + 등급 배지 + 그 칩이면 h3 가
+     min-content 까지만 줄고 그 뒤로 카드 밖으로 넘친다. 좁은 화면(@media 40rem)과
+     고령자 모드(--scale 이 칩 글자·패딩을 같이 키운다)에서 더 빨리 닿는다.
+     PR #526 리뷰 ⑦. */
+  flex-wrap: wrap;
   gap: var(--space-3);
   align-items: baseline;
   justify-content: space-between;
 }
-.s05__item-head h3 { font-size: calc(17px * var(--scale)); font-weight: 600; }
+/* 제목이 남는 폭을 다 먹는다 — 그래야 등급 배지와 「재설명 N회」가 서로 붙은 채 오른쪽
+   끝에 선다. 안 그러면 space-between 이 셋을 균등하게 벌려 배지가 가운데로 떠 버린다. */
+.s05__item-head h3 { flex: 1 1 auto; font-size: calc(17px * var(--scale)); font-weight: 600; }
+
+/* 「재설명 N회」 — 등급 배지 옆에 조용히 붙는 이력 표시(이슈 #506).
+   테두리만 있는 칩이다: 등급이 이 카드의 주어이고 이것은 그 옆의 각주라, 채움을 주면
+   두 배지가 같은 무게로 읽힌다. **상한 N 은 여기 안 적는다**(7-4 역이용 방지). */
+.s05__reverify-used {
+  flex: none;
+  font-size: calc(12px * var(--scale));
+  font-weight: 600;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  white-space: nowrap;
+}
 /* ── 등급 배지 (피드백 9번) ─────────────────────────────────────────────────
    네 등급이 전부 같은 회색이라 「이해」와 「오해」가 안 갈렸다. 판정 3색은 못 쓴다 —
    신호등은 세션 배너 한 곳의 것이고(설계 판단 ②), 채도 있는 색은 판정에만 쓴다는 것이

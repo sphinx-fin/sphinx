@@ -16,6 +16,10 @@ dist/
 # 로컬에서 돌린 뒤 남는다. `dist/` 는 슬래시가 있어 이 이름을 안 문다.
 dist-demo-captions/
 data/synth_sessions/*.json
+# 업로드 흐름(F-EXT-001 · UploadedDocumentStore, #527)이 런타임에 쓰는 자리다 —
+# 커밋 대상이 아니다. ignore 를 안 걸면 업로드를 테스트할 때마다 바이너리가 git add -A 로
+# 쓸려 들어온다(#542 에서 실제로 났다).
+data/uploads/
 eval/labeling/*.xlsx
 .DS_Store
 .pytest_cache/
