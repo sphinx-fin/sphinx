@@ -364,6 +364,8 @@ done
 # 200 이면 있고 **404 면 한 번도 안 돌린 것**이다 — `ProductRiskItems.riskItemsOf` 가 빈
 # 스냅샷에 `NoSuchElementException` 을 던진다. #562 가 목 폴백을 걷어서 200 으로 덮이지
 # 않으므로, 이 줄이 실제로 「항목이 있다」를 잰다(그 전에는 폴백이 목 2건을 200 으로 냈다).
+# 그 404 는 `RealExtractionWiringTest` 가 물고 있다 — 폴백이 다시 생기는 변경은 그 테스트가
+# 먼저 빨개지므로, 이 확인이 조용히 무의미해지는 경로가 막혀 있다.
 for p in doc-els-kiwoom-4181 doc-var-samsung-b2601; do
   printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
     curl -sS -K - -o /dev/null -w "$p %{http_code}\n" \
@@ -371,6 +373,9 @@ for p in doc-els-kiwoom-4181 doc-var-samsung-b2601; do
 done
 # 둘 다 200 이 정상이다. 404 면 데모 첫 화면(S-02 상품 목록 → 항목)이 선다.
 # ❗이 줄이 말하는 것은 「항목이 있다」까지다 — 「채점이 된다」는 여전히 안 말한다(결정 7.56).
+# ❗**그리고 200 은 「행이 있다」까지다** — `riskItemsOf` 가 status 를 안 보므로 전부
+#   `extraction_failed` 여도 200 이다. 그때는 첫 화면이 아니라 **판정에서** 막힌다(면담이
+#   실패 항목을 안 묻고 분모에는 남아 미측정 → R-00 RED). 그 자리는 #568 의 카드가 가른다.
 
 # ❗아래 둘은 **실패해야 정상이다**
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8100/healthz   # ai-service 직접 — 막혀야 한다
