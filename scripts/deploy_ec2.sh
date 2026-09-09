@@ -329,16 +329,15 @@ log_unhealthy sphinx-edge
 # DB(`sphinx_mysql-data`)가 그 안에 있고, 새 스택이 이름으로 그대로 물려받는 것이 이
 # 이관의 전제다. `docker rm` 은 named volume 을 지우지 않는다 — 여기에 `down -v` 를 쓰면
 # 인증서와 DB 가 같이 날아간다(재발급은 Let's Encrypt 발급 한도가 걸린다).
-# ❗업로드 원본(`sphinx_uploads`)도 같은 전제에 얹혀 있다(이슈 #521). `external: true` 라
-# `down -v` 로도 안 지워지지만 **`docker volume prune` 은 막지 못한다** — 그래서 위에서
-# `--label` 을 붙여 스크래치 볼륨과 구별되게 해 뒀다. 그쪽은 **복구 수단이
+# ❗업로드 원본(`sphinx_uploads`)도 같은 전제에 얹혀 있고(이슈 #521), 그쪽은 **복구 수단이
 # 아예 없다** — 인증서는 재발급되고 DB 는 스냅샷이 있지만, 사람이 올린 문서는 아무도 다시
-# 만들어 주지 않는다. `external: true` 라 `down -v` 로도 지워지지 않지만, `docker volume rm`
-# 은 막지 못한다.
+# 만들어 주지 않는다. `external: true` 라 `down -v` 로도 안 지워지지만 `docker volume rm` 과
+# `docker volume prune -a` 는 막지 못한다. 지워지는 경로는 `data/uploads/README.md` 가 든다.
 #
-# 라벨 필터는 **정확히 일치**라 `sphinx-edge`·`sphinx-data`·`sphinx-blue` 는 안 걸린다.
-# 이관이 끝난 박스에서는 걸리는 컨테이너가 0개라 이 블록은 아무 일도 안 한다 — 그게 정상
-# 상태다. 지우려면 alpha·prod **두 박스가 모두** 새 배치로 한 번씩 돈 것을 확인하고 지운다.
+# 아래 **컨테이너** 라벨 필터는 **정확히 일치**라 `sphinx-edge`·`sphinx-data`·`sphinx-blue`
+# 는 안 걸린다. 이관이 끝난 박스에서는 걸리는 컨테이너가 0개라 이 블록은 아무 일도 안 한다
+# — 그게 정상 상태다. 지우려면 alpha·prod **두 박스가 모두** 새 배치로 한 번씩 돈 것을
+# 확인하고 지운다.
 #
 # 이 한 번의 배포에만 **짧은 단절이 있다.** 80/443 을 쥔 쪽이 바뀌는 순간이라 피할 수 없다
 # — 옛 web 을 내려야 새 web 이 그 포트를 잡는다. 그 창을 줄이려고 edge 이미지를 **먼저**
@@ -380,10 +379,21 @@ fi
 # 만으로는 지워진다). 업로드 원본은 복구 수단이 아예 없어서 인증서·DB 보다 세게 막는다.
 # 그 대가로 이 줄이 필요하고, `docs/deployment.md` 의 로컬 절차에도 같은 줄이 있다.
 #
-# `--label` 을 붙이는 이유: 실패한 배포의 `compose_app down` 과 다음 `up` 사이에 이 볼륨은
-# **어느 컨테이너에도 안 붙어 있다.** 그 틈에 `docker volume prune` 이 돌면 확인 없이
-# 지우는데, `docker volume ls` 로는 스크래치 볼륨과 구별되지 않는다. 이 스크립트 자신이
-# 아래에서 prune 하는 습관이 있다.
+# ❗**`--label` 은 지워지는 것을 막지 않는다**(PR #532 리뷰 ①, 강희진 실측 · Docker 29.5.2).
+# 처음에 여기 적었던 근거(*"실패한 배포의 down 과 up 사이에 맨 prune 이 확인 없이 지운다"*)가
+# 틀렸다. 맨 `docker volume prune` 은 Docker 23 부터 **익명 볼륨만** 지우므로 이름 있는 이
+# 볼륨은 애초에 대상이 아니고, `prune -a` 는 **라벨을 보지 않는다** — 라벨을 붙인 볼륨과 안
+# 붙인 볼륨이 실측에서 둘 다 사라졌다. 그래서 그 「창」은 맨 prune 으로는 열리지 않고, 실제
+# 위험은 사람이 `prune -a` 를 치는 것 하나다.
+#
+# 라벨의 값은 **그 사람이 고를 수 있게 하는 것**이다. prune 을 치는 자리에서 필터로 쓰면
+# 그때는 실제로 안 지워진다 — 런북과 손으로 치는 자리에서 이 형태로 쓴다.
+#
+#     docker volume prune -a --filter label!=com.sphinxfin.keep
+#     docker volume ls      --filter label=com.sphinxfin.keep     # 무엇이 그 대상인지 본다
+#
+# 이 스크립트 자신은 `volume prune` 을 하지 않는다 — 아래에 있는 것은 `image prune` 과
+# `builder prune` 뿐이다(실측: 이 파일의 `prune` 은 그 둘과 이 주석뿐이다).
 docker volume create --label com.sphinxfin.keep=업로드원본-복구수단없음 \
     sphinx_uploads >/dev/null
 

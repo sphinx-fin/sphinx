@@ -101,10 +101,16 @@ gid 를 `Dockerfile` 에서 `groupadd --gid 10001` 로 못 박아 뒀다 — 안
 `ai-service` 는 같은 지점을 `:ro` 로 붙어서 읽기만 한다 — 파서가 자기 입력을 고칠 수
 있으면 재현성(P2)의 전제가 깨진다.
 
-## ❗지워지는 경로가 하나 있다 — 그리고 DB 는 안 지워진다 (PR #532 리뷰, 윤지석)
+## ❗지워지는 경로가 둘 있다 — 그리고 DB 는 안 지워진다 (PR #532 리뷰, 윤지석 · 강희진)
 
 `external: true` 라 `docker compose down -v` 로는 안 지워진다. **`docker volume rm
-sphinx_uploads` 는 지운다.**
+sphinx_uploads` 와 `docker volume prune -a` 는 지운다.**
+
+뒤쪽은 `--label com.sphinxfin.keep` 이 붙어 있어도 지운다 — `prune -a` 는 **라벨을 보지
+않는다**(강희진 실측 · Docker 29.5.2). 라벨은 지우는 사람이 `--filter label!=com.sphinxfin.keep`
+로 **골라 낼 수 있게** 하는 표시이고, 그 필터를 안 쓰면 아무 방어도 아니다. 맨
+`docker volume prune`(`-a` 없이)은 Docker 23 부터 익명 볼륨만 지우므로 이 볼륨은 대상이
+아니다.
 
 지워도 `extracted_risk_items` 행은 DB 에 그대로 남으므로, 화면에서는 **항목이 정상으로
 보이고** 원문 조회(`GET /products/{id}/document`)와 재추출만 죽는다. 즉 고장이 목록에
