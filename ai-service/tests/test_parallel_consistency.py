@@ -178,6 +178,11 @@ def test_a_passing_grade_uses_the_speculative_call(parallel) -> None:
     assert parallel.snapshot() == {
         "needed": 1, "speculated": 1, "used": 1,
         "discarded": 0, "no_slot": 0, "disabled": 0, "failed": 0,
+        # ❗**두 실패를 가른다** (`#533` 리뷰, 오준서). `failed` 는 «필요했던 호출이
+        #   죽었다」(측정 손실)이고 `discarded_failed` 는 «아무도 안 원한 프로브가
+        #   죽었다」(판정에 영향 없음)다. 합치면 완전히 측정된 실행에 대고 «못 쟀다» 를
+        #   말하게 된다.
+        "discarded_failed": 0, "disagreed": 0,
     }
 
 
@@ -250,6 +255,10 @@ def test_a_failing_discarded_probe_is_counted(parallel) -> None:
 
     그러면 재질의가 계속 죽고 있는데 로그가 비어서, 이 파일이 계속 막아 온
     *"안 도는 것"* 과 *"도는데 문제없는 것"* 이 같아 보인다.
+
+    ❗**`failed` 가 아니라 `discarded_failed` 다** (`#533` 리뷰, 오준서). 이 실패는
+    **아무도 안 원한** 프로브의 것이라 판정에 영향이 없다 — 필요했던 호출이 죽은 것과
+    한 숫자로 합치면, 완전히 측정된 실행에 대고 *"그만큼은 못 쟀다"* 를 말하게 된다.
     """
     llm = ThreadSafeLlm(first=_judgment(Grade.U3),
                         second_raises=LlmError("재질의 실패"))
@@ -257,10 +266,13 @@ def test_a_failing_discarded_probe_is_counted(parallel) -> None:
     _score(llm)
 
     deadline = time.monotonic() + 2.0
-    while parallel.failed == 0 and time.monotonic() < deadline:
+    while parallel.discarded_failed == 0 and time.monotonic() < deadline:
         time.sleep(0.01)                      # 콜백은 워커 스레드에서 돈다
     assert parallel.discarded == 1
-    assert parallel.failed == 1, "버린 호출의 실패가 어디에도 안 남았다"
+    assert parallel.discarded_failed == 1, "버린 호출의 실패가 어디에도 안 남았다"
+    assert parallel.failed == 0, (
+        "필요했던 호출은 안 죽었다 — 이 칸이 오르면 «측정 손실» 로 오독된다"
+    )
 
 
 # ── ④ 못 던진 경우를 갈라 센다 ──────────────────────────────────────────────────

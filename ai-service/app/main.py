@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -114,6 +115,11 @@ class PiiGuardMiddleware:
     #: 아니다)". 발행사 민원부서 번호 같은 법인 연락처가 인쇄돼 있어 넓은 휴리스틱이 정상
     #: 문서를 막는다 — 실측으로 `02-785-7424` 가 ACCOUNT 에 걸려 추출이 422 로 거부됐다.
     #:
+    #: ❗**이 목록은 「어느 경로가」를 정하고 「무엇이 완화되는지」는 정하지 않는다** —
+    #: 그건 `pii.SCOPE_RULES` 다. `#534` 로 완화가 «BROAD 전체 끔» 에서 «EMAIL·CARD 끔 +
+    #: 법인 유선 선지우기» 로 좁아졌고, 그러면 **여기 든 경로에서도 진짜 계좌번호는 막힌다.**
+    #: 두 사실을 한 곳에 적으면 한쪽이 낡는다(그래서 실제로 낡아 있었다).
+    #:
     #: 이 경로에서도 좁은 패턴(RRN·PHONE)은 그대로 검사한다. 공시 문서에 주민번호나 개인
     #: 휴대번호가 있으면 그건 문서 쪽 사고이므로 막아야 한다.
     #:
@@ -129,6 +135,26 @@ class PiiGuardMiddleware:
 
     def _scope(self, path: str) -> str:
         return "public_document" if path in self.PUBLIC_DOCUMENT_PATHS else "customer"
+
+    #: 422 본문의 `detail`. **범위마다 고치는 자리가 다르다** (`#534` 리뷰, 오준서).
+    #:
+    #: ❗예전에는 둘 다 *"상류 PiiGateway를 거치지 않은 텍스트입니다"* 였는데, 그 문장은
+    #: `public_document` 에서 **설계상 절대 참이 아니다** — 파스된 PDF 는 `PiiGateway.mask()`
+    #: 를 지나지 않는다(그 게이트웨이는 고객 텍스트의 단일 경로다). 그런데 이 완화를 좁혀
+    #: `ACCOUNT` 를 켜면 그 경로에 닿는 빈도가 오히려 올라가고, 그러면 운영자가
+    #: **`core/pii/` 에서 없는 버그를 찾는다.**
+    #:
+    #: 고치는 자리를 문면이 가리켜야 한다:
+    #:
+    #:     customer         상류가 마스킹을 빠뜨렸다 → core/pii/PiiGateway
+    #:     public_document  올린 문서에 그 값이 인쇄돼 있다 → 문서를 바꾼다
+    _DETAIL = {
+        "customer": ("P3 위반 — 상류 PiiGateway를 거치지 않은 텍스트입니다. "
+                     "server 의 core/pii 경로를 봅니다."),
+        "public_document": ("공시 문서 본문에 개인정보 패턴이 있습니다. 이 경로는 "
+                            "PiiGateway 를 지나지 않으므로 상류 누락이 아니라 "
+                            "**올린 문서 자체**의 문제입니다 — 문서를 확인합니다."),
+    }
 
     def __init__(self, app) -> None:
         self.app = app
@@ -157,15 +183,18 @@ class PiiGuardMiddleware:
                 try:
                     assert_payload_clean(payload, scope=self._scope(scope.get("path", "")))
                 except PiiDetected as exc:
-                    log.warning("PII 차단: kinds=%s where=%s path=%s",
-                                exc.kinds, exc.where, scope.get("path"))
+                    detected_scope = self._scope(scope.get("path", ""))
+                    log.warning("PII 차단: kinds=%s where=%s path=%s scope=%s",
+                                exc.kinds, exc.where, scope.get("path"), detected_scope)
                     response = JSONResponse(
                         status_code=HTTP_422,
                         content={
                             "error": "pii_detected",
                             "kinds": exc.kinds,
                             "where": exc.where,
-                            "detail": "P3 위반 — 상류 PiiGateway를 거치지 않은 텍스트입니다.",
+                            # ❗범위를 같이 낸다 — 운영자가 어느 쪽을 볼지 응답만 보고 알아야 한다.
+                        "scope": detected_scope,
+                        "detail": self._DETAIL[detected_scope],
                         },
                     )
                     await response(scope, receive, send)
@@ -299,6 +328,22 @@ async def _pii_handler(request: Request, exc: PiiDetected) -> JSONResponse:
     )
 
 
+#: 이 프로세스가 뜬 시각(UTC · ISO-8601). **모듈 로드 시점에 한 번** 잡는다.
+#:
+#: 운영 콘솔(`#522`·`#531`)이 server 와 ai-service 의 기동 시각을 나란히 놓아 **코드 세대가
+#: 갈리는 사고**를 한눈에 보게 하려는 값이다 — 핫재기동 뒤 한쪽만 새 판이면 `/internal/score`
+#: 가 422 로 떨어지는데, 그 원인은 응답 어디에도 안 보였다.
+#:
+#: ❗**이것만으로는 세대 사고를 못 잡는다.** 같은 시각에 뜬 두 컨테이너도 이미지가 다르면
+#: 갈린다. 그래서 아래 `prompt_versions`·`misconception_library_version` 을 같이 본다 —
+#: 「언제 떴나」와 「무엇이 떴나」는 다른 질문이다.
+#:
+#: ❗**로컬은 `uvicorn --reload` 라 이 값이 컨테이너가 아니라 「워커」의 기동 시각이다.**
+#: 파일을 고칠 때마다 바뀐다. 배포에는 `--reload` 가 없어 문제가 없지만, 로컬에서 두 값을
+#: 나란히 놓고 *"어긋났다"* 로 읽으면 오진이다.
+STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     """키 유무를 노출하지만 값은 절대 노출하지 않는다.
@@ -313,6 +358,7 @@ def healthz() -> dict:
     cfg = settings()
     return {
         "status": "ok",
+        "started_at": STARTED_AT,
         "llm_model": cfg.llm_model,
         "llm_base_url": cfg.llm_base_url,
         "llm_configured": cfg.llm_configured,

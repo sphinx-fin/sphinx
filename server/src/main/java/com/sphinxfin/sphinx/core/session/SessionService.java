@@ -44,7 +44,7 @@ public class SessionService {
      * 상품별 이해항목의 단일 출처(F-EXT-002). <b>게이트 분모를 여기서 낸다</b>(이슈 #405).
      *
      * <p>{@code R-00} 이 보는 미측정 수 = <i>그 상품이 기대하는 항목 집합</i> − <i>판정된 항목</i>
-     * 이다. 기대 집합은 저장된 추출(없으면 MockData 폴백)에서 오고, 세션은 그 목록을 모르므로
+     * 이다. 기대 집합은 저장된 추출에서만 오고(없으면 404 — 이슈 #478), 세션은 그 목록을 모르므로
      * 서비스가 {@link Session#unmeasuredItemCount(java.util.Collection)} 에 넣어 준다. 목이든
      * 실추출이든 둘 다 {@code ProductRiskItems} 를 지나므로 이 배선이 그대로 맞는다.
      *
@@ -287,7 +287,7 @@ public class SessionService {
      * 재설명 콘텐츠는 ai-service /internal/reexplain 가 만든다 — 판정(측정값)과 risk_item,
      * 세션의 연령대·경험수준으로 눈높이 재설명을 생성한다(#60). LLM 문면은 판정이 아니라
      * 설명 초안이므로 P1 을 어기지 않는다. risk_item 은 호출부(SessionController)가 넘긴다 —
-     * 지금은 목(MockData) 항목이고, 추출(F-EXT-002)이 붙으면 세션에 쌓인 항목으로 바뀐다.
+     * 저장된 추출 스냅샷의 항목이다 — 목 폴백은 걷었다(이슈 #478).
      *
      * ai-service 호출은 상태 전이 전에 한다 — 실패(502)하면 세션을 RE_EXPLAIN 으로 옮기지
      * 않아 재시도가 깔끔하다(부수효과 없이 실패).
@@ -299,7 +299,7 @@ public class SessionService {
     /**
      * 재설명 + 재검증 질문 (F-INT-004 · F-INT-002).
      *
-     * <p>{@code productType} 을 호출자가 준다 — 상품 목록이 {@code api/MockData} 에 있어
+     * <p>{@code productType} 을 호출자가 준다 — 상품 카탈로그가 {@code api/} 쪽에 있어
      * 여기서 찾으면 {@code core} 가 {@code api} 에 의존하게 된다.
      */
     @Transactional

@@ -25,6 +25,7 @@ from .schemas import (
     CoverageGap,
     CoverageGapRequest,
     CoverageGapResponse,
+    PolaritySummary,
     RubricListResponse,
     RubricView,
     ConditionNotExtracted,
@@ -101,6 +102,126 @@ def _measurement_invalid(exc: scoring.MeasurementInvalid) -> HTTPException:
     )
 
 
+#: ★ **파싱 거부 → 상태 코드의 단일 표.** 손으로 열거하던 `except` 사슬을 접었다.
+#:
+#: ❗**`#548` 이 넷째 갈래를 만들었는데 HTTP 동작이 하나도 안 바뀌었다.** 이 라우트가
+#: 하위 타입을 손으로 열거하고 있어서 새 하위(`DocumentAccessDenied`)는 아무 절에도 안
+#: 걸리고 500 으로 나갔다 — 그 500 을 Spring 이 502 `AI_SERVICE_UNAVAILABLE` 로 뭉치므로
+#: **그 PR 이 없애려던 「ai-service 장애」 오진이 그대로 남는다.**
+#:
+#: 원인은 *"기반 클래스를 안 잡는다"* 가 아니라 **"하위를 손으로 열거하는데 새 하위를
+#: 아무도 안 알려준다"** 였다. 그 차이가 고칠 자리를 바꾼다 — 기반을 잡으면 넷이 한 코드로
+#: 뭉쳐서 `ParseRefused` docstring 이 금지한 상태가 되고, 표로 두면 하위를 추가하는 사람이
+#: 여기 한 줄을 더하게 된다. 안 더하면 **기동에서 죽는다**(아래 검사).
+#: ❗**단, `parsing.py` 안에 정의하는 한** — 그 검사의 조건 절을 본다.
+#:
+#: 두 번째 칸은 `detail` 에 실을 기계용 코드다. `None` 이면 사람이 읽는 문자열을 그대로
+#: 둔다 — 지금 계약(결정 10.40)이 내부 오류 본문 형식을 안 정해서, **다른 방법이 없는
+#: 경우에만** 구조화한다(`MEASUREMENT_INVALID` 와 같은 이유).
+_REFUSAL_RESPONSE: dict[type[parsing.ParseRefused], tuple[int, str | None]] = {
+    #: 경로 규칙 위반 — 고칠 자리는 **부르는 쪽 배선**이다.
+    parsing.DocumentPathRejected: (status.HTTP_400_BAD_REQUEST, None),
+    #: 파일 없음 — 고칠 자리는 **업로드·마운트**다.
+    parsing.DocumentNotFound: (status.HTTP_404_NOT_FOUND, None),
+    #: PDF 로 안 열림 — 고칠 자리는 **문서 자체**다. 502 로 내면 상류 장애로 오진된다
+    #: (`/extract` 의 413 과 같은 이유, PR #60 리뷰).
+    #: ❗상수명 대신 리터럴이다 — starlette 버전에 따라 `UNPROCESSABLE_ENTITY` /
+    #: `UNPROCESSABLE_CONTENT` 로 갈리고 1.6.0 에서 앞쪽이 deprecated 다.
+    #: `main.py:31` 이 같은 이유로 `HTTP_422 = 422` 를 두고 있다 — 그 규약을 따른다.
+    parsing.DocumentUnreadable: (422, None),
+    #: 권한 거부 — 고칠 자리는 **볼륨 소유권**이다(`#548`).
+    #:
+    #: ❗**4xx 로 두지 않는다.** 요청도 문서도 정상이고 못 읽는 것이 우리 쪽이다. 특히
+    #: 422 는 이 라우트에서 *"문서가 문제다"* 를 뜻해서, `AiServiceClient.parseFailure()` 가
+    #: 그 코드에 «암호화·손상 PDF 인지 확인하라» 는 운영자 문면을 붙인다 — 그러면 오진이
+    #: 없어지는 게 아니라 **자리를 옮겨 돌아온다.**
+    #:
+    #: 502 인 것은 `MEASUREMENT_INVALID` 와 같은 판단이다. 상태 코드로는 이 사실을 말할 수
+    #: 없으므로(그쪽 docstring) **본문에 코드를 싣는다.** Spring 수신 배선(강희진 영역)이
+    #: 오기 전까지는 지금과 똑같이 502 로 취급된다 — 깨지는 것 없이 먼저 나갈 수 있다.
+    parsing.DocumentAccessDenied: (status.HTTP_502_BAD_GATEWAY, "DOCUMENT_ACCESS_DENIED"),
+}
+
+
+def _refusal_subclasses(root: type = parsing.ParseRefused) -> set[type]:
+    """`ParseRefused` 의 모든 하위 — **재귀로** 본다.
+
+    `__subclasses__()` 는 직계만 준다. 하위의 하위가 생기면 한 겹만 보는 검사는 그것을
+    놓치고, 놓친 타입이 조용히 500 으로 나간다.
+    """
+    found: set[type] = set()
+    for cls in root.__subclasses__():
+        found.add(cls)
+        found |= _refusal_subclasses(cls)
+    return found
+
+
+#: 매핑을 요구하는 하위의 출처. **`app.` 안에서 선언된 것만** 계약이다 — 테스트가 만든
+#: 임시 하위가 기동 검사나 대조를 깨뜨리면 안 된다(`__subclasses__()` 는 약한 참조라
+#: 수거 시점이 실행 순서에 달려 있다).
+_REFUSAL_HOME = "app."
+
+
+def _assert_every_refusal_is_mapped(
+    root: type = parsing.ParseRefused,
+    mapping: dict | None = None,
+) -> None:
+    """★ **하위를 늘리고 매핑을 안 하면 기동에서 죽는다** — 요청 시점에 500 이 되지 않게.
+
+    ❗이 검사가 없으면 `#548` 이 실제로 겪은 일이 반복된다: 타입을 늘렸고 테스트도 늘렸고
+    전건 초록인데 **HTTP 동작은 안 바뀌었다.** 그 사실이 어느 대조에도 안 걸렸다.
+
+    *"조용한 실패를 로딩 시점으로 끌어올린다"* 를 이 파일에 적용한 것이다 — 배포가
+    `ddl-auto: validate` 로 스키마 어긋남에 기동을 거부하는 것과 같은 층이다(CLAUDE.md).
+
+    ## ❗조건 — **이 모듈이 import 될 때 이미 로드된 하위**만 본다
+
+    `__subclasses__()` 는 그 시점까지 **정의된** 것만 준다(`#551` 리뷰 1, 정세현 실측).
+
+        parsing.py 안에 정의한다        이 모듈이 parsing 을 import 하므로 반드시 보인다
+        늦게 로드되는 app. 모듈에 둔다   검사를 지나가고, 그 거부는 500 으로 나간다
+
+    지금 파싱 거부 하위가 `parsing.py` 밖에 생길 이유는 없어서 동작 결함은 아니다.
+    다만 **단정을 조건보다 넓게 적으면 다음 사람이 그 보장을 믿는다** — 그래서 조건을
+    적는다. 넓히려면 import 시점이 아니라 **첫 요청 시점**에 다시 보거나 거부를 한
+    모듈에 모으는 규약이 필요하고, 둘 다 이 PR 범위 밖이다.
+    """
+    table = _REFUSAL_RESPONSE if mapping is None else mapping
+    missing = sorted(cls.__name__ for cls in _refusal_subclasses(root)
+                     if cls.__module__.startswith(_REFUSAL_HOME) and cls not in table)
+    if missing:
+        raise RuntimeError(
+            f"ParseRefused 하위에 상태 코드 매핑이 없다: {missing} — "
+            "app/routes.py 의 _REFUSAL_RESPONSE 에 한 줄을 더한다. "
+            "매핑이 없으면 그 거부는 500 으로 나가고 Spring 이 502 「ai-service 장애」로 뭉친다"
+        )
+
+
+_assert_every_refusal_is_mapped()
+
+
+def _refused(exc: parsing.ParseRefused) -> HTTPException:
+    """거부 → HTTP. **표에서만 고른다.**
+
+    ❗`type(exc).__mro__` 를 훑는 이유는 하위의 하위를 위한 것이다. 자기 항목이 없으면
+    가장 가까운 조상의 매핑을 쓴다 — 기동 검사가 그 경우를 이미 막지만, 여기서도
+    「표에 없으면 삼키지 않는다」를 지킨다.
+    """
+    for cls in type(exc).__mro__:
+        mapped = _REFUSAL_RESPONSE.get(cls)
+        if mapped is not None:
+            code, error_code = mapped
+            break
+    else:  # pragma: no cover
+        # ❗**기동 검사가 못 본 하위**(늦게 로드되는 `app.` 모듈)면 여기로 온다 — 그
+        #   검사는 import 시점에 로드된 것만 본다(`#551` 리뷰 1). 삼키지 않고 그대로
+        #   올리는 것이 요점이다: 500 으로 나가더라도 **원인이 스택에 남는다.**
+        raise exc
+    if error_code is None:
+        return HTTPException(status_code=code, detail=str(exc))
+    return HTTPException(status_code=code, detail={"code": error_code, "message": str(exc)})
+
+
 # ── F-EXT-001 (정세현) ─────────────────────────────────────────────────────────
 @router.post("/parse")
 def parse(body: ParseRequest) -> dict:
@@ -110,8 +231,10 @@ def parse(body: ParseRequest) -> dict:
     채워 내보내는데(`parsed_at: null`) 계약의 그 필드는 nullable 이 아니고, 파서 출력이
     한 번 더 직렬화를 거치면 재현성 비교(P2)의 대상이 파서 출력이 아니게 된다.
 
-    실패 셋을 각각 다른 코드로 낸다 — 고치는 자리가 전부 다르기 때문이다.
-    경로 규칙 위반 400 · 파일 없음 404 · PDF 로 안 열림 422.
+    실패 **넷**을 각각 다른 코드로 낸다 — 고치는 자리가 전부 다르기 때문이다. 어느 거부가
+    어느 코드인지는 `_REFUSAL_RESPONSE` 한 곳에 있고 **여기 베끼지 않는다**: 예전에 이
+    docstring 이 *"실패 셋 … 400 · 404 · 422"* 라고 적었는데 `#548` 이 넷째를 만들면서
+    조용히 거짓이 됐다.
     """
     try:
         return parsing.parse_upload(
@@ -120,14 +243,8 @@ def parse(body: ParseRequest) -> dict:
             document_id=body.document_id,
             parsed_at=body.parsed_at,
         )
-    except parsing.DocumentPathRejected as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except parsing.DocumentNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except parsing.DocumentUnreadable as exc:
-        # 문서가 안 열리는 것은 상류 장애가 아니라 입력 문제다 — 502 로 나가면 Spring 쪽에서
-        # "ai-service 장애"로 오진된다(`/extract` 의 413 과 같은 이유, PR #60 리뷰).
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except parsing.ParseRefused as exc:
+        raise _refused(exc) from exc
 
 
 # ── F-EXT-002 ─────────────────────────────────────────────────────────────────
@@ -351,6 +468,25 @@ def _view(r: rubrics.Rubric) -> RubricView:
         #   `reason`·`until` 둘 다 없으면 던진다) **그 불변식을 여기서 끌어오지 않는다.**
         unlinked_until=list(r.unlinked_until) if r.unlinked_until is not None else None,
     )
+
+
+@router.get("/polarity/summary", response_model=PolaritySummary)
+def polarity_summary() -> PolaritySummary:
+    """극성 게이트(F-DET-001 3단계) 계량기 (이슈 #483).
+
+    **`/healthz` 에 안 싣는다.** 그쪽은 `GUARDED_PREFIX` 밖이라 **무인증**인데, `by_type` 에
+    `M08-TYING` 이 들어올 수 있고 그건 불공정영업 신호다(기획 7-4). 총계만 보면 무해해
+    보이지만 **유형별 내역이 같이 있어야 쓸모가 있고**, 둘을 갈라 두 곳에 두면 같은 사실이
+    두 벌이 된다. 그래서 통째로 인증 뒤에 둔다.
+
+    ❗**구간의 시작은 여기 안 담는다.** `/healthz` 의 `started_at` 이 같은 프로세스의
+    기동 시각이고, 두 곳에 두면 같은 사실이 두 벌이 된다. 소비자가 둘을 짝지어 읽는다.
+
+    ❗**읽기가 값을 바꾸지 않는다.** 여기서 초기화하면 두 소비자가 서로의 값을 지운다 —
+    누적을 원하는 쪽(`#483` ③ 의 불변 기록)과 지금을 보는 쪽(운영 콘솔)이 같은 카운터를
+    본다. 리셋이 필요해지면 그때 **별도 동작**으로 만든다.
+    """
+    return PolaritySummary(**misconception.METER.snapshot())
 
 
 @router.get("/rubrics", response_model=RubricListResponse)

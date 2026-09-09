@@ -70,12 +70,21 @@ jobs:
           # `#41` 1항이 되살아난 것과 같은 그림이 되므로, **환경으로 갈라 둔다.**
           #
           # prod 는 도메인도 아직 없다. 비면 nginx 가 443 을 안 세우고 :80 만 뜬다.
+          # ❗**데모 답지 캡션(`#539`)도 alpha 에만 준다 — 같은 이유의 다른 물건이다.**
+          # S-03 질문 아래에 「이렇게 답하면 U1 · 이렇게 답하면 U4」를 내는 진행자용
+          # 캡션인데, S-03 은 **고객 화면**이라 상시로 붙으면 기획 7-4 역이용 방지와
+          # 부딪친다(`#494` 가 루브릭을 판매자에게도 주지 않기로 한 것보다 직접적이다).
+          #
+          # 이건 **빌드 인자**다(`docker-compose.edge.yml` → `web/Dockerfile`). 꺼진
+          # 환경에서는 답지 문자열이 번들에 아예 안 들어간다 — CI 가 매번 확인한다.
           if [ "$TARGET" = alpha ]; then
             echo "public_host=sphinxfin.duckdns.org" >> "$GITHUB_OUTPUT"
             echo "demo_open=1"                        >> "$GITHUB_OUTPUT"
+            echo "demo_captions=1"                    >> "$GITHUB_OUTPUT"
           else
             echo "public_host=" >> "$GITHUB_OUTPUT"
             echo "demo_open="   >> "$GITHUB_OUTPUT"
+            echo "demo_captions=" >> "$GITHUB_OUTPUT"
           fi
 
           echo "### $TARGET ← \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
@@ -144,7 +153,7 @@ jobs:
                 "aws s3 cp s3://sphinx-artifacts-${{ vars.AWS_ACCOUNT_ID }}/${{ steps.art.outputs.key }} - | tar xz -C \"$NEW\"",
                 "chmod 755 \"$NEW\"",
                 "cd \"$NEW\"",
-                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -200 /var/log/sphinx-deploy.log; exit 1; }",
+                "SSM_PREFIX=/sphinx/${{ steps.t.outputs.target }} SPHINX_PUBLIC_HOST=${{ steps.t.outputs.public_host }} SPHINX_DEMO_OPEN=${{ steps.t.outputs.demo_open }} SPHINX_DEMO_CAPTIONS=${{ steps.t.outputs.demo_captions }} ./scripts/deploy_ec2.sh > /var/log/sphinx-deploy.log 2>&1 || { tail -200 /var/log/sphinx-deploy.log; exit 1; }",
                 "tail -40 /var/log/sphinx-deploy.log"
               ]}' \
             --query Command.CommandId --output text)
