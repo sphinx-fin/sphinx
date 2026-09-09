@@ -358,6 +358,20 @@ for u in seller-01 compl-01; do
 done
 # seller-01 403 · compl-01 200 이 정상이다. seller-01 이 401 이면 명부가 htpasswd 에 안 들어간 것.
 
+# ❗추출 스냅샷이 들어 있는가 (이슈 #568). **배포가 이것을 만들지 않는다** — 사람이
+# `POST /products/{id}/extract` 를 한 번 돌린 결과가 MySQL 볼륨에 남아 배포를 넘어 사는
+# 것이고(#445), 그 볼륨이 새로 나면(EC2 재생성 · `down -v` · 새 리전) 다시 돌려야 한다.
+# 200 이면 있고 **404 면 한 번도 안 돌린 것**이다 — `ProductRiskItems.riskItemsOf` 가 빈
+# 스냅샷에 `NoSuchElementException` 을 던진다. #562 가 목 폴백을 걷어서 200 으로 덮이지
+# 않으므로, 이 줄이 실제로 「항목이 있다」를 잰다(그 전에는 폴백이 목 2건을 200 으로 냈다).
+for p in doc-els-kiwoom-4181 doc-var-samsung-b2601; do
+  printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
+    curl -sS -K - -o /dev/null -w "$p %{http_code}\n" \
+      "http://localhost/api/products/$p/risk-items"
+done
+# 둘 다 200 이 정상이다. 404 면 데모 첫 화면(S-02 상품 목록 → 항목)이 선다.
+# ❗이 줄이 말하는 것은 「항목이 있다」까지다 — 「채점이 된다」는 여전히 안 말한다(결정 7.56).
+
 # ❗아래 둘은 **실패해야 정상이다**
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8100/healthz   # ai-service 직접 — 막혀야 한다
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8000/products  # server 직접 — 막혀야 한다
