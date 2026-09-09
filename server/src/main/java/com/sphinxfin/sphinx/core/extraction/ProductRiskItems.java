@@ -87,10 +87,10 @@ public class ProductRiskItems {
      * <b>측정 결과</b>라 지어내면 화면·게이트·교부 문서가 그것을 실물로 받는다.
      */
     private static final List<Preloaded> PRELOADED = List.of(
-            new Preloaded("doc-els-kiwoom-4181",
+            new Preloaded("doc-els-kiwoom-4181", "doc-els-kiwoom-4181",
                     "A증권 제4181회 ELS (원금비보장형)", "ELS",
                     "documents/els_kiwoom_4181_simple_prospectus.pdf"),
-            new Preloaded("doc-var-samsung-b2601",
+            new Preloaded("doc-var-samsung-b2601", "doc-var-samsung-b2601",
                     "B생명 변액연금보험 (최저연금보증형)", "VARIABLE_INSURANCE",
                     "documents/var_samsung_b2601_product_summary.pdf"));
 
@@ -102,9 +102,19 @@ public class ProductRiskItems {
      * 사전적재 상품 하나. 이해항목은 여기 없다(위 javadoc).
      *
      * <p>{@code displayName} 은 <b>가명</b>이고 {@code productId} 는 가명 대상이 아니다.
+     *
+     * <p>❗<b>{@code documentId} 를 {@code productId} 와 따로 든다</b>(결정 1.37 · 이슈 #528).
+     * 오늘 두 값이 같은 것은 <b>이 표가 상품마다 문서를 한 건만 들어서 나는 우연</b>이고
+     * 계약이 아니다 — {@code var_samsung_b2601} 은 실물 문서가 3편이고 계약 샘플 둘이
+     * 서로 다른 {@code document_id}({@code doc-var-samsung-b2601} ·
+     * {@code doc-var-samsung-b2601-ops})를 든다. 한 필드로 합치면 두 번째 문서를 등록하는
+     * 날 «상품이 둘» 이나 «문서가 한 값으로 뭉침» 중 하나가 된다.
+     *
+     * <p>값은 계약 샘플과 맞춰 둔다 —
+     * {@code PreloadedTableMatchesParseSamplesTest} 가 대조한다.
      */
-    public record Preloaded(String productId, String displayName, String productType,
-                            String documentPath) {}
+    public record Preloaded(String productId, String documentId, String displayName,
+                            String productType, String documentPath) {}
 
     /**
      * S-02 목록이 쓰는 사전적재 2종 — 목록에 나가는 순서 그대로.
@@ -139,7 +149,9 @@ public class ProductRiskItems {
         // ELS 템플릿으로 읽는 종류의 오판이 조용히 생긴다(SessionController.productTypeOf 주석).
         String productType = productTypeOf(productId);
 
-        ParsedDocument parsed = aiServiceClient.parse(documentPath, productType);
+        // ❗파스에 넘기는 document_id 는 호출자 몫이다(결정 1.37) — 안 넘기면 파서가 파일명에서
+        //   만들고, 그 값이 extracted_risk_items.document_id 에 쌓여 규칙이 두 벌이 된다.
+        ParsedDocument parsed = aiServiceClient.parse(documentPath, productType, documentIdOf(productId));
         AiServiceClient.ExtractResult result = aiServiceClient.extract(productId, parsed);
 
         for (AiServiceClient.Warning warning : result.warnings()) {
@@ -270,6 +282,31 @@ public class ProductRiskItems {
      *
      * @throws NoSuchElementException 등록된 문서가 없는 상품(→ 404)
      */
+    /**
+     * 파스에 넘길 <b>업로드 단위 식별자</b>(결정 1.37 · 이슈 #528).
+     *
+     * <p>업로드본은 <b>{@code productId} 자체가 내용 주소</b>다
+     * ({@code doc-<슬러그>-<sha256 앞 16자>}) — 같은 바이트면 같은 값이고 한 바이트만 달라도
+     * 다른 값이라, 문서 1건을 가리키는 식별자로 그대로 쓴다. 사전적재는 표가 든 값이고, 그
+     * 값은 계약 샘플의 {@code document_id} 와 맞춰져 있다.
+     *
+     * <p>❗<b>기본값을 두지 않는다.</b> 여기서 못 찾은 것을 파서 폴백에 맡기면 규칙이 두
+     * 벌이 된다({@link #documentPathOf} 가 이미 404 로 드러내는 것과 같은 규약).
+     *
+     * @throws NoSuchElementException 업로드본도 사전적재도 아닌 상품(→ 404)
+     */
+    public String documentIdOf(String productId) {
+        if (productUploads.documentPathOf(productId).isPresent()) {
+            return productId;
+        }
+        Preloaded preloaded = BY_ID.get(productId);
+        if (preloaded == null) {
+            throw new NoSuchElementException(
+                    "업로드 단위 식별자를 알 수 없다(업로드본도 사전적재도 아니다): " + productId);
+        }
+        return preloaded.documentId();
+    }
+
     public String documentPathOf(String productId) {
         // ❗업로드본이 먼저다. 순서가 반대면 업로드한 파일명이 우연히 사전적재 상품ID 와
         // 같아지는 날 «올린 문서가 아닌 것» 을 파스하고, 그 결과가 그 상품의 항목이 된다.

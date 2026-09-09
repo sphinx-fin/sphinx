@@ -139,7 +139,7 @@ class ProductAccessWiringTest {
     void theAdminCanRegister() throws Exception {
         ParsedDocument parsed = new ParsedDocument("doc-els-kiwoom-4181", "ELS", null, "v1",
                 null, 1, List.of(new ParsedDocument.Page(1, "원문", 2)), List.of(), List.of());
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed);
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed);
         when(aiServiceClient.extract(anyString(), any(ParsedDocument.class)))
                 .thenReturn(new AiServiceClient.ExtractResult(List.of(
                         RiskItem.extracted("ELS-PRINCIPAL-LOSS-WARNING", "doc-els-kiwoom-4181",

@@ -404,14 +404,22 @@ public class AiServiceClient {
      * detectMismatch() 가 마스킹하고 question()·이 메서드가 안 하는 것이 같은 규칙의 두 면이다.
      * ai-service 의 입구 PII 재검사가 두 번째 방어선으로 남는다.
      *
-     * <p>⚠ ai-service {@code /internal/parse} 는 아직 스텁이다(정세현 배선 예정). 이 클라이언트는
-     * 호출 능력만 추가할 뿐 목 데모 흐름(ProductController)을 바꾸지 않는다 — 실제 배선
-     * (업로드→parse→저장)은 스텁이 구현된 뒤 별도 단계다.
+     * <h2>❗{@code documentId} 는 호출자가 준다 (결정 1.37 · 이슈 #528)</h2>
+     *
+     * <p>파서에도 만드는 자리가 있다 — {@code derive_document_id} 가 파일명에서 슬러그를 만든다.
+     * 그건 <b>단독 실행용 폴백</b>이고 <b>운영 경로가 거기에 닿으면 결함</b>이다. 파일명만 보므로
+     * <b>내용이 다른 두 문서가 같은 값을 받는다</b>: 같은 파일명 두 업로드가 한 값이 되고,
+     * ASCII 영숫자가 안 남는 파일명(예: {@code 상품설명서.pdf})은 전부 {@code doc-unnamed} 다.
+     *
+     * <p>그 값이 <b>{@code extracted_risk_items.document_id} 에 쌓인다.</b> 규칙이 두 벌이면
+     * 그 열에 두 규칙의 값이 섞이고, 그 상태에서는 <i>"이 항목이 어느 파스에서 왔나"</i> 에
+     * 답할 수 없다. 그래서 인자를 <b>선택으로 두지 않았다</b> — 2-인자 오버로드를 남기면
+     * 폴백이 운영 경로로 되돌아오고, 그건 컴파일러가 안 잡는다.
      *
      * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
      */
-    public ParsedDocument parse(String documentPath, String productType) {
-        ParseRequest request = new ParseRequest(documentPath, productType);
+    public ParsedDocument parse(String documentPath, String productType, String documentId) {
+        ParseRequest request = new ParseRequest(documentPath, productType, documentId);
         ParsedDocument parsed;
         try {
             parsed = restClient.post()
@@ -899,9 +907,13 @@ public class AiServiceClient {
 
     /**
      * /internal/parse 요청 본문. snake_case 매퍼로 직렬화되어 ai-service ParseRequest
-     * (document_path, product_type)와 1:1이다.
+     * (document_path, product_type, document_id)와 1:1이다.
+     *
+     * <p>❗{@code documentId} 는 <b>필수로 채운다</b>(결정 1.37). 저쪽 스키마에서는
+     * nullable 이고 비면 파일명에서 만드는데, 그 폴백이 운영 경로에 닿으면 결함이다 —
+     * 근거는 {@link AiServiceClient#parse} javadoc.
      */
-    record ParseRequest(String documentPath, String productType) {}
+    record ParseRequest(String documentPath, String productType, String documentId) {}
 
     /**
      * /internal/extract 요청 본문. snake_case 매퍼로 직렬화되어 ai-service ExtractRequest

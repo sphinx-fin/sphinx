@@ -21,7 +21,9 @@ import java.util.List;
  * 검사한다. 스팬 검증에는 {@code pageCount} 가 아니라 {@code pages[].charCount} 를 본다.
  */
 public record ParsedDocument(
-        String documentId,          // 업로드 단위 식별자. productId 와 다르다
+        // ❗업로드 단위 식별자 — 문서 1건이다. productId 는 상품 1건이라 다르다(결정 1.37):
+        //    한 상품에 문서가 여러 건일 수 있다(var_samsung_b2601 이 3편). 호출자가 준다.
+        String documentId,
         String productType,         // ELS | VARIABLE_INSURANCE (데모 범위 2종)
         String sourceFile,          // 원본 파일명(경로 아님). nullable
         String parserVersion,       // 같은 문서 → 같은 출력 (P2). 출력이 달라지면 올린다

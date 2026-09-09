@@ -112,7 +112,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 올린 바이트가 디스크에 남고, 추출이 그 파일을 파스한다 — 사전적재 문서가 아니다")
     void uploadedBytesAreStoredAndFedToParse() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String productId = upload("els_prospectus.pdf", "ELS", PDF);
 
@@ -130,10 +130,12 @@ class DocumentUploadWiringTest {
         assertThat(Files.readAllBytes(stored)).isEqualTo(PDF);
 
         // ② 업로드가 그 경로로 파스를 불렀다
-        verify(aiServiceClient).parse(eq(row.documentPath()), eq("ELS"));
+        // ❗document_id 도 같이 잠근다 — 업로드본은 productId 가 내용 주소라 그것이 그 값이다
+        //   (결정 1.37). 안 넘기면 파서가 파일명에서 만들고 같은 파일명 두 업로드가 한 값을 받는다.
+        verify(aiServiceClient).parse(eq(row.documentPath()), eq("ELS"), eq(productId));
 
         // ② 추출도 같은 경로를 쓴다 — documentPathOf 가 업로드본을 먼저 본다는 뜻이다.
-        //    사전적재 DEMO_DOCUMENTS 로 떨어지면 이 검증이 documents/… 를 보게 된다.
+        //    사전적재 표(PRELOADED)로 떨어지면 이 검증이 documents/… 를 보게 된다.
         when(aiServiceClient.extract(anyString(), any())).thenReturn(
                 new AiServiceClient.ExtractResult(List.of(RiskItem.extracted(
                         "UP-ITEM", productId, "원금손실 조건", "required",
@@ -143,9 +145,9 @@ class DocumentUploadWiringTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].itemId").value("UP-ITEM"));
         verify(aiServiceClient, org.mockito.Mockito.times(2))
-                .parse(eq(row.documentPath()), eq("ELS"));
+                .parse(eq(row.documentPath()), eq("ELS"), eq(productId));
 
-        // ③ S-02 선택 목록에 도달한다. 데모 2종도 그대로 남는다(#403 이 걷는다).
+        // ③ S-02 선택 목록에 도달한다. 사전적재 2종도 그대로 남는다(둘의 출처는 아래 테스트가 잰다).
         mvc.perform(get("/products"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].productId").value(productId))
@@ -206,7 +208,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 파스가 판별한 상품유형이 요청값을 이긴다 — 변액을 ELS 로 등록하면 오해 필터가 조용히 틀린다")
     void parsedProductTypeWinsOverTheRequestedOne() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenReturn(parsed("VARIABLE_INSURANCE"));
 
         String productId = upload("var_summary.pdf", "ELS", PDF);
@@ -222,7 +224,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 같은 파일을 두 번 올려도 상품이 하나다 — productId 가 내용 주소다")
     void reUploadingTheSameFileKeepsOneProduct() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String first = upload("same.pdf", "ELS", PDF);
         String second = upload("same.pdf", "ELS", PDF);
@@ -234,7 +236,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 내용이 다르면 파일명이 같아도 다른 상품이다 — 문서가 바뀌면 판정 근거가 바뀐다")
     void differentBytesMakeADifferentProduct() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String first = upload("same.pdf", "ELS", PDF);
         String second = upload("same.pdf", "ELS",
@@ -249,7 +251,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 문서를 못 열면 200 + parse_failed 다 — 502 로 새면 운영자가 문서를 의심하지 않는다")
     void unreadableDocumentLandsAsParseFailedNotFiveOhTwo() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenThrow(new DocumentUnreadableException("문서를 열 수 없다: HTTP 422"));
 
         String body = mvc.perform(multipart("/products/documents")
@@ -276,7 +278,7 @@ class DocumentUploadWiringTest {
     void aPiiRejectedDocumentGetsItsOwnWording() throws Exception {
         // PR #534 가 public_document 완화를 좁혀 CARD 를 이 범위에서도 검사한다. 그래서
         // 올린 파일에 카드번호가 있으면 파서가 아니라 **미들웨어**가 422 를 낸다.
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenThrow(new com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException(
                         "문서에 개인정보로 보이는 값이 있어 거부됐다(CARD) — "
                         + "올린 파일이 상품설명서인지 확인하라"));
@@ -301,7 +303,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ ai-service 가 죽은 것은 parse_failed 가 아니다 — 502 로 올라가고 상품이 안 생긴다")
     void aiServiceOutageIsNotAParseFailure() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenThrow(new com.sphinxfin.sphinx.core.aiservice.AiServiceException(
                         "ai-service 호출 실패"));
 
@@ -361,7 +363,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗파일명의 ../ 는 기준 디렉토리 밖에 아무것도 못 만든다 — 경로는 sha256 이 정한다")
     void filenameCannotEscapeTheDataDirectory() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String productId = upload("../../../../tmp/escaped.pdf", "ELS", PDF);
 
@@ -384,7 +386,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 원문 조회의 파일명이 «올린 이름» 이다 — 경로에서 뽑으면 9f2a….pdf 를 받는다")
     void theDownloadKeepsTheUploadersFilename() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String productId = upload("els_prospectus.pdf", "ELS", PDF);
 
@@ -398,7 +400,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("★ 정제로 접힌 특수문자도 받는 파일명에는 원문 그대로다 — DB 가 원문을 든다")
     void theDownloadUsesTheRawNameNotTheSanitisedPathSegment() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         // 저장 경로에서는 괄호가 `_` 로 접힌다. 받는 파일 이름은 올린 그대로여야 한다.
         String productId = upload("ELS(제4181회) 설명서.pdf", "ELS", PDF);
@@ -429,7 +431,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗한글 파일명이 전부 같은 productId 로 무너지지 않는다 — doc-unnamed-… 였다")
     void koreanFilenamesDoNotCollapseIntoOneProductId() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         // 실제 공시 코퍼스는 한글 파일명이 기본이다. ASCII 슬러그로는 통째로 비므로
         // 예전에는 둘 다 doc-unnamed-<sha8> 이 됐고, 그게 충돌 면적을 최대로 키웠다.
@@ -447,7 +449,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗productId 가 sha256 64비트를 든다 — 32비트로는 다른 문서를 조용히 내준다")
     void theProductIdCarriesEnoughEntropy() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String productId = upload("els_prospectus.pdf", "ELS", PDF);
 
@@ -457,7 +459,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗아주 긴 파일명이 500 이 아니다 — varchar(255) 를 넘겨 Data too long 이었다")
     void aVeryLongFilenameIsStoredNotCrashed() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed("ELS"));
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed("ELS"));
 
         String productId = upload("가".repeat(300) + ".pdf", "ELS", PDF);
 
@@ -470,7 +472,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗파스가 「문서 문제」가 아닌 이유로 실패하면 바이트도 안 남는다 — 참조 없는 파일이 쌓였다")
     void bytesDoNotSurviveARolledBackUpload() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenThrow(new com.sphinxfin.sphinx.core.aiservice.AiServiceException(
                         "ai-service 호출 실패"));
 
@@ -494,7 +496,7 @@ class DocumentUploadWiringTest {
     @Test
     @DisplayName("❗재추출이 「문서 문제」를 502 로 내지 않는다 — 운영자가 문서를 의심하지 않았다")
     void reExtractingAnUnreadableDocumentIsNotAnOutage() throws Exception {
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenThrow(new com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException(
                         "문서를 열 수 없다: HTTP 422"));
 

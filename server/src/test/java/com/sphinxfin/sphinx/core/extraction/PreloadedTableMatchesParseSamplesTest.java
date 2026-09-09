@@ -41,6 +41,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   parsed_variable_sample.json  doc-var-samsung-b2601  VARIABLE_INSURANCE   var_samsung_b2601_product_summary.pdf
  * </pre>
  *
+ * <p>❗{@code documentId} 도 같이 맞춘다(결정 1.37 · 이슈 #528). 그 값이
+ * {@code /internal/parse} 로 나가고 {@code extracted_risk_items.document_id} 에 쌓이므로,
+ * 표와 계약이 다른 값을 들면 <b>그 열에 두 규칙의 값이 섞인다.</b>
+ *
  * <p>문서 경로까지 보는 이유는 <b>유형만 맞추면 짝이 안 잡히기 때문</b>이다 — 두 상품의
  * 유형이 서로 다르므로 유형만으로도 뒤바뀜은 잡히지만, 표가 <b>같은 유형의 다른 문서</b>를
  * 가리키게 되는 것은 경로를 봐야 잡힌다({@code var_samsung_b2601} 은 문서가 3편이다).
@@ -74,7 +78,8 @@ class PreloadedTableMatchesParseSamplesTest {
                 continue;
             }
             out.put(id.asText(), new String[] {
-                    n.path("product_type").asText(), n.path("source_file").asText() });
+                    n.path("product_type").asText(), n.path("source_file").asText(),
+                    id.asText() });
         }
         return out;
     }
@@ -101,6 +106,20 @@ class PreloadedTableMatchesParseSamplesTest {
         }
         // ★ 표가 비면 위 루프가 한 번도 안 돌고 초록이 된다.
         assertThat(matched).as("대조한 상품이 없다 — 사전적재 표가 비었다").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("❗표의 documentId 가 그 샘플의 document_id 다 — 파스에 넘기는 값이라 규칙이 하나여야 한다")
+    void theDocumentIdMatchesTheContractSample() throws Exception {
+        Map<String, String[]> samples = parseSamples();
+        for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
+            assertThat(p.documentId())
+                    .as("사전적재 표의 documentId 가 계약 샘플의 document_id 와 다르다(%s). "
+                            + "이 값이 /internal/parse 로 나가고 extracted_risk_items.document_id "
+                            + "에 쌓인다 — 규칙이 두 벌이면 «이 항목이 어느 파스에서 왔나» 에 "
+                            + "답할 수 없다(결정 1.37)", p.productId())
+                    .isEqualTo(samples.get(p.productId())[2]);
+        }
     }
 
     @Test
