@@ -630,11 +630,37 @@ def documents_root() -> Path:
 
 
 def derive_document_id(pdf_path: str | Path) -> str:
-    """파일명에서 만든 문서 id. 같은 파일이면 같은 값이다(P2).
+    """파일명에서 만든 문서 id. **단독 실행용 폴백이다.**
 
     계약상 `document_id` 는 **업로드 단위** 식별자라 원래 업로더가 가진 값이고 파서가 정할
     것이 아니다 — 호출자가 주면 그걸 쓴다. 여기서 만드는 것은 영속 층(#401 의 3번)이 붙기
     전까지 이 엔드포인트를 혼자 돌려볼 수 있게 하는 값이다.
+
+    ❗**「같은 파일이면 같은 값」은 참이지만 그 역은 거짓이다**(이슈 #528 실측). 파일명만
+    보므로 **내용이 다른 두 문서가 같은 값을 받는다.** 업로드에서는 그것이 예외가 아니다.
+
+        uploads/aaaa1111/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
+        uploads/bbbb2222/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
+
+    `_ID_UNSAFE` 가 `[^a-z0-9]+` 라 **한글은 사라지고 숫자·라틴 문자는 남는다.** 그래서 한글
+    파일명의 결과가 두 갈래이고, **남는 쪽이 더 나쁘다**(PR #569 리뷰, 강희진).
+
+        약관.pdf                    ->  doc-unnamed        눈에 띈다
+        키움증권_제4181회_ELS.pdf     ->  doc-4181-els       ❗정상적인 id 로 보인다
+        제4181회.pdf                ->  doc-4181           ❗
+        키움증권_제4181회.pdf         ->  doc-4181           ❗같다
+        제4181회_상품설명서.pdf       ->  doc-4181           ❗같다
+        제4181회 약관.pdf            ->  doc-4181           ❗같다
+
+    같은 회차의 문서 넷이 한 값이 된다. `doc-unnamed` 는 이상해 보여서 누가 들여다보는데
+    `doc-4181` 은 안 그렇다. 운영 코퍼스에서 한글 파일명은 예외가 아니라 기본이다.
+    상품ID 쪽은 이 함정을 이미 닫아 뒀다(`contracts/openapi.yaml` 27-31 행 — ASCII 영숫자가
+    하나도 안 남으면 `doc-<sha256 앞 16자>`).
+
+    ❗**그래서 운영 경로가 이 함수에 닿으면 그것이 결함이다.** 지우지 않는 이유는 단독
+    실행 경로가 실재하기 때문이고, 고칠 자리는 여기가 아니라 **호출자가 값을 주는 것**이다
+    (결정 1.37). 이 함수를 「충돌하지 않게」 고치는 쪽은 안 간다 — 그러면 이미 저장된
+    스냅샷(`extracted_risk_items.document_id`)에 두 규칙의 값이 섞인다.
     """
     stem = _ID_UNSAFE.sub("-", Path(pdf_path).stem.lower()).strip("-")
     return f"doc-{stem}" if stem else "doc-unnamed"
