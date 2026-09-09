@@ -53,10 +53,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class QuestionVulnerableHintTest {
 
     @Autowired private MockMvc mvc;
+    @Autowired private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository
+            extractedRiskItems;
     @MockBean private AiServiceClient aiServiceClient;
 
     @BeforeEach
     void stub() {
+        // 폴백을 걷었으므로(이슈 #478) 항목을 테스트가 심는다. 예전에는 프로덕션 폴백이
+        // 픽스처 노릇을 해서 아무것도 안 심어도 항목이 있었다 — 그게 폴백을 걷기 어렵게
+        // 만든 이유다.
+        com.sphinxfin.sphinx.core.extraction.DemoExtractionFixture.seedEls(extractedRiskItems);
         when(aiServiceClient.question(any(RiskItem.class), anyList(), anyString(), anyString(),
                 nullable(AiServiceClient.InterviewContext.class)))
                 .thenReturn(new AiServiceClient.Question("질문?", "situation", false));
@@ -92,8 +98,8 @@ class QuestionVulnerableHintTest {
     @DisplayName("❗done=true 응답에도 실린다 — 세션의 성질이지 이번 질문의 성질이 아니다")
     void theDoneResponseCarriesItToo() throws Exception {
         String sid = session("70대", "없음", "5천만원대");
-        for (RiskItem item : MockData.RISK_ITEMS) {
-            answer(sid, item.itemId());
+        for (String itemId : com.sphinxfin.sphinx.core.extraction.DemoExtractionFixture.ELS_ITEM_IDS) {
+            answer(sid, itemId);
         }
 
         String body = ask(sid);

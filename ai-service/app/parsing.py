@@ -545,8 +545,9 @@ def verify_span(doc: dict, source_span: dict, value_text: str) -> bool:
 class ParseRefused(Exception):
     """파싱을 시작하지 못했다. 하위 타입이 이유를 가르고, 라우트가 그것으로 상태 코드를 고른다.
 
-    세 이유를 한 코드로 묶으면 안 된다 — 고치는 자리가 전부 다르다. 경로 규칙 위반은
-    부르는 쪽 배선, 파일 없음은 업로드·마운트, 못 읽음은 문서 자체다.
+    네 이유를 한 코드로 묶으면 안 된다 — 고치는 자리가 전부 다르다. 경로 규칙 위반은
+    부르는 쪽 배선, 파일 없음은 업로드·마운트, 못 읽음은 문서 자체, **권한 거부는 볼륨
+    소유권**이다.
     """
 
 
@@ -560,6 +561,38 @@ class DocumentNotFound(ParseRefused):
 
 class DocumentUnreadable(ParseRefused):
     """PDF 로 열리지 않는다 — 형식 오류·암호화·페이지 0."""
+
+
+class DocumentAccessDenied(ParseRefused):
+    """뿌리 안이고 파일도 있는데 **읽을 권한이 없다** (이슈 #521 · PR #532 리뷰, 윤지석).
+
+    ❗**위 셋 중 어디에도 안 맞는다.** `DocumentNotFound` 는 거짓이고(파일은 있다)
+    `DocumentUnreadable` 도 거짓이다(문서는 멀쩡하다). 고치는 자리가 **볼륨 소유권**이라
+    넷째 갈래가 된다 — 이 클래스의 존재 이유가 그것이다.
+
+    ## 왜 이 갈래가 생겼나
+
+    `#532` 가 업로드 볼륨(`/data/uploads`)을 붙이면서 **이 스택의 첫 rw 마운트**가 생겼다.
+    그전에는 마운트가 전부 `:ro` 고 파일은 git 이 넣어 준 것이라 권한이 어긋날 자리가
+    없었다. 지금은 `docker volume create` 가 만든 볼륨 루트가 `root:root` 이고 server 는
+    비루트(10001)로 도므로, 소유권을 맞추지 않으면 그 트리를 못 읽는다.
+
+    실측(`#532` 리뷰): `chmod 000` 한 파일에 `parse_upload()` 를 걸면 `PermissionError` 가
+    **`ParseRefused` 계열 밖으로** 새어 500 이 됐고, Spring 이 그것을 502
+    `AI_SERVICE_UNAVAILABLE` 로 뭉쳐 **「ai-service 장애」로 오진**됐다.
+
+    ## ❗상태 코드로는 이 사실을 말할 수 없다
+
+    라우트가 이 타입을 어떻게 매핑해도 부족하다. 4xx 로 두면 *"요청이 잘못됐다"* 가 되는데
+    요청은 정상이고, 5xx 는 Spring 이 다시 502 로 뭉친다. **어느 코드도 「ai-service 는
+    멀쩡하고 볼륨 권한만 어긋났다」를 말하지 못한다** — 그게 `#531` 이 `/ops/status` 를
+    별도 엔드포인트로 낸 이유의 그 종류다.
+
+    그래서 이 클래스가 하는 일은 **원인을 타입과 메시지에 남기는 것**이다. 로그에서
+    갈리고, 다음 사람이 위 셋을 볼 때 넷째가 있다는 것을 안다. 화면에서 가르는 것은
+    `/ops/status` 의 `data-volumes` 가 **쓰기 가능 여부**를 보는 쪽이 답이다(`#532` 에
+    요청해 뒀다).
+    """
 
 
 #: pdfplumber 는 pdfminer 예외를 자기 타입으로 감싼다. 핀이 없는 의존성이라(requirements.txt)
@@ -597,11 +630,37 @@ def documents_root() -> Path:
 
 
 def derive_document_id(pdf_path: str | Path) -> str:
-    """파일명에서 만든 문서 id. 같은 파일이면 같은 값이다(P2).
+    """파일명에서 만든 문서 id. **단독 실행용 폴백이다.**
 
     계약상 `document_id` 는 **업로드 단위** 식별자라 원래 업로더가 가진 값이고 파서가 정할
     것이 아니다 — 호출자가 주면 그걸 쓴다. 여기서 만드는 것은 영속 층(#401 의 3번)이 붙기
     전까지 이 엔드포인트를 혼자 돌려볼 수 있게 하는 값이다.
+
+    ❗**「같은 파일이면 같은 값」은 참이지만 그 역은 거짓이다**(이슈 #528 실측). 파일명만
+    보므로 **내용이 다른 두 문서가 같은 값을 받는다.** 업로드에서는 그것이 예외가 아니다.
+
+        uploads/aaaa1111/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
+        uploads/bbbb2222/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
+
+    `_ID_UNSAFE` 가 `[^a-z0-9]+` 라 **한글은 사라지고 숫자·라틴 문자는 남는다.** 그래서 한글
+    파일명의 결과가 두 갈래이고, **남는 쪽이 더 나쁘다**(PR #569 리뷰, 강희진).
+
+        약관.pdf                    ->  doc-unnamed        눈에 띈다
+        키움증권_제4181회_ELS.pdf     ->  doc-4181-els       ❗정상적인 id 로 보인다
+        제4181회.pdf                ->  doc-4181           ❗
+        키움증권_제4181회.pdf         ->  doc-4181           ❗같다
+        제4181회_상품설명서.pdf       ->  doc-4181           ❗같다
+        제4181회 약관.pdf            ->  doc-4181           ❗같다
+
+    같은 회차의 문서 넷이 한 값이 된다. `doc-unnamed` 는 이상해 보여서 누가 들여다보는데
+    `doc-4181` 은 안 그렇다. 운영 코퍼스에서 한글 파일명은 예외가 아니라 기본이다.
+    상품ID 쪽은 이 함정을 이미 닫아 뒀다(`contracts/openapi.yaml` 27-31 행 — ASCII 영숫자가
+    하나도 안 남으면 `doc-<sha256 앞 16자>`).
+
+    ❗**그래서 운영 경로가 이 함수에 닿으면 그것이 결함이다.** 지우지 않는 이유는 단독
+    실행 경로가 실재하기 때문이고, 고칠 자리는 여기가 아니라 **호출자가 값을 주는 것**이다
+    (결정 1.37). 이 함수를 「충돌하지 않게」 고치는 쪽은 안 간다 — 그러면 이미 저장된
+    스냅샷(`extracted_risk_items.document_id`)에 두 규칙의 값이 섞인다.
     """
     stem = _ID_UNSAFE.sub("-", Path(pdf_path).stem.lower()).strip("-")
     return f"doc-{stem}" if stem else "doc-unnamed"
@@ -668,6 +727,15 @@ def _manual_override(path: Path, *, product_type: str,
     """
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError as exc:
+        # ❗**`OSError` 보다 먼저 잡는다.** `PermissionError` 는 `OSError` 의 하위라 아래
+        #   절이 먼저 오면 여기서 먹혀 「파스 출력을 못 읽는다」(422)가 된다 — 그건 거짓이다.
+        #   파일은 멀쩡하고 못 읽는 것이 우리 쪽이라, 고치는 자리가 **볼륨 소유권**이다.
+        #   `#548` 리뷰(윤지석)가 실측으로 잡았다: 이 예외는 밖으로 안 나가므로 호출자가
+        #   감싸도 **거기서는 절대 못 잡는다.**
+        raise DocumentAccessDenied(
+            f"수동 파스 출력을 읽을 권한이 없다: {path.name} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
     except (OSError, json.JSONDecodeError) as exc:
         # ❗PDF 로 폴백하지 않는다. 사람이 고쳐 둔 것이 안 읽히는데 파싱이 성공하면,
         # 그 사람은 고쳤다고 믿고 우리는 옛 결과를 쓴다.
@@ -718,12 +786,38 @@ def parse_upload(
     """
     path = resolve_document_path(document_path, root=root)
     if not path.is_file():
+        # ❗**`is_file()` 은 `EACCES` 를 삼키고 `False` 를 준다**(3.14 실측, `#548` 리뷰).
+        #   그래서 「파일이 없다」와 「상위 디렉토리를 못 본다」가 **같은 답**으로 온다.
+        #   뒤쪽은 볼륨 소유권 사고이고 고칠 자리가 전혀 다른데 `DocumentNotFound` 로
+        #   나가면 운영자가 업로드·마운트를 뒤진다. `stat()` 은 삼키지 않으므로 그것으로 가른다.
+        try:
+            path.stat()
+        except PermissionError as exc:
+            raise DocumentAccessDenied(
+                f"문서가 있는 자리를 읽을 권한이 없다: {document_path!r} — 볼륨 소유권을 본다"
+                f"(server 는 uid 10001 로 돈다)") from exc
+        except OSError:
+            pass    # 진짜 없다(ENOENT 등) — 아래 DocumentNotFound 가 맞다
         raise DocumentNotFound(f"문서가 없다: {document_path!r}")
 
-    override = path.with_suffix(".json")
-    if override.is_file():
-        return _manual_override(override, product_type=product_type,
-                                document_id=document_id, parsed_at=parsed_at)
+    # ❗**권한을 미리 보지 않는다** — `os.access()` 로 앞서 확인하면 확인과 열기 사이에
+    #   바뀔 수 있고(TOCTOU), 무엇보다 **실제 실패 지점에서 잡는 것이 정확하다.** 여기서
+    #   감싸는 이유는 `PermissionError` 가 `ParseRefused` 계열 밖이라 그대로 새면 500 이
+    #   되고 상류가 그것을 「ai-service 장애」로 오진하기 때문이다(#532 리뷰).
+    #
+    # ❗**이 절이 덮는 것은 `override.is_file()` 뿐이다.** JSON 을 실제로 읽는 자리는
+    #   `_manual_override` 안이고 **거기서 이미 갈라 낸다** — 그쪽이 `PermissionError` 를
+    #   밖으로 안 내므로 여기서는 잡을 수가 없다(`#548` 리뷰가 실측으로 잡았다). 감싸는
+    #   범위를 실물보다 넓게 적으면 다음 사람이 이 줄을 방어로 읽는다.
+    try:
+        override = path.with_suffix(".json")
+        if override.is_file():
+            return _manual_override(override, product_type=product_type,
+                                    document_id=document_id, parsed_at=parsed_at)
+    except PermissionError as exc:
+        raise DocumentAccessDenied(
+            f"파스 출력이 있는지 볼 권한이 없다: {override.name!r} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
 
     try:
         return parse_document(
@@ -736,6 +830,17 @@ def parse_upload(
         # parse_document 가 내는 것: 데모 범위 밖 product_type · 페이지 0.
         # 둘 다 입력 문제라 500 이 아니다.
         raise DocumentUnreadable(str(exc)) from exc
+    except PermissionError as exc:
+        # ❗`_UNREADABLE` 보다 **먼저** 둔다 — 다만 지금 pdfplumber 는 권한 오류를 자기
+        #   예외로 **감싸지 않는다**(`#548` 리뷰 실측). 그러니 이 순서가 오늘 답을 바꾸지는
+        #   않는다. 순서를 지키는 이유는 감싸는 판이 오는 날을 위해서다 — 그날 `_UNREADABLE`
+        #   이 먼저면 「문서가 안 열린다」(422)가 되는데 그건 거짓이다. 문서는 멀쩡하고 못
+        #   읽는 것이 우리 쪽이라 고칠 자리가 볼륨 소유권이다.
+        #   ❗감싸는 판이 오면 이 절만으로는 부족하다 — `PdfminerException.__cause__` 를
+        #   봐야 하고, 그건 별건이다.
+        raise DocumentAccessDenied(
+            f"문서를 읽을 권한이 없다: {document_path!r} — 볼륨 소유권을 본다"
+            f"(server 는 uid 10001 로 돈다)") from exc
     except _UNREADABLE as exc:
         raise DocumentUnreadable(
             f"PDF 로 열리지 않는다: {document_path!r} ({type(exc).__name__}: {exc})"

@@ -136,7 +136,7 @@ public class ProductController {
 
     /**
      * 추출된 항목 조회. 면담이 부르는 경로라 SELLER 가 닿아야 한다({@code product:read}).
-     * 저장된 추출이 있으면 그것, 없으면 MockData 폴백 — 키 없는 환경도 계속 돈다.
+     * 저장된 추출뿐이다 — 없으면 404 (이슈 #478). 목으로 덮으면 「추출을 안 돌렸다」가 감춰진다.
      */
     @PreAuthorize("@accessGuard.canAggregate('product:read')")
     @GetMapping("/{productId}/risk-items")

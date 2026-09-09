@@ -117,7 +117,7 @@ public class GateEngine {
      * 감사 시점에 GREEN 을 보면 <b>전 항목이 통과한 것으로 읽힌다.</b>
      *
      * <p>분모는 <b>그 상품의 추출 항목 집합</b>이다 — {@code SessionService} 가
-     * {@code ProductRiskItems.riskItemsOf(productId)}(저장된 추출 우선, 없으면 MockData 폴백)로
+     * {@code ProductRiskItems.riskItemsOf(productId)}(저장된 추출뿐 — 없으면 404, 이슈 #478)로
      * 기대 집합을 얻어 판정된 항목을 뺀 수를 여기 넣는다(#405). 전에는 이 값이 <b>질문을 보낸
      * 항목</b>과 대조한 우회였다 — 추출이 아직 목이던 시절이라 그것을 못 쓴 것인데, 그러면
      * <b>아예 안 물어본 항목</b>(질문 생성 실패·항목 누락·순회 중단)이 분모에서 같이 빠져

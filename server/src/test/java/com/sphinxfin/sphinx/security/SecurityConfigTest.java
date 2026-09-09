@@ -89,7 +89,12 @@ class SecurityConfigTest {
         @Test
         @DisplayName("자격증명이 맞으면 통과")
         void allowsAuthenticated() throws Exception {
-            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")
+            // ❗**데이터에 기대지 않는 경로를 쓴다**(이슈 #478). 예전에는 risk-items 를 불렀고
+            //   MockData 폴백이 항목을 내줘서 200 이었다. 폴백을 걷으면 추출 없는 상품이
+            //   404 라, **인증을 재는 테스트가 카탈로그 상태 때문에 빨개진다** — 재는 것과
+            //   깨지는 이유가 달라지면 다음 사람이 원인을 여기서 못 찾는다.
+            //   `GET /products` 는 목록이라 비어도 200 이다.
+            mvc.perform(get("/products")
                             .with(org.springframework.security.test.web.servlet.request
                                     .SecurityMockMvcRequestPostProcessors
                                     .httpBasic("seller-01", "test-only-not-a-real-credential")))

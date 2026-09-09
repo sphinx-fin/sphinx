@@ -526,7 +526,7 @@ public class Session extends BaseEntity {
      * <b>기대 항목 중 판정이 없는 항목 수</b> (이슈 #280 ② · #405). {@code R-00} 의 분모다.
      *
      * <p>분모({@code expectedItemIds})는 <b>그 상품의 추출 항목 집합</b>이다 —
-     * {@code ProductRiskItems.riskItemsOf(productId)} 가 낸다(저장된 추출 우선, 없으면 MockData
+     * {@code ProductRiskItems.riskItemsOf(productId)} 가 낸다(저장된 추출뿐 — 없으면 404, #478
      * 폴백). 세션은 그 목록을 모르므로 <b>호출부가 넣어 준다</b>({@code SessionService}). 세션은
      * "무엇을 판정했나" 만 알고, "몇 항목이어야 하나" 는 상품 쪽이 안다 — 둘을 여기서 맞춘다.
      *

@@ -71,6 +71,11 @@ class ProductAccessWiringTest {
     @Test
     @DisplayName("❗판매자는 상품을 읽는다 — 면담이 여기서 항목을 받는다")
     void theSellerCanReadTheCatalog() throws Exception {
+        // ❗**클래스 전체에 심지 않는다.** 같은 클래스의 다른 테스트가 「추출 전에는 404」를
+        //   재므로(아래 둘) @BeforeEach 로 심으면 그쪽이 거짓이 된다. 항목이 필요한 것은
+        //   이 한 테스트뿐이라 여기서만 심는다(이슈 #478).
+        com.sphinxfin.sphinx.core.extraction.DemoExtractionFixture.seedEls(extractedRiskItems);
+
         mvc.perform(get("/products").with(as("seller-01", "SELLER")))
                 .andExpect(status().isOk());
         mvc.perform(get("/products/{id}/risk-items", "doc-els-kiwoom-4181").with(as("seller-01", "SELLER")))
@@ -88,13 +93,17 @@ class ProductAccessWiringTest {
     }
 
     @Test
-    @DisplayName("❗추출 전 변액 상품 risk-items 는 404 — ELS 폴백을 변액에 안 내준다 (이슈 #427)")
+    @DisplayName("❗추출 전 변액 상품 risk-items 는 404 — 목으로 덮지 않는다 (이슈 #427 · #478)")
     void variableProductWithoutExtractionIsNotFound() throws Exception {
-        // 폴백(MockData.RISK_ITEMS)은 ELS 한 벌뿐이다. 변액 상품(존재하고 productType 은
-        // VARIABLE_INSURANCE 로 맞게 나온다)에 그 목록을 내주면 변액 세션에 ELS 질문이 조용히
-        // 나온다 — 유형이 다르면 폴백이 empty 라 404 로 실패시킨다(조용한 오답보다 낫다).
-        // 실추출이 이 상품을 채우면 저장 경로가 폴백을 덮어 200 이 된다. @AfterEach 가 스냅샷을
-        // 지우므로 여기서는 '추출 전' 상태다.
+        // #478 로 폴백이 사라졌으므로 이제 근거가 하나다 — **저장된 추출이 없으면 404**.
+        //
+        // 예전 근거는 「폴백이 ELS 한 벌뿐이라 상품유형이 다르면 empty」였다. 그 시절 이
+        // 단정이 잡은 것은 «변액 세션에 ELS 질문이 조용히 나오는 것» 이었고, 지금은 유형과
+        // 무관하게 추출 전이면 404 라 그 사고 자체가 성립하지 않는다.
+        //
+        // ❗그래도 이 테스트를 남긴다. 폴백을 되살리는 변이에서 여기가 빨개진다(실측) —
+        //   같은 사고로 돌아가는 길목을 지키는 자리다. @AfterEach 가 스냅샷을 지우므로
+        //   여기서는 '추출 전' 상태다.
         mvc.perform(get("/products/{id}/risk-items", "doc-var-samsung-b2601").with(as("seller-01", "SELLER")))
                 .andExpect(status().isNotFound());
     }

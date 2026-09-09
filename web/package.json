@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "demo-answers": "node scripts/build-demo-answers.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
