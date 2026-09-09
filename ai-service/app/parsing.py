@@ -641,13 +641,21 @@ def derive_document_id(pdf_path: str | Path) -> str:
 
         uploads/aaaa1111/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
         uploads/bbbb2222/els_kiwoom_4181_prospectus.pdf  ->  doc-els-kiwoom-4181-prospectus
-        uploads/cccc3333/상품설명서.pdf                    ->  doc-unnamed
-        uploads/dddd4444/상품설명서.pdf                    ->  doc-unnamed
 
-    `_ID_UNSAFE` 가 `[^a-z0-9]+` 라 한글은 통째로 사라지고, 슬러그가 비면 `doc-unnamed`
-    하나로 뭉친다. 운영 코퍼스에서 한글 파일명은 예외가 아니라 기본이다. 상품ID 쪽은
-    이 함정을 이미 닫아 뒀다(`contracts/openapi.yaml` 27-31 행 — 슬러그가 비면
-    `doc-<sha256 앞 16자>`).
+    `_ID_UNSAFE` 가 `[^a-z0-9]+` 라 **한글은 사라지고 숫자·라틴 문자는 남는다.** 그래서 한글
+    파일명의 결과가 두 갈래이고, **남는 쪽이 더 나쁘다**(PR #569 리뷰, 강희진).
+
+        약관.pdf                    ->  doc-unnamed        눈에 띈다
+        키움증권_제4181회_ELS.pdf     ->  doc-4181-els       ❗정상적인 id 로 보인다
+        제4181회.pdf                ->  doc-4181           ❗
+        키움증권_제4181회.pdf         ->  doc-4181           ❗같다
+        제4181회_상품설명서.pdf       ->  doc-4181           ❗같다
+        제4181회 약관.pdf            ->  doc-4181           ❗같다
+
+    같은 회차의 문서 넷이 한 값이 된다. `doc-unnamed` 는 이상해 보여서 누가 들여다보는데
+    `doc-4181` 은 안 그렇다. 운영 코퍼스에서 한글 파일명은 예외가 아니라 기본이다.
+    상품ID 쪽은 이 함정을 이미 닫아 뒀다(`contracts/openapi.yaml` 27-31 행 — ASCII 영숫자가
+    하나도 안 남으면 `doc-<sha256 앞 16자>`).
 
     ❗**그래서 운영 경로가 이 함수에 닿으면 그것이 결함이다.** 지우지 않는 이유는 단독
     실행 경로가 실재하기 때문이고, 고칠 자리는 여기가 아니라 **호출자가 값을 주는 것**이다
