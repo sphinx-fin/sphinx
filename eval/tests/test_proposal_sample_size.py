@@ -139,3 +139,34 @@ def test_the_unit_is_utterances_not_sessions() -> None:
         "(이슈 #577 실측). 수 대신 data/synth_sessions/distribution.yaml 과 "
         "scripts/gen_synth_sessions.py 를 가리킨다."
     )
+
+    # ❗**대시보드 합성 세션의 «수» 는 이 문서에 적지 않는다**(이슈 #580 · PR #579 리뷰, 강희진).
+    #
+    #   위 단정으로는 안 잡힌다 — 낡았던 문면이 「합성 세션」 뒤가 아니라 **파일명 뒤**에
+    #   수를 달고 있었고, 그래서 `합성 세션 \d+건` 에 안 걸렸다.
+    #
+    #       >    합성 데이터이고(`data/synth_sessions/`, 배포마다 `gen_synth_sessions.py` 가 68건)
+    #
+    # ❗**그리고 `_body_text()` 가 아니라 전문을 본다.** 그 문면은 **머리말**에 있었다 —
+    #   인용 대조에서 머리말을 빼는 것은 맞지만(정정 이력이 옛 문면을 인용한다), 「이 수를
+    #   적지 마라」 는 금지에서는 머리말이 제일 위험한 자리다. 낡은 값이 실제로 거기 살았다.
+    #
+    #   정정 이력이 «예전에 「68건」이라고 적혀 있었다» 로 그 수를 인용하는 것은 정당하다.
+    #   그건 경로·스크립트 이름과 같은 줄에 없으므로 이 규칙에 안 걸린다 — 이력을 적을 때
+    #   그 줄에 경로를 같이 두지 않는다.
+    raw = PROPOSAL.read_text(encoding="utf-8")
+    counted = [
+        ln for ln in raw.splitlines()
+        if re.search(r"synth_sessions", ln) and re.search(r"\d+\s*건", ln)
+    ]
+    assert not counted, (
+        f"대시보드 합성 세션의 수를 적었다: {counted}\n"
+        "❗그 수는 이 문서에 적지 않는다 — 생성 파라미터는 커밋돼 있지만 산출물"
+        "(sessions.json)은 .gitignore 가 물고, 무엇보다 그 수가 **파라미터 밖의 입력에 "
+        "얽혀 있다**: 등급 추출과 지터 추출이 같은 난수열을 쓰므로 템플릿의 required 항목이 "
+        "하나 바뀌면 세션 수가 움직인다(66 → 73, 이슈 #577 실측). 실제로 세 곳이 서로 다른 "
+        "값을 들고 있었다(재생성 66 · 로컬 68 · 로컬 71, 이슈 #580). 수 대신 "
+        "data/synth_sessions/distribution.yaml 과 scripts/gen_synth_sessions.py 를 가리킨다.\n"
+        "· 정정 이력으로 옛 수를 인용하는 것이면 — 그 줄에 경로·스크립트 이름을 같이 두지 "
+        "않는다. 그러면 이력은 남고 이 규칙에 안 걸린다."
+    )
