@@ -275,13 +275,28 @@ docker-compose.yml`(각각 `-p sphinx-data`·`sphinx-edge`·`sphinx-blue`).
 ## 6. `data/` 와 `contracts/` 는 볼륨이다 — 이미지에 굽지 않는다
 
 `git clone` 하면 둘 다 통째로 온다(#30 이후 `documents/` 까지 추적). 그래서 bind mount 가
-그대로 성립한다.
+그대로 성립한다. (업로드 볼륨은 예외다 — 아래 표의 뒤 두 행)
 
 | 마운트 | 서비스 | 없으면 |
 |---|---|---|
 | `./data:/data:ro` | ai-service | 오해 라이브러리를 못 읽어 **로딩 시점에 죽는다** — 드러난다 |
 | `./contracts:/contracts:ro` | ai-service | ❗**조용히 no-op** — 아래 |
 | `./data/timeseries:/data/timeseries:ro` | server | 시뮬레이터 계산 불가 (경고 로그) |
+| `uploads:/data/uploads:ro` | ai-service | ❗**컨테이너가 아예 안 뜬다** — 아래 |
+| `uploads:/data/uploads` | server | 업로드가 저장될 곳이 없다. 이 스택의 **유일한 rw 마운트** |
+
+❗**뒤 두 행에는 호스트 전제가 하나 붙는다 — `data/uploads/` 디렉토리가 있어야 한다.**
+ai-service 는 `./data` 를 통째로 `:ro` 마운트하고 그 위에 볼륨을 겹치는데, 마운트 지점이
+없으면 runc 가 만들려 하고 부모가 읽기 전용이라 실패한다.
+
+```
+create mountpoint for /data/uploads mount: … read-only file system
+```
+
+그래서 빈 디렉토리를 커밋해 뒀고(`data/uploads/README.md` 가 지우지 말라고 적는다)
+`deploy_ec2.sh` 의 「레포를 통째로 clone 했는지」 가드가 그 경로를 함께 본다. **`server` 는
+같은 상황에서 정상 기동한다** — 그쪽은 `data/` 하위만 붙어서 `/data` 자체가 이미지 레이어다.
+즉 이 전제가 깨지면 **server 만 뜨고 ai-service 가 죽어** 채점이 전부 502 가 된다.
 
 `timeseries/` 를 이미지에 넣지 않는 이유는 18,089줄을 한 벌 더 두면 `data/timeseries/VERSION`
 의 sha256 으로 고정한 원본과 조용히 갈라지고, 시뮬레이터 출력이 달라진 원인이 코드인지
@@ -357,6 +372,25 @@ for u in seller-01 compl-01; do
     curl -sS -K - -o /dev/null -w "$u %{http_code}\n" http://localhost/api/dashboard/heatmap
 done
 # seller-01 403 · compl-01 200 이 정상이다. seller-01 이 401 이면 명부가 htpasswd 에 안 들어간 것.
+
+# ❗추출 스냅샷이 들어 있는가 (이슈 #568). **배포가 이것을 만들지 않는다** — 사람이
+# `POST /products/{id}/extract` 를 한 번 돌린 결과가 MySQL 볼륨에 남아 배포를 넘어 사는
+# 것이고(#445), 그 볼륨이 새로 나면(EC2 재생성 · `down -v` · 새 리전) 다시 돌려야 한다.
+# 200 이면 있고 **404 면 한 번도 안 돌린 것**이다 — `ProductRiskItems.riskItemsOf` 가 빈
+# 스냅샷에 `NoSuchElementException` 을 던진다. #562 가 목 폴백을 걷어서 200 으로 덮이지
+# 않으므로, 이 줄이 실제로 「항목이 있다」를 잰다(그 전에는 폴백이 목 2건을 200 으로 냈다).
+# 그 404 는 `RealExtractionWiringTest` 가 물고 있다 — 폴백이 다시 생기는 변경은 그 테스트가
+# 먼저 빨개지므로, 이 확인이 조용히 무의미해지는 경로가 막혀 있다.
+for p in doc-els-kiwoom-4181 doc-var-samsung-b2601; do
+  printf 'user = "%s:%s"\n' "$esc_user" "$esc_pass" |
+    curl -sS -K - -o /dev/null -w "$p %{http_code}\n" \
+      "http://localhost/api/products/$p/risk-items"
+done
+# 둘 다 200 이 정상이다. 404 면 데모 첫 화면(S-02 상품 목록 → 항목)이 선다.
+# ❗이 줄이 말하는 것은 「항목이 있다」까지다 — 「채점이 된다」는 여전히 안 말한다(결정 7.56).
+# ❗**그리고 200 은 「행이 있다」까지다** — `riskItemsOf` 가 status 를 안 보므로 전부
+#   `extraction_failed` 여도 200 이다. 그때는 첫 화면이 아니라 **판정에서** 막힌다(면담이
+#   실패 항목을 안 묻고 분모에는 남아 미측정 → R-00 RED). 그 자리는 #568 의 카드가 가른다.
 
 # ❗아래 둘은 **실패해야 정상이다**
 curl --max-time 3 http://<EC2 퍼블릭 IP>:8100/healthz   # ai-service 직접 — 막혀야 한다
@@ -517,6 +551,11 @@ export SPHINX_API_PASSWORD=$P
 export SPHINX_INTERNAL_TOKEN=$(openssl rand -hex 32)
 export SPHINX_API_USERS=$(sed -n 's/^.*[^A-Za-z0-9_-]id:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' \
                             server/src/main/resources/demo_accounts.yaml | paste -sd, -)
+# ❗업로드 원본 볼륨을 먼저 만든다(이슈 #521). 앱 스택이 `external: true` 로 참조만 하므로,
+# 없으면 마지막 줄이 `external volume "sphinx_uploads" not found` 로 죽는다 —
+# 컨테이너를 하나도 안 만들고 멈춘다. 소유권까지 맞춰야 업로드가 EACCES 를 안 낸다.
+docker volume create sphinx_uploads
+docker run --rm -v sphinx_uploads:/v busybox chown 10001:10001 /v
 # 세 프로젝트 순서대로 — §1.1 참조. data·edge 는 상시 유지, app 은 색을 고른다(처음엔 blue).
 docker compose -f docker-compose.data.yml -p sphinx-data up -d
 docker compose -f docker-compose.edge.yml -p sphinx-edge up -d --build

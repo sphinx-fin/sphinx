@@ -16,10 +16,27 @@ dist/
 # 로컬에서 돌린 뒤 남는다. `dist/` 는 슬래시가 있어 이 이름을 안 문다.
 dist-demo-captions/
 data/synth_sessions/*.json
-# 업로드 흐름(F-EXT-001 · UploadedDocumentStore, #527)이 런타임에 쓰는 자리다 —
-# 커밋 대상이 아니다. ignore 를 안 걸면 업로드를 테스트할 때마다 바이너리가 git add -A 로
-# 쓸려 들어온다(#542 에서 실제로 났다).
-data/uploads/
+# 업로드된 상품문서(#521 · `UploadedDocumentStore`). 배포에서는 도커 볼륨에 살지만,
+# compose 없이 서버를 직접 돌리면(`SPHINX_DATA_DIR` 기본값 `../data`) 호스트 이 디렉토리에
+# 쓴다. ignore 를 안 걸면 업로드를 테스트할 때마다 바이너리가 `git add -A` 로 쓸려
+# 들어온다(#542 에서 실제로 났다 · #549).
+#
+# ❗**디렉토리 자체는 마운트 지점이라 커밋돼 있어야 한다** — 없으면 `./data:/data:ro` 위에
+#   `/data/uploads` 를 겹쳐 붙일 때 runc 가 마운트 지점을 만들려다 실패하고 **ai-service 가
+#   아예 안 뜬다**(#532 실측). 그래서 `README.md` 만 추적한다.
+#
+# ❗**`data/uploads/`(디렉토리 형)로 되돌리지 않는다.** 그러면 아래 `!` 가 **순서와 무관하게**
+#   안 먹는다 — git 이 제외된 디렉토리 안으로 안 내려가서 그 아래 파일을 되살릴 수 없다.
+#   실측(#549 · #532):
+#
+#     data/uploads/                       README 도 무시된다        ❗
+#     data/uploads/* · !README            README 추적 · blob 무시    ✅
+#     위 둘을 함께 두면(순서 무관)          README 가 무시된다        ❗
+#
+#   런타임 산출물을 막는 목적은 `*` 로 그대로 달성된다. 바로 위 `node_modules` 가 같은 종류를
+#   이미 문서화해 뒀다(슬래시 유무가 답을 바꾼 자리).
+data/uploads/*
+!data/uploads/README.md
 eval/labeling/*.xlsx
 .DS_Store
 .pytest_cache/
