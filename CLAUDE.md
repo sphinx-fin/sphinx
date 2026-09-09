@@ -142,13 +142,15 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
   `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
-  네 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온)이 어긋나지
-  않도록 `ErrorCodeContractTest`가 전부 대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
+  다섯 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온·
+  `web/src/lib/errorText.ts`의 문면 표)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부
+  대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
   (이슈 #316 — `UNAUTHORIZED`·`FORBIDDEN`·`MEASUREMENT_INVALID`가 없었다).
-  ❗**다섯 번째 자리가 있다** — `web/src/lib/errorText.ts`의 `Record<ErrorCode, string>`.
-  거기는 `ErrorCodeContractTest`가 아니라 **tsc가 잡는다**(코드를 더하고 문면을 안 쓰면
-  `npm run build`가 깨진다). 그래서 대조 테스트는 초록인데 웹 빌드만 빨간 상태가 생긴다 —
-  코드를 더했으면 `npm run build`까지 돌린다. 문면 규칙은 그 파일 주석에 있다.
+  ❗**다섯 번째 자리는 tsc도 잡는다 — 그런데 순서가 나쁘다.** 문면 표가 전체 맵이라 코드를
+  더하고 문면을 안 쓰면 `npm run build`가 깨지는데, 서버만 고치는 사람은 그걸 안 돌린다.
+  그러면 앞 네 대조가 초록이라 "다 맞췄다"로 읽히고 **웹 빌드만 빨간 채로 머지된다** —
+  실제로 그렇게 main이 깨졌다(#521). 그래서 같은 테스트가 그 표까지 본다. 문면 규칙은
+  그 파일 주석에 있다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다

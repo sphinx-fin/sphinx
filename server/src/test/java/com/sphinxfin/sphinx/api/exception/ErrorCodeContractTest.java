@@ -56,8 +56,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p><b>상태 코드까지 본다.</b> CLAUDE.md는 {@code `CODE`(404)}로, openapi는
  * {@code - CODE  # 404}로 각각 상태를 적어둔다. 코드 이름만 맞고 상태가 어긋난 문서는
  * <b>빠진 항목보다 나쁘다</b> — 없는 것은 찾아보게 되는데 틀린 것은 그대로 믿는다.
+ *
+ * <h2>❗다섯 번째 사본 — web 문면 표</h2>
+ *
+ * <p>{@code web/src/lib/errorText.ts} 의 {@code Record<ErrorCode, string>} 이 코드마다
+ * 사용자 문면을 하나씩 든다. 그 파일이 <b>전체 맵</b>인 이유를 스스로 적어 뒀다 —
+ * 부분 맵이면 새 코드가 조용히 기본 문면으로 떨어지고 <i>"그게 화면에서는 정상처럼 보인다"</i>.
+ *
+ * <p>그래서 {@code tsc} 가 그 사본을 지키는데, <b>여기서 멈추면 순서가 나쁘다.</b> 위 네
+ * 대조가 초록이라 <i>"다 맞췄다"</i> 로 읽히고 <b>웹 빌드만 빨간 상태</b>가 남는다 — 실제로
+ * 그렇게 {@code DOCUMENT_UNPROCESSABLE} 을 넣은 커밋이 {@code main} 을 깨뜨렸다
+ * ({@code #521}). 서버 쪽만 고치는 사람은 {@code npm run build} 를 안 돌린다.
+ *
+ * <p>이 대조는 {@code tsc} 보다 <b>세다</b>. 누가 그 표를 {@code Partial<…>} 이나
+ * {@code Record<string, string>} 으로 느슨하게 바꾸면 {@code tsc} 는 그 순간부터 아무것도
+ * 안 잡는데, 여기는 키 집합을 계약과 직접 맞추므로 그대로 잡는다.
  */
-@DisplayName("에러 코드 계약 — 핸들러 ≡ openapi.yaml ≡ CLAUDE.md ≡ web 유니온")
+@DisplayName("에러 코드 계약 — 핸들러 ≡ openapi.yaml ≡ CLAUDE.md ≡ web 유니온 ≡ web 문면")
 class ErrorCodeContractTest {
 
     private static final Path REPO_ROOT = Path.of("..");   // server/ 에서 실행된다
@@ -69,6 +84,9 @@ class ErrorCodeContractTest {
     /** web 유니온의 {@code | "CODE"  // 404 설명} 형식 — 코드와 상태를 함께 읽는다. */
     private static final Pattern WEB_UNION_ENTRY =
             Pattern.compile("\\|\\s*\"([A-Z_]+)\"\\s*(?://\\s*(\\d{3}))?");
+
+    /** web 문면 표의 {@code CODE: "…"} 형식 — 값(문면)은 이 대조의 관심이 아니다. */
+    private static final Pattern ERROR_TEXT_ENTRY = Pattern.compile("(?m)^\\s*([A-Z_]+):");
 
     /** openapi enum의 {@code - CODE  # 404 설명} 형식. */
     private static final Pattern CONTRACT_ENTRY =
@@ -133,6 +151,38 @@ class ErrorCodeContractTest {
                 .as("web 유니온 주석의 상태가 계약과 다르다 — 화면이 그 숫자로 분기를 짜면 "
                         + "타입은 통과하고 동작만 어긋난다")
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("❗web 문면 표(errorText.ts)가 계약의 코드를 전부 든다 — 빠지면 웹 빌드만 깨진다")
+    void errorTextCoversContract() throws Exception {
+        assertThat(errorTextCodes())
+                .as("코드를 더했으면 web/src/lib/errorText.ts 에 사용자 문면도 적는다. "
+                        + "여기까지 같이 보는 이유는 순서다 — 안 보면 위 네 대조가 초록인 채로 "
+                        + "웹 빌드만 빨개지고, 서버만 고친 사람은 그걸 모른 채 머지한다")
+                .isEqualTo(contractStatuses().keySet());
+    }
+
+    /** web 문면 표의 코드 집합. */
+    private Set<String> errorTextCodes() {
+        String src = read("web/src/lib/errorText.ts");
+        int from = src.indexOf("const ERROR_TEXT");
+        assertThat(from)
+                .as("web/src/lib/errorText.ts 에서 ERROR_TEXT 표를 못 찾았다 — 이름이 바뀌었으면 "
+                        + "이 대조도 같이 고친다. 안 고치면 조용히 통과한다")
+                .isNotNegative();
+        int end = src.indexOf("\n};", from);
+        assertThat(end).as("ERROR_TEXT 표의 끝을 못 찾았다 — 형식이 바뀐 것이다").isNotNegative();
+        String table = src.substring(from, end);
+
+        Set<String> out = new TreeSet<>();
+        Matcher m = ERROR_TEXT_ENTRY.matcher(table);
+        while (m.find()) {
+            out.add(m.group(1));
+        }
+        assertThat(out).as("표에서 코드를 하나도 못 읽었다면 이 테스트의 정규식이 낡은 것이다")
+                .isNotEmpty();
+        return out;
     }
 
     /** web ErrorCode 유니온의 코드 → 주석에 적힌 상태(없으면 빈 문자열). */
