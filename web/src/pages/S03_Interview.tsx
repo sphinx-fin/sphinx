@@ -663,6 +663,11 @@ export default function S03Interview() {
                 <ul className="iv__demo-list">
                   {(["u1", "u4"] as const).map((grade) => {
                     const example = demoAnswers[grade];
+                    /* ❗**없는 등급은 줄을 아예 안 그린다.** 답지는 부분일 수 있다 —
+                       라벨러 둘이 갈린 자리는 생성본에 키가 없고, 작성본도 없으면 그
+                       등급은 없는 것이다(`lib/demoAnswers` · `DemoAnswerPair`). 빈 줄을
+                       그리면 진행자에게는 답지가 깨진 것으로 보인다. */
+                    if (!example) return null;
                     return (
                       <li key={grade} className={`iv__demo-row iv__demo-row--${grade}`}>
                         <p className="iv__demo-line">
