@@ -72,7 +72,7 @@ class UploadStoreFailureWordingTest {
         // 옛 문면이 새 자리에 남아 있으면 안 된다.
         assertThat(thrown).hasMessageNotContaining("쓰기로 붙었는지");
 
-        // ❗**기대값을 던져진 원인에서 만든다**(PR #561 리뷰, 정세현). 문면을 하드코딩하면
+        // ❗**기대값을 던져진 원인에서 만든다**(PR #561 리뷰). 문면을 하드코딩하면
         //   플랫폼에 갈린다 — macOS 는 "Not a directory" 인데 리눅스에서는
         //   FileAlreadyExistsException(reason null)일 수 있고, 그러면 CI 에서만 빨개진다
         //   (#558 이 방금 다룬 그 부류다). 원인 쪽에서 만들면 어느 갈래로 가든 같은 답이다.
@@ -91,7 +91,7 @@ class UploadStoreFailureWordingTest {
     @DisplayName("★ getReason() 갈래를 직접 잰다 — #557 을 고치는 갈래가 이것인데 테스트가 없었다")
     void theOsReasonBranchIsMeasuredDirectly() {
         // ENOSPC 를 테스트에서 만들 수는 없지만 예외를 만들어 넣을 수는 있다. 그러면
-        // 플랫폼에 갈리는 하드코딩도 안 생긴다(PR #561 리뷰, 윤지석).
+        // 플랫폼에 갈리는 하드코딩도 안 생긴다(PR #561 리뷰).
         // ❗#554(상한·정리 없음)가 실제로 나는 날 이 문면이 맞게 나가는 것을 미리 보장한다.
         UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
                 Path.of("/data/uploads/abc/x.pdf"),
@@ -111,7 +111,7 @@ class UploadStoreFailureWordingTest {
     void aReadOnlyMountGoesToTheReasonBranch() {
         // 실측(JDK 21 · docker `-v …:ro`): FileSystemException / reason="Read-only file system".
         // AccessDeniedException 이 아니다 — 그래서 첫 문면의 「쓰기로 붙었는지」는 이 상황에
-        // 닿을 수 없었다(PR #561 리뷰, 오준서).
+        // 닿을 수 없었다(PR #561 리뷰).
         UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
                 Path.of("/data/uploads/abc/x.pdf"),
                 new FileSystemException("/data/uploads/abc/x.pdf", null,
