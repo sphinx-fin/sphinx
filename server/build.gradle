@@ -139,6 +139,10 @@ tasks.named('test') {
     // 입력이고, 이건 **선언을 빼고 실측해서 확인했다** — 표에서 코드 한 줄을 지우고 돌리면
     // `BUILD SUCCESSFUL` 이 난다(test 가 UP-TO-DATE). 변이가 안 잡히는 그물은 없느니만
     // 못하므로, 이 줄이 대조와 같은 커밋에 있어야 한다.
+    //
+    // ❗**`ci.yml` 의 server 판별에도 같은 경로가 있어야 한다**(CiServerFilterMirrorsGradleInputsTest
+    // 가 대조한다). 이 표를 `Partial<…>` 로 느슨하게 바꾸는 변경은 `web/` 만 건드려서, 없으면
+    // 그 PR 에서 server 잡이 아예 안 뜨고 새 대조가 안 돈다.
     inputs.file('../web/src/lib/errorText.ts')
             .withPropertyName('webErrorText')
             .withPathSensitivity(PathSensitivity.RELATIVE)
