@@ -282,6 +282,18 @@ public class ProductRiskItems {
      *
      * @throws NoSuchElementException 등록된 문서가 없는 상품(→ 404)
      */
+    public String documentPathOf(String productId) {
+        // ❗업로드본이 먼저다. 순서가 반대면 업로드한 파일명이 우연히 사전적재 상품ID 와
+        // 같아지는 날 «올린 문서가 아닌 것» 을 파스하고, 그 결과가 그 상품의 항목이 된다.
+        String documentPath = productUploads.documentPathOf(productId)
+                .orElseGet(() -> Optional.ofNullable(BY_ID.get(productId))
+                        .map(Preloaded::documentPath).orElse(null));
+        if (documentPath == null) {
+            throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
+        }
+        return documentPath;
+    }
+
     /**
      * 파스에 넘길 <b>업로드 단위 식별자</b>(결정 1.37 · 이슈 #528).
      *
@@ -305,17 +317,5 @@ public class ProductRiskItems {
                     "업로드 단위 식별자를 알 수 없다(업로드본도 사전적재도 아니다): " + productId);
         }
         return preloaded.documentId();
-    }
-
-    public String documentPathOf(String productId) {
-        // ❗업로드본이 먼저다. 순서가 반대면 업로드한 파일명이 우연히 사전적재 상품ID 와
-        // 같아지는 날 «올린 문서가 아닌 것» 을 파스하고, 그 결과가 그 상품의 항목이 된다.
-        String documentPath = productUploads.documentPathOf(productId)
-                .orElseGet(() -> Optional.ofNullable(BY_ID.get(productId))
-                        .map(Preloaded::documentPath).orElse(null));
-        if (documentPath == null) {
-            throw new NoSuchElementException("등록된 문서가 없는 상품이다: " + productId);
-        }
-        return documentPath;
     }
 }
