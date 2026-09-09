@@ -18,17 +18,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 사전적재 표의 <b>상품유형·문서 경로</b>가 계약 샘플과 같은지 본다 (이슈 #403). 소유: 강희진
  *
- * <h2>❗업로드본에는 있고 사전적재에는 없던 방어</h2>
+ * <h2>❗상품유형을 문서와 맞춰 보는 것이 아무 데도 없다</h2>
  *
- * <p>업로드 경로는 <b>파스가 판별한 상품유형이 요청값을 이긴다</b>({@code DocumentUploadWiringTest}) —
- * 올린 사람이 변액을 ELS 로 등록해도 파스 결과가 그것을 덮는다. 그런데 <b>사전적재 2종은 그
- * 방어를 안 지난다.</b> 유형이 {@code ProductRiskItems} 의 표에서 오고, {@link
- * ProductRiskItems#extract} 는 그 값을 <b>파스에 넘기는 입력</b>으로 쓴다.
+ * <p>{@link ProductRiskItems#extract} 는 표의 유형을 <b>파스에 넘기는 입력</b>으로 쓰고,
+ * ai-service 는 그 값을 <b>되돌려 줄 뿐 판별하지 않는다</b> — {@code parsing.py} 의
+ * {@code parse_document} 가 {@code "product_type": product_type} 을 그대로 담고, 하는 일은
+ * <b>범위 검사</b>({@code PRODUCT_TYPES} 두 값)뿐이다. 수동 파스 출력 경로도 다른 값을 내지
+ * 않는다 — 요청과 다르면 <b>거부</b>한다({@code DocumentPathRejected}).
+ *
+ * <p>❗<b>업로드 경로에도 판별은 없다.</b> {@code DocumentUploadWiringTest} 의
+ * <i>"파스가 판별한 유형이 요청값을 이긴다"</i> 는 <b>서버의 우선순위 배선</b>을 목으로 재는
+ * 것이고, 실물에서는 파스가 요청값을 되돌려 주므로 <b>두 값이 늘 같다</b>(PR #572 리뷰 실측).
+ * 즉 올린 사람이 변액을 ELS 로 등록하면 그대로 저장된다.
  *
  * <p>그래서 표의 한 줄이 틀리면 <b>그 유형의 템플릿으로 문서를 읽는다</b> — 변액 문서를 ELS
  * 템플릿으로 읽으면 항목이 어긋나고, 그 항목이 오해 유형 필터
- * ({@code misconception.applies_to})의 입력이라 <b>판정이 조용히 틀린다.</b> 에러도 로그도
- * 없다(PR #572 리뷰 지적).
+ * ({@code misconception.applies_to})의 입력이라 <b>판정이 조용히 틀린다.</b> 에러도 로그도 없다.
+ *
+ * <p>❗<b>이 대조가 지금 그 유일한 그물이고, 사전적재 2종까지만 덮는다.</b> 업로드본은
+ * 올린 사람이 고른 값을 아무도 안 본다 — 그쪽은 판별을 만드는 문제라 여기서 못 닫는다.
  *
  * <h2>대조할 기준이 계약에 이미 있다</h2>
  *
