@@ -77,13 +77,33 @@
  *    ❗**상한 N 은 안 받고 안 그린다.** 계약이 `exhausted` 불리언까지만 준다(7-4 역이용
  *    방지). 화면도 「재설명 1회」·「소진」까지만 말하고 «2회 중 1회» 로 되짚지 않는다 —
  *    그 숫자를 알면 판매자가 몇 번까지 밀어붙일 수 있는지를 세게 된다.
+ *
+ * ⑪ **예외 승인은 신호 옆에 «덧붙은 사실» 로 그린다 — 신호를 덮지 않는다** (F-GTE-002)
+ *    S-06 에서 MGR 이 승인해도 이 화면은 그대로 **보류(적색)** 였다. 화면 결함이 아니라
+ *    절반만 맞았다 — 서버가 신호를 안 바꾸는 것이 설계이고(`OverrideService` 머리말:
+ *    *"오버라이드는 게이트 신호를 바꾸지 않는다. 세션은 여전히 적색으로 남고, 「적색인데
+ *    승인으로 진행했다」는 사실이 별도로 기록된다"*), 그래야 사후 감사에서 오버라이드
+ *    건을 가려낼 수 있다. **빠져 있던 것은 그 «별도의 사실» 을 그리는 자리**다.
+ *    승인하고 돌아오면 화면이 승인 전과 한 글자도 다르지 않아서, 판매자는 승인이
+ *    실패했는지 화면이 낡았는지 구별할 수 없었다.
+ *
+ *    ❗**신호를 고쳐서 풀지 않는다.** `SIGNAL_DESC.RED` 를 승인 뒤에 바꿔 끼우거나 배너를
+ *    녹색으로 돌리면 화면이 룰 엔진이 하지 않은 판정을 지어내는 것이고(P1 · 설계 판단 ②),
+ *    감사에서 오버라이드 건을 가려내는 근거가 화면에서 사라진다. 배너는 그대로 두고
+ *    **판정과 나란히** 승인 사실을 적는다 — 「적색인데 승인으로 진행했다」가 이 화면에서도
+ *    두 문장으로 읽혀야 한다. 신호등 3색도 쓰지 않는다(이건 판정이 아니다).
+ *
+ *    ❗**값은 이미 응답에 있다.** `SessionResponse` 가 `overrideStatus`·`overrideReason`·
+ *    `overrideApprover`·`overrideDecidedAt` 을 싣는다(#116 · 서버 `SessionResponse` DTO).
+ *    서버에 더 필요한 것이 없다 — 이 화면이 안 읽고 있었을 뿐이다.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiRequestError, get, post } from "../api/client";
 import type {
-  GatePreview, GateResult, Grade, Judgment, JudgmentsResponse, ReExplainRequest, ReExplanation,
-  ReverifyStatus, RiskItem, RuleRef, SessionResponse, Signal, SuitabilityStatus,
+  GatePreview, GateResult, Grade, Judgment, JudgmentsResponse, OverrideStatus,
+  ReExplainRequest, ReExplanation, ReverifyStatus, RiskItem, RuleRef, SessionResponse,
+  Signal, SuitabilityStatus,
 } from "../api/types";
 import { reverifyPath, stashReExplanation } from "../lib/reexplain";
 import ErrorNote from "../components/ErrorNote";
@@ -132,6 +152,19 @@ const SIGNAL_DESC: Record<Signal, string> = {
   GREEN: "계약을 진행할 수 있어요.",
   YELLOW: "재설명이 필요한 항목이 있어요.",
   RED: "이 상태로는 계약을 진행할 수 없어요.",
+};
+
+/**
+ * 예외 승인 CTA 라벨 (설계 판단 ⑪). 목적지는 셋 다 S-06 한 화면이고 — 그쪽이
+ * `overrideStatus` 로 요청·검토·기록을 갈라 그린다(S-06 머리말) — 바뀌는 것은 **가서 할
+ * 일**뿐이다. 라벨을 「예외 승인 요청」으로 고정해 두면 승인이 끝난 뒤에도 화면이 다시
+ * 요청하라고 말하고, 그러면 판매자가 눌러서 «이미 승인이 끝난 세션» 409 를 받는다
+ * (`OverrideService.request`). 눌러서 409 를 받는 것보다 라벨이 맞는 게 낫다.
+ */
+const OVERRIDE_CTA: Record<OverrideStatus, string> = {
+  NONE: "예외 승인 요청",
+  PENDING_APPROVAL: "예외 승인 검토",
+  APPROVED: "예외 승인 기록",
 };
 
 /**
@@ -275,16 +308,25 @@ export default function S05Judgment() {
 
   /* ── 창이 다시 앞에 오면 한 번 되읽는다 ──────────────────────────────────
    * 팝업이 막혀 **한 탭을 번갈아 쓰는** 경로에서는 위 폴링이 돌 새가 없다 — 이 화면이
-   * 아예 뒤에 있다. 확정 전에만, 조용히 한 번. 확정된 판정은 더 변하지 않는다.       */
+   * 아예 뒤에 있다. 조용히 한 번만.
+   *
+   * ❗**«확정 전에만» 이 아니다(설계 판단 ⑪).** 확정된 판정은 더 안 변하지만 **예외 승인은
+   * 확정 뒤에만 움직인다** — 그 버튼이 `gate.settled` 뒤에서만 열린다. 조건을 `!settled`
+   * 로 두면 되읽기가 도는 구간과 값이 바뀌는 구간이 **정확히 어긋나서**, 승인 대기 세션은
+   * 다른 창에서 MGR 이 승인해도 여기서 영원히 「승인 대기」로 남는다. 그게 이 화면이
+   * 승인을 못 보던 두 번째 이유였다(첫 번째는 아예 안 그린 것).
+   *
+   * 승인까지 끝난 세션(`APPROVED`)은 다시 빠진다 — 그 뒤로 더 움직일 값이 없다.        */
   const settled = gate?.settled ?? false;
+  const overridePending = session?.overrideStatus === "PENDING_APPROVAL";
   useEffect(() => {
-    if (settled) return;
+    if (settled && !overridePending) return;
     const onVisible = () => {
       if (document.visibilityState === "visible") void load(true);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [settled, load]);
+  }, [settled, overridePending, load]);
 
   /* ── 확정 ────────────────────────────────────────────────────────────────
    * 되돌릴 수 없으므로 확인 단계를 거친다(설계 판단 ③).                          */
@@ -401,6 +443,65 @@ export default function S05Judgment() {
               ? "확정된 판정이에요."
               : "아직 확정 전이에요. 아래에서 확정해요."}
           </p>
+        </section>
+      )}
+
+      {/* ── 예외 승인 (F-GTE-002 · 설계 판단 ⑪) ──────────────────────────────
+          배너 **바로 아래**에 붙인다. 이건 판정을 덮는 값이 아니라 판정 옆에 나란히 서는
+          사실이라, 배너 안에 넣으면 신호의 일부로 읽히고 화면 아래로 내리면 「보류」만 보고
+          돌아서는 사람에게 안 닿는다.
+
+          ❗**신호등 3색을 쓰지 않는다.** 승인은 게이트가 하지 않은 판정이다(설계 판단 ②).
+          `NONE` 이면 아무것도 안 그린다 — 대부분의 세션이 그쪽이고, 「예외 승인 없음」은
+          정보가 아니라 잡음이다(등급 요약에서 0건을 안 적는 것과 같은 규칙).
+          값으로 비교한다 — 부재로 읽으면 "없다" 와 "안 실렸다" 가 같아진다(S-06 설계 판단 ③). */}
+      {session && session.overrideStatus !== "NONE" && (
+        <section
+          className={`s05__override s05__override--${session.overrideStatus.toLowerCase().replace(/_/g, "-")}`}
+          aria-live="polite"
+        >
+          <p className="s05__override-head">
+            <span className="s05__override-badge">
+              {session.overrideStatus === "APPROVED" ? "예외 승인됨" : "예외 승인 대기"}
+            </span>
+            {session.overrideStatus === "APPROVED" && (
+              <span className="s05__override-meta">
+                {session.overrideApprover && <>승인자 {session.overrideApprover}</>}
+                {session.overrideDecidedAt && (
+                  <> · {new Date(session.overrideDecidedAt).toLocaleString("ko-KR")}</>
+                )}
+              </span>
+            )}
+          </p>
+
+          {/* ❗**판정이 그대로라는 것을 여기서 말한다.** 이 문장이 없으면 위 배너의
+              「보류 · 진행할 수 없어요」와 이 배지가 정면으로 부딪히는 것으로 읽히고,
+              판매자는 둘 중 어느 쪽이 참인지 화면에서 알 수 없다. 둘 다 참이고, 그
+              관계가 F-GTE-002 그 자체다 — 신호는 측정이 만든 판정이고 승인은 그 판정을
+              **알고도 진행하겠다는 사람의 결정**이라 서로를 지우지 않는다. */}
+          {session.overrideStatus === "APPROVED" ? (
+            <p className="s05__override-desc">
+              판정은 그대로 <b>{SIGNAL_LABEL[gate?.signal ?? "RED"]}</b>로 남아요 — 예외 승인은
+              게이트 신호를 바꾸지 않습니다. 「적색인데 승인으로 진행했다」는 사실이 불변
+              기록에 남고 준법감시(COMPL)에 통보됩니다.
+            </p>
+          ) : (
+            <p className="s05__override-desc">
+              판매자가 예외 승인을 요청했고 관리자(MGR) 승인을 기다리는 중이에요. 승인
+              전까지 이 세션은 그대로 보류입니다.
+            </p>
+          )}
+
+          {/* 사유는 **접지 않고** 그대로 낸다 — 30자를 API 가 강제한 이유(ADR-002 견제
+              장치)가 «승인자가 반드시 읽는다» 인데, 이 화면에서 접어 두면 판정을 보는
+              사람은 그 사유를 안 본 채 다음으로 간다. S-06 이 승인 버튼 위에 전문을
+              놓는 것과 같은 규칙이다(그쪽 설계 판단 ②). */}
+          {session.overrideReason && (
+            <div className="s05__override-reason">
+              <span className="s05__evidence-label">진행 사유</span>
+              <blockquote>{session.overrideReason}</blockquote>
+            </div>
+          )}
         </section>
       )}
 
@@ -646,9 +747,13 @@ export default function S05Judgment() {
               바로 위 `판정 확정` 이 이미 같은 규칙을 지킨다 — 눌러서 409 를 받는 것보다
               눌리지 않는 게 낫다(설계 판단 ③). `recorded` 를 둔 목적이 미리보기를 확정으로
               오인하지 않게 하는 것이고(결정 2.6), 여기가 정확히 그 자리다. */}
+          {/* 라벨은 오버라이드 상태를 따라간다(설계 판단 ⑪) — 승인이 끝난 뒤에도
+              「요청」이라고 적어 두면 화면이 이미 닫힌 길을 가리킨다. 상태를 못 읽었으면
+              `NONE` 으로 본다: 요청이 첫 동작이라 그게 맞는 기본값이고, 실제로 되는지는
+              서버가 정한다(409 가 본선). */}
           {gate?.signal === "RED" && gate.settled && (
             <button type="button" className="s05__btn" onClick={() => navigate(`/override/${sid}`)}>
-              예외 승인 요청
+              {OVERRIDE_CTA[session?.overrideStatus ?? "NONE"]}
             </button>
           )}
 
@@ -695,20 +800,40 @@ export default function S05Judgment() {
           </div>
         )}
 
-        {/* 잠긴 이유를 적는다. 안 적으면 판매자가 "적색인데 버튼이 없다"에서 멈춘다.
+        {/* 버튼 줄의 캡션. 잠긴 이유를 적는다 — 안 적으면 판매자가 "적색인데 버튼이
+            없다"에서 멈춘다.
 
-            ❗**두 갈래로 가른다.** 위 `판정 확정` 이 `judgments.length === 0` 이면 같이
-            잠기므로, 한 문면으로만 두면 안내가 **눌리지 않는 버튼을 가리킨다** — 멈추는
-            자리가 없어지는 게 아니라 *"확정하라는데 확정이 안 눌린다"* 로 한 칸 옮겨진다.
-            그리고 `#311` 이 재현 조건으로 적은 것이 정확히 응답 0건 세션이라, 그 경우가
-            이 안내의 첫 독자다(#328 리뷰). */}
-        {gate?.signal === "RED" && !gate.settled && (
+            ❗**적색만이 아니라 «확정 전» 전체에 적는다.** 예전에는 `signal === "RED"`
+            에서만 떴는데, 확정이 여는 것은 예외 승인 하나가 아니다 — 리포트도 대시보드도
+            `gate.settled` 뒤에만 그려진다(위 CTA 줄). 그래서 녹색·황색 세션에서는 이 줄이
+            아예 없고, 화면에 **버튼이 「판정 확정」 하나뿐인 이유를 아무도 말하지 않았다.**
+            판매자가 리포트를 찾아 화면을 훑다가 «없다» 로 끝난다.
+
+            ❗**«옆» 이 아니라 바로 아래다.** 버튼과 문장을 한 flex 줄에 섞지 않는 것이
+            이 footer 의 규칙이고(위 `s05__actions` 주석 — 섞었더니 버튼이 두 덩이로
+            쪼개졌다), 이 자리가 그 줄의 캡션 자리다.
+
+            ❗**두 갈래는 그대로 둔다.** 위 `판정 확정` 이 `judgments.length === 0` 이면
+            같이 잠기므로, 한 문면으로만 두면 안내가 **눌리지 않는 버튼을 가리킨다** —
+            멈추는 자리가 없어지는 게 아니라 *"확정하라는데 확정이 안 눌린다"* 로 한 칸
+            옮겨진다. 그리고 `#311` 이 재현 조건으로 적은 것이 정확히 응답 0건 세션이라,
+            그 경우가 이 안내의 첫 독자다(#328 리뷰). 0건이면 신호는 언제나 적색이므로
+            (`R-00` unmeasured>0) 조건을 넓혀도 그 갈래의 독자는 달라지지 않는다.
+
+            예외 승인은 **적색일 때만** 적는다 — 녹색·황색에서는 확정해도 그 버튼이 안
+            뜨고(계약이 409 로 막는다), 적어 두면 화면이 없는 길을 약속하게 된다. */}
+        {gate && !gate.settled && (
           <p className="s05__action-note">
             {judgments.length === 0 ? (
               <>아직 채점된 응답이 없어요. <b>인터뷰를 진행한 뒤</b> 판정을 확정하면 예외 승인
                 요청을 할 수 있습니다.</>
             ) : (
-              <>예외 승인 요청은 <b>판정을 확정한 뒤</b>에 할 수 있어요.</>
+              <>
+                <b>「판정 확정」을 눌러야</b> 이해 기록 리포트
+                {gate.signal === "RED" && <>·예외 승인 요청</>}
+                ·오해 지도 대시보드로 가는 버튼이 나타나요. 확정 전에는 이 화면에서
+                다음 단계로 나가는 길이 없습니다.
+              </>
             )}
           </p>
         )}

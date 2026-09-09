@@ -185,7 +185,13 @@ jobs:
           # 이름이 바뀌는 PR 은 web/ 을 안 건드린다** — 빼면 그 PR 에서 답지 커버리지 대조가
           # 안 돌고, 새 항목의 캡션이 조용히 비어 있는 채로 리허설에 간다. `#263`·`#270` 이
           # 두 번 낸 「경로 필터 밖이라 안 도는 검사」와 같은 자리다.
-          web=false;       hit '^(web/|data/timeseries/VERSION$|ai-service/app/rubrics/)' && web=true
+          #
+          # `data/demo_answers/` 도 같은 이유다(이슈 #539 ②). 답지의 `labeled` 는 그 JSON 에서
+          # **생성돼 커밋되는** `web/src/lib/demoAnswers.generated.ts` 로 오는데, 라벨이 바뀌는
+          # PR 은 eval 과 data 만 건드리고 web/ 은 안 건드린다 — 빼면 그 PR 에서 생성본 대조가
+          # 안 돌고 **화면 답지만 옛 라벨로 남는다.** 손으로 옮기던 시절의 결함이 자동화 뒤에도
+          # 그대로 돌아오는 자리라, 경로를 같이 문다.
+          web=false;       hit '^(web/|data/timeseries/VERSION$|ai-service/app/rubrics/|data/demo_answers/)' && web=true
           # ❗`^(eval/|data/)` 로 넓히지 않는다 — 이슈 #344 가 제안한 모양인데, 그러면
           # `data/timeseries/` 만 고치는 PR(기초자산 갱신)에 eval 이 따라 붙는다. eval 이
           # 실제로 읽는 것은 `data/` 중 오해 라이브러리 하나뿐이다(머리말 ② 표).
@@ -198,7 +204,14 @@ jobs:
           # 는 **ai-service 만 뜨고 정작 무는 eval 이 안 떴다.** 세 번째 같은 결함이다.
           # `README\.md$` 는 `^` 앵커라 **루트만** 문다 — `web/README.md`·`server/README.md`
           # 는 안 걸린다(재봤다). 라벨러 표기가 바뀌면 이 목록도 같이 는다.
-          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$)' && ev=true
+          #
+          # `docs/proposal.md` 도 같은 이유다(이슈 #566). 그 파일은 **기획서 정본**이고 제출
+          # PDF 를 거기서 뽑는데, 평가 표본 수를 인용한다 — `eval/tests/test_proposal_sample_size.py`
+          # 가 그 인용을 `eval/corpus` 실물과 대조한다. 빼면 **기획서만 고치는 PR 에서 그 대조가
+          # 안 돌고**, 정본이 실물보다 큰 표본을 주장하는 상태로 심사 PDF 가 나간다. 실제로
+          # 그렇게 났다 — v1.2 를 70 기준으로 정정한 회차에 기획서가 안 따라왔고 아무것도
+          # 빨개지지 않았다. `docs/` 를 통짜로 넓히지 않는 것은 위 server 쪽과 같은 이유다.
+          ev=false;        hit '^(eval/|ai-service/app/rubrics/|ai-service/tests/fixtures/README\.md$|data/misconception_library/|contracts/judgment\.schema\.json$|README\.md$|docs/proposal\.md$)' && ev=true
 
           echo "── 판별 ── server=$server ai-service=$ai web=$web eval=$ev"
           { echo "server=$server"; echo "ai_service=$ai"; echo "web=$web"; echo "eval=$ev"; } >> "$GITHUB_OUTPUT"
@@ -354,6 +367,17 @@ jobs:
         # npm ci 다 — package-lock.json 이 커밋돼 있고, install 은 락을 갱신해 버려서
         # "러너에서만 다른 버전"이 생긴다.
         run: npm ci
+      - name: web · 데모 답지 생성본이 라벨과 같은지 (이슈 #539 ②)
+        id: web_demo_generated
+        if: ${{ !cancelled() && steps.filter.outputs.web == 'true' }}
+        # `data/demo_answers/*.json`(정세현 · `eval/tools/build_demo_answers.py` 산출물)에서
+        # `web/src/lib/demoAnswers.generated.ts` 를 다시 만들어 커밋본과 대조한다.
+        #
+        # ❗**생성을 `npm run build` 에 걸지 못한다.** Docker 빌드 컨텍스트가 `web/` 이라
+        # 이미지 안에 `data/` 가 없어서, 빌드에 걸면 **배포 이미지 빌드만** 죽는다. 그래서
+        # 산출물을 커밋하고 낡음은 여기서 잡는다 — 근거는 생성기 머리말에 있다.
+        run: node web/scripts/build-demo-answers.mjs --check
+
       - name: web · 타입 검사 + 빌드
         id: web_build
         if: ${{ !cancelled() && steps.filter.outputs.web == 'true' && steps.web_deps.outcome == 'success' }}
@@ -383,12 +407,23 @@ jobs:
           python3 - <<'PY'
           import pathlib, re, sys
 
-          SRC  = pathlib.Path("web/src/lib/demoAnswers.ts")
+          # ❗**답지는 두 파일에 나뉘어 있다**(이슈 #539 ② 배선). 라벨 합의분은 생성본에서
+          #   오고 작성본·dev set 만 손으로 쓴 파일에 남는다. 한쪽만 읽으면 이 검사가 **읽지
+          #   않은 쪽의 유출을 못 본다** — 그리고 지금은 문장 대부분이 생성본 쪽에 있다.
+          SRCS = [pathlib.Path("web/src/lib/demoAnswers.ts"),
+                  pathlib.Path("web/src/lib/demoAnswers.generated.ts")]
           OFF  = pathlib.Path("web/dist/assets")                 # 기본 빌드 (플래그 없음)
           ON   = pathlib.Path("web/dist-demo-captions/assets")   # 양성 대조 (플래그 1)
 
+          for src in SRCS:
+              if not src.exists():
+                  print(f"::error::{src} 가 없다 — 답지 파일이 갈라졌거나 이름이 바뀌었다. "
+                        "이 검사가 한쪽만 재고 초록이 되는 것을 막는다.")
+                  sys.exit(1)
+          text = "\n".join(s.read_text(encoding="utf-8") for s in SRCS)
+
           # 답지 문장을 소스에서 뽑는다 — 검사 대상을 손으로 적지 않는다(결정로그 9.35).
-          answers = re.findall(r'text:\s*"((?:[^"\\]|\\.)+)"', SRC.read_text(encoding="utf-8"))
+          answers = re.findall(r'text:\s*"((?:[^"\\]|\\.)+)"', text)
           if len(answers) < 30:
               print(f"::error::답지 문장을 {len(answers)}건밖에 못 뽑았다 — 형식이 바뀌었으면 "
                     "이 검사도 같이 고친다. 못 뽑은 채로 통과하면 검사가 눈을 감는다.")
@@ -424,7 +459,7 @@ jobs:
           #    막지 않는 이유: 루브릭은 윤지석 소유이고, 답지 부재가 화면을 깨지는 않는다
           #    (그 자리를 아예 안 그린다). 대신 조용히 지나가지도 않게 한다.
           rubrics = {p.stem for p in pathlib.Path("ai-service/app/rubrics").glob("*.yaml")}
-          keys = set(re.findall(r'^  "([A-Z0-9-]+)": \{', SRC.read_text(encoding="utf-8"), re.M))
+          keys = set(re.findall(r'^  "([A-Z0-9-]+)": \{', text, re.M))
           for miss in sorted(rubrics - keys):
               print(f"::warning file=web/src/lib/demoAnswers.ts::{miss} 에 데모 답지가 없다 — "
                     "그 항목이 나오면 S-03 캡션이 비어 있다 (이슈 #539)")
