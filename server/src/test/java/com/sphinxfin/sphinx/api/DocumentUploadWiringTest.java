@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.core.extraction.UploadedProduct;
 import com.sphinxfin.sphinx.core.extraction.UploadedProductRepository;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
@@ -152,6 +153,45 @@ class DocumentUploadWiringTest {
                 .andExpect(jsonPath("$.data[0].status").value("parsed"))
                 .andExpect(jsonPath("$.data[?(@.productId == 'doc-els-kiwoom-4181')]")
                         .isNotEmpty());
+    }
+
+    /**
+     * ❗<b>사전적재 2종의 출처가 목록과 같은 표여야 한다</b>(이슈 #403).
+     *
+     * <p>{@code MockData.PRODUCTS} 를 걷으면서 이 두 줄의 <b>가명 표시명</b>을
+     * {@link ProductRiskItems#preloaded()} 로 옮겼다 — 같은 두 상품의 경로·상품유형이
+     * 이미 그 표에 있었고 표시명이 셋째 사본이었다.
+     *
+     * <p>그래서 재는 것이 <i>"두 개가 뜬다"</i> 가 아니라 <b>"뜬 문면이 그 표에서 왔다"</b> 다.
+     * 컨트롤러가 표를 안 쓰고 문면을 다시 적으면 응답 모양은 그대로라 눈에 안 보인다 —
+     * 그게 방금 걷어 낸 상태(두 벌)로 돌아가는 유일한 경로다.
+     *
+     * <p><b>순서도 본다.</b> 표를 {@code Map} 으로 되돌리면 두 상품이 실행마다 뒤바뀔 수 있다
+     * ({@code Map.of} 는 반복 순서를 보장하지 않는다).
+     */
+    @Test
+    @DisplayName("❗S-02 목록의 사전적재 2종이 사전적재 표에서 온다 — 문면·유형·순서까지")
+    void theTwoPreloadedProductsComeFromThePreloadedTable() throws Exception {
+        List<ProductRiskItems.Preloaded> table = ProductRiskItems.preloaded();
+
+        // ★ 이 단정이 먼저다 — 표가 비면 아래 대조가 아무것도 안 재면서 초록이 된다.
+        assertThat(table).as("사전적재 표가 데모 2종을 들고 있어야 한다").hasSize(2);
+
+        // 이 파일의 @AfterEach 가 업로드본을 지우므로 목록은 사전적재 2종뿐이다. 그 수를
+        // 먼저 못 박아야 아래 인덱스 대조가 «남은 업로드본을 재는» 것으로 미끄러지지 않는다.
+        var result = mvc.perform(get("/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(table.size()));
+        for (int i = 0; i < table.size(); i++) {
+            ProductRiskItems.Preloaded p = table.get(i);
+            // 업로드본이 있으면 그쪽이 앞에 온다(#521) — 여기서는 없으므로 표 순서 그대로다.
+            String at = "$.data[" + i + "]";
+            result.andExpect(jsonPath(at + ".productId").value(p.productId()))
+                    .andExpect(jsonPath(at + ".name").value(p.displayName()))
+                    .andExpect(jsonPath(at + ".productType").value(p.productType()))
+                    // 커밋된 코퍼스라 parse_failed 상태가 없다.
+                    .andExpect(jsonPath(at + ".status").value("parsed"));
+        }
     }
 
     @Test

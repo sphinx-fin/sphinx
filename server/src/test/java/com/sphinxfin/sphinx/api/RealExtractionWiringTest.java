@@ -42,8 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       분모에 유령으로 남는다.</li>
  *   <li>세션 면담({@code questions/next}·세션 경유 risk-items)이 저장된 항목을 쓴다 —
  *       목에는 없는 itemId 가 질문으로 나온다.</li>
- *   <li>저장된 추출이 없는 상품은 MockData 폴백이다 — LLM 키 없는 환경의 데모가
- *       계속 돌아야 한다(목 삭제는 후속).</li>
+ *   <li>저장된 추출이 없는 상품은 <b>404</b> 다 — 목으로 덮으면 «추출을 안 돌렸다» 가
+ *       감춰진다(이슈 #478. 목 클래스 삭제는 #403 이 마쳤다).</li>
  * </ol>
  *
  * <p>ai-service 는 목이다 — 이 파일이 재는 것은 서버의 영속·배선이지 추출 품질이 아니다.

@@ -552,7 +552,7 @@ export interface SimulateResponse {
  * S-02 상품 선택 목록 항목 (`GET /products`).
  *
  * 표시명은 **가명**이다 — 기획서가 "데모와 제출물에서는 상품명과 발행사를 가명 처리하고
- * 조건만 인용한다"로 못박았고, 서버 `MockData.PRODUCTS` 도 같은 문면을 쓴다.
+ * 조건만 인용한다"로 못박았고, 서버 사전적재 표(`ProductRiskItems.PRELOADED`)도 같은 문면을 쓴다.
  */
 export interface ProductSummary {
   productId: string;

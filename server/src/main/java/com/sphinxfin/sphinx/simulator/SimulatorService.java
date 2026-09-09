@@ -191,7 +191,8 @@ public final class SimulatorService {
      * S-02 목록은 가명이라 <b>한 화면 안에서 규약이 갈렸다</b>).
      *
      * @param sourceName        <b>원문 상품명. 화면에 내보내지 않는다.</b> 조건 출처 대조·주석용
-     * @param displayName       <b>화면·응답에 나가는 가명.</b> S-02 목록({@code MockData.PRODUCTS})과
+     * @param displayName       <b>화면·응답에 나가는 가명.</b> S-02 목록
+     *                          ({@code ProductRiskItems.preloaded()})과
      *                          같은 문면이어야 한 상품이 화면마다 다른 이름으로 보이지 않는다
      * @param underlyings       기초자산 키. worst-of 판정 순서에 쓰인다
      * @param observationMonths 조기상환·만기 평가 시점(계약일로부터 개월). 마지막 항목이 만기평가일
@@ -230,7 +231,7 @@ public final class SimulatorService {
      */
     public static final Product KIWOOM_4181 = new Product(
             "키움증권 제4181회 ELS",
-            // ❗화면에 나가는 것은 이쪽이다. MockData.PRODUCTS 의 같은 상품과 문면이 같아야
+            // ❗화면에 나가는 것은 이쪽이다. ProductRiskItems.preloaded() 의 같은 상품과 문면이 같아야
             // 하고, ProductDisplayNameTest 가 그 두 벌을 대조한다.
             "A증권 제4181회 ELS (원금비보장형)",
             List.of("sp500", "nikkei225", "eurostoxx50"),

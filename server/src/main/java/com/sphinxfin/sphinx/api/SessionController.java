@@ -351,7 +351,8 @@ public class SessionController {
      * 보내면 라이브러리에서 닫은 구멍이 배선에서 다시 열린다. 에러도 로그도 없이 판정만 틀린다.
      *
      * 출처는 ProductRiskItems 다(F-EXT-002 배선) — 추출 스냅샷이 있으면 파스가 판별한 값,
-     * 없으면 MockData 카탈로그. 어느 쪽도 모르면 404(NoSuchElementException)로 드러낸다.
+     * 다음이 업로드본, 없으면 사전적재 표. 어느 쪽도 모르면 404(NoSuchElementException)로
+     * 드러낸다. 예전에는 마지막 자리가 MockData 카탈로그였고 그건 걷었다(이슈 #403).
      * 기본값을 두면 위 오판이 조용히 되살아나므로 폴백 기본값을 만들지 않는 규약은 그대로다.
      */
     private String productTypeOf(Session session) {
