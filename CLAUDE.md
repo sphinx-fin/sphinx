@@ -142,13 +142,20 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
   `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
-  네 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온)이 어긋나지
-  않도록 `ErrorCodeContractTest`가 전부 대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
+  다섯 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온·
+  `web/src/lib/errorText.ts`의 문면 표)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부
+  대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
   (이슈 #316 — `UNAUTHORIZED`·`FORBIDDEN`·`MEASUREMENT_INVALID`가 없었다).
-  ❗**다섯 번째 자리가 있다** — `web/src/lib/errorText.ts`의 `Record<ErrorCode, string>`.
-  거기는 `ErrorCodeContractTest`가 아니라 **tsc가 잡는다**(코드를 더하고 문면을 안 쓰면
-  `npm run build`가 깨진다). 그래서 대조 테스트는 초록인데 웹 빌드만 빨간 상태가 생긴다 —
-  코드를 더했으면 `npm run build`까지 돌린다. 문면 규칙은 그 파일 주석에 있다.
+  ❗**다섯 번째 자리는 tsc도 잡는다 — 그런데 늦게 잡고, 못 잡는 갈래가 있다.** 문면 표가
+  전체 맵이라 코드를 더하고 문면을 안 쓰면 `npm run build`가 깨진다. 코드를 더하면
+  유니온(`types.ts`)도 고쳐야 하므로 CI의 web 스텝이 반드시 돌고 그것이 머지 전에 막는다 —
+  **그래서 main이 깨진 적은 없다**(첫 부모 이력에서 두 파일이 다 있는 154 커밋, 어긋남 0건).
+  문제는 둘이다. **하나, 빨개지는 자리가 CI다** — 앞 네 대조가 초록이라 "다 맞췄다"로 읽고
+  서버만 고친 사람은 CI 로그를 안 본다(#527 브랜치에서 그렇게 5분 뒤 고침 커밋이 붙었다).
+  **둘, 누가 그 표를 `Partial<…>`이나 `Record<string, string>`으로 느슨하게 바꾸면 tsc는
+  그 순간부터 아무것도 안 잡는다.** 그래서 같은 테스트가 그 표까지 보고, `errorText.ts`를
+  서버 판별(`ci.yml`의 `server_extra`)에도 넣었다 — 표만 느슨하게 바꾸는 PR은 `web/`만
+  건드려서 server 잡이 안 뜬다. 문면 규칙은 그 파일 주석에 있다.
   새 코드는 전용 예외 타입으로 만든다. `IllegalArgumentException` 같은 범용 예외를 통째로
   400에 매핑하면 서버 설정 오류(게이트 룰 파싱 실패 등)까지 "잘못된 요청"이 된다.
 - **요청 DTO는 `api/dto`에** 두고 `@Valid`로 검증, 서비스에는 `core`의 커맨드로 변환해 넘긴다
