@@ -20,7 +20,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("업로드 정리 — 마운트 지점과 커밋된 README 는 남는다")
 class UploadsTestTreeTest {
 
-    /** 실물과 같은 모양: {@code uploads/README.md} + {@code uploads/<sha256>/<파일>}. */
+    /**
+     * 실물과 같은 모양: {@code uploads/README.md} + {@code uploads/<sha256>/<파일>}.
+     *
+     * <p>뿌리는 {@code @TempDir} 로 받는다 — JUnit 이 테스트 뒤에 지운다. 레포의 다른 두
+     * 테스트({@code ProductDocumentsTest} · {@code UploadStoreFailureWordingTest})와 같은
+     * 모양이고, <b>테스트가 남긴 것을 안 치우는 것을 고치는 파일이 스스로 남기면 안 된다</b>
+     * (PR #582 리뷰).
+     */
     private Path tree(Path root) throws IOException {
         Path uploads = Files.createDirectories(root.resolve("uploads"));
         Files.writeString(uploads.resolve("README.md"), "커밋된 것");
@@ -31,8 +38,7 @@ class UploadsTestTreeTest {
 
     @Test
     @DisplayName("❗정리가 디렉토리와 README 를 남긴다 — 지우면 ai-service 가 안 뜬다")
-    void theMountPointAndTrackedReadmeSurviveCleanup() throws Exception {
-        Path root = Files.createTempDirectory("sphinx-uploads-");
+    void theMountPointAndTrackedReadmeSurviveCleanup(@TempDir Path root) throws Exception {
         Path uploads = tree(root);
 
         UploadsTestTree.clearUploads(uploads);
@@ -52,8 +58,7 @@ class UploadsTestTreeTest {
 
     @Test
     @DisplayName("❗바이트 셈이 README 를 고아로 세지 않는다 — 그것 때문에 단정이 순서에 의존했다")
-    void theByteCountIgnoresTheTrackedReadme() throws Exception {
-        Path root = Files.createTempDirectory("sphinx-uploads-");
+    void theByteCountIgnoresTheTrackedReadme(@TempDir Path root) throws Exception {
         Path uploads = tree(root);
 
         assertThat(UploadsTestTree.uploadedFiles(uploads))
