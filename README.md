@@ -48,7 +48,7 @@ throw new EvidenceRequiredException("근거 없는 판정은 무효 (P4): eviden
 | 무엇을 지키나 | 무엇이 잡나 |
 |---|---|
 | 모든 응답이 공통 봉투를 쓴다 | `EnvelopeContractTest` |
-| 에러 코드 다섯 벌(핸들러·OpenAPI·`CLAUDE.md`·프론트 유니온·프론트 문면 표)이 같다 | `ErrorCodeContractTest` |
+| 에러 코드 여섯 벌(핸들러·OpenAPI·`CLAUDE.md`·프론트 유니온·프론트 문면 표·명세서 §9)이 같다 | `ErrorCodeContractTest` |
 | 모든 엔드포인트가 권한 action 에 속한다 | `AccessControlWiringTest` |
 | 계약(OpenAPI)과 실물 권한이 양방향으로 맞는다 | `OpenApiPermissionSyncTest` |
 | 개방 모드에서 주입되는 계정이 그 엔드포인트를 실제로 만족한다 | `DemoModeAccountMapTest` |

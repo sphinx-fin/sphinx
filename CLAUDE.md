@@ -142,9 +142,10 @@ git이 알려주지 않는다(#142에서 실제로 그랬다).
   `AI_SERVICE_UNAVAILABLE`(502)·`INTERNAL_ERROR`(500).
   **이 목록은 `contracts/openapi.yaml`의 `ApiError.code` enum과 같아야 한다** — 프론트가
   그대로 유니온 타입으로 들고 분기하므로, 계약에 없는 코드를 내보내면 화면이 조용히 깨진다.
-  다섯 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온·
-  `web/src/lib/errorText.ts`의 문면 표)이 어긋나지 않도록 `ErrorCodeContractTest`가 전부
-  대조한다. **유니온을 뺐더니 실제로 셋 갈렸다**
+  여섯 벌(핸들러·openapi·이 문단·`web/src/api/types.ts`의 `ErrorCode` 유니온·
+  `web/src/lib/errorText.ts`의 문면 표·`docs/functional-spec-v1.2.md` §9)이 어긋나지 않도록
+  `ErrorCodeContractTest`가 전부 대조한다. 그 테스트는 **문서가 적은 「N 벌」 자체도** 자기가
+  보는 출처 수와 맞춘다 — 일곱 번째가 생기면 고칠 자리를 알려준다. **유니온을 뺐더니 실제로 셋 갈렸다**
   (이슈 #316 — `UNAUTHORIZED`·`FORBIDDEN`·`MEASUREMENT_INVALID`가 없었다).
   ❗**다섯 번째 자리는 tsc도 잡는다 — 그런데 늦게 잡고, 못 잡는 갈래가 있다.** 문면 표가
   전체 맵이라 코드를 더하고 문면을 안 쓰면 `npm run build`가 깨진다. 코드를 더하면
