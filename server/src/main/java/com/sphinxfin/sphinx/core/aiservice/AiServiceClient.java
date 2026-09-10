@@ -637,6 +637,23 @@ public class AiServiceClient {
      * ai-service 는 그것을 정확히 갈라 보내는데(그쪽 {@code _REFUSAL_RESPONSE} 표) 경계 한 칸
      * 뒤에서 사라지고 있었다.
      *
+     * <h2>❗아직 뭉쳐 있는 갈래가 하나 남는다 (PR #591 리뷰)</h2>
+     *
+     * <p>{@code 400 DocumentPathRejected} 를 여기서 안 가른다. 그 예외가 나는 자리 다섯 중
+     * <b>넷은 우리 배선 버그</b>라 502 로 나가도 «고칠 자리» 가 안 틀린다 — 경로가 비었거나
+     * NUL 이 섞였거나 해소 실패거나 뿌리 밖인 것은 서버가 잘못 보낸 것이다.
+     *
+     * <p><b>다섯째는 다르다</b> — 수동 파스 출력({@code data/documents/x.json}, {@code #441})의
+     * {@code product_type} 이 요청과 다른 상태다({@code parsing.py:749}). <b>운영자가 실제로
+     * 만들 수 있는 데이터 상태</b>이고 고칠 자리는 그 JSON 파일인데, 지금 문면은
+     * {@code AI_SERVICE_UNAVAILABLE} 이라 ai-service 를 가리킨다 — 이 메서드가 없애려는 그
+     * 고리 그대로다.
+     *
+     * <p>여기서 못 고치는 이유는 <b>구별할 재료가 안 오기 때문</b>이다: ai-service 의 거부 표가
+     * 그 갈래에 body code 를 안 싣는다({@code (400, None)}). 그래서 서버는 넷과 다섯째를 구별할
+     * 방법이 없다. 그쪽 표를 고치는 것이 선행이고, 그 뒤에 이 갈래를 어느 코드로 낼지 정한다
+     * ({@code DOCUMENT_UNREACHABLE} 은 아니다 — 볼륨은 멀쩡하다).
+     *
      * <p><b>본문을 인자로 받는다.</b> {@code resp.getBody()} 는 스트림이라 두 번째 읽기가 빈
      * 값을 준다 — 갈래마다 따로 읽으면 <b>앞 갈래가 뒤를 먹는다</b>({@link #parseFailure} 가
      * 그 함정을 이미 한 번 밟았다). 읽는 자리를 {@link #failure} 하나로 올려 그 실수가
@@ -782,7 +799,7 @@ public class AiServiceClient {
      * 빈 목록은 «PII 응답인데 패턴 이름이 안 왔다» 다 — 뒤쪽도 PII 거부이므로 문서 문제로
      * 다뤄야 한다. 한 값으로 접으면 이름이 안 온 날 «문서를 열 수 없다» 로 되돌아간다.
      *
-     * <p>{@link #errorCode} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
+     * <p>{@link #raise} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
      * {@code get()} 은 문자열 본문에서 NPE 다(#293 리뷰).
      */
     private static List<String> piiKinds(JsonNode body) {
