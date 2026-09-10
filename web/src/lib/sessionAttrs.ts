@@ -94,7 +94,7 @@ export const CHANNELS = [
  * 여기 상수로 고정했다. #49 로 `GET /products` 가 생겨 상수를 지웠다 (decision-log 10.18).
  *
  * 지우는 게 중요한 이유는 **가명 표기** 때문이다. 기획서가 "데모와 제출물에서는 상품명과
- * 발행사를 가명 처리한다"로 못박았고 서버 `MockData.PRODUCTS` 도 같은 문면을 쓰는데, 같은
+ * 발행사를 가명 처리한다"로 못박았고 서버 사전적재 표(`ProductRiskItems.PRELOADED`)도 같은 문면을 쓰는데, 같은
  * 문자열이 두 곳에 있으면 한쪽만 고쳐진다. 목록을 서버에서 받으면 문면의 출처가 하나가 된다.
  *
  * 타입은 `api/types.ts` 의 `ProductSummary`.

@@ -8,7 +8,7 @@ SphinX(스FIN크스) — 금융상품 계약 직전에 고객 이해도를 검�
 Challenge 공모전 MVP. 4인 팀(윤지석·강희진·정세현·오준서)이 3주 일정으로 개발한다.
 
 레포 전체가 **스캐폴드 단계**다. 대부분의 클래스는 `// TODO(담당자)` 스텁이고, Spring
-컨트롤러는 `api/MockData.java`의 목 응답을 반환한다. 이건 의도된 것으로, 프론트가 첫날부터
+컨트롤러 일부는 목 응답을 반환한다. 이건 의도된 것으로, 프론트가 첫날부터
 실제 엔드포인트로 개발할 수 있게 하려는 구조다. 구현을 붙일 때 목 응답을 지우는 것이 각
 모듈의 완료 조건이다.
 
@@ -85,7 +85,7 @@ core 에 둔 경계 인터페이스라(ADR-003) 어느 하위 패키지에도 �
 | `core/gate/` | `GateEngine`·`GateConfig` (판정) |
 | `core/pii/` | `PiiGateway` — P3 경계라 단독 패키지다 |
 | `core/aiservice/` | ai-service 호출 경계 |
-| `core/extraction/` | 상품 문서 업로드·저장 (F-EXT-001) + 추출 스냅샷 저장·조회 (F-EXT-002). 저장 우선, MockData 폴백 |
+| `core/extraction/` | 상품 문서 업로드·저장 (F-EXT-001) + 추출 스냅샷 저장·조회 (F-EXT-002). 저장된 추출뿐 — 없으면 404(#478). 사전적재 2종의 경로·유형·가명 표시명이 `ProductRiskItems.PRELOADED` 한 곳에 있다(#403) |
 | `core/ops/` | 운영 상태 실측 (F-OPS-001). 「떠 있는데 못 하는 상태」를 갈라 낸다 |
 | `core/persistence/` | `BaseEntity`·JPA 감사·컨버터 |
 | `core/simulator/` | `SimulatorProperties` (설정 주입. 계산 엔진은 최상위 `simulator/`) |

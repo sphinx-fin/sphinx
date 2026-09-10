@@ -22,7 +22,8 @@ rules:
   # 부분은 아무도 안 막았고, 기록에 남는 것이 signal·ruleTrace 뿐이라 조용했다.
   #
   # `unmeasured` 는 **기대 항목 중 판정이 없는 항목 수**다 (#405). 분모는 그 상품의 추출 항목
-  # 집합(ProductRiskItems, 저장 우선·MockData 폴백)이고 SessionService 가 숫자로 접어 넣는다.
+  # 집합(ProductRiskItems — 저장된 추출뿐이다. 없으면 404. 이슈 #478)이고 SessionService 가
+  # 숫자로 접어 넣는다.
   # 전에는 **질문을 보낸 항목**과 대조하는 우회였다 — 추출이 목이던 시절이라 안 물어본 항목이
   # 분모에서 빠져 안 잡혔다. 이제 기대 집합으로 세므로 그 구멍도 막힌다.
   - id: R-00

@@ -1,8 +1,7 @@
 package com.sphinxfin.sphinx.simulator;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sphinxfin.sphinx.api.MockData;
-import com.sphinxfin.sphinx.api.dto.ProductSummary;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.core.simulator.SimulatorProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -79,19 +78,21 @@ class ProductDisplayNameTest {
      * ❗<b>같은 상품이 화면마다 다른 이름으로 보이면 안 된다.</b> S-02 목록에서 고른 상품을
      * S-04 에서 시뮬레이션하는 것이 데모 흐름이라, 두 문면이 갈리면 같은 상품인지가 안 보인다.
      *
-     * <p>{@code MockData} 는 각 모듈 구현이 붙으면 <b>삭제될 파일</b>이다(CLAUDE.md). 그때 이
-     * 테스트는 컴파일에서 깨지고, 그게 의도다 — 목을 걷는 사람이 S-02 표시명의 새 근거가
-     * 어디인지 정하고 여기를 그쪽으로 다시 걸어야 한다. 조용히 두 벌로 갈리는 것보다 낫다.
+     * <p>❗<b>근거가 한 번 옮겨졌다</b>(이슈 #403). 예전 자리는 {@code MockData.PRODUCTS} 였고,
+     * 이 javadoc 이 <i>"목을 걷는 사람이 S-02 표시명의 새 근거를 정하고 여기를 그쪽으로 다시
+     * 걸어야 한다"</i> 로 그 순간을 미리 적어 뒀다. 새 근거는
+     * {@link ProductRiskItems#preloaded()} 다 — 같은 두 상품의 경로·상품유형이 이미 그
+     * 표에 있었고 표시명이 셋째 사본이었다. 컴파일이 깨져서 이 자리가 드러났다.
      */
     @Test
     @DisplayName("❗S-02 목록과 S-04 머리말이 같은 문면을 쓴다")
     void oneProductHasOneNameAcrossScreens() {
-        String listName = MockData.PRODUCTS.stream()
+        String listName = ProductRiskItems.preloaded().stream()
                 .filter(p -> PRODUCT_ID.equals(p.productId()))
-                .map(ProductSummary::name)
+                .map(ProductRiskItems.Preloaded::displayName)
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
-                        PRODUCT_ID + " 가 MockData.PRODUCTS 에 없다 — 목을 걷었다면 S-02 표시명의 "
+                        PRODUCT_ID + " 가 사전적재 표에 없다 — 그 표를 걷었다면 S-02 표시명의 "
                                 + "새 근거를 정하고 이 테스트를 그쪽으로 건다"));
 
         assertThat(SimulatorService.KIWOOM_4181.displayName())

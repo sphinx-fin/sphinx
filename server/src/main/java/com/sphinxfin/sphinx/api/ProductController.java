@@ -74,8 +74,9 @@ public class ProductController {
      * 사라지고 왜 안 보이는지 알 길이 없다 — 계약의 {@code ProductSummary.status} 가
      * {@code parsed}/{@code parse_failed} 두 값을 든 이유가 그것이다(E-EXT-03 은폐 금지).
      *
-     * <p>사전적재 2종은 {@code MockData.PRODUCTS} 가 계속 낸다 — 표시명이 <b>가명</b>이고
-     * (결정 1.11) 커밋된 공시 문서라 키 없는 환경에서도 데모가 돈다. 걷는 것은 #403 이다.
+     * <p>사전적재 2종은 {@link ProductRiskItems#preloaded()} 가 낸다 — 표시명이 <b>가명</b>이고
+     * (결정 1.11) 커밋된 공시 문서라 키 없는 환경에서도 데모가 돈다. 예전에는 {@code MockData}
+     * 가 그 자리였고, 같은 두 상품의 경로·상품유형은 이미 그 표에 있었다(이슈 #403).
      */
     @PreAuthorize("@accessGuard.canAggregate('product:read')")
     @GetMapping
@@ -84,7 +85,10 @@ public class ProductController {
         for (UploadedProduct p : productUploads.catalog()) {
             all.add(new ProductSummary(p.productId(), p.displayName(), p.productType(), p.status()));
         }
-        all.addAll(MockData.PRODUCTS);
+        for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
+            // 사전적재는 커밋된 코퍼스라 parse_failed 상태가 없다 — 상수로 둔다.
+            all.add(new ProductSummary(p.productId(), p.displayName(), p.productType(), "parsed"));
+        }
         return ApiResponse.ok(all);
     }
 

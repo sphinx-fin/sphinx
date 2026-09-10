@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.core.extraction.UploadedProduct;
 import com.sphinxfin.sphinx.core.extraction.UploadedProductRepository;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
@@ -141,6 +142,54 @@ class DocumentUploadWiringTest {
                 .andExpect(jsonPath("$.data[0].status").value("parsed"))
                 .andExpect(jsonPath("$.data[?(@.productId == 'doc-els-kiwoom-4181')]")
                         .isNotEmpty());
+    }
+
+    /**
+     * ❗<b>사전적재 2종의 출처가 목록과 같은 표여야 한다</b>(이슈 #403).
+     *
+     * <p>{@code MockData.PRODUCTS} 를 걷으면서 이 두 줄의 <b>가명 표시명</b>을
+     * {@link ProductRiskItems#preloaded()} 로 옮겼다 — 같은 두 상품의 경로·상품유형이
+     * 이미 그 표에 있었고 표시명이 셋째 사본이었다.
+     *
+     * <p>그래서 재는 것이 <i>"두 개가 뜬다"</i> 가 아니라 <b>"뜬 문면이 그 표와 같다"</b> 다.
+     *
+     * <p>❗<b>재는 것을 정확히 적는다 — 「두 벌로 돌아가는 것」은 못 잡고 「갈리는 것」을
+     * 잡는다</b>(PR #572 리뷰 실측). 컨트롤러가 표를 안 쓰고 <b>같은 문자열</b>을 다시 적으면
+     * 이 단정은 초록이다. 빨개지는 것은 그 두 벌 중 하나가 바뀌는 순간이다. 아픈 것이 갈림이라
+     * 실질적으로는 그것으로 충분하지만, <i>"복제 자체를 막는다"</i> 로 적으면 다음 사람이 이
+     * 그물을 실제보다 넓게 믿는다.
+     *
+     * <p><b>순서도 본다 — 다만 「응답 순서 = 표 순서」까지다.</b> 기대값과 실제값이 <b>같은
+     * 표</b>를 읽으므로, 표 자신이 {@code Map} 파생으로 되돌아가는 것은 이 단정이 못 잡는다
+     * (실측: 되돌리고 8회 돌려 8/8 초록. {@code Map.of} 의 반복 순서는 JVM 마다 정해지므로
+     * 리터럴 순서를 박아도 <b>확률 그물</b>이 된다 — 그건 안 넣는다).
+     *
+     * <p>그 자리를 {@link com.sphinxfin.sphinx.core.extraction.PreloadedTableIsOrderedTest}
+     * 가 따로 받는다 — 표가 <b>순서 있는 리터럴</b>인지를 소스에서 본다.
+     */
+    @Test
+    @DisplayName("❗S-02 목록의 사전적재 2종이 사전적재 표에서 온다 — 문면·유형·순서까지")
+    void theTwoPreloadedProductsComeFromThePreloadedTable() throws Exception {
+        List<ProductRiskItems.Preloaded> table = ProductRiskItems.preloaded();
+
+        // ★ 이 단정이 먼저다 — 표가 비면 아래 대조가 아무것도 안 재면서 초록이 된다.
+        assertThat(table).as("사전적재 표가 데모 2종을 들고 있어야 한다").hasSize(2);
+
+        // 이 파일의 @AfterEach 가 업로드본을 지우므로 목록은 사전적재 2종뿐이다. 그 수를
+        // 먼저 못 박아야 아래 인덱스 대조가 «남은 업로드본을 재는» 것으로 미끄러지지 않는다.
+        var result = mvc.perform(get("/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(table.size()));
+        for (int i = 0; i < table.size(); i++) {
+            ProductRiskItems.Preloaded p = table.get(i);
+            // 업로드본이 있으면 그쪽이 앞에 온다(#521) — 여기서는 없으므로 표 순서 그대로다.
+            String at = "$.data[" + i + "]";
+            result.andExpect(jsonPath(at + ".productId").value(p.productId()))
+                    .andExpect(jsonPath(at + ".name").value(p.displayName()))
+                    .andExpect(jsonPath(at + ".productType").value(p.productType()))
+                    // 커밋된 코퍼스라 parse_failed 상태가 없다.
+                    .andExpect(jsonPath(at + ".status").value("parsed"));
+        }
     }
 
     @Test
