@@ -661,9 +661,39 @@ def derive_document_id(pdf_path: str | Path) -> str:
     실행 경로가 실재하기 때문이고, 고칠 자리는 여기가 아니라 **호출자가 값을 주는 것**이다
     (결정 1.37). 이 함수를 「충돌하지 않게」 고치는 쪽은 안 간다 — 그러면 이미 저장된
     스냅샷(`extracted_risk_items.document_id`)에 두 규칙의 값이 섞인다.
+
+    ## ❗그래서 닿을 때마다 한 줄 남긴다 (이슈 #578 ②)
+
+    위 문단이 *"닿으면 결함"* 이라고 선언하는데 **그 사건에 신호가 없었다** — 로그도 카운터도
+    없어서 «정말 안 닿나» 에 답하려면 코드를 다시 읽는 수밖에 없었다.
+
+    **자리가 여기인 이유는 폴백 호출부가 둘이기 때문이다**(PR #588 리뷰, 정세현).
+
+        parsing.py:_manual_override    doc["document_id"] = derive_document_id(path)
+        parsing.py:parse_upload        document_id or derive_document_id(path)
+
+    호출부에 각각 적으면 두 벌이 되고 **세 번째 폴백이 생기면 또 빠진다.** 이 함수가 그
+    둘의 단일 깔때기라, 여기서 한 번 적으면 새 호출부가 생겨도 자동으로 걸린다.
+
+    ❗**문면이 「호출자가 안 줬다」로 단정할 수 있는 것은 `#588` 덕분이다.** 그 전에는 빈
+    문자열도 여기로 떨어졌으므로(`'' or derive(...)`) *"안 줬거나 빈 값이거나"* 로 적어야
+    했다. 지금은 `ParseRequest` 가 빈 값을 422 로 막으므로 남은 경우가 하나다.
+
+    이 줄이 답하는 것 둘이다.
+
+        ⓐ 운영 경로가 정말 안 닿나        알파 로그에 이 줄이 없어야 한다
+        ⓑ 알파 재추출이 끝났나            결정 1.37 · 미결 10.87 의 완료 조건이다
+
+    ❗**WARNING 이 아니라 INFO 다.** 단독 실행에서는 이것이 **정상 경로**라 그때마다 경고를
+    내면 그 경고가 곧 배경이 되고, 운영에서 진짜로 났을 때 아무도 안 본다. 운영에서 이 줄이
+    보이는 것 자체가 신호이므로 층을 올릴 필요가 없다.
     """
     stem = _ID_UNSAFE.sub("-", Path(pdf_path).stem.lower()).strip("-")
-    return f"doc-{stem}" if stem else "doc-unnamed"
+    derived = f"doc-{stem}" if stem else "doc-unnamed"
+    log.info(
+        "F-EXT-001 document_id 를 파일명에서 만들었다 — 호출자가 안 줬다: %s -> %s "
+        "(운영 경로면 결함이다 · 결정 1.37 · 이슈 #578)", pdf_path, derived)
+    return derived
 
 
 def resolve_document_path(document_path: str, *, root: str | Path | None = None) -> Path:

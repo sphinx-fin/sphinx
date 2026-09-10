@@ -129,3 +129,40 @@ def test_the_route_rejects_a_blank_document_id_with_422() -> None:
 
     assert r.status_code == 422, r.text
     assert "document_id" in r.text
+
+
+# ── 폴백이 돌면 그것이 보인다 (이슈 #578 ②) ─────────────────────────────────────
+def test_the_filename_fallback_announces_itself(real_pdf, caplog) -> None:
+    """★ 폴백이 **조용하지 않다** — 닿을 때마다 한 줄 남긴다.
+
+    `derive_document_id` docstring 이 *"운영 경로가 이 함수에 닿으면 그것이 결함"* 이라고
+    선언하는데 그 사건에 신호가 없었다. 알파 로그에 이 줄이 **없어야** 운영 경로가 정말 안
+    닿는 것이고, 그것이 미결 10.87(재추출)의 완료 조건이기도 하다.
+
+    ❗자리가 `derive_document_id` 안인 이유는 **폴백 호출부가 둘**이라서다 — 호출부에 각각
+    적으면 두 벌이 되고 세 번째가 생기면 또 빠진다(PR #588 리뷰). 그래서 아래는 **두 경로
+    모두**에서 그 줄이 나오는 것을 본다.
+    """
+    derived = parsing.derive_document_id(real_pdf)
+
+    with caplog.at_level("INFO", logger="app.parsing"):
+        parsing.parse_upload(DOC_REL, product_type="ELS", document_id=None)
+
+    hits = [r for r in caplog.records if "파일명에서 만들었다" in r.getMessage()]
+    assert hits, "폴백이 돌았는데 아무 줄도 안 남았다 — 「닿으면 결함」에 신호가 없다"
+    assert hits[0].levelname == "INFO", (
+        "단독 실행에서는 이것이 정상 경로다 — 경고로 올리면 배경이 되고 운영에서 진짜 났을 때 안 보인다")
+    assert derived in hits[0].getMessage(), "파생값이 없으면 「어느 규칙으로 만들어졌나」에 못 답한다"
+
+
+def test_a_given_document_id_leaves_no_fallback_line(real_pdf, caplog) -> None:
+    """❗**값을 준 호출은 그 줄을 안 남긴다** — 안 그러면 로그가 늘 켜져 신호가 안 된다.
+
+    이 단정이 있어야 «알파에 이 줄이 없어야 한다» 가 성립한다. 폴백과 무관하게 매번 찍히면
+    그 문장이 거짓이 되고, 위 테스트는 그것을 못 가른다.
+    """
+    with caplog.at_level("INFO", logger="app.parsing"):
+        parsing.parse_upload(DOC_REL, product_type="ELS", document_id="doc-given")
+
+    assert not [r for r in caplog.records if "파일명에서 만들었다" in r.getMessage()], \
+        "호출자가 값을 줬는데 폴백 줄이 나왔다"
