@@ -3,6 +3,7 @@ package com.sphinxfin.sphinx.api;
 import com.jayway.jsonpath.JsonPath;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
 import com.sphinxfin.sphinx.domain.RiskItem;
 import org.junit.jupiter.api.AfterEach;
@@ -82,9 +83,18 @@ class RealExtractionWiringTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.items[0].itemId").value("ELS-STORED-ONLY"));
 
-        // 문서 경로·상품유형이 배선의 값이다 — 아무 문자열로 불러도 목이 응답하므로
-        // 호출 인자를 직접 잰다.
-        verify(aiServiceClient).parse(ELS_DOC, "ELS");
+        // 문서 경로·상품유형·document_id 가 배선의 값이다 — 아무 문자열로 불러도 목이
+        // 응답하므로 호출 인자를 직접 잰다.
+        //
+        // ❗**document_id 를 기대값에서 상수로 쓰지 않고 표에서 읽는다.** 사전적재에서는 그 값이
+        //   오늘 productId 와 같은데 그건 «문서를 한 건만 든다» 에서 나는 우연이고 계약이
+        //   아니다(결정 1.37) — 상수로 박으면 두 번째 문서가 붙는 날 이 단정이 «productId 를
+        //   넘겨라» 로 틀린 요구를 한다. 표의 값이 계약 샘플과 같은지는
+        //   PreloadedTableMatchesParseSamplesTest 가 따로 본다.
+        String elsDocumentId = ProductRiskItems.preloaded().stream()
+                .filter(p -> ELS.equals(p.productId()))
+                .findFirst().orElseThrow().documentId();
+        verify(aiServiceClient).parse(ELS_DOC, "ELS", elsDocumentId);
 
         assertThat(repository.count())
                 .as("추출 결과가 영속돼야 재기동·다른 라우트가 같은 항목을 본다")
@@ -181,7 +191,7 @@ class RealExtractionWiringTest {
         ParsedDocument parsed = new ParsedDocument("doc-parse-001", "ELS", null, "parser-v1",
                 "2026-09-01T00:00:00Z", 1,
                 List.of(new ParsedDocument.Page(1, "…원문 인용…", 10)), List.of(), List.of());
-        when(aiServiceClient.parse(anyString(), anyString())).thenReturn(parsed);
+        when(aiServiceClient.parse(anyString(), anyString(), anyString())).thenReturn(parsed);
         when(aiServiceClient.extract(anyString(), any(ParsedDocument.class)))
                 .thenReturn(new AiServiceClient.ExtractResult(items, List.of()));
         stubQuestion();

@@ -103,7 +103,10 @@ public class ProductUploads {
             String failureReason = null;
             ParsedDocument parsed = null;
             try {
-                parsed = aiServiceClient.parse(stored.documentPath(), productType);
+                // ❗업로드본의 document_id 는 productId 다 — 그 값이 내용 주소라(sha256)
+                //   문서 1건을 가리킨다. 안 넘기면 파서가 파일명에서 만들고, 같은 파일명
+                //   두 업로드가 한 값을 받는다(결정 1.37).
+                parsed = aiServiceClient.parse(stored.documentPath(), productType, productId);
             } catch (DocumentUnreadableException | DocumentRejectedException e) {
                 status = "parse_failed";
                 failureReason = e.getMessage();

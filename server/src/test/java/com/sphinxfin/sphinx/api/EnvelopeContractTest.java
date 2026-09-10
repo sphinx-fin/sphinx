@@ -119,7 +119,7 @@ class EnvelopeContractTest {
         assertEnveloped(mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")));
         // extract 는 실배선(#355)이라 등록된 문서가 있는 상품이어야 200 이다 — 봉투를 보는
         // 테스트이므로 성공 응답이 나오는 상태(실 데모 상품 + ai-service 목)를 만들어서 본다.
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
                         "doc-parse-001", "ELS", null, "parser-v1", null, 1,
                         List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),

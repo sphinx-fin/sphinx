@@ -49,6 +49,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   parsed_variable_sample.json  doc-var-samsung-b2601  VARIABLE_INSURANCE   var_samsung_b2601_product_summary.pdf
  * </pre>
  *
+ * <p>❗{@code documentId} 도 같이 맞춘다(결정 1.37 · 이슈 #528). 그 값이
+ * {@code /internal/parse} 로 나가고 {@code extracted_risk_items.document_id} 에 쌓이므로,
+ * 표와 계약이 다른 값을 들면 <b>그 열에 두 규칙의 값이 섞인다.</b>
+ *
  * <p>문서 경로까지 보는 이유는 <b>유형만 맞추면 짝이 안 잡히기 때문</b>이다 — 두 상품의
  * 유형이 서로 다르므로 유형만으로도 뒤바뀜은 잡히지만, 표가 <b>같은 유형의 다른 문서</b>를
  * 가리키게 되는 것은 경로를 봐야 잡힌다({@code var_samsung_b2601} 은 문서가 3편이다).
@@ -82,7 +86,8 @@ class PreloadedTableMatchesParseSamplesTest {
                 continue;
             }
             out.put(id.asText(), new String[] {
-                    n.path("product_type").asText(), n.path("source_file").asText() });
+                    n.path("product_type").asText(), n.path("source_file").asText(),
+                    id.asText() });
         }
         return out;
     }
@@ -93,11 +98,12 @@ class PreloadedTableMatchesParseSamplesTest {
         Map<String, String[]> samples = parseSamples();
         int matched = 0;
         for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
-            String[] sample = samples.get(p.productId());
+            String[] sample = samples.get(p.documentId());
             assertThat(sample)
-                    .as("사전적재 상품 %s 에 대응하는 계약 샘플이 없다 — 표에 상품을 더했으면 "
-                            + "contracts/samples 에 그 문서의 파스 출력도 있어야 한다. 없으면 "
-                            + "유형이 맞는지 확인할 기준이 없다", p.productId())
+                    .as("사전적재 %s 의 documentId(%s)에 대응하는 계약 샘플이 없다 — 표에 "
+                            + "문서를 더했으면 contracts/samples 에 그 문서의 파스 출력도 "
+                            + "있어야 한다. 없으면 유형이 맞는지 확인할 기준이 없다",
+                            p.productId(), p.documentId())
                     .isNotNull();
             assertThat(p.productType())
                     .as("사전적재 표의 상품유형이 계약 샘플과 다르다(%s). 업로드본은 파스가 "
@@ -112,11 +118,35 @@ class PreloadedTableMatchesParseSamplesTest {
     }
 
     @Test
+    @DisplayName("❗표의 documentId 가 그 샘플의 document_id 다 — 파스에 넘기는 값이라 규칙이 하나여야 한다")
+    void theDocumentIdMatchesTheContractSample() throws Exception {
+        Map<String, String[]> samples = parseSamples();
+        for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
+            // ❗재는 것은 «그 documentId 가 어느 계약 샘플의 document_id 다» 다. 값 비교로
+            //   적으면 조회 키와 같은 값을 견주게 되어 구성상 항상 참이 된다(PR #576 리뷰).
+            assertThat(samples.get(p.documentId()))
+                    .as("사전적재 %s 의 documentId(%s)가 어느 계약 샘플의 document_id 도 "
+                            + "아니다. 이 값이 /internal/parse 로 나가고 "
+                            + "extracted_risk_items.document_id 에 쌓인다 — 규칙이 두 벌이면 "
+                            + "«이 항목이 어느 파스에서 왔나» 에 답할 수 없다(결정 1.37)",
+                            p.productId(), p.documentId())
+                    .isNotNull();
+        }
+    }
+
+    @Test
     @DisplayName("❗표의 문서 경로가 그 샘플의 원본 파일명으로 끝난다 — 같은 유형의 다른 문서를 가리킬 수 있다")
     void theDocumentPathMatchesTheContractSample() throws Exception {
         Map<String, String[]> samples = parseSamples();
         for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
-            String sourceFile = samples.get(p.productId())[1];
+            String[] sample = samples.get(p.documentId());
+            // ★ 먼저 짚는다 — 없는 채로 색인하면 NullPointerException 이 나고, 그 실패는
+            //   무엇을 고쳐야 하는지 아무것도 안 알려준다(실측: 이 가드 전에 그랬다).
+            assertThat(sample)
+                    .as("사전적재 %s 의 documentId(%s)에 대응하는 계약 샘플이 없다",
+                            p.productId(), p.documentId())
+                    .isNotNull();
+            String sourceFile = sample[1];
             assertThat(sourceFile)
                     .as("계약 샘플에 source_file 이 없다 — 그러면 경로를 맞출 기준이 없다")
                     .isNotEmpty();

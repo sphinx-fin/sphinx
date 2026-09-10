@@ -182,7 +182,7 @@ class SessionControllerTest {
         // 목 목록을 안 내준다(이슈 #427). 그래서 변액 세션을 돌리려면 먼저 변액 항목을
         // 추출·저장해 둔다(EnvelopeContractTest 와 같은 방식: parse·extract 를 목으로 세우고
         // POST /extract 가 실제로 영속). 이렇게 해야 productType 도 항목도 변액에서 온다.
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
                         "doc-var-samsung-b2601", "VARIABLE_INSURANCE", null, "parser-v1", null, 1,
                         java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
@@ -223,7 +223,7 @@ class SessionControllerTest {
     void interviewAsksRequiredItemsOnly() throws Exception {
         // 실추출에 recommended 가 처음 들어오며 드러난 경로(#414). ELS 상품에 required 1 +
         // recommended 1 을 추출·저장한다(EnvelopeContractTest 와 같은 목→POST 방식).
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
                         "doc-els-kiwoom-4181", "ELS", null, "parser-v1", null, 1,
                         java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),
@@ -277,7 +277,7 @@ class SessionControllerTest {
                                         "원금손실 조건: 낙인 하회 시 손실을 인지해야 함"),
                                 "조건을 정확히 진술", null),
                         inv.getArgument(2)));
-        when(aiServiceClient.parse(anyString(), anyString()))
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
                 .thenReturn(new com.sphinxfin.sphinx.domain.ParsedDocument(
                         "doc-els-kiwoom-4181", "ELS", null, "parser-v1", null, 1,
                         java.util.List.of(new com.sphinxfin.sphinx.domain.ParsedDocument.Page(1, "원문", 2)),

@@ -588,12 +588,15 @@ class AiServiceClientTest {
     // ── F-EXT-001 /internal/parse ───────────────────────────────────────────
 
     @Test
-    @DisplayName("parse: 요청은 snake_case(document_path·product_type), 응답은 ParsedDocument로 역직렬화")
+    @DisplayName("parse: 요청은 snake_case(document_path·product_type·document_id), 응답은 ParsedDocument로 역직렬화")
     void parseSendsSnakeCaseAndParsesResponse() {
         server.expect(requestTo(BASE + "/internal/parse"))
                 .andExpect(method(org.springframework.http.HttpMethod.POST))
                 .andExpect(jsonPath("$.document_path").value("data/documents/els-sample.pdf"))
                 .andExpect(jsonPath("$.product_type").value("ELS"))
+                // ❗호출자가 준 값이 실려 나가야 한다. 안 실리면 파서가 파일명에서 만들고
+                //   (derive_document_id) 같은 파일명 두 문서가 한 값을 받는다(결정 1.37).
+                .andExpect(jsonPath("$.document_id").value("doc-els-4181"))
                 .andRespond(withSuccess("""
                         {
                           "document_id": "doc-els-001",
@@ -615,7 +618,7 @@ class AiServiceClientTest {
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        ParsedDocument doc = client.parse("data/documents/els-sample.pdf", "ELS");
+        ParsedDocument doc = client.parse("data/documents/els-sample.pdf", "ELS", "doc-els-4181");
 
         assertThat(doc.documentId()).isEqualTo("doc-els-001");
         assertThat(doc.productType()).isEqualTo("ELS");
@@ -639,7 +642,7 @@ class AiServiceClientTest {
         server.expect(requestTo(BASE + "/internal/parse"))
                 .andRespond(withServerError());
 
-        assertThatThrownBy(() -> client.parse("data/documents/x.pdf", "ELS"))
+        assertThatThrownBy(() -> client.parse("data/documents/x.pdf", "ELS", "doc-x"))
                 .isInstanceOf(AiServiceException.class);
         server.verify();
     }
@@ -664,7 +667,7 @@ class AiServiceClientTest {
                                 + "\"where\": \"parsed_document.pages[0].text\", "
                                 + "\"detail\": \"P3 위반\"}"));
 
-        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
                 .isInstanceOf(DocumentRejectedException.class)
                 // 패턴 **이름**만 싣는다. 걸린 값은 ai-service 가 애초에 안 보낸다.
                 .hasMessageContaining("CARD")
@@ -681,7 +684,7 @@ class AiServiceClientTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("{\"detail\": \"file is not a readable pdf\"}"));
 
-        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
                 .isInstanceOf(DocumentUnreadableException.class)
                 .isNotInstanceOf(DocumentRejectedException.class)
                 .hasMessageContaining("암호화");
@@ -698,7 +701,7 @@ class AiServiceClientTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("{\"error\": \"pii_detected\"}"));
 
-        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
                 .isInstanceOf(DocumentRejectedException.class);
         server.verify();
     }
@@ -710,7 +713,7 @@ class AiServiceClientTest {
                 .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
                         .contentType(MediaType.TEXT_PLAIN).body("not json"));
 
-        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS"))
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
                 .isInstanceOf(DocumentUnreadableException.class)
                 .isNotInstanceOf(DocumentRejectedException.class);
         server.verify();
