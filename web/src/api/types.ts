@@ -39,6 +39,7 @@ export type ErrorCode =
   | "REEXPLAIN_NOT_ELIGIBLE"    // 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
   | "REVERIFY_EXHAUSTED"        // 400 재검증 상한 도달 — 판정으로 진행
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+  | "DOCUMENT_UNREACHABLE"      // 502 등록된 문서의 파일에 닿지 못했다(없음·권한) — 고칠 자리는 배포다  ← #556
   | "AI_SERVICE_UNAVAILABLE"    // 502 ai-service 호출 실패(non-2xx·연결 오류·미구현)  ← PR #67
   | "OVERRIDE_NOT_ELIGIBLE"     // 409 적색 아님·승인 대기 아님 — 오버라이드 불가        ← PR #68
   | "DOCUMENT_UNPROCESSABLE"    // 400 이 문서로는 처리할 수 없다 — 문서를 고쳐 다시 올린다  ← #521
