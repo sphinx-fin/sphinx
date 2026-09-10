@@ -249,8 +249,8 @@ class ParseRequest(Strict):
         정확히 위 문단이 말하는 「다음 호출자」다.
 
         여기서 같이 안 고치는 이유는 `ParsedDocument` 가 `contracts/parsed_document.schema.json`
-        과 1:1 이라 **계약 변경**이기 때문이다(강희진 승인 + 수요자 전원 멘션). 정세현이
-        이슈로 뗀다.
+        과 1:1 이라 **계약 변경**이기 때문이다(강희진 승인 + 수요자 전원 멘션).
+        **이슈 #589** 가 그 자리다(정세현).
         """
         if self.document_id is None:
             return self
