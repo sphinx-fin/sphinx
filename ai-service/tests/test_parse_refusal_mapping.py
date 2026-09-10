@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -169,3 +171,61 @@ def test_a_subclass_of_a_mapped_refusal_uses_the_nearest_ancestor() -> None:
 
     got = routes._refused(_Narrower("좁힌 사유"))
     assert got.status_code == routes._REFUSAL_RESPONSE[parsing.DocumentUnreadable][0]
+
+
+# ── 다섯째 갈래: 같은 400 인데 고칠 자리가 다르다 (이슈 #598) ─────────────────────
+def test_the_manual_type_mismatch_is_distinguishable_from_a_wiring_bug(tmp_path, monkeypatch) -> None:
+    """★ **실물로 가른다** — 표 대조가 아니라 실제 요청 둘을 나란히 세운다.
+
+    `DocumentPathRejected` 가 나는 자리가 다섯인데 넷은 **부르는 쪽 배선**이고 다섯째는
+    **운영자가 놓은 파일의 내용**이다(`#441` 의 수동 파스 출력). 상태가 같아서 서버가
+    구별할 재료가 없었고, code 없는 400 이 502 `AI_SERVICE_UNAVAILABLE` 로 나가
+    **운영자가 ai-service 를 재시작하게** 만들었다 — `#556` 이 없애려던 고리다(이슈 #598).
+
+    ❗위 `test_every_mapped_refusal_gets_its_declared_status` 는 예외를 **주입해서** 표를
+    재고, 여기는 **그 예외가 실제로 나는 상황**을 만든다. 둘이 다른 층이다 — 표를 맞게
+    적어도 `_manual_override` 가 옛 타입을 계속 던지면 그 대조는 초록이다.
+    """
+    docs = tmp_path / "documents"
+    docs.mkdir()
+    (docs / "x.pdf").write_bytes(b"%PDF-1.4 (broken on purpose)")
+    (docs / "x.json").write_text(json.dumps({
+        "product_type": "VARIABLE_INSURANCE",     # 요청은 ELS 로 보낸다
+        "parser_version": "manual-1",
+        "pages": [{"page": 1, "text": "만기평가일에 최초기준가격의 65% 미만이면 손실이 발생한다.",
+                   "char_count": 33}],
+        "tables": [],
+        "parse_warnings": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    # ❗`SPHINX_DATA_DIR` 을 setenv 해도 안 먹는다 — `settings()` 가 캐시라 import 시점에
+    #   이미 채워져 있다. 라우트 테스트가 쓰는 방식(`test_parse_route.py`)을 따른다.
+    monkeypatch.setattr(parsing, "documents_root", lambda: tmp_path)
+
+    mismatch = client.post("/internal/parse",
+                           json={"document_path": "documents/x.pdf", "product_type": "ELS"})
+    wiring = client.post("/internal/parse",
+                         json={"document_path": "../etc/passwd", "product_type": "ELS"})
+
+    assert mismatch.status_code == wiring.status_code == 400, "둘 다 400 이라는 것이 이 이슈의 전제다"
+    assert mismatch.json()["detail"] == {
+        "code": "MANUAL_PARSE_TYPE_MISMATCH",
+        "message": mismatch.json()["detail"]["message"],
+    }, mismatch.text
+    assert isinstance(wiring.json()["detail"], str), (
+        "배선 버그 넷은 코드 없는 문자열 그대로다 — 그 갈래까지 구조화하면 계약이 넓어진다")
+
+    # ❗문면이 **어느 파일**인지 말한다 — 「요청이 잘못됐다」로 읽히면 고칠 자리가 틀린다.
+    assert "x.json" in mismatch.json()["detail"]["message"], (
+        "어느 파일을 고쳐야 하는지가 없으면 운영자가 요청 쪽을 뒤진다")
+
+
+def test_the_mismatch_still_answers_to_the_old_except_clause() -> None:
+    """❗**옛 호출자가 그대로 잡는다** — 갈래를 늘리는 변경이 조용히 500 을 만들지 않는다.
+
+    `ManualParseTypeMismatch` 를 `DocumentPathRejected` 의 하위로 둔 이유가 이것이다.
+    `except DocumentPathRejected` 로 잡던 자리가 계속 잡고, `_refused()` 의 `__mro__`
+    훑기도 자기 항목이 없으면 부모로 떨어진다(`#551` 이 세운 그 규약).
+    """
+    assert issubclass(parsing.ManualParseTypeMismatch, parsing.DocumentPathRejected)
+    assert issubclass(parsing.ManualParseTypeMismatch, parsing.ParseRefused)
+
