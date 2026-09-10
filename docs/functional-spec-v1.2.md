@@ -230,7 +230,7 @@ v1.1 대비 추가된 룰 셋: **R-00**(측정 안 된 것을 «없음»으로 �
 | 항목 | 내용 |
 | --- | --- |
 | 설명 | 기초자산이 과거 특정 구간처럼 움직였을 때의 상환 금액을 가입 예정 금액 기준으로 계산한다 |
-| 상품 조건 (실제 문서) | A증권 제4181회 ELS — 기초자산 **S&P500 · NIKKEI225 · EuroStoxx50**, 3년/6개월 스텝다운, 조기상환 배리어 85/85/85/80/75/70%, 쿠폰 연 11.00%, 낙인 45%, 최대손실 −100% |
+| 상품 조건 (실제 문서) | A증권 제4181회 ELS (원금비보장형) — 기초자산 **S&P500 · NIKKEI225 · EuroStoxx50**, 3년/6개월 스텝다운, 조기상환 배리어 85/85/85/80/75/70%, 쿠폰 연 11.00%, 낙인 45%, 최대손실 −100% |
 | 데이터 (P2) | 지수 일별 종가 2000-01 ~ 2026-08(`data/timeseries/*.csv`), **`VERSION` 파일이 각 CSV 의 sha256 을 고정** — 출력이 달라지면 원인이 코드인지 데이터인지 갈린다 |
 | 처리 | 역사 전 구간의 **모든 계약 시점**을 상품 조건에 결정론적으로 대입 → 전개별 비중 산출 → **최악 · 중간 · 최선 3건**을 규칙으로 고른다(동률 처리까지 명시). LLM 미개입 |
 | 출력 | 3열 {상환금액, 손익, 결과 문면, **사용한 지수 구간(시작·종료일 · 최저 종목)**} + 전개별 비중 + 시계열 스냅샷 판 |
@@ -343,7 +343,7 @@ v1.1 대비 추가된 룰 셋: **R-00**(측정 안 된 것을 «없음»으로 �
 
 | 지표 | 값 | 비고 |
 | --- | --- | --- |
-| 표본 | ELS 70발화 · 10항목 · 라벨러 2인(강희진·정세현) 독립 | 프롬프트 당사자(윤지석) 제외 |
+| 표본 | ELS **채점 단위 70건**(고유 발화 67 · 10항목) · 라벨러 2인(강희진·정세현) 독립 | 프롬프트 당사자(윤지석) 제외. 한 발화가 두 항목에 걸린 것이 3건이라 발화 수와 채점 단위가 다르다 |
 | 상한(라벨러 간) | QWK **+0.769** · 일치율 72.9% | 사람도 안 맞는 항목에서 모델이 맞기를 기대할 수 없다 |
 | 모델 ↔ 합의(51건) | QWK **+0.828** · 일치율 80.4% | **기획 5절 목표 +0.75 달성** |
 | 모델 ↔ 각 라벨러(70건) | +0.694 / +0.723 | 상한의 90% / 94% |
@@ -378,7 +378,7 @@ v1.1 대비 추가된 룰 셋: **R-00**(측정 안 된 것을 «없음»으로 �
 
 ## 9. API — 실제 계약 (`contracts/openapi.yaml`)
 
-모든 응답은 공통 봉투 `{success, data, error{code, message, timestamp}}`. 오류 코드 13종은 계약·서버·문서·프론트 유니온 네 벌이 **테스트로 대조**된다: `NOT_FOUND` `VALIDATION_ERROR` `MALFORMED_REQUEST` `REEXPLAIN_NOT_ELIGIBLE` `REVERIFY_EXHAUSTED` `ILLEGAL_STATE_TRANSITION`(409) `OVERRIDE_NOT_ELIGIBLE`(409) `UNAUTHORIZED` `FORBIDDEN` `EVIDENCE_REQUIRED`(502) `MEASUREMENT_INVALID`(502) `AI_SERVICE_UNAVAILABLE`(502) `INTERNAL_ERROR`.
+모든 응답은 공통 봉투 `{success, data, error{code, message, timestamp}}`. 오류 코드 14종은 계약·서버·문서·프론트 유니온·프론트 문면 표 **다섯 벌**이 **테스트로 대조**된다: `NOT_FOUND` `VALIDATION_ERROR` `MALFORMED_REQUEST` `REEXPLAIN_NOT_ELIGIBLE` `REVERIFY_EXHAUSTED` `ILLEGAL_STATE_TRANSITION`(409) `OVERRIDE_NOT_ELIGIBLE`(409) `UNAUTHORIZED` `FORBIDDEN` `DOCUMENT_UNPROCESSABLE` `EVIDENCE_REQUIRED`(502) `MEASUREMENT_INVALID`(502) `AI_SERVICE_UNAVAILABLE`(502) `INTERNAL_ERROR`.
 
 ```
 GET    /products                          상품 목록 (시연용 사전탑재 2종)
@@ -546,7 +546,7 @@ v1.1의 미결정 5건은 전부 답이 났다 — ① 음성 제외 ② 신뢰�
 | 대시보드 | 히트맵 + 선행지표 | + 취약 대비 · 게이트 결정 · 코칭 정황 · **실세션 운영 지표** · 감사 집계 · 합성 66건 |
 | 권한 | 역할표 | `rbac_policy.yaml` **20 action × 범위** · 12 audited · «없는 역할» 문면 · 정책 파일이 유일한 근거 |
 | 평가 | 계획 | **QWK +0.828 달성** · 미탐 U4→U1 0건 · 수치의 출처(프롬프트·문맥 판)를 산출물이 들고 다닌다 |
-| API | 13 초안 | **32 경로** · 봉투 · 오류 코드 13종 네 벌 대조 |
+| API | 13 초안 | **32 경로** · 봉투 · 오류 코드 14종 다섯 벌 대조 |
 | 화면 | S-01~S-08 | S-01 은 범위 밖 · 번호 없는 사용 가이드(`/guide`) |
 | 배포 | — | alpha 최종 · OIDC/SSM · MySQL · 외부 노출 web 하나 |
 | 정답지 | 핵심설명서 | 공시문서 집합(ADR-007) |
