@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import BrandBar from "./components/BrandBar";
 import Splash from "./components/Splash";
+import ConsolePage from "./pages/Console";
 import GuidePage from "./pages/Guide";
 import UploadPage from "./pages/S01_Upload";
 import SessionStartPage from "./pages/S02_SessionStart";
@@ -25,6 +26,15 @@ export default function App() {
             대조하는 목록이라 명세에 없는 항목이 끼면 대조가 어긋난다. 위 규칙의 유일한
             예외이고, 이유는 `pages/Guide.tsx` 머리말에 적었다. */}
         <Route path="/guide" element={<GuidePage />} />
+        {/* 운영 콘솔. 가이드와 **같은 성격**이라 같은 규칙이다 — 제품 흐름 밖이고
+            `SCREENS` 에 안 넣는다. 이슈 #522 가 「S-09」로 부르지만 **번호는 안 준다**:
+            명세 8절 표는 제품 흐름의 화면 목록이라 거기 얹으면 그 구별이 사라진다
+            (#522 질문 3 — 정세현·윤지석 합의. 명세 쪽 「제품 흐름 밖 화면」 절은 정세현).
+            `ops:status:read` 가 ADMIN 뿐이라 다른 역할에는 403 이고, 화면이 그것을
+            「차단됨」으로 그린다 — 그래서 제품 흐름에서 링크하지 않는다. ❗**지금은 어디서도
+            안 걸려 있어 닿는 길이 주소 직접 입력뿐이다**(`/upload` 와 같은 상태 · #406).
+            진입점은 이 PR 밖에서 정한다. */}
+        <Route path="/console" element={<ConsolePage />} />
         {/* ❗S-01 은 이번 라운드 개발하지 않는다(이슈 #406). 라우트는 남겨 둔다 —
             화면은 목 엔드포인트 상대로 동작하고, 지우면 다음 라운드에 되살리는 값이 생긴다.
             제품 흐름에서는 여전히 어디서도 링크되지 않는다 — 닿는 길은 URL 직접 입력뿐이다. */}
