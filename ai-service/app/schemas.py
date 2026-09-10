@@ -237,7 +237,20 @@ class ParseRequest(Strict):
 
         ❗**서버는 오늘 이 갈래에 안 닿는다** — `ProductRiskItems.documentIdOf` 가 기본값 없이
         `NoSuchElementException`(→404) 이다. 이 검사는 그 보장이 **호출자 한쪽에만** 서 있는
-        것을 받는 쪽에서 닫는다. 다음 호출자(도구·재처리 스크립트)가 생기면 그때 열린다.
+        것을 `/internal/parse` **입구에서** 닫는다. 다음 호출자(도구·재처리 스크립트)가
+        생기면 그때 열린다.
+
+        ❗**받는 쪽이 여기 하나가 아니다 — `ExtractRequest.parsed_document` 가 남는다**
+        (PR #588 리뷰, 정세현·강희진). 그쪽 `ParsedDocument.document_id` 에는 이 검사가
+        없고, **`extracted_risk_items.document_id` 에 실제로 들어가는 값이 그쪽**이다
+        (`ExtractedRiskItem.java:118` — `parsed.documentId()`). 오늘 서버 경로에서는 그
+        `parsed` 가 이 엔드포인트의 응답이라 여기서 닫히지만, `/internal/extract` 는 따로
+        열린 라우트다(`routes.py:252`) — **parse 를 건너뛰고 extract 만 부르는 도구**가
+        정확히 위 문단이 말하는 「다음 호출자」다.
+
+        여기서 같이 안 고치는 이유는 `ParsedDocument` 가 `contracts/parsed_document.schema.json`
+        과 1:1 이라 **계약 변경**이기 때문이다(강희진 승인 + 수요자 전원 멘션). 정세현이
+        이슈로 뗀다.
         """
         if self.document_id is None:
             return self
