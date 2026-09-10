@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import BrandBar from "./components/BrandBar";
 import Splash from "./components/Splash";
+import AuditPage from "./pages/Audit";
 import ConsolePage from "./pages/Console";
 import GuidePage from "./pages/Guide";
 import UploadPage from "./pages/S01_Upload";
@@ -35,6 +36,14 @@ export default function App() {
             안 걸려 있어 닿는 길이 주소 직접 입력뿐이다**(`/upload` 와 같은 상태 · #406).
             진입점은 이 PR 밖에서 정한다. */}
         <Route path="/console" element={<ConsolePage />} />
+        {/* 감사 기록. `/console` 과 같은 자리다 — 제품 흐름 밖이고 `SCREENS` 에 안 넣는다.
+            ❗**S-08 안의 뷰로 두지 않는다.** 그쪽은 `aggregate:*`(COMPL org · MGR branch)이고
+            여기는 `audit:read`·`audit:verify`(COMPL 뿐)라, 얹으면 **MGR 에게 상시 403 인 탭**이
+            생긴다. 성격도 다르다 — S-08 은 «고객이 무엇을 모르는가», 여기는 «그 기록을 믿을 수
+            있는가» 이고 무결성 검증은 집계가 아니다. 다른 역할에는 403 이고 화면이 그것을
+            「차단됨」으로 그린다. ❗**지금은 어디서도 안 걸려 있어 닿는 길이 주소 직접
+            입력뿐이다** — 진입점은 `/upload`·`/console` 과 같이 밖에서 정한다(#406). */}
+        <Route path="/audit" element={<AuditPage />} />
         {/* ❗S-01 은 이번 라운드 개발하지 않는다(이슈 #406). 라우트는 남겨 둔다 —
             화면은 목 엔드포인트 상대로 동작하고, 지우면 다음 라운드에 되살리는 값이 생긴다.
             제품 흐름에서는 여전히 어디서도 링크되지 않는다 — 닿는 길은 URL 직접 입력뿐이다. */}
