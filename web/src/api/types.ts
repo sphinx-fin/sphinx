@@ -39,6 +39,7 @@ export type ErrorCode =
   | "REEXPLAIN_NOT_ELIGIBLE"    // 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
   | "REVERIFY_EXHAUSTED"        // 400 재검증 상한 도달 — 판정으로 진행
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+  | "DOCUMENT_UNREACHABLE"      // 502 등록된 문서의 파일에 닿지 못했다(없음·권한) — 고칠 자리는 배포다  ← #556
   | "AI_SERVICE_UNAVAILABLE"    // 502 ai-service 호출 실패(non-2xx·연결 오류·미구현)  ← PR #67
   | "OVERRIDE_NOT_ELIGIBLE"     // 409 적색 아님·승인 대기 아님 — 오버라이드 불가        ← PR #68
   | "DOCUMENT_UNPROCESSABLE"    // 400 이 문서로는 처리할 수 없다 — 문서를 고쳐 다시 올린다  ← #521
@@ -872,4 +873,65 @@ export interface DecisionView {
   override: OverrideCount;
   reexplain: ReexplainEffect;
   unmeasured: UnmeasuredCount;
+}
+
+/* ── 운영 상태 (F-OPS-001 · `GET /ops/status`) ─────────────────────────────── */
+
+/**
+ * 구성요소 하나의 건강 (`OpsComponent.health`).
+ *
+ * ❗**`DEGRADED` 가 이 화면의 요점이다.** 「떠 있는데 못 하는 상태」가 이 스택에서 실제로
+ * 자주 나는 실패라(키 없이 뜬 ai-service, 마운트가 빠진 채 뜬 server), UP/DOWN 둘로만
+ * 그리면 **그게 전부 정상으로 보인다** — 그 셋이 겉으로 같은 502 하나였다는 것이 이슈
+ * #522 의 출발점이다.
+ */
+export type OpsHealth = "UP" | "DEGRADED" | "DOWN";
+
+/** 지금 뜬 것이 무엇인가. */
+export interface OpsDeployment {
+  /** 활성 프로파일. 없으면 `default`. */
+  profile: string;
+  /** blue 또는 green. ❗**로컬은 빈 문자열이고 그게 정상이다** — 「모른다」로 그리면 로컬이 상시 경고가 된다. */
+  stack: string;
+  startedAt: string;
+  uptimeSec: number;
+}
+
+/** 이름표와 값. 비밀은 「설정됐는가」까지만 실린다(JDBC URL 은 `?` 앞까지). */
+export interface OpsFact {
+  label: string;
+  value: string;
+}
+
+/**
+ * 구성요소 카드 하나.
+ *
+ * ❗**`facts` 는 배열이다.** 화면이 읽는 순서가 곧 중요도인데 객체는 직렬화 순서가 구현에
+ * 달린다 — 계약이 그 이유로 배열로 왔다(#522 요청).
+ */
+export interface OpsComponent {
+  id: "server" | "database" | "ai-service" | "data-volumes";
+  name: string;
+  health: OpsHealth;
+  /** ❗**못 잰 자리는 `null` 이다 — 0 과 다르다.** 0 으로 그리면 「즉시 응답」과 「안 쟀다」가 같아진다. */
+  latencyMs: number | null;
+  /** 정상이면 `null`. 한 줄이다 — 스택트레이스는 서버 로그에 있다. */
+  note: string | null;
+  facts: OpsFact[];
+}
+
+/**
+ * 운영 콘솔(`/console`)이 그리는 실측 (`GET /ops/status`).
+ *
+ * ❗**고객 데이터가 0건인 것이 이 경로의 ADMIN 그랜트를 성립시킨다**(계약 · ADR-001).
+ * 세션 수 하나만 얹어도 `ops:status:read` 가 집계 우회로가 되므로, 이 인터페이스에 그런
+ * 필드가 생기면 **고칠 자리는 화면이 아니라 서버 응답**이다. 서버 쪽은
+ * `OpsStatusHasNoCustomerDataTest` 가 타입 의존으로 막고 있다.
+ */
+export interface OpsStatus {
+  /** 실측 시각. **캐시하지 않는다** — 캐시하면 화면의 시각과 값이 갈린다. */
+  checkedAt: string;
+  deployment: OpsDeployment;
+  /** server · database · ai-service · data-volumes. **화면은 이 순서 그대로 카드를 놓는다.** */
+  components: OpsComponent[];
 }

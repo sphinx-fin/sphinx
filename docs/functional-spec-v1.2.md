@@ -378,7 +378,7 @@ v1.1 대비 추가된 룰 셋: **R-00**(측정 안 된 것을 «없음»으로 �
 
 ## 9. API — 실제 계약 (`contracts/openapi.yaml`)
 
-모든 응답은 공통 봉투 `{success, data, error{code, message, timestamp}}`. 오류 코드 14종은 계약·서버·문서·프론트 유니온·프론트 문면 표·**이 절** 여섯 벌이 **테스트로 대조**된다: `NOT_FOUND` `VALIDATION_ERROR` `MALFORMED_REQUEST` `REEXPLAIN_NOT_ELIGIBLE` `REVERIFY_EXHAUSTED` `ILLEGAL_STATE_TRANSITION`(409) `OVERRIDE_NOT_ELIGIBLE`(409) `UNAUTHORIZED` `FORBIDDEN` `DOCUMENT_UNPROCESSABLE` `EVIDENCE_REQUIRED`(502) `MEASUREMENT_INVALID`(502) `AI_SERVICE_UNAVAILABLE`(502) `INTERNAL_ERROR`.
+모든 응답은 공통 봉투 `{success, data, error{code, message, timestamp}}`. 오류 코드 15종은 계약·서버·문서·프론트 유니온·프론트 문면 표·**이 절** 여섯 벌이 **테스트로 대조**된다: `NOT_FOUND` `VALIDATION_ERROR` `MALFORMED_REQUEST` `REEXPLAIN_NOT_ELIGIBLE` `REVERIFY_EXHAUSTED` `ILLEGAL_STATE_TRANSITION`(409) `OVERRIDE_NOT_ELIGIBLE`(409) `UNAUTHORIZED` `FORBIDDEN` `DOCUMENT_UNPROCESSABLE` `DOCUMENT_UNREACHABLE`(502) `EVIDENCE_REQUIRED`(502) `MEASUREMENT_INVALID`(502) `AI_SERVICE_UNAVAILABLE`(502) `INTERNAL_ERROR`.
 
 ```
 GET    /products                          상품 목록 (시연용 사전탑재 2종)
@@ -546,7 +546,7 @@ v1.1의 미결정 5건은 전부 답이 났다 — ① 음성 제외 ② 신뢰�
 | 대시보드 | 히트맵 + 선행지표 | + 취약 대비 · 게이트 결정 · 코칭 정황 · **실세션 운영 지표** · 감사 집계 · 합성 66건 |
 | 권한 | 역할표 | `rbac_policy.yaml` **20 action × 범위** · 12 audited · «없는 역할» 문면 · 정책 파일이 유일한 근거 |
 | 평가 | 계획 | **QWK +0.828 달성** · 미탐 U4→U1 0건 · 수치의 출처(프롬프트·문맥 판)를 산출물이 들고 다닌다 |
-| API | 13 초안 | **32 경로** · 봉투 · 오류 코드 14종 여섯 벌 대조 |
+| API | 13 초안 | **32 경로** · 봉투 · 오류 코드 15종 여섯 벌 대조 |
 | 화면 | S-01~S-08 | S-01 은 범위 밖 · 번호 없는 사용 가이드(`/guide`) |
 | 배포 | — | alpha 최종 · OIDC/SSM · MySQL · 외부 노출 web 하나 |
 | 정답지 | 핵심설명서 | 공시문서 집합(ADR-007) |
