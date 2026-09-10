@@ -4,6 +4,7 @@ import com.sphinxfin.sphinx.api.dto.ApiError;
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException;
+import com.sphinxfin.sphinx.core.aiservice.DocumentUnreachableException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
 import com.sphinxfin.sphinx.core.extraction.ProductUploads;
 import com.sphinxfin.sphinx.core.session.OverrideNotEligibleException;
@@ -200,6 +201,33 @@ public class GlobalExceptionHandler {
         log.warn("P4 차단 — 근거 없는 판정 거부: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ApiError.of("EVIDENCE_REQUIRED", "근거 없는 판정은 처리할 수 없습니다 (P4)")));
+    }
+
+    /**
+     * 문서 <b>파일에 닿지 못했다</b> → 502 {@code DOCUMENT_UNREACHABLE} (이슈 #556).
+     *
+     * <p>❗<b>{@code AI_SERVICE_UNAVAILABLE} 과 갈라야 하는 이유는 「다음 행동」이다.</b>
+     * 그 코드의 문면(<i>"채점 서비스에 연결할 수 없습니다"</i>)을 받은 운영자는
+     * <b>ai-service 를 재시작한다.</b> 이 갈래에서 그건 아무것도 안 고친다 — 볼륨이
+     * 안 붙었거나 소유자가 uid 10001 이 아닌 것이고, 고칠 자리는 <b>배포</b>다.
+     *
+     * <p>❗<b>{@code DOCUMENT_UNPROCESSABLE}(400)도 아니다.</b> 그건 <i>"이 문서를 고쳐 다시
+     * 올려라"</i> 인데 여기서는 <b>문서가 멀쩡하다</b> — 올린 사람이 할 수 있는 것이 없다.
+     * 문서를 바꿔 다시 올리게 만들면 원인이 안 고쳐진 채로 시도만 는다.
+     *
+     * <p>❗<b>상태는 502 다.</b> 요청도 문서도 정상이고 못 읽는 것이 우리 쪽 배포다 — 4xx 로
+     * 두면 호출자 잘못으로 읽힌다. ai-service 가 같은 이유로 이 갈래를 502 에 둔다(그쪽
+     * {@code _REFUSAL_RESPONSE} 주석).
+     *
+     * <p><b>본문에 경로를 안 싣는다.</b> 저장 경로는 로그에만 남긴다({@code #582} 와 같은
+     * 규약) — 응답에는 어디를 봐야 하는지만 적는다.
+     */
+    @ExceptionHandler(DocumentUnreachableException.class)
+    public ResponseEntity<ApiResponse<Void>> onDocumentUnreachable(DocumentUnreachableException e) {
+        log.warn("문서 파일에 닿지 못했다: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ApiError.of("DOCUMENT_UNREACHABLE",
+                        "문서 파일에 닿지 못했습니다 — 업로드 볼륨의 마운트와 소유권을 확인하세요")));
     }
 
     /**

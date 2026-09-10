@@ -619,19 +619,65 @@ public class AiServiceClient {
      * 나머지는 문자열</b>이다. 그 상태에서 전부 객체로 가정하면 나머지 경로가 죽는다.
      */
     private static ErrorHandler failure(String endpoint) {
-        return (req, resp) -> raise(endpoint, resp);
+        return (req, resp) -> raise(endpoint, statusOf(resp), errorBody(resp));
     }
 
-    /** {@link #failure} 의 본체. {@link #parseFailure} 가 422 를 가른 뒤 나머지를 여기로 넘긴다. */
-    private static void raise(String endpoint,
-                              org.springframework.http.client.ClientHttpResponse resp) {
-        String code = errorCode(resp);
-        String where = "ai-service " + endpoint + " 실패: HTTP " + statusOf(resp);
+    /**
+     * {@link #failure} 의 본체. {@link #parseFailure} 가 422·404 를 가른 뒤 나머지를 넘긴다.
+     *
+     * <h2>❗상태와 본문 코드를 <b>버리지 않는다</b> (이슈 #556)</h2>
+     *
+     * <p>예전에는 {@code MEASUREMENT_INVALID} 하나만 갈리고 <b>나머지가 전부
+     * {@code AiServiceException}</b> 이었다. 그러면 502 {@code AI_SERVICE_UNAVAILABLE} 로
+     * 나가고 화면·로그가 <i>"채점 서비스에 연결할 수 없습니다"</i> 를 말한다 — <b>ai-service 는
+     * 멀쩡한데</b> 운영자는 그것을 재시작한다. 그건 아무것도 안 고친다.
+     *
+     * <p>{@code DOCUMENT_ACCESS_DENIED} 가 그 자리다. 볼륨이 {@code root:root} 이고 server 가
+     * uid 10001 로 도는 상태({@code #532}·결정 7.54)의 증상이라, 고칠 자리는 <b>배포</b>다.
+     * ai-service 는 그것을 정확히 갈라 보내는데(그쪽 {@code _REFUSAL_RESPONSE} 표) 경계 한 칸
+     * 뒤에서 사라지고 있었다.
+     *
+     * <h2>❗아직 뭉쳐 있는 갈래가 하나 남는다 (PR #591 리뷰)</h2>
+     *
+     * <p>{@code 400 DocumentPathRejected} 를 여기서 안 가른다. 그 예외가 나는 자리 다섯 중
+     * <b>넷은 우리 배선 버그</b>라 502 로 나가도 «고칠 자리» 가 안 틀린다 — 경로가 비었거나
+     * NUL 이 섞였거나 해소 실패거나 뿌리 밖인 것은 서버가 잘못 보낸 것이다.
+     *
+     * <p><b>다섯째는 다르다</b> — 수동 파스 출력({@code data/documents/x.json}, {@code #441})의
+     * {@code product_type} 이 요청과 다른 상태다({@code parsing.py:749}). <b>운영자가 실제로
+     * 만들 수 있는 데이터 상태</b>이고 고칠 자리는 그 JSON 파일인데, 지금 문면은
+     * {@code AI_SERVICE_UNAVAILABLE} 이라 ai-service 를 가리킨다 — 이 메서드가 없애려는 그
+     * 고리 그대로다.
+     *
+     * <p>여기서 못 고치는 이유는 <b>구별할 재료가 안 오기 때문</b>이다: ai-service 의 거부 표가
+     * 그 갈래에 body code 를 안 싣는다({@code (400, None)}). 그래서 서버는 넷과 다섯째를 구별할
+     * 방법이 없다. 그쪽 표를 고치는 것이 선행이고, 그 뒤에 이 갈래를 어느 코드로 낼지 정한다
+     * ({@code DOCUMENT_UNREACHABLE} 은 아니다 — 볼륨은 멀쩡하다).
+     *
+     * <p><b>본문을 인자로 받는다.</b> {@code resp.getBody()} 는 스트림이라 두 번째 읽기가 빈
+     * 값을 준다 — 갈래마다 따로 읽으면 <b>앞 갈래가 뒤를 먹는다</b>({@link #parseFailure} 가
+     * 그 함정을 이미 한 번 밟았다). 읽는 자리를 {@link #failure} 하나로 올려 그 실수가
+     * 구조적으로 안 나게 한다.
+     */
+    private static void raise(String endpoint, String status, JsonNode body) {
+        // ❗`path()` 만 쓴다. 없는 키에 null 을 주는 `get()` 은 문자열 detail 에서 NPE 다
+        //   (#293 리뷰에서 그 변이가 실제로 걸렸다).
+        String code = body.path("detail").path("code").asText(null);
+        String where = "ai-service " + endpoint + " 실패: HTTP " + status;
         if ("MEASUREMENT_INVALID".equals(code)) {
             throw new MeasurementInvalidException(where + " — " + code);
         }
+        if (DOCUMENT_ACCESS_DENIED.equals(code)) {
+            // 상태(502)로는 못 가른다 — ai-service 가 본문에 코드를 싣는 이유가 그것이다.
+            throw new DocumentUnreachableException(
+                    where + " — " + code + ": 업로드 원본을 읽을 권한이 없다. 볼륨 소유자가 "
+                    + "컨테이너 사용자(uid 10001)인지 확인하라 (결정 7.54)");
+        }
         throw new AiServiceException(where);
     }
+
+    /** ai-service 가 본문에 싣는 권한 거부 코드(그쪽 {@code routes.py} 표, {@code #548}). */
+    private static final String DOCUMENT_ACCESS_DENIED = "DOCUMENT_ACCESS_DENIED";
 
     /** 상태코드 읽기가 IOException 을 던지는 계약이라 한 자리에서 접는다. */
     private static String statusOf(org.springframework.http.client.ClientHttpResponse resp) {
@@ -695,16 +741,24 @@ public class AiServiceClient {
      */
     private static ErrorHandler parseFailure() {
         return (req, resp) -> {
-            if (!"422".equals(statusOf(resp))) {
-                raise("/internal/parse", resp);
+            String status = statusOf(resp);
+            JsonNode body = errorBody(resp);
+            if (!"422".equals(status)) {
+                // ❗**404 는 「문서에 닿지 못했다」다**(이슈 #556). ai-service 의
+                //   `DocumentNotFound` 이고 고칠 자리는 **업로드·마운트**다 — 502 로 뭉치면
+                //   운영자가 ai-service 를 의심한다. 이 갈래를 여기 두는 이유는 그 뜻이
+                //   **이 엔드포인트에서만** 참이기 때문이다: 다른 내부 경로의 404 는
+                //   «라우트가 없다» 이고, 그걸 문서 문제로 읽으면 반대로 오진한다.
+                if ("404".equals(status)) {
+                    throw new DocumentUnreachableException(
+                            "ai-service /internal/parse 실패: HTTP 404 — 등록된 문서의 파일이 "
+                            + "없다. 업로드 볼륨이 붙어 있는지, 그 원본이 지워지지 않았는지 "
+                            + "확인하라 (#521 · 결정 7.53)");
+                }
+                raise("/internal/parse", status, body);
                 return;
             }
-            // ❗**본문을 한 번만 읽는다.** `resp.getBody()` 는 스트림이라 두 번째 읽기가
-            //   빈 값을 준다 — 갈래마다 따로 읽으면 **앞에서 읽은 갈래가 뒤를 먹어** 뒤쪽
-            //   판정이 조용히 «아니다» 로 떨어진다. 처음에 그렇게 썼고, 스키마 거부가
-            //   DocumentUnreadable 로 새는 것이 그 결과였다.
-            JsonNode body = errorBody(resp);
-
+            // 본문은 위에서 한 번 읽었다 — 갈래마다 따로 읽으면 앞 갈래가 뒤를 먹는다.
             // 미들웨어가 막은 것인가(PII). 어느 패턴이 걸렸는지는 `kinds` 에 있고, 그 값은
             // 패턴 **이름**이라 원문이 아니다 — 문면에 실어도 문서 내용이 새지 않는다.
             List<String> kinds = piiKinds(body);
@@ -745,7 +799,7 @@ public class AiServiceClient {
      * 빈 목록은 «PII 응답인데 패턴 이름이 안 왔다» 다 — 뒤쪽도 PII 거부이므로 문서 문제로
      * 다뤄야 한다. 한 값으로 접으면 이름이 안 온 날 «문서를 열 수 없다» 로 되돌아간다.
      *
-     * <p>{@link #errorCode} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
+     * <p>{@link #raise} 와 같은 이유로 {@code path()} 만 쓴다 — 없는 키에 null 을 주는
      * {@code get()} 은 문자열 본문에서 NPE 다(#293 리뷰).
      */
     private static List<String> piiKinds(JsonNode body) {
@@ -755,30 +809,6 @@ public class AiServiceClient {
         List<String> kinds = new java.util.ArrayList<>();
         body.path("kinds").forEach(node -> kinds.add(node.asText()));
         return kinds;
-    }
-
-    /** {@code {"detail": {"code": …}}} 에서 code 만. 그 모양이 아니면 {@code null}. */
-    private static String errorCode(org.springframework.http.client.ClientHttpResponse resp) {
-        // ❗**실제로 던져지는 것만 잡는다.** 처음엔 `catch (Exception)` 이었는데, 그러면
-        // 아래 읽기가 터져도 삼켜져서 **방어가 도는지 아무도 못 잰다** — `isObject()` 를
-        // 지우거나 `path()` 를 `get()` 으로 바꿔도 테스트가 전부 초록이었다(#293 리뷰,
-        // 윤지석 실측). 넓은 catch 가 "문자열 detail 도 안전하다" 를 **두 가지 이유로**
-        // 참으로 만들고 둘을 구별하지 못했다: 읽기가 방어적이라서인지, 터졌는데 삼켜서인지.
-        try {
-            // ❗**방어는 `path()` 하나다.** 처음엔 `isObject() ? … : null` 을 앞에 뒀는데
-            // 그 가드를 지워도 답이 안 바뀐다 — `path()` 는 객체가 아닌 노드에도
-            // {@code MissingNode} 를 주고 `asText(null)` 이 null 이 된다. **방어처럼 생긴
-            // 죽은 줄**이라 지웠다: 다음 사람이 그걸 믿고 `get()` 으로 바꾸면 문자열
-            // detail 에서 NPE 다(#293 리뷰에서 실제로 그 변이가 걸렸다).
-            //
-            // `get()` 을 쓰면 안 되는 이유가 여기 있다 — 없는 키에 null 을 준다.
-            JsonNode detail = ERROR_MAPPER.readTree(resp.getBody()).path("detail");
-            return detail.path("code").asText(null);
-        } catch (java.io.IOException e) {
-            // 본문이 없거나 JSON 이 아니다. 코드가 없는 것이고 그 자체가 정보다 —
-            // 호출자는 AiServiceException 을 받는다.
-            return null;
-        }
     }
 
     /** 세션 내 발화 한 건. text 는 이미 마스킹된 값이다. */
