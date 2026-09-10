@@ -23,10 +23,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -88,18 +86,9 @@ class DocumentUploadWiringTest {
         // 지우는 것과 같은 이유다.
         uploads.deleteAll();
         extracted.deleteAll();
-        Path uploadsDir = Path.of(dataDir, "uploads");
-        if (Files.isDirectory(uploadsDir)) {
-            try (Stream<Path> walk = Files.walk(uploadsDir)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try {
-                        Files.deleteIfExists(p);
-                    } catch (IOException ignored) {
-                        // 정리 실패는 테스트 결과가 아니다 — 다음 실행이 덮어쓴다.
-                    }
-                });
-            }
-        }
+        // ❗디렉토리와 그 안의 커밋된 README 는 남긴다 — 지우면 ai-service 가 안 뜨고
+        //   `git status` 에 추적 파일 삭제가 뜬다. 근거는 UploadsTestTree.
+        UploadsTestTree.clearUploads(Path.of(dataDir, "uploads"));
     }
 
     private ParsedDocument parsed(String productType) {
@@ -482,15 +471,13 @@ class DocumentUploadWiringTest {
                 .andExpect(status().isBadGateway());
 
         assertThat(uploads.findAll()).isEmpty();
-        Path uploadsDir = Path.of(dataDir, "uploads");
-        if (Files.isDirectory(uploadsDir)) {
-            try (Stream<Path> walk = Files.walk(uploadsDir)) {
-                assertThat(walk.filter(Files::isRegularFile).toList())
-                        .as("행이 안 남았으면 바이트도 남지 않아야 한다 — uploads/ 를 지우는 "
-                                + "코드가 레포에 없어서 여기 새면 단조 증가한다")
-                        .isEmpty();
-            }
-        }
+        // ❗세는 것은 `uploads/<sha256>/` 아래다. 뿌리의 커밋된 README 까지 세면 그 파일을
+        //   고아 바이트로 신고하고, 그 단정은 같은 클래스의 다른 테스트가 먼저 그것을
+        //   지워 준 덕에 초록이었다 — 혼자 돌리면 빨갰다(UploadsTestTree 참고).
+        assertThat(UploadsTestTree.uploadedFiles(Path.of(dataDir, "uploads")))
+                .as("행이 안 남았으면 바이트도 남지 않아야 한다 — uploads/ 를 지우는 "
+                        + "코드가 레포에 없어서 여기 새면 단조 증가한다")
+                .isEmpty();
     }
 
     @Test
