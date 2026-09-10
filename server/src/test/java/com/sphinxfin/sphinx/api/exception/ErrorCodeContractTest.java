@@ -96,12 +96,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <h2>❗「N 벌」이라는 수도 본다</h2>
  *
- * <p>세 문서가 <i>"에러 코드 <b>다섯</b> 벌이 대조된다"</i> 로 <b>대조 대상의 개수</b>를
+ * <p>세 문서가 <i>"에러 코드 <b>여섯</b> 벌이 대조된다"</i> 로 <b>대조 대상의 개수</b>를
  * 적는다({@code CLAUDE.md} · {@code README.md} · 명세서 §9와 요약표). 그 수는 <b>이 테스트가
- * 무엇을 보는지</b>에 달렸으므로, 사본을 하나 더 넣을 때마다 네 자리를 손으로 고쳐야 했다.
+ * 무엇을 보는지</b>에 달렸으므로, 사본을 하나 더 넣을 때마다 네 자리를 손으로 고쳐야 했다 —
+ * {@code #571}(다섯째)과 {@code #583} 이 두 PR 에 걸쳐 손으로 맞췄다.
  *
- * <p>이 테스트는 <b>자기가 비교하는 출처가 몇 개인지 안다</b>. 그래서 그 수를 문서와 맞춘다 —
- * 다음에 일곱 번째가 생기면 <b>고칠 자리를 테스트가 알려준다.</b>
+ * <p>그래서 그 수를 {@link #SOURCES} 에서 낸다. <b>사본을 늘리는 사람이 고칠 손 자리는 그
+ * 목록 하나</b>이고, 고치면 세 문서가 빨개져 나머지를 알려준다. 목록과 실제로 읽는 파일이
+ * 갈리는 것은 {@code theSourceListMatchesWhatIsActuallyRead} 가 막는다.
+ *
+ * <p>❗<b>여기까지다 — 「테스트가 다 알아서 안다」는 아니다</b>(PR #586 리뷰 실측). 대조
+ * 하나를 <b>통째로 지우면</b>({@code @Test} 삭제) 목록도 문서도 그대로라 <b>조용히 통과한다.</b>
+ * 사본을 <b>빼는</b> 사람은 {@link #SOURCES} 를 같이 줄여야 하고, 그것을 무는 것은 없다.
+ * 이 파일이 다루는 결함이 원래 «다른 사본을 모른 채 지나간다» 라, 그 방향이 남아 있다는
+ * 사실을 적어 두는 것이 지금 할 수 있는 것이다.
  */
 @DisplayName("에러 코드 계약 — 핸들러 ≡ openapi.yaml ≡ CLAUDE.md ≡ web 유니온 ≡ web 문면 ≡ 명세서 §9")
 class ErrorCodeContractTest {
@@ -110,6 +118,25 @@ class ErrorCodeContractTest {
 
     /** 제출 문서의 API 절. v1.1 이 아니라 v1.2 다 — 구현 완료 시점의 명세다(CLAUDE.md). */
     private static final String SPEC = "docs/functional-spec-v1.2.md";
+
+    private static final String HANDLER =
+            "server/src/main/java/com/sphinxfin/sphinx/api/exception/GlobalExceptionHandler.java";
+    private static final String CONTRACT = "contracts/openapi.yaml";
+    private static final String CLAUDE_MD = "CLAUDE.md";
+    private static final String WEB_UNION = "web/src/api/types.ts";
+    private static final String WEB_TEXT = "web/src/lib/errorText.ts";
+
+    /**
+     * 대조하는 사본 — 핸들러가 코드의 출처이자 첫째 사본이다.
+     *
+     * <p>❗<b>이 목록이 「N 벌」의 근거다.</b> 문서 셋이 그 수를 문면으로 적으므로, 사본을
+     * 늘리는 사람은 <b>여기부터</b> 고친다. 그러면 세 문서가 빨개져서 나머지를 알려준다.
+     */
+    private static final List<String> SOURCES =
+            List.of(HANDLER, CONTRACT, CLAUDE_MD, WEB_UNION, WEB_TEXT, SPEC);
+
+    /** 이번 실행에서 {@link #read} 가 실제로 읽은 경로. {@code SOURCES} 와 맞춰 본다. */
+    private final Set<String> readPaths = new TreeSet<>();
     private static final Pattern EMITTED = Pattern.compile("ApiError\\.of\\(\"([A-Z_]+)\"");
 
     /** CLAUDE.md의 {@code `CODE`(404)} 형식 — 코드와 상태를 함께 읽는다. */
@@ -132,12 +159,8 @@ class ErrorCodeContractTest {
     private static final Map<String, Integer> NUMERALS = Map.of(
             "한", 1, "두", 2, "세", 3, "네", 4, "다섯", 5, "여섯", 6, "일곱", 7, "여덟", 8);
 
-    /**
-     * 이 테스트가 대조하는 출처 개수. 문서의 {@code 「N 벌」} 이 이 수와 같아야 한다.
-     *
-     * <p>핸들러 · openapi · CLAUDE.md · web 유니온 · web 문면 표 · 명세서 §9.
-     */
-    private static final int COMPARED_SOURCES = 6;
+    /** 문서의 {@code 「N 벌」} 이 맞춰야 하는 수 — {@link #SOURCES} 에서 나온다. */
+    private static final int COMPARED_SOURCES = SOURCES.size();
 
     /** 「N 벌」 앞뒤로 에러 코드 낱말을 찾는 창. 한 문장이 두 줄로 접히는 문서가 있다. */
     private static final int WINDOW = 200;
@@ -266,10 +289,28 @@ class ErrorCodeContractTest {
                     + "바뀌었으면 이 대조도 같이 고친다", doc).isPositive();
         }
         assertThat(wrong)
-                .as("문서가 적은 대조 사본 수가 실제(%d)와 다르다. 사본을 늘렸으면 그 수와 "
-                        + "괄호 안 목록을 같이 고친다 — 숫자만 맞고 목록이 빠진 문서는 "
-                        + "「어느 것들이냐」에 답할 수 없다", COMPARED_SOURCES)
+                .as("문서가 적은 대조 사본 수가 실제(%d)와 다르다. 이 대조가 보는 것은 «수» "
+                        + "하나다 — 괄호 안 목록은 안 본다(문서마다 표기가 달라 값에 비해 "
+                        + "비싸다). 수를 고칠 때 그 목록도 같이 고친다", COMPARED_SOURCES)
                 .isEmpty();
+    }
+
+    @Test
+    @DisplayName("★ SOURCES 가 실제로 읽히는 파일과 같다 — 「N 벌」의 근거가 목록이라서 먼저 잰다")
+    void theSourceListMatchesWhatIsActuallyRead() throws Exception {
+        // 여섯 접근자를 다 부른다. 하나가 다른 파일을 읽거나, 목록에만 있고 아무도 안 읽는
+        // 파일이 생기면 아래 대조가 그것을 든다.
+        handlerCodes();
+        contractStatuses();
+        claudeMd();
+        webUnion();
+        errorTextCodes();
+        specCodes();
+
+        assertThat(readPaths)
+                .as("SOURCES 와 실제로 읽은 파일이 다르다. 「N 벌」 대조가 이 목록의 크기를 "
+                        + "쓰므로, 목록에 넣고 읽는 코드를 안 쓰면 문서의 수만 올라간다")
+                .containsExactlyInAnyOrderElementsOf(SOURCES);
     }
 
     @Test
@@ -315,7 +356,7 @@ class ErrorCodeContractTest {
 
     /** web 문면 표의 코드 집합. */
     private Set<String> errorTextCodes() {
-        String src = read("web/src/lib/errorText.ts");
+        String src = read(WEB_TEXT);
         int from = src.indexOf("const ERROR_TEXT");
         assertThat(from)
                 .as("web/src/lib/errorText.ts 에서 ERROR_TEXT 표를 못 찾았다 — 이름이 바뀌었으면 "
@@ -337,7 +378,7 @@ class ErrorCodeContractTest {
 
     /** web ErrorCode 유니온의 코드 → 주석에 적힌 상태(없으면 빈 문자열). */
     private Map<String, String> webUnion() {
-        String src = read("web/src/api/types.ts");
+        String src = read(WEB_UNION);
         int from = src.indexOf("export type ErrorCode");
         assertThat(from)
                 .as("web/src/api/types.ts 에서 ErrorCode 유니온을 못 찾았다 — 타입 이름이 "
@@ -358,7 +399,7 @@ class ErrorCodeContractTest {
     /** CLAUDE.md api/ 절의 코드 → 상태. */
     private Map<String, String> claudeMd() {
         Map<String, String> out = new TreeMap<>();
-        Matcher m = CLAUDE_MD_ENTRY.matcher(read("CLAUDE.md"));
+        Matcher m = CLAUDE_MD_ENTRY.matcher(read(CLAUDE_MD));
         while (m.find()) {
             out.put(m.group(1), m.group(2));
         }
@@ -370,7 +411,7 @@ class ErrorCodeContractTest {
     /** openapi enum의 코드 → 주석에 적힌 상태. */
     private Map<String, String> contractStatuses() throws Exception {
         Map<String, String> out = new TreeMap<>();
-        Matcher m = CONTRACT_ENTRY.matcher(read("contracts/openapi.yaml"));
+        Matcher m = CONTRACT_ENTRY.matcher(read(CONTRACT));
         while (m.find()) {
             out.put(m.group(1), m.group(2));
         }
@@ -382,6 +423,7 @@ class ErrorCodeContractTest {
 
     private String read(String relative) {
         try {
+            readPaths.add(relative);
             return Files.readString(REPO_ROOT.resolve(relative));
         } catch (Exception e) {
             throw new IllegalStateException("읽을 수 없다: " + relative, e);
@@ -389,9 +431,8 @@ class ErrorCodeContractTest {
     }
 
     /** GlobalExceptionHandler가 실제로 내보내는 코드. */
-    private Set<String> handlerCodes() throws Exception {
-        String src = Files.readString(REPO_ROOT.resolve(
-                "server/src/main/java/com/sphinxfin/sphinx/api/exception/GlobalExceptionHandler.java"));
+    private Set<String> handlerCodes() {
+        String src = read(HANDLER);
         Set<String> codes = new TreeSet<>();
         Matcher m = EMITTED.matcher(src);
         while (m.find()) {
