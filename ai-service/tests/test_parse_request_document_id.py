@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -140,8 +141,10 @@ def test_the_filename_fallback_announces_itself(real_pdf, caplog) -> None:
     닿는 것이고, 그것이 미결 10.87(재추출)의 완료 조건이기도 하다.
 
     ❗자리가 `derive_document_id` 안인 이유는 **폴백 호출부가 둘**이라서다 — 호출부에 각각
-    적으면 두 벌이 되고 세 번째가 생기면 또 빠진다(PR #588 리뷰). 그래서 아래는 **두 경로
-    모두**에서 그 줄이 나오는 것을 본다.
+    적으면 두 벌이 되고 세 번째가 생기면 또 빠진다(PR #588 리뷰). **이 테스트는 그중
+    `parse_upload` 경로 하나만 본다** — 나머지 하나는 아래
+    `test_the_manual_path_announces_the_fallback_too` 가 잡는다. 둘이 같이 있어야 「깔때기라
+    여기에 둔다」가 재진다(PR #593 리뷰, 강희진·정세현).
     """
     derived = parsing.derive_document_id(real_pdf)
 
@@ -166,3 +169,44 @@ def test_a_given_document_id_leaves_no_fallback_line(real_pdf, caplog) -> None:
 
     assert not [r for r in caplog.records if "파일명에서 만들었다" in r.getMessage()], \
         "호출자가 값을 줬는데 폴백 줄이 나왔다"
+
+
+# ── 두 번째 호출부도 같은 깔때기를 지난다 (PR #593 리뷰) ─────────────────────────
+#: `test_manual_parse_override.py` 의 `DOC` 와 같은 모양인데 **`document_id` 가 없다** —
+#: 있으면 JSON 값이 이겨서 폴백이 안 돈다(정세현 실측). 그 파일을 안 건드리려고 여기 둔다.
+_MANUAL_DOC_WITHOUT_ID = {
+    "product_type": "ELS",
+    "parser_version": "manual-1",
+    "pages": [{"page": 1, "text": "만기평가일에 최초기준가격의 65% 미만이면 손실이 발생한다.",
+               "char_count": 33}],
+    "tables": [],
+    "parse_warnings": [],
+}
+
+
+def test_the_manual_path_announces_the_fallback_too(tmp_path, caplog) -> None:
+    """★ **「단일 깔때기라서 여기에 둔다」를 재는 자리** (PR #593 리뷰, 강희진·정세현).
+
+    이 PR 의 자리 선택 근거가 *"호출부 둘을 한 번에 덮는다"* 인데, 위 테스트는 `parse_upload`
+    하나만 본다. 그래서 **로그를 깔때기 밖으로 빼 `parse_upload` 호출부에만 두는 변이**가
+    전건 초록이었다(실측) — 그 순간 수동 파스 경로가 조용해지고 *"알파 로그에 이 줄이
+    없어야 한다"* 가 그 경로에서만 거짓이 된다.
+
+    ❗**두 리뷰어가 독립으로 같은 자리를 짚었고, 내가 `#587` 로 뗀 것과 같은 모양이다** —
+    「직접 잰다」고 적은 테스트가 그 갈래를 안 재던 것. 이번엔 본문이 근거로 든 갈래였다.
+
+    수동 JSON 에 `document_id` 가 **없어야** 폴백이 돈다 — 있으면 그 값이 이긴다.
+    """
+    docs = tmp_path / "documents"
+    docs.mkdir()
+    (docs / "x.pdf").write_bytes(b"%PDF-1.4 (broken on purpose)")
+    (docs / "x.json").write_text(json.dumps(_MANUAL_DOC_WITHOUT_ID, ensure_ascii=False),
+                                 encoding="utf-8")
+
+    with caplog.at_level("INFO", logger="app.parsing"):
+        out = parsing.parse_upload("documents/x.pdf", product_type="ELS",
+                                   document_id=None, root=tmp_path)
+
+    assert out["document_id"] == "doc-x", "수동 경로에서 폴백이 안 돌았다면 이 테스트의 전제가 바뀐 것이다"
+    assert [r for r in caplog.records if "파일명에서 만들었다" in r.getMessage()], (
+        "수동 파스 경로가 조용하다 — 로그가 깔때기(derive_document_id) 밖으로 나갔다는 뜻이다")
