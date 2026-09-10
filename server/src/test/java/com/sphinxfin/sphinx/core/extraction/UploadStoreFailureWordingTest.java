@@ -123,6 +123,30 @@ class UploadStoreFailureWordingTest {
     }
 
     @Test
+    @DisplayName("★ 폴백은 원문 예외를 통째로 싣는다 — 추측하지 않는 것이 이 갈래의 값이다")
+    void theFallbackCarriesTheRawException() {
+        // ❗**이 갈래도 그물이 없었다**(PR #592 리뷰 실측). 폴백에서 `+ e` 를 떼도 전체
+        //   스위트가 초록이었다 — 그러면 reason 이 null 인 실패에서 운영자가 받는 것이
+        //   경로 하나가 되고 원인이 통째로 없어진다(#557 이 겪은 그 상태).
+        //
+        //   왜 안 잡혔나: 「어느 갈래로 가든」을 재는 위 테스트가 기대값을 던져진 원인에서
+        //   만든다(플랫폼 갈림을 피하는 좋은 설계다). 그 대가로 **어느 갈래가 도는지가
+        //   플랫폼에 달린다** — macOS 는 "Not a directory"(reason 있음)라 getReason 갈래로
+        //   가고, 폴백에는 아무도 안 닿았다. 즉 폴백을 재는 것이 「CI 가 리눅스라서」에
+        //   기대고 있었다.
+        //
+        //   그래서 ★ 테스트들과 같은 방식으로 storeFailed 를 직접 부른다 — 플랫폼과 무관하다.
+        IOException cause = new IOException("boom");   // reason 이 없고 권한도 아니다
+        UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
+                Path.of("/data/uploads/abc/x.pdf"), cause);
+
+        assertThat(thrown)
+                .as("원인을 지어내지 않는 대신 원문을 그대로 싣는 것이 이 갈래의 전부다 — "
+                        + "그것까지 빠지면 「저장하지 못했다」와 경로만 남는다")
+                .hasMessage("업로드 문서를 저장하지 못했다: /data/uploads/abc/x.pdf — " + cause);
+    }
+
+    @Test
     @DisplayName("❗ro 마운트는 첫째 갈래가 아니다 — 그 문면이 도달 불가능한 안내였다")
     void aReadOnlyMountGoesToTheReasonBranch() {
         // 실측(JDK 21 · docker `-v …:ro`): FileSystemException / reason="Read-only file system".
