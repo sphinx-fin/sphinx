@@ -206,13 +206,51 @@ class ParseRequest(Strict):
     product_type: ProductType = "ELS"
     document_id: str | None = Field(
         default=None,
-        description="업로드 단위 식별자. 안 주면 파일명에서 만든다 — 업로더가 가진 값이 있으면 그걸 준다",
+        description="업로드 단위 식별자. 안 주면 파일명에서 만든다 — 업로더가 가진 값이 있으면 그걸 준다. "
+                    "❗빈 값·앞뒤 공백은 거부한다(아래 검사)",
     )
     parsed_at: str | None = Field(
         default=None,
         description="호출자가 주입한다. 파서가 현재 시각을 찍으면 같은 문서의 두 파싱 결과가 "
                     "달라져 재현성 비교(P2)에 못 쓴다. 안 주면 출력에 키가 없다",
     )
+
+    @model_validator(mode="after")
+    def _document_id_is_an_id_or_absent(self) -> "ParseRequest":
+        """❗`None` 은 정당하고 **빈 값은 아니다** (이슈 #578 · 결정 1.37).
+
+        `None` 은 *"호출자가 안 준다"* 이고 그때 파일명 폴백이 도는 것이 설계다 — 단독 실행
+        경로가 실재한다(`parsing.derive_document_id`). 그런데 `""` 는 **같은 폴백을 조용히
+        되살린다**: `parsing.py` 가 `document_id or derive_document_id(path)` 라 빈 문자열이
+        falsy 로 떨어진다. 실측(#578)::
+
+            document_id=''     → 출력 doc-els-kiwoom-4181-simple-prospectus   ❗폴백이 돌았다
+            document_id='   '  → 출력 '   '                                    ❗그대로 쌓인다
+
+        둘 다 `extracted_risk_items.document_id` 에 닿는다. 결정 1.37 이 막으려던 «한 열에 두
+        규칙» 이 앞쪽으로, 뒤쪽은 «아무 값이나» 로 난다.
+
+        ❗**앞뒤 공백도 거부한다.** `' doc-x '` 를 받아 두면 `'doc-x'` 와 **다른 문서**가 되고,
+        그 차이는 로그에서 눈에 안 보인다. 여기서 `strip()` 으로 고쳐 주지 않는 이유는 그러면
+        호출자가 보낸 값과 저장된 값이 달라지기 때문이다 — 조용히 고치는 것이 이 이슈가
+        막으려는 것 그 자체다.
+
+        ❗**서버는 오늘 이 갈래에 안 닿는다** — `ProductRiskItems.documentIdOf` 가 기본값 없이
+        `NoSuchElementException`(→404) 이다. 이 검사는 그 보장이 **호출자 한쪽에만** 서 있는
+        것을 받는 쪽에서 닫는다. 다음 호출자(도구·재처리 스크립트)가 생기면 그때 열린다.
+        """
+        if self.document_id is None:
+            return self
+        if not self.document_id.strip():
+            raise ValueError(
+                "document_id 가 비어 있다 — 안 줄 거면 키를 빼거나 null 로 준다(그때만 "
+                "파일명 폴백이 돈다). 빈 문자열은 그 폴백을 조용히 되살린다(결정 1.37 · 이슈 #578)")
+        if self.document_id != self.document_id.strip():
+            raise ValueError(
+                f"document_id 앞뒤에 공백이 있다: {self.document_id!r} — 이 값은 그대로 "
+                "extracted_risk_items.document_id 에 쌓이므로 공백 하나가 다른 문서를 만든다. "
+                "여기서 고쳐 주지 않는다(보낸 값과 저장된 값이 달라진다)")
+        return self
 
 
 class ExtractRequest(Strict):
