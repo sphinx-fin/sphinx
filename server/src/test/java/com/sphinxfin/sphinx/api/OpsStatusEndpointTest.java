@@ -1,6 +1,8 @@
 package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.DemoExtractionFixture;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,7 +44,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OpsStatusEndpointTest {
 
     @Autowired private MockMvc mvc;
+    @Autowired private com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository extractedRiskItems;
+    @Autowired private com.sphinxfin.sphinx.core.extraction.UploadedProductRepository uploadedProducts;
     @MockBean private AiServiceClient aiServiceClient;
+
+    /**
+     * ❗<b>추출 스냅샷을 비우고 시작한다</b> (이슈 #568). 같은 컨텍스트(H2)를 다른 통합
+     * 테스트가 공유해서, 그쪽이 남긴 행이 있으면 이 카드가 <b>다른 상태를 재게 된다</b> —
+     * 그러면 이 파일의 단정이 실행 순서에 달린다.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void clearSnapshots() {
+        extractedRiskItems.deleteAll();
+        uploadedProducts.deleteAll();
+    }
+
+    private void healthyAiService() {
+        when(aiServiceClient.health())
+                .thenReturn(new AiServiceClient.HealthProbe(healthy(true, "enabled"), 9, null));
+        when(aiServiceClient.hasInternalToken()).thenReturn(true);
+    }
 
     /** 정상 healthz. 필드 이름은 ai-service {@code /healthz} 와 1:1 이다. */
     private AiServiceClient.AiHealth healthy(boolean keyConfigured, String internalAuth) {
@@ -141,23 +163,117 @@ class OpsStatusEndpointTest {
     }
 
     @Test
-    @DisplayName("★ 구성요소가 넷이고 순서가 고정이다 — 화면이 이 순서로 카드를 놓는다")
-    void fourComponentsInAFixedOrder() throws Exception {
+    @DisplayName("★ 구성요소가 다섯이고 순서가 고정이다 — 화면이 이 순서로 카드를 놓는다")
+    void fiveComponentsInAFixedOrder() throws Exception {
         when(aiServiceClient.health())
                 .thenReturn(new AiServiceClient.HealthProbe(healthy(true, "enabled"), 9, null));
         when(aiServiceClient.hasInternalToken()).thenReturn(true);
 
         mvc.perform(get("/ops/status"))
-                .andExpect(jsonPath("$.data.components.length()").value(4))
+                .andExpect(jsonPath("$.data.components.length()").value(5))
                 .andExpect(jsonPath("$.data.components[0].id").value("server"))
                 .andExpect(jsonPath("$.data.components[1].id").value("database"))
                 .andExpect(jsonPath("$.data.components[2].id").value("ai-service"))
                 .andExpect(jsonPath("$.data.components[3].id").value("data-volumes"))
+                // 다섯째는 추출 스냅샷이다(이슈 #568) — 없으면 데모 첫 화면이 선다.
+                .andExpect(jsonPath("$.data.components[4].id").value("extraction"))
                 // server 는 항상 UP 이다 — 이 코드가 돌고 있다는 것이 증거다.
                 .andExpect(jsonPath("$.data.components[0].health").value("UP"))
                 // facts 는 **배열**이다. 객체면 순서가 구현에 달린다(#522 요청).
                 .andExpect(jsonPath("$.data.components[0].facts[0].label").exists())
                 .andExpect(jsonPath("$.data.components[0].facts[0].value").exists());
+    }
+
+    @Test
+    @DisplayName("❗추출을 한 번도 안 돌리면 DOWN 이다 — 이 상태가 데모 첫 화면을 세운다 (#568)")
+    void noSnapshotAtAllIsDown() throws Exception {
+        healthyAiService();
+
+        mvc.perform(get("/ops/status"))
+                .andExpect(jsonPath("$.data.components[4].health").value("DOWN"))
+                // ❗«없다» 만으로는 다음 행동이 안 정해진다 — 무엇이 죽고 무엇을 돌릴지 적는다.
+                .andExpect(jsonPath("$.data.components[4].note")
+                        .value(org.hamcrest.Matchers.containsString("extract")))
+                .andExpect(jsonPath("$.data.components[4].facts[0].value")
+                        .value(org.hamcrest.Matchers.containsString("404")))
+                // 왕복은 재는 것이 없다 — 0 으로 채우면 「즉시 응답」으로 읽힌다.
+                .andExpect(jsonPath("$.data.components[4].latencyMs")
+                        .value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    @DisplayName("❗한 상품만 추출됐으면 DEGRADED 다 — 나머지는 항목 조회가 404 다 (#568)")
+    void onlyOneProductExtractedIsDegraded() throws Exception {
+        healthyAiService();
+        DemoExtractionFixture.seedEls(extractedRiskItems);
+
+        mvc.perform(get("/ops/status"))
+                .andExpect(jsonPath("$.data.components[4].health").value("DEGRADED"))
+                .andExpect(jsonPath("$.data.components[4].note")
+                        .value(org.hamcrest.Matchers.containsString("404")));
+    }
+
+    @Test
+    @DisplayName("❗사전적재 전부에 항목이 있으면 UP 이다 — 그때만 데모가 돈다 (#568)")
+    void everyPreloadedProductExtractedIsUp() throws Exception {
+        healthyAiService();
+        for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
+            DemoExtractionFixture.seed(extractedRiskItems, p.productId(), p.productType(),
+                    java.util.List.of(p.productId() + "-ITEM-1", p.productId() + "-ITEM-2"));
+        }
+
+        mvc.perform(get("/ops/status"))
+                .andExpect(jsonPath("$.data.components[4].health").value("UP"))
+                .andExpect(jsonPath("$.data.components[4].note")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                // 상품별 항목 수를 싣는다 — 「있다」만으로는 재추출이 돌았는지 못 가른다.
+                .andExpect(jsonPath("$.data.components[4].facts.length()")
+                        .value(ProductRiskItems.preloaded().size()))
+                .andExpect(jsonPath("$.data.components[4].facts[0].value")
+                        .value(org.hamcrest.Matchers.containsString("2항목")));
+    }
+
+    @Test
+    @DisplayName("★ 업로드본은 안 센다 — 세면 항목 없는 업로드본 하나에 카드가 노랑이 된다 (#568)")
+    void uploadedProductsDoNotDegradeTheCard() throws Exception {
+        healthyAiService();
+        for (ProductRiskItems.Preloaded p : ProductRiskItems.preloaded()) {
+            DemoExtractionFixture.seed(extractedRiskItems, p.productId(), p.productType(),
+                    java.util.List.of(p.productId() + "-ITEM-1"));
+        }
+        // 운영자가 방금 올린 상품 — 추출 전이라 항목이 없는 것이 **정상**이다.
+        uploadedProducts.save(com.sphinxfin.sphinx.core.extraction.UploadedProduct.builder()
+                .productId("doc-just-uploaded-abcdef0123456789")
+                .productType("ELS")
+                .displayName("방금 올린 문서")
+                .originalFilename("x.pdf")
+                .documentPath("uploads/" + "a".repeat(64) + "/x.pdf")
+                .contentSha256("a".repeat(64))
+                .sizeBytes(1024L)
+                .status("parsed")
+                .build());
+
+        mvc.perform(get("/ops/status"))
+                // ❗이 카드가 답하는 것은 «데모가 도는가» 이고 그 전제는 사전적재 2종이다.
+                //   업로드본을 세면 정상 상태가 상시 경고로 보인다.
+                .andExpect(jsonPath("$.data.components[4].health").value("UP"))
+                .andExpect(jsonPath("$.data.components[4].facts.length()")
+                        .value(ProductRiskItems.preloaded().size()));
+    }
+
+    @Test
+    @DisplayName("★ 추출 카드에 고객 데이터가 없다 — 이 카드가 ADMIN 그랜트를 흔들지 않는다 (#568)")
+    void theExtractionCardCarriesNoCustomerData() throws Exception {
+        healthyAiService();
+        DemoExtractionFixture.seedEls(extractedRiskItems);
+
+        String body = mvc.perform(get("/ops/status"))
+                .andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+
+        // ❗세션·발화·고객이라는 낱말이 응답에 없다. 서버 쪽 타입 방어는
+        //   OpsStatusHasNoCustomerDataTest 가 보지만, 이 카드는 **문자열을 만들어** 싣는
+        //   자리라 타입 그래프로는 안 보인다 — 문면으로도 한 번 본다.
+        assertThat(body).doesNotContain("session", "utterance", "sellerId", "customer");
     }
 
     @Test
