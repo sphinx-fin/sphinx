@@ -32,7 +32,11 @@ from app import rubrics
 # ❗모듈 수준에서 임포트한다 — `test_enforcement_gap.py` 머리말의 caplog 함정과 같다.
 from app.main import _log_draft_rubrics
 
-#: 지금 **검토 전인데 채점에 쓰이는** 루브릭. 변액 10종 중 7종이다.
+#: 지금 **검토 전인데 채점에 쓰이는** 루브릭. **변액 7종 전부**다 (ELS 10종은 전부 confirmed).
+#:
+#: ❗「일부가 검토 전」과 「전부가 검토 전」은 화면에서 다른 이야기다(`#617` 리뷰, 정세현).
+#: 항목마다 갈리면 배지가 맞고, 상품 전체가 그렇다면 **상품 단위 문면**이 맞을 수 있다 —
+#: `#609` ① 의 ⓑ(`Judgment.rubric_status`)를 정할 때 이 차이가 걸린다.
 #:
 #: 늘면 *"검토 안 끝난 기준이 운영 채점에 더 들어왔다"* 는 뜻이고, 줄면 누가 검토를 마친
 #: 것이다 — **둘 다 사건**이라 양방향으로 잡는다.
@@ -56,15 +60,35 @@ def test_the_draft_set_is_exactly_what_we_measured() -> None:
     )
 
 
-def test_every_els_rubric_is_confirmed() -> None:
-    """ELS 는 전부 confirmed 다 — 데모 상품이 검토 전 기준으로 채점되면 안 된다.
+def test_the_split_is_by_product_not_by_item() -> None:
+    """★ **상품별 구성을 못박는다** — 「일부가 검토 전」과 「전부가 검토 전」은 다른 이야기다.
 
-    위 목록은 문자열 집합이라 **어느 상품인지**를 말하지 않는다. 변액 7종이 draft 인 것과
-    ELS 가 하나라도 draft 가 되는 것은 **성질이 다르다** — 데모가 ELS 로 돈다.
+    ❗내가 위 목록 주석에 *"변액 10종 중 7종"* 이라고 적었었다. **틀렸다**(`#617` 리뷰,
+    정세현) — ELS 10 · 변액 7 인데 둘을 뒤섞었고, 실제는 **변액 7종 전부**다. 숫자를 주석에만
+    적으면 그런 식으로 낡는다. 그래서 그 문장을 여기서 **검사로 만든다.**
+
+        ELS      10종 · draft 0종      데모가 도는 상품이다
+        변액       7종 · draft 7종      전부다
+
+    이 구별이 `#609` ① 의 ⓑ 설계에 걸린다 — 항목마다 갈리면 배지가 맞고, 상품 전체가
+    그렇다면 **상품 단위 문면**이 맞을 수 있다. 그리고 `_DRAFT_IN_SCORING` 집합만으로는
+    이 사실이 안 잡힌다: 변액 루브릭이 confirmed 로 하나 늘어도 그 집합은 그대로다.
     """
+    by_type: dict[str, list[str]] = {}
+    for item_id, r in rubrics.all_rubrics().items():
+        by_type.setdefault(r.product_type, []).append(item_id)
     drafts = set(rubrics.drafts_in_scoring())
-    els = {i for i, r in rubrics.all_rubrics().items() if r.product_type == "ELS"}
-    assert not (drafts & els), f"ELS 루브릭이 검토 전이다: {sorted(drafts & els)}"
+
+    els = set(by_type["ELS"])
+    var = set(by_type["VARIABLE_INSURANCE"])
+
+    assert not (drafts & els), (
+        f"ELS 루브릭이 검토 전이다: {sorted(drafts & els)} — **데모가 ELS 로 돈다**")
+    assert drafts == var, (
+        f"「변액 전부가 검토 전」이 더 이상 참이 아니다. 검토 끝남: {sorted(var - drafts)} · "
+        f"변액 밖에서 새로 draft: {sorted(drafts - var)}. 위 목록 주석과 #617·#609 의 "
+        f"문면을 같이 고친다"
+    )
 
 
 def test_scoring_cannot_tell_the_two_apart() -> None:
