@@ -530,8 +530,14 @@ public class AiServiceClient {
      * {@code status=extraction_failed} 로 온 것과 짝을 이룬다 — 코드셋은 ai-service 의
      * {@code ExtractionWarning}(ITEM_NOT_FOUND·SPAN_UNRESOLVED·LOOSE_MATCH·AMBIGUOUS_SPAN·
      * PAGE_CORRECTED·QUOTE_NARROWED·NARROWING_REFUSED·UNKNOWN_ITEM_ID·IMPORTANCE_PLACEHOLDER·
-     * <b>MANUAL_SOURCE</b>).
+     * <b>MANUAL_SOURCE</b>·<b>EVIDENCE_WIDENED</b>·<b>EVIDENCE_PIECE_MISSING</b>).
      * 이 클라이언트는 코드를 문자열로 실어 나르기만 하고 해석은 배선 단계가 한다.
+     *
+     * <p>❗{@code EVIDENCE_WIDENED} 는 <b>우리가 뒤에서 인용을 넓혔다</b>는 뜻이다(이슈 #456).
+     * 루브릭이 요구하는 요소의 근거가 원문에서 조건절과 결론에 갈려 있으면 모델이 어느 쪽을
+     * 인용하든 축자 검증을 통과해서 회차마다 다른 답이 나왔다 — 템플릿이 선언한 조각을 덮도록
+     * 결정론으로 넓힌다. 조용히 넓히면 «모델이 전문을 인용했다»로 읽히므로 경고로 남긴다.
+     * {@code EVIDENCE_PIECE_MISSING} 은 그 조각이 그 페이지에 없어 <b>안 넓혔다</b>는 뜻이다.
      *
      * <p>❗{@code MANUAL_SOURCE} 만 <b>문서 단위</b>다 — {@code itemId} 가 비어서 온다.
      * 파스 출력이 사람이 만든 것이라는 뜻이고(ai-service {@code parse_warnings} 의

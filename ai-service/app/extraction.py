@@ -178,6 +178,8 @@ def _to_risk_item(
             message="낱자 사이 개행까지 허용해 찾았다 — 거짓 양성 가능, 사람 확인 필요",
         ))
 
+    span = _widen_to_cover(span, template_item, doc, warnings)
+
     occurrences = parsing.find_occurrences(doc, span["source_span"]["page"], candidate.quote)
     if len(occurrences) > 1:
         warnings.append(ExtractionWarning(
@@ -196,6 +198,93 @@ def _to_risk_item(
             source_span=SourceSpan(**span["source_span"]),
         ),
     )
+
+
+#: 줄머리 원문자만 조항을 연다. `⑧ 위 ⑥에 해당하지 않고` 처럼 **절 안의 참조**가 같은 글자라
+#: 위치를 안 보면 그것이 시작으로 잡힌다(실측: 넓힘 결과가 807 과 811 로 갈렸다).
+_CLAUSE_OPENER = re.compile(r"(?:^|(?<=\n))[\u2460-\u2473]")
+
+
+def _widen_to_cover(
+    span: dict, template_item: templates.TemplateItem, doc: dict,
+    warnings: list[ExtractionWarning],
+) -> dict:
+    """선언된 조각을 덮도록 스팬을 **결정론으로** 넓힌다 (이슈 #456).
+
+    ## 왜 있나
+
+    루브릭이 `u1_requires: 2` 로 두 요소를 요구하는데 그 근거가 원문에서 **조건절과 결론에
+    갈려 있으면**, 모델이 어느 쪽을 인용하든 P6(1절 F-EXT-002) 축자 검증을 통과한다 — *"원문과 같은가"* 는
+    재지만 *"필요한 것을 덮는가"* 는 아무도 안 재기 때문이다. 같은 문서·같은 프롬프트에서
+    **여섯 회차에 세 답**이 나왔고 셋 다 초록이었다.
+
+    ❗**프롬프트로는 못 고친다.** 모델은 인용만 내고 스팬은 여기서 정해지므로, 어떤 문면을
+    써도 «어느 조각을 인용하나» 가 회차마다 흔들린다. 게다가 `eval` 문맥을 다시 만드는 것이
+    `extraction.extract()` 를 부르는 일이라 **재생성 자체가 또 한 회차**다. 그래서 모델이
+    무엇을 골랐든 같은 답이 나오게 **뒤에서** 맞춘다.
+
+    ## 어떻게
+
+        1. 선언된 조각마다 **해소된 인용에 가장 가까운 출현**을 찾아 범위를 넓힌다
+        2. 시작을 그 위 **줄머리 원문자(조항 머리)** 로 스냅한다
+        3. 끝을 그 줄 끝으로 스냅한다
+
+    조각이 문서 전체에서 유일할 필요가 없는 것이 1 때문이다(`최초기준가격의` 는 p8 에만
+    4회). 실측 — 다섯 갈래(결론만·조건만·수식만·전문·한 글자)가 전부 한 값으로 모인다.
+
+    ❗**선언이 없으면 아무것도 안 한다.** 지금 이 규약을 쓰는 항목은 하나뿐이고, 나머지는
+    이 함수를 지나도 스팬이 그대로다 — 넓힘은 **선언한 항목에만** 걸리는 옵트인이다.
+
+    ❗**같은 페이지 안에서만 넓힌다.** 조각이 그 페이지에 없으면 넓히지 않고 경고를 남긴다 —
+    은폐하지 않는다(E-EXT-03) — 남은 조각으로는 계속 넓힌다.
+    그물은 `tests/test_evidence_covers_required.py` 다.
+    """
+    wanted = template_item.evidence_must_cover
+    if not wanted:
+        return span
+
+    page = span["source_span"]["page"]
+    try:
+        text = parsing.page_text(doc, page)
+    except KeyError:            # 해소가 준 페이지라 정상 경로에서는 안 난다
+        return span
+
+    lo, hi = span["source_span"]["start"], span["source_span"]["end"]
+    missing: list[str] = []
+    for piece in wanted:
+        hits = [i for i in range(len(text)) if text.startswith(piece, i)]
+        if not hits:
+            missing.append(piece)
+            continue
+        # 해소된 인용에 가장 가까운 출현 — 유일할 필요가 없는 이유다
+        near = min(hits, key=lambda i: min(abs(i - lo), abs(i + len(piece) - hi)))
+        lo, hi = min(lo, near), max(hi, near + len(piece))
+
+    if missing:
+        warnings.append(ExtractionWarning(
+            code="EVIDENCE_PIECE_MISSING", item_id=template_item.item_id,
+            message=f"덮어야 할 조각이 p{page} 에 없다: {missing} — 인용을 안 넓혔다",
+        ))
+
+    openers = [m.start() for m in _CLAUSE_OPENER.finditer(text[:lo + 1])]
+    if openers:
+        lo = openers[-1]
+    newline = text.find("\n", hi)
+    hi = len(text) if newline < 0 else newline
+
+    if (lo, hi) == (span["source_span"]["start"], span["source_span"]["end"]):
+        return span
+
+    warnings.append(ExtractionWarning(
+        code="EVIDENCE_WIDENED", item_id=template_item.item_id,
+        message=(f"인용을 [{span['source_span']['start']}, {span['source_span']['end']}) 에서 "
+                 f"[{lo}, {hi}) 로 넓혔다 — 루브릭 필수요소의 근거가 갈려 있다(이슈 #456)"),
+    ))
+    return {
+        **span,
+        "value_text": text[lo:hi],
+        "source_span": {"page": page, "start": lo, "end": hi},
+    }
 
 
 def _resolve(candidate: ExtractedCandidate, doc: dict, warnings: list[ExtractionWarning]):
