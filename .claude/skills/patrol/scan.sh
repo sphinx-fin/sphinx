@@ -25,6 +25,14 @@ last_speaker() {
     | sort_by(.at) | last | if . == null then "(발언 없음)" else "\(.who) \(.at[0:16])" end'
 }
 
+# PR 한 건에서 **내가 마지막으로 낸 리뷰**의 상태. 사용자별 최신만 본다 —
+# 코멘트를 덧붙여도 앞선 변경요청이 살아 있는 것이 이 레포의 판정 규칙이다.
+my_review_state() {
+  gh pr view "$1" --repo "$REPO" --json reviews -q "
+    [.reviews[]? | select(.author.login == \"$ME\")]
+    | sort_by(.submittedAt) | last | .state // \"없음\""
+}
+
 pr_rows() {
   gh pr list --repo "$REPO" --state open --limit 60 \
     --json number,title,author,isDraft,reviewDecision,labels,statusCheckRollup,reviewRequests \
@@ -51,6 +59,17 @@ if [ "$WHAT" = all ] || [ "$WHAT" = inbox ]; then
   gh pr list --repo "$REPO" --search "review-requested:@me state:open" \
     --json number,title,author,reviewDecision \
     -q '.[] | "#\(.number)\t\(.author.login)\t\(.title[0:70])"' || echo "(없다)"
+
+  # ❗내가 변경요청을 낸 PR 은 **고쳐지면 재리뷰가 내 차례**인데, 재리뷰 요청이 자동으로
+  # 다시 오지 않는다 — 위 두 갈래 어디에도 안 뜬다. 실제로 `#617` 에서 이걸 놓쳤다.
+  hr "내가 변경요청한 PR — 고쳐졌으면 재리뷰가 내 차례다"
+  gh pr list --repo "$REPO" --search "state:open reviewed-by:@me" --limit 30 \
+    --json number,title,author,isDraft \
+    -q ".[] | select(.author.login != \"$ME\" and .isDraft == false) | \"\(.number)\t\(.author.login)\t\(.title[0:55])\"" \
+  | while IFS=$'\t' read -r n who title; do
+      [ "$(my_review_state "$n")" = "CHANGES_REQUESTED" ] || continue
+      printf '#%-5s %-12s %s\n        그 뒤 마지막 발언: %s\n' "$n" "$who" "$title" "$(last_speaker "$n")"
+    done
 
   hr "나를 멘션한 열린 항목 — 최근순 15"
   gh api "search/issues?q=repo:$REPO+mentions:$ME+state:open&sort=updated&per_page=15" \
