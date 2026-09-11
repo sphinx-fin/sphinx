@@ -91,6 +91,19 @@ gh pr view N --json reviewRequests -q '[.reviewRequests[].login]|join(", ")'
 커밋 상태다.** 승인이 마지막 사건인데 푸시가 없는 PR 은 라벨이 안 낫는다 — 아무 커밋이나
 한 번 밀면 맞춰진다.
 
+**본문에 백틱이 있으면 `--body-file` 로 낸다.** `gh pr comment --body "$(cat <<'EOF' … EOF)"`
+는 heredoc 이 quoted 여도 `$()` 안에서 백틱이 명령 치환으로 새는 경우가 있다 — 그때
+**코멘트는 올라가고 그 자리만 빈다.** 에러는 터미널에만 남으므로 올린 뒤 본문을 확인하지
+않으면 모른다(실제로 `#610` 에서 한 번 냈다). 파일로 쓰고 `--body-file` 을 주면 셸을
+안 지난다.
+
+```bash
+cat > "$TMP/c.md" <<'BODY'
+… 백틱 든 본문 …
+BODY
+gh pr comment N --body-file "$TMP/c.md"
+```
+
 **스택 PR 은 부모를 `--delete-branch` 로 머지하지 않는다** — 자식 PR 이 닫힌다.
 자식을 먼저 재타깃한다.
 
