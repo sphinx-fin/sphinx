@@ -309,6 +309,8 @@ class ExtractionWarning(Strict):
         "UNKNOWN_ITEM_ID",       # 템플릿에 없는 item_id 를 모델이 만들어냄
         "IMPORTANCE_PLACEHOLDER",  # 템플릿 importance 미부여 (이슈 #26)
         "MANUAL_SOURCE",         # ❗파스 출력이 사람이 만든 것이다 (#436·#441) — 아래 참조
+        "EVIDENCE_WIDENED",      # 루브릭 필수요소를 덮도록 인용을 넓혔다 (#456)
+        "EVIDENCE_PIECE_MISSING",  # 덮을 조각이 없다 → 항목을 실패로 낸다 (#456)
     ]
     item_id: str | None = None
     message: str
