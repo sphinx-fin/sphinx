@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </pre>
  *
  * <p>이 화면이 스스로 세운 규칙(<i>"0 과 「셀 수 없다」를 가른다"</i>)을 정확히 뒤집는다.
- * {@code ErrorCodeContractTest} 가 에러 코드 다섯 벌을 대조하는 이유와 같은 자리인데,
+ * {@code ErrorCodeContractTest} 가 에러 코드 여섯 벌을 대조하는 이유와 같은 자리인데,
  * <b>응답 스키마 쪽에는 그 대조가 없었다.</b>
  *
  * <h2>❗허용 목록을 두지 않는다</h2>

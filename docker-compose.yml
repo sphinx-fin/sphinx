@@ -169,10 +169,14 @@ services:
       # ai-service 는 401 로 막는 조합이 되는데, 그건 배포가 아니라 런타임에 드러난다.
       SPHINX_INTERNAL_TOKEN: ${SPHINX_INTERNAL_TOKEN:?SSM 에서 받는다 — scripts/deploy_ec2.sh 참조}
       # ── F-DSH-003 합성 세션 (이슈 #179 · PR #194) ────────────────────────────
-      # `deploy_ec2.sh` 가 배포마다 `gen_synth_sessions.py` 로 68건을 만드는데 **서버가
+      # `deploy_ec2.sh` 가 배포마다 `gen_synth_sessions.py` 로 산출물을 만드는데 **서버가
       # 안 읽고 있었다** — `SyntheticSessionLoader` 는 기본값이 `false` 고 main 어디에도
       # 켜는 자리가 없었다. 그래서 alpha 의 S-08 이 전부 `MIN_CELL_SAMPLE(30)` 아래로
       # 떨어져 **빗금 친 표**로 뜬다(화면은 정상 동작이라 더 안 보인다).
+      #
+      # ❗**여기에 건수를 적지 않는다**(이슈 #580). 예전에 「68건」이라고 적혀 있었는데 지금
+      # 재생성하면 66 이다 — 그 수가 파라미터가 아니라 템플릿의 `required` 항목 수에 걸려
+      # 움직인다. 수가 필요하면 `data/synth_sessions/distribution.yaml` 을 본다.
       #
       # ❗**여기서 `true` 로 못 박지 않는다.** 켜 놓고 파일이 없으면 로더가
       # `UncheckedIOException` 을 던져 **server 가 기동을 못 한다** — 산출물은 추적하지

@@ -1,0 +1,137 @@
+/* 운영 콘솔 (`/console`). 소유: 오준서.
+
+   ❗**이 파일이 판정 3색을 쓰는 유일한 「제품 흐름 밖」 화면이다.** 근거와 조건 셋(제품
+   흐름 밖 · 라벨 병기 · 고객 비노출)은 `Console.tsx` 머리말에 있다 — `tokens.css` 규칙 1
+   자체는 이 PR 이 안 건드리므로 그 예외를 모른다. 여기서 지켜야 하는 것은 조건 둘째다 —
+   **색이 붙는 자리마다 글자가 같이 있어야 한다.** 색만 남기는 「깔끔한」 정리는 이
+   화면에서 규칙 위반이다.
+
+   S-08 이 집계에 3색을 **안 쓰는** 것과 모순이 아니다. 그쪽은 수치가 판정처럼 보이면
+   「지점 성과 지표」로 읽히는 자리이고, 여기는 값 자체가 판정과 같은 종류(정상·주의·불가)다. */
+
+/* 폭 규칙은 S-08 과 같은 짝이다 — `max-width` 만 두면 좁은 뷰포트에서 min-content 로
+   버틴다. 여기 카드는 그렇게까지 넓어질 것이 없지만, 규칙을 화면마다 다르게 두면
+   다음 화면에서 또 밟는다. */
+.cn { width: 100%; max-width: min(72rem, 100%); margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-5); }
+
+.cn h1 { font-size: calc(30px * var(--scale)); line-height: calc(1.34 * var(--leading-scale));
+  letter-spacing: -0.03em; font-weight: 700; }
+.cn__back { color: var(--accent); font-size: calc(14px * var(--scale)); font-weight: 600; }
+.cn__lead { color: var(--text-muted); font-size: calc(14px * var(--scale)); margin-top: var(--space-1); }
+.cn__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.cn__head { display: flex; flex-wrap: wrap; gap: var(--space-4);
+  align-items: flex-start; justify-content: space-between; }
+
+/* ── 폴링 상태 ───────────────────────────────────────────────────────────── */
+.cn__poll { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-1); }
+.cn__checked { font-size: calc(15px * var(--scale)); font-weight: 700;
+  font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: var(--space-2); }
+.cn__poll-note { color: var(--text-muted); font-size: calc(13px * var(--scale)); }
+.cn__poll-btns { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
+
+/* 도는 중 표시. **강조색이 아니라 무채색이다** — 누를 수 있는 것이 아니다(토큰 규칙 2). */
+.cn__dot { width: 8px; height: 8px; border-radius: var(--radius-pill);
+  background: var(--text-muted); animation: cn-pulse 1.1s ease-in-out infinite; }
+@keyframes cn-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+.cn__btn { height: var(--control-h-sm); padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--text); font-weight: 600;
+  font-size: calc(14px * var(--scale)); cursor: pointer;
+  transition: background var(--dur-press) var(--ease), border-color var(--dur-press) var(--ease); }
+.cn__btn:hover { background: var(--surface-sunken); }
+.cn__btn[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+/* ── 배포 줄 ─────────────────────────────────────────────────────────────── */
+.cn__deploy { display: flex; flex-wrap: wrap; gap: var(--space-5);
+  background: var(--surface); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1); padding: var(--space-4) var(--space-5); }
+.cn__item { display: flex; flex-direction: column; gap: var(--space-1); }
+.cn__item-label { font-size: calc(12px * var(--scale)); font-weight: 600; color: var(--text-muted); }
+.cn__item-value { font-size: calc(15px * var(--scale)); font-weight: 600;
+  font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: var(--space-2); }
+
+.cn__caveat { color: var(--text-muted); font-size: calc(13px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale));
+  background: var(--surface-sunken); border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4); }
+
+.cn__error { background: var(--red-bg); color: var(--red); border: 0;
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+
+/* ── 차단됨 ──────────────────────────────────────────────────────────────── */
+.cn__blocked { background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); padding: var(--space-6); }
+.cn__blocked h2 { font-size: calc(22px * var(--scale)); font-weight: 700; margin-bottom: var(--space-3); }
+.cn__blocked p { font-size: calc(16px * var(--scale)); line-height: calc(1.6 * var(--leading-scale)); }
+.cn__blocked-why { color: var(--text-muted); }
+.cn__blocked p + p { margin-top: var(--space-3); }
+
+/* ── 카드 ────────────────────────────────────────────────────────────────── */
+/* `auto-fit` + `minmax` 라 창이 좁아지면 저절로 줄어든다. 하한을 **26rem 으로 잡아 넓은
+   창에서 2×2 가 되게** 했다 — 20rem 이면 3열이 되고 카드가 넷이라 마지막 하나가 혼자
+   둘째 줄에 남는다(실측). facts 값에 파일 경로가 들어오므로 카드가 넓은 편이 낫다.
+   `min(…, 100%)` 은 좁은 뷰포트에서 하한이 화면보다 커져 가로 스크롤이 나는 것을 막는다. */
+.cn__cards { display: grid; gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+  /* 카드를 내용 높이로 둔다. 늘리면 facts 가 적은 카드(연결 실패 등)가 **빈 상자**가
+     되는데, 이 화면은 이상한 카드를 눈으로 찾는 자리라 빈 면이 그 훑기를 방해한다. */
+  align-items: start; }
+
+.cn__card { background: var(--surface); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1); padding: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-3);
+  /* 상태는 **왼쪽 띠**로도 말한다. 칩 하나만 두면 카드 넷을 훑을 때 눈이 칩을 찾아야
+     하는데, 이 화면의 사용 방식은 「이상한 카드를 찾는 것」이다. */
+  border-left: 4px solid var(--border-strong); }
+.cn__card[data-health="UP"]       { border-left-color: var(--green); }
+.cn__card[data-health="DEGRADED"] { border-left-color: var(--yellow); }
+.cn__card[data-health="DOWN"]     { border-left-color: var(--red); }
+
+.cn__card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.cn__card-head h2 { font-size: calc(18px * var(--scale)); font-weight: 700; }
+
+/* 칩은 면 + 글자다. 면만 남기면 색각 이상에서 적/녹이 같아진다(토큰 규칙 3). */
+.cn__chip { border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3);
+  font-size: calc(13px * var(--scale)); font-weight: 700; white-space: nowrap; }
+.cn__chip[data-health="UP"]       { background: var(--green-bg);  color: var(--green); }
+.cn__chip[data-health="DEGRADED"] { background: var(--yellow-bg); color: var(--yellow); }
+.cn__chip[data-health="DOWN"]     { background: var(--red-bg);    color: var(--red); }
+
+.cn__latency { font-size: calc(14px * var(--scale)); color: var(--text-muted);
+  font-variant-numeric: tabular-nums; }
+
+/* note 는 「무엇을 고쳐야 하는가」다 — 카드에서 제일 무겁게 둔다. */
+.cn__note { font-size: calc(14px * var(--scale)); line-height: calc(1.6 * var(--leading-scale));
+  font-weight: 600; background: var(--surface-sunken); border-radius: var(--radius);
+  padding: var(--space-3); }
+.cn__card[data-health="DEGRADED"] .cn__note { background: var(--yellow-bg); color: var(--yellow); }
+.cn__card[data-health="DOWN"]     .cn__note { background: var(--red-bg);    color: var(--red); }
+
+.cn__facts { display: flex; flex-direction: column; gap: var(--space-2); }
+.cn__facts > div { display: flex; gap: var(--space-3); align-items: baseline;
+  border-top: 1px solid var(--border); padding-top: var(--space-2); }
+.cn__facts > div:first-child { border-top: 0; padding-top: 0; }
+.cn__facts dt { flex: 0 0 auto; min-width: 7.5rem; font-size: calc(13px * var(--scale));
+  font-weight: 600; color: var(--text-muted); }
+/* 값에 경로·URL 이 들어온다 — 안 접으면 카드가 가로로 넘친다. */
+.cn__facts dd { font-size: calc(14px * var(--scale)); overflow-wrap: anywhere; }
+.cn__facts-empty { font-size: calc(13px * var(--scale)); color: var(--text-muted); }
+
+/* ── 지연 추이 (브라우저 메모리) ─────────────────────────────────────────── */
+.cn__trend { display: flex; align-items: flex-end; gap: 2px; height: 32px;
+  margin-top: auto; padding-top: var(--space-2); }
+/* 한 가지 잉크의 **높이**로만 말한다 — 계열 색을 주면 판정 3색과 경쟁한다(S-08 과 같은
+   판단). 이 화면이 3색을 쓰는 자리는 상태이지 수치가 아니다. */
+.cn__bar { flex: 1 1 0; min-width: 2px; background: var(--border-strong);
+  border-radius: 1px; }
+/* 못 잰 자리. **높이 0 이 아니라 바닥 점**이다 — 0 으로 두면 「빠르다」로 읽힌다. */
+.cn__bar--gap { align-self: flex-end; height: 2px; background: var(--border); }
+
+@media (prefers-reduced-motion: reduce) {
+  /* 이 점은 「도는 중」이 곧 정보라, 모션이 꺼지면 켜진 채로 둔다(S-08 진행 막대와 같은 판단). */
+  .cn__dot { animation: none; opacity: 1; }
+}

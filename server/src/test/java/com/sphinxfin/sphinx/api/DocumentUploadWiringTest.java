@@ -481,6 +481,32 @@ class DocumentUploadWiringTest {
     }
 
     @Test
+    @DisplayName("❗재추출이 「문서에 닿지 못했다」를 「AI 장애」로 내지 않는다 — 운영자가 ai-service 를 재시작한다 (#556)")
+    void reExtractingAnUnreachableDocumentNamesTheDeployment() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
+                .thenReturn(parsed("ELS"));
+        String productId = upload("volume.pdf", "ELS", PDF);
+
+        // 볼륨이 root:root 인 상태의 증상 — ai-service 는 멀쩡하고 못 읽는 것이 우리 배포다.
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
+                .thenThrow(new com.sphinxfin.sphinx.core.aiservice.DocumentUnreachableException(
+                        "ai-service /internal/parse 실패: HTTP 502 — DOCUMENT_ACCESS_DENIED: "
+                        + "업로드 원본을 읽을 권한이 없다"));
+
+        mvc.perform(post("/products/{id}/extract", productId))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error.code").value("DOCUMENT_UNREACHABLE"))
+                // ❗«다시 올려라» 도 «서비스 장애» 도 아니다. 둘 다 아무것도 안 고친다.
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.containsString("볼륨")))
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("채점 서비스"))))
+                // 저장 경로는 로그에만 남긴다(#582 와 같은 규약).
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("uploads/"))));
+    }
+
+    @Test
     @DisplayName("❗재추출이 「문서 문제」를 502 로 내지 않는다 — 운영자가 문서를 의심하지 않았다")
     void reExtractingAnUnreadableDocumentIsNotAnOutage() throws Exception {
         when(aiServiceClient.parse(anyString(), anyString(), anyString()))

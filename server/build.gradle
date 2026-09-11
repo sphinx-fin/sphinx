@@ -135,6 +135,19 @@ tasks.named('test') {
             .withPropertyName('webErrorCodeUnion')
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // docs/functional-spec-v1.2.md §9 가 **여섯 번째 사본**이다 — 제출 문서의 API 절이
+    // 같은 목록을 들고, DOCUMENT_UNPROCESSABLE 이 들어온 뒤에도 「13종」으로 낡아 있었다
+    // (#583 이 손으로 고쳤다). 그 문서만 고치는 PR 에서 대조가 돌아야 한다.
+    inputs.file('../docs/functional-spec-v1.2.md')
+            .withPropertyName('functionalSpecV12')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // README.md 도 같은 이유다 — 「에러 코드 여섯 벌」이라는 **수**를 적고, 그 수는 이
+    // 테스트가 무엇을 보는지에 달렸다.
+    inputs.file('../README.md')
+            .withPropertyName('readme')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // web/src/lib/errorText.ts 의 문면 표가 **다섯 번째 사본**이다. 위 넷과 같은 이유로
     // 입력이고, 이건 **선언을 빼고 실측해서 확인했다** — 표에서 코드 한 줄을 지우고 돌리면
     // `BUILD SUCCESSFUL` 이 난다(test 가 UP-TO-DATE). 변이가 안 잡히는 그물은 없느니만
