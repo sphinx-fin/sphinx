@@ -55,18 +55,15 @@ def _declared() -> list[templates.TemplateItem]:
     return out
 
 
-# ── 커밋된 문맥이 규약을 지킨다 ────────────────────────────────────────────────
-@pytest.mark.xfail(
-    strict=True,
-    reason="커밋된 문맥이 아직 넓힘 전 회차다(결론 18자) — #409 가 재생성할 때 초록이 된다",
-)
-def test_the_committed_context_covers_every_required_element() -> None:
-    """★ **커밋된 추출 산출물**이 선언된 조각을 다 덮는다 (이슈 #456).
+# ── 커밋된 문맥이 지금 어느 회차인가 ──────────────────────────────────────────
+def test_the_committed_context_is_still_the_round_before_widening() -> None:
+    """★ 커밋된 추출 산출물이 **아직 넓힘 전 회차**임을 못 박는다 (이슈 #456).
 
     ❗여기가 이 이슈의 본체다. `eval/data/context/els.json` 이 채점 표본의 `[상품 조건 원문]`
-    이고, 그것이 반쪽이면 그 표본으로 잰 수치가 근거 없이 나온다.
+    이고, 그것이 반쪽이면 그 표본으로 잰 수치가 근거 없이 나온다. 지금 커밋돼 있는 것은
+    결론 18자(`'이 경우 원금 손실이 발생합니다.'`)라 **필수요소 ①의 근거가 없다.**
 
-    ## ❗지금은 `xfail(strict)` 다 — 이 PR 이 문맥을 재생성하지 않기 때문이다
+    ## 이 PR 이 문맥을 재생성하지 않는 이유
 
     `build_context.py` 를 돌리면 `built_at` 이 바뀌고 그 순간
     `eval/tests/test_model_output_matches_context.py` 가 **빨개진다** — 그 파일이 `#456` 을
@@ -74,26 +71,37 @@ def test_the_committed_context_covers_every_required_element() -> None:
     수치(QWK)가 이 PR 에서 바뀐다. `#409` 가 그 배치를 들고 있고 *"91회는 두 번 돌릴 값이
     아니다"* 가 그쪽 판단이므로, **재생성은 거기서 한 번에** 한다.
 
-    ❗**`strict=True` 인 이유**: 재생성이 끝나면 이 단정이 통과하는데, 그때 `xpass` 로 조용히
-    지나가면 이 표시가 영원히 남는다. strict 면 **초록이 되는 순간 빨개져서** 이 데코레이터를
-    걷으라고 말한다 — 「고쳤는데 아무도 안 걷는 표시」를 안 만든다.
+    ## ❗그래서 `xfail` 이 아니라 「못 박기」다
 
-    걷는 조건은 하나다 — `eval/data/context/els.json` 이 넓힘 뒤 추출로 재생성되는 것.
+    처음엔 «덮는다» 를 `xfail(strict)` 로 뒀는데 **CI 가 그걸 못 쓴다** — pytest 는 xfail 을
+    JUnit XML 에 `<skipped>` 로 적고 `.github/scripts/no_skip.py` 가 skip 하나에 빌드를
+    떨어뜨린다(*"CI 에서 skip 은 검산이 안 돌았다"* · `#73`). 로컬은 `1 xfailed` 로 초록인데
+    러너만 빨간 형태였다.
+
+    못 박기는 신호가 같고 **초록으로 산다**: 문맥이 재생성되는 순간 빠진 조각이 없어져서 이
+    단정이 빨개지고, 그때 «덮는다» 쪽으로 뒤집으면서 `#456` 을 닫는다. 「고쳤는데 아무도 안
+    걷는 표시」를 안 만든다는 목적은 그대로다.
     """
     ctx = json.loads(CONTEXT.read_text(encoding="utf-8"))
-    items = ctx["risk_items"]
 
+    stale: dict[str, list[str]] = {}
     for item in _declared():
-        got = items.get(item.item_id)
-        if got is None:
-            pytest.skip(f"{item.item_id} 가 문맥에 없다 — 표본 구성이 바뀐 것이다")
+        got = ctx["risk_items"].get(item.item_id)
+        assert got is not None, (
+            f"{item.item_id} 가 문맥에 없다 — 표본 구성이 바뀌었으면 이 파일의 전제가 낡았다")
         text = got["condition"]["value_text"]
-        missing = [p for p in item.evidence_must_cover if p not in text]
-        assert not missing, (
-            f"{item.item_id}: 인용이 필수요소의 근거를 덜 덮는다 — 빠진 조각 {missing}. "
-            f"루브릭이 u1_requires 로 요구하는 요소의 근거가 원문에서 갈려 있는데 인용이 "
-            f"한쪽만 집었다는 뜻이다(이슈 #456). 인용: {text[:60]!r}"
-        )
+        stale[item.item_id] = [p for p in item.evidence_must_cover if p not in text]
+
+    assert stale == {"ELS-MATURITY-LOSS-CONDITION": ["최초기준가격의"]}, f"""\
+커밋된 문맥의 상태가 기록과 다르다 — 지금 빠진 조각: {stale}
+
+빠진 것이 **없어졌다면** 좋은 소식이다: `eval/data/context/els.json` 이 넓힘 뒤 추출로
+재생성된 것이다. 이 단정을 «모든 필수요소를 덮는다» 로 뒤집고 `#456` 을 닫는다 —
+
+    assert stale == {{item.item_id: [] for item in _declared()}}
+
+**다른 조각이 빠졌다면** 문맥이 또 다른 회차로 바뀐 것이다. 어느 스팬이 실렸는지 보고
+`_widen_to_cover` 가 그 회차에서도 같은 값으로 모으는지 먼저 잰다."""
 
 
 def test_the_span_still_resolves_to_the_source() -> None:
@@ -102,9 +110,7 @@ def test_the_span_still_resolves_to_the_source() -> None:
     doc = _doc()
 
     for item in _declared():
-        got = ctx["risk_items"].get(item.item_id)
-        if got is None:
-            continue
+        got = ctx["risk_items"][item.item_id]
         span, text = got["condition"]["source_span"], got["condition"]["value_text"]
         page = parsing.page_text(doc, span["page"])
         assert page[span["start"]:span["end"]] == text, (
