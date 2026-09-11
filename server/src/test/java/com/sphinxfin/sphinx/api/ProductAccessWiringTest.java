@@ -26,6 +26,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -120,6 +121,60 @@ class ProductAccessWiringTest {
 
         mvc.perform(post("/products/{id}/extract", "doc-els-kiwoom-4181").with(as("seller-01", "SELLER")))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("❗판매자는 루브릭을 못 본다 — 채점 정답표라 7-4 에 걸린다 (#475 · README:92)")
+    void theSellerCannotReadRubrics() throws Exception {
+        // ❗**정책 한 줄만으로는 다음 사람이 역할을 더해도 조용하다.** rbac_policy 의
+        //   rubric:read 에 SELLER 를 넣으면 이 두 줄이 200 이 되고, 그때 빨개지는 것이
+        //   여기다(#610 리뷰에서 제가 이 그물을 약속한 자리).
+        //
+        //   무서운 쪽은 덜 허용하는 변이가 아니라 **더 허용하는 변이**다 — 기준을 아는
+        //   판매자는 "이렇게 답하시면 통과합니다" 를 할 수 있다.
+        mvc.perform(get("/products/rubrics").with(as("seller-01", "SELLER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/products/rubrics/{id}", "ELS-PRINCIPAL-LOSS-WARNING")
+                        .with(as("seller-01", "SELLER")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("루브릭은 준법감시·지점장·관리자가 본다 — 공개 의무를 보이는 자리다 (#493 · #494)")
+    void supervisorsAndAdminReadRubrics() throws Exception {
+        // ❗**목록 길이와 total 을 일부러 다르게 둔다.** 같게 두면 경계에서 total 을
+        //   목록 길이로 접어도 이 단정이 통과한다(실측: 그 변이가 초록이었다) — 그러면
+        //   화면이 걸러진 목록을 「이게 전부」로 읽는 것을 아무도 안 막는다.
+        when(aiServiceClient.rubrics(null))
+                .thenReturn(new AiServiceClient.RubricList(java.util.List.of(
+                        new com.sphinxfin.sphinx.domain.Rubric(
+                                "ELS-PRINCIPAL-LOSS-WARNING", "ELS", "원금손실 가능성", "confirmed",
+                                java.util.List.of("원금이 깨질 수 있다"), 1,
+                                java.util.List.of(), java.util.List.of(), null)), 17));
+
+        for (String[] who : new String[][] {{"compl-01", "COMPL"}, {"mgr-01", "MGR"}, {"admin-01", "ADMIN"}}) {
+            mvc.perform(get("/products/rubrics").with(as(who[0], who[1])))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.rubrics.length()").value(1))
+                    // total 은 필터 전 전체 개수다 — 경계에서 접으면 화면이 「이게 전부」로 읽는다.
+                    .andExpect(jsonPath("$.data.total").value(17))
+                    // ❗u1Requires 가 응답에 있어야 한다 — 요소 개수가 아니라 이 값이 문턱이다(#367)
+                    .andExpect(jsonPath("$.data.rubrics[0].u1Requires").value(1));
+        }
+    }
+
+    @Test
+    @DisplayName("❗루브릭이 없는 항목은 404 다 — 「AI 서비스 장애」가 아니다 (결정 10.1 · #435)")
+    void aMissingRubricIsNotFoundNotAnOutage() throws Exception {
+        // recommended 항목은 루브릭이 없고 채점 대상도 아니다 — 정상 상태다. 502 로 내면
+        // 화면이 상류 장애로 읽고, 「기준이 없다」와 「기준이 비어 있다」가 같아진다.
+        when(aiServiceClient.rubric("ELS-RECOMMENDED-ONLY"))
+                .thenThrow(new java.util.NoSuchElementException("루브릭이 없는 항목이다"));
+
+        mvc.perform(get("/products/rubrics/{id}", "ELS-RECOMMENDED-ONLY")
+                        .with(as("compl-01", "COMPL")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
     }
 
     @Test

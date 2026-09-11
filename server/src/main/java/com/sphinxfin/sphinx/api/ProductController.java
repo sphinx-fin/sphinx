@@ -2,10 +2,13 @@ package com.sphinxfin.sphinx.api;
 
 import com.sphinxfin.sphinx.api.dto.ApiResponse;
 import com.sphinxfin.sphinx.api.dto.ProductSummary;
+import com.sphinxfin.sphinx.api.dto.RubricsResponse;
 import com.sphinxfin.sphinx.api.dto.RiskItemsResponse;
 import com.sphinxfin.sphinx.api.dto.UploadResponse;
+import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
 import com.sphinxfin.sphinx.core.extraction.ProductDocuments;
 import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
+import com.sphinxfin.sphinx.domain.Rubric;
 import com.sphinxfin.sphinx.core.extraction.ProductUploads;
 import com.sphinxfin.sphinx.core.extraction.UploadedProduct;
 import lombok.RequiredArgsConstructor;
@@ -62,6 +65,8 @@ public class ProductController {
     private final ProductRiskItems productRiskItems;
     private final ProductDocuments productDocuments;
     private final ProductUploads productUploads;
+    /** 루브릭 열람 중계 — 읽기 전용이다(이슈 #475). 화면은 내부망을 직접 못 부른다. */
+    private final AiServiceClient aiServiceClient;
 
     /**
      * S-02 상품 선택 목록. 기존 /products/* 는 전부 productId 를 이미 알아야 부를 수 있어서
@@ -90,6 +95,54 @@ public class ProductController {
             all.add(new ProductSummary(p.productId(), p.displayName(), p.productType(), "parsed"));
         }
         return ApiResponse.ok(all);
+    }
+
+    /**
+     * 루브릭 열람 — 전체 또는 상품유형별 (이슈 #475 · `#474` ②).
+     *
+     * <h2>왜 서버가 중계하나</h2>
+     *
+     * <p>공개 의무(기획서 5절)가 요구하는 것은 <i>"기준이 문서로 존재하고 감사·심사가 볼 수
+     * 있다"</i> 이고, 그 «볼 수 있다» 를 성립시키는 것이 화면이다. 그런데 화면은
+     * {@code ai-service} 를 직접 못 부른다 — <b>내부망 전용</b>이고 브라우저에 노출하지
+     * 않는다(CLAUDE.md). 그래서 이 경로가 읽기 전용으로 중계한다.
+     *
+     * <p>❗<b>아무것도 안 바꾼다.</b> 승인 산출물은 {@code app/rubrics/*.yaml} 파일이고 승인은
+     * git 커밋이다(결정 {@code #475} ⓐ — 서버는 stateless). 그래서 이 경로는 파일을 보여줄
+     * 뿐이고, 승인(`approve`)은 별건이다(`#609` 의 데모 뒤 칸).
+     *
+     * <h2>❗판매 직원에게 열지 않는다</h2>
+     *
+     * <p>{@code rubric:read} 는 COMPL·MGR·ADMIN 뿐이다({@code rbac_policy.yaml} · README).
+     * 채점 정답표라 7-4(역이용 방지)에 걸린다 — 기준을 아는 판매자는 <i>"이렇게 답하시면
+     * 통과합니다"</i> 를 할 수 있다. <b>정책 한 줄만으로는 다음 사람이 역할을 더해도 조용하니</b>
+     * {@code ProductAccessWiringTest} 가 {@code seller-01} 로 403 을 재서 한 번 더 박는다.
+     *
+     * <p>❗<b>경로가 {@code /products/{productId}} 계열과 같은 자리에 있다.</b>
+     * {@code /products/rubrics} 는 리터럴이라 스프링이 템플릿보다 먼저 고르지만, 그 우선순위에
+     * 기대는 것이 아니라 <b>{@code productId} 로 {@code "rubrics"} 가 올 수 없다</b>는 것이
+     * 근거다 — 상품ID 는 {@code doc-} 접두 내용 주소다({@code openapi.yaml} 27행).
+     */
+    @PreAuthorize("@accessGuard.canAggregate('rubric:read')")
+    @GetMapping("/rubrics")
+    public ApiResponse<RubricsResponse> rubrics(
+            @RequestParam(value = "productType", required = false) String productType) {
+        AiServiceClient.RubricList list = aiServiceClient.rubrics(productType);
+        return ApiResponse.ok(new RubricsResponse(list.rubrics(), list.total()));
+    }
+
+    /**
+     * 항목 하나의 루브릭 (이슈 #475).
+     *
+     * <p>❗<b>없으면 404 다 — 빈 루브릭을 지어내지 않는다.</b> 화면이 «기준이 없다» 와
+     * «기준이 비어 있다» 를 가를 수 있어야 한다(ai-service {@code get_rubric} 과 같은 규약).
+     * {@code recommended} 항목은 루브릭이 없고 채점 대상도 아니다(결정 10.1 · {@code #435}) —
+     * 그건 정상 상태이므로 502 로 내면 «AI 서비스 장애» 로 오진된다.
+     */
+    @PreAuthorize("@accessGuard.canAggregate('rubric:read')")
+    @GetMapping("/rubrics/{itemId}")
+    public ApiResponse<Rubric> rubric(@PathVariable String itemId) {
+        return ApiResponse.ok(aiServiceClient.rubric(itemId));
     }
 
     /**
