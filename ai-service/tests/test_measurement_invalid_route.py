@@ -99,8 +99,14 @@ def test_the_code_matches_the_spring_contract() -> None:
 
     다른 값을 내보내면 Spring 이 그 코드를 모르고, 프론트는 계약에 없는 코드를 받는다.
     `ErrorCodeContractTest` 가 서버 쪽 **여섯 벌**을 대조하는데 **우리는 그 대조에 없다.**
-    (`/internal/*` 응답 코드는 `ApiError.code` 와 다른 네임스페이스라 그 대조의 모집단이
-    아니다 — 여기서 계약을 직접 읽는 이유다.)
+    그쪽 여섯은 전부 «코드 목록 전체» 를 적은 자리라 서로 같은 집합인지를 보고, 우리가 든
+    것은 **코드 하나**다 — 일곱째로 넣으면 집합이 안 맞아 늘 빨갛다. 그래서 목록을 베끼지
+    않고 계약을 직접 읽어 **포함 여부만** 잰다. 베낀 것이 없으니 낡을 자리도 없다.
+
+    ❗`routes.py:130` 의 *"여기 코드는 `ApiError.code` 가 아니다"* 를 이 파일로 옮기면 안 된다
+    (`#619` 리뷰, 강희진). 그쪽은 `/internal/*` 본문의 기계용 코드(`DOCUMENT_ACCESS_DENIED` ·
+    `MANUAL_PARSE_TYPE_MISMATCH`)라 계약 enum 에 없지만, **`MEASUREMENT_INVALID` 는 바로 그
+    enum 의 값**이다(`openapi.yaml:940`) — 아래 단정이 그것을 잰다.
     """
     from pathlib import Path
 
