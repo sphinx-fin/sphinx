@@ -383,6 +383,39 @@ class SessionControllerTest {
     }
 
     @Test
+    @DisplayName("❗설문 답이 있는데 세트 버전이 없으면 400 — 교부 문서에 빈 칸이 나가고 못 고친다 (#555)")
+    void answersWithoutASchemaVersionAreRejectedAtCreate() throws Exception {
+        // ❗이 값은 append-only 기록으로 내려가고 교부 문서가 거기서 조립된다 — 통과시키면
+        //   그 세션의 적합성 절이 영원히 「어느 기준으로 물었는지 모름」이다. 경계에서 막으면
+        //   400 하나로 끝난다(이슈 #555 의 ⓐ).
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대",
+                                 "surveyResult":{"SUIT-RISK-TOLERANCE":"원금은 지켜야 한다"}}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                // 고칠 자리를 문면이 가리킨다 — 「죽은 버전」과 다르다(번들이 아니라 필드 누락이다).
+                .andExpect(jsonPath("$.error.message")
+                        .value(org.hamcrest.Matchers.containsString("surveySchemaVersion")));
+
+        // ★ 빈 맵은 «설문 없음» 이다 — 막지 않는다. 안 그러면 답이 하나도 없는 세션이
+        //   버전을 보내야 하고, 그건 없는 설문의 세트를 적는 것이다(결정 5.40).
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대",
+                                 "surveyResult":{}}"""))
+                .andExpect(status().isOk());
+
+        // 둘을 같이 보내면 통과 — 실제 화면(S-02)이 보내는 조합이다.
+        mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productId":"doc-els-kiwoom-4181","channel":"FACE_TO_FACE","ageBand":"60대",
+                                 "surveySchemaVersion":"s02-survey-v2",
+                                 "surveyResult":{"SUIT-RISK-TOLERANCE":"원금은 지켜야 한다"}}"""))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("상품 목록에 없는 productId → 404. 조용한 기본값을 두지 않는다")
     void unknownProductTypeFailsLoudly() throws Exception {
         String created = mvc.perform(post("/sessions").contentType(MediaType.APPLICATION_JSON)

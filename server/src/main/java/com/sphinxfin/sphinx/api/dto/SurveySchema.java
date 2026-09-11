@@ -1,5 +1,6 @@
 package com.sphinxfin.sphinx.api.dto;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -13,19 +14,37 @@ import java.util.Set;
  * <p>검증이 없으면 두 갈래로 새어 든다.
  *
  * <pre>
- *   ① 낡은 번들이 죽은 버전을 보낸다 (캐시된 옛 dist/)   ← 이 클래스가 막는다
- *   ② 값이 비었는데 세션에는 설문이 있었다               ← ❗이 클래스는 안 막는다
+ *   ① 낡은 번들이 죽은 버전을 보낸다 (캐시된 옛 dist/)   ← {@link #isAcceptable}
+ *   ② 값이 비었는데 세션에는 설문이 있었다               ← {@link #isVersionedWhenAnswered}
  * </pre>
  *
- * <p>❗<b>②는 여기서 안 막는다.</b> {@link #isAcceptable} 이 빈 값을 통과시키기 때문이다 —
- * 설문 없는 세션이 계약상 허용되므로 «값이 없다» 만으로는 거부할 근거가 없고, «설문은
- * 있는데 버전이 없다» 를 잡으려면 <b>두 필드를 같이 보는 판단</b>이 필요하다. 그 크로스필드
- * 의미론은 별건이다(이슈 #546 ②) — 그 별건이 열려 있는 동안 교부 문서에 빈 칸이 나갈 수 있다.
+ * <h2>②를 어떻게 정했나 (이슈 #555)</h2>
  *
- * <p>그리고 그 빈 칸을 <b>결정 5.40 의 위반으로 읽지 않는다.</b> 5.40 이 금지하는 것은
- * <i>부재를 0 으로 적는 것</i>이고, ②에서 일어나는 일은 <i>존재하는 값이 부재로 기록되는
- * 것</i>이라 축이 다르다 — 빈 값이 «모른다»로 남는 것 자체는 오히려 5.40 을 따르는 모양이다.
- * 문제는 «모른다»가 아니라 «실제로는 세트가 있었다» 는 쪽이다.
+ * <p>«값이 없다» 만으로는 거부할 근거가 없다 — 설문 없는 세션이 계약상 허용된다. 그래서
+ * <b>두 필드를 같이 보는 판단</b>이 필요했고 갈래가 셋이었다.
+ *
+ * <pre>
+ *   ⓐ surveyResult 가 있으면 surveySchemaVersion 도 필수   ← 골랐다
+ *   ⓑ 서버가 기본값을 채운다                               결정 5.40 위반 — 모르는 것을 아는 척한다
+ *   ⓒ 그대로 두고 교부 문서에 「기준 미기록」으로 적는다      기록은 정직하지만 고객 지면에 빈 칸이 나간다
+ * </pre>
+ *
+ * <p><b>ⓐ 인 이유는 되돌릴 수 없기 때문이다.</b> 이 값은 append-only 기록으로 내려가고 교부
+ * 문서가 그 기록에서 조립되므로 <b>나중에 못 고친다</b> — {@code #546} 이 죽은 버전에 대해
+ * 든 근거가 빈 버전에도 그대로 걸린다. 경계에서 막으면 400 하나로 끝나고, 통과시키면 그
+ * 세션의 적합성 절이 영원히 «어느 기준으로 물었는지 모름» 이다.
+ *
+ * <p>❗<b>그리고 막는 비용이 0 이다.</b> 실제 클라이언트는 이미 둘을 같이 보낸다
+ * ({@code web/src/pages/S02_SessionStart.tsx} 가 {@code surveySchemaVersion} 과
+ * {@code surveyResult} 를 같은 본문에 싣는다). ⓐ 가 거부하는 것은 <b>지금 아무도 안 보내는
+ * 조합</b>이고, 그게 오면 클라이언트가 깨진 것이다.
+ *
+ * <p>ⓒ 를 안 고른 이유: 기록은 정직해지지만 <b>고객이 받는 지면에 빈 칸이 나간다.</b> 그리고
+ * 그 시점에는 채울 방법이 없다 — 막을 수 있었던 자리가 경계였다.
+ *
+ * <p>빈 값이 «모른다»로 남는 것 자체는 <b>결정 5.40 의 위반이 아니다</b> — 5.40 이 금지하는
+ * 것은 <i>부재를 0 으로 적는 것</i>이라 오히려 그 결을 따른다. 문제는 «모른다»가 아니라
+ * <b>«실제로는 세트가 있었다»</b> 는 쪽이고, ⓐ 는 그 상태를 안 만든다.
  *
  * <p><b>정본은 web {@code src/lib/survey.ts} 의 {@code SURVEY_SCHEMA_VERSION} 하나다.</b> 서버가
  * 두 벌을 갖는 셈이라 갈릴 수 있는데, {@code SurveySchemaVersionMirrorsWebTest} 가
@@ -53,5 +72,24 @@ public final class SurveySchema {
      */
     public static boolean isAcceptable(String version) {
         return version == null || version.isBlank() || ALLOWED_VERSIONS.contains(version);
+    }
+
+    /**
+     * 설문 답이 있으면 세트 버전도 있는가 (이슈 #555 · 위 ⓐ).
+     *
+     * <p><b>답이 없으면 true</b> — 설문 없는 세션에는 버전이 없어도 된다. <b>빈 맵도 «없음»
+     * 이다</b>: 답이 하나도 없는 세션에 버전을 요구하면 <i>없는 설문의 세트</i>를 적게 하는
+     * 것이라 결정 5.40 과 부딪친다.
+     *
+     * <p>❗<b>{@link #isAcceptable} 과 겹치지 않는다.</b> 그쪽은 <i>있는 값이 살아 있는가</i>,
+     * 이쪽은 <i>있어야 할 값이 있는가</i> 다. 한 메서드로 접으면 실패 문면이 «죽은 버전»과
+     * «빠진 버전»을 같이 말하게 되는데 <b>고칠 자리가 다르다</b> — 앞은 번들을 새로 받는
+     * 것이고 뒤는 클라이언트가 필드를 안 보낸 것이다.
+     */
+    public static boolean isVersionedWhenAnswered(String version, Map<String, Object> surveyResult) {
+        if (surveyResult == null || surveyResult.isEmpty()) {
+            return true;
+        }
+        return version != null && !version.isBlank();
     }
 }

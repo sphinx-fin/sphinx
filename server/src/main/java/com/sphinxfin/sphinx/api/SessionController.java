@@ -68,6 +68,16 @@ public class SessionController {
                     "알 수 없는 설문 세트 버전이다: " + body.surveySchemaVersion()
                     + " — 화면 번들이 낡았을 수 있다(살아 있는 세트: " + SurveySchema.ALLOWED_VERSIONS + ")");
         }
+        // ❗설문 답이 있으면 세트 버전도 있어야 한다(이슈 #555). 이 값은 append-only 기록으로
+        // 내려가고 교부 문서가 거기서 조립되므로 **나중에 못 고친다** — 통과시키면 그 세션의
+        // 적합성 절이 영원히 「어느 기준으로 물었는지 모름」이다. 선택지 문면이 곧
+        // recorded_answer 라 세트를 모르면 같은 답의 뜻을 정할 수 없다.
+        if (!SurveySchema.isVersionedWhenAnswered(body.surveySchemaVersion(), body.surveyResult())) {
+            throw new ValidationException(
+                    "설문 답이 있는데 세트 버전이 없다 — surveySchemaVersion 을 같이 보낸다"
+                    + "(살아 있는 세트: " + SurveySchema.ALLOWED_VERSIONS + "). 이 값은 불변 "
+                    + "기록과 교부 문서에 실려 「어느 기준으로 물었나」에 답한다");
+        }
         // 귀속은 인증 주체에서만 온다 — 본문에 없다(CreateSessionRequest 주석).
         Session session = sessionService.create(
                 body.toCommand(currentActor.actorId(), currentActor.branchId()));
