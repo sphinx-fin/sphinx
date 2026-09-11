@@ -555,6 +555,25 @@ class DocumentPathRejected(ParseRefused):
     """허용된 뿌리 밖을 가리킨다. 파일을 만지기 전에 거부한다."""
 
 
+class ManualParseTypeMismatch(DocumentPathRejected):
+    """수동 파스 출력의 `product_type` 이 요청과 다르다 (이슈 #598).
+
+    ❗**같은 400 인데 고칠 자리가 다르다.** `DocumentPathRejected` 가 나는 다른 네 자리는
+    전부 **부르는 쪽 배선**이다(경로가 비었다 · NUL · 해소 실패 · 뿌리 밖) — 서버가 잘못
+    보낸 것이라 문면이 ai-service 를 가리켜도 방향이 안 틀린다. 여기는 **운영자가 놓은
+    파일의 내용**이고(`#441` 의 `data/documents/x.json`) 고칠 자리는 그 JSON 이다.
+
+    그래서 뭉쳐 두면 `#556` 이 없애려던 고리가 그대로 남는다 — 서버가 502
+    「채점 서비스에 연결할 수 없습니다」로 내보내고, 운영자는 ai-service 를 재시작하고,
+    아무것도 안 고쳐진다.
+
+    ❗**`DocumentPathRejected` 의 하위로 두는 이유**는 옛 호출자 때문이다. `except
+    DocumentPathRejected` 로 잡던 자리가 그대로 잡고, `_refused()` 의 `__mro__` 훑기도
+    부모 매핑으로 떨어진다 — **갈래를 늘리는 변경이 조용히 500 을 만들지 않는다.**
+    갈라 내는 것은 본문 코드이고, 그것을 무엇으로 받을지는 서버 쪽 결정이다(이슈 #598).
+    """
+
+
 class DocumentNotFound(ParseRefused):
     """뿌리 안이지만 그 파일이 없다."""
 
@@ -661,9 +680,39 @@ def derive_document_id(pdf_path: str | Path) -> str:
     실행 경로가 실재하기 때문이고, 고칠 자리는 여기가 아니라 **호출자가 값을 주는 것**이다
     (결정 1.37). 이 함수를 「충돌하지 않게」 고치는 쪽은 안 간다 — 그러면 이미 저장된
     스냅샷(`extracted_risk_items.document_id`)에 두 규칙의 값이 섞인다.
+
+    ## ❗그래서 닿을 때마다 한 줄 남긴다 (이슈 #578 ②)
+
+    위 문단이 *"닿으면 결함"* 이라고 선언하는데 **그 사건에 신호가 없었다** — 로그도 카운터도
+    없어서 «정말 안 닿나» 에 답하려면 코드를 다시 읽는 수밖에 없었다.
+
+    **자리가 여기인 이유는 폴백 호출부가 둘이기 때문이다**(PR #588 리뷰, 정세현).
+
+        parsing.py:_manual_override    doc["document_id"] = derive_document_id(path)
+        parsing.py:parse_upload        document_id or derive_document_id(path)
+
+    호출부에 각각 적으면 두 벌이 되고 **세 번째 폴백이 생기면 또 빠진다.** 이 함수가 그
+    둘의 단일 깔때기라, 여기서 한 번 적으면 새 호출부가 생겨도 자동으로 걸린다.
+
+    ❗**문면이 「호출자가 안 줬다」로 단정할 수 있는 것은 `#588` 덕분이다.** 그 전에는 빈
+    문자열도 여기로 떨어졌으므로(`'' or derive(...)`) *"안 줬거나 빈 값이거나"* 로 적어야
+    했다. 지금은 `ParseRequest` 가 빈 값을 422 로 막으므로 남은 경우가 하나다.
+
+    이 줄이 답하는 것 둘이다.
+
+        ⓐ 운영 경로가 정말 안 닿나        알파 로그에 이 줄이 없어야 한다
+        ⓑ 알파 재추출이 끝났나            결정 1.37 · 미결 10.87 의 완료 조건이다
+
+    ❗**WARNING 이 아니라 INFO 다.** 단독 실행에서는 이것이 **정상 경로**라 그때마다 경고를
+    내면 그 경고가 곧 배경이 되고, 운영에서 진짜로 났을 때 아무도 안 본다. 운영에서 이 줄이
+    보이는 것 자체가 신호이므로 층을 올릴 필요가 없다.
     """
     stem = _ID_UNSAFE.sub("-", Path(pdf_path).stem.lower()).strip("-")
-    return f"doc-{stem}" if stem else "doc-unnamed"
+    derived = f"doc-{stem}" if stem else "doc-unnamed"
+    log.info(
+        "F-EXT-001 document_id 를 파일명에서 만들었다 — 호출자가 안 줬다: %s -> %s "
+        "(운영 경로면 결함이다 · 결정 1.37 · 이슈 #578)", pdf_path, derived)
+    return derived
 
 
 def resolve_document_path(document_path: str, *, root: str | Path | None = None) -> Path:
@@ -746,8 +795,10 @@ def _manual_override(path: Path, *, product_type: str,
     got = doc.get("product_type")
     if got and got != product_type:
         # 요청 상품유형과 다른 문서를 내주면 화면·추출이 다른 상품을 본다 (#427 과 같은 종류).
-        raise DocumentPathRejected(
-            f"수동 파스 출력의 product_type 이 요청과 다르다: {got} != {product_type}")
+        # ❗하위 타입으로 낸다 — 나머지 네 자리(배선 버그)와 **고칠 자리가 다르다**(이슈 #598).
+        raise ManualParseTypeMismatch(
+            f"수동 파스 출력의 product_type 이 요청과 다르다: {got} != {product_type} "
+            f"— 고칠 자리는 {path.name} 다(요청이 아니다)")
 
     doc["product_type"] = product_type
     if document_id:

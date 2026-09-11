@@ -1,0 +1,128 @@
+/* 감사 기록 (`/audit`). 소유: 오준서.
+
+   ❗**판정 3색은 체인 무결성 한 자리에만 쓴다.** 그 값만 판정과 같은 종류다(온전한가 ·
+   끊겼는가). 나머지는 전부 수치라 3색을 안 얹는다 — S-08 이 집계에 3색을 안 쓰는 이유와
+   같다(수치에 얹으면 성과 지표로 읽힌다). 근거와 조건은 `Audit.tsx` 머리말에 있고,
+   `tokens.css` 규칙 1 자체는 아직 그 예외를 모른다(`/console` 과 같은 상태).
+
+   ❗**막대는 한 가지 잉크의 길이로만 말한다.** 항목마다 색을 주면 action 이 늘 때 색이
+   늘고 판정 3색과 경쟁한다. */
+
+.au { width: 100%; max-width: min(64rem, 100%); margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-4); }
+
+.au h1 { font-size: calc(30px * var(--scale)); line-height: calc(1.34 * var(--leading-scale));
+  letter-spacing: -0.03em; font-weight: 700; }
+.au__back { color: var(--accent); font-size: calc(14px * var(--scale)); font-weight: 600; }
+.au__lead { color: var(--text-muted); font-size: calc(14px * var(--scale));
+  line-height: calc(1.6 * var(--leading-scale)); margin-top: var(--space-1); max-width: 42rem; }
+.au__loading { color: var(--text-muted); padding: var(--space-6); }
+
+.au__head { display: flex; flex-wrap: wrap; gap: var(--space-4);
+  align-items: flex-start; justify-content: space-between; }
+
+.au__btn { height: var(--control-h-sm); padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--text); font-weight: 600;
+  font-size: calc(14px * var(--scale)); cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-press) var(--ease); }
+.au__btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.au__btn:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: default; }
+
+.au__error { background: var(--red-bg); color: var(--red); border: 0;
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+
+/* ── 차단됨 ──────────────────────────────────────────────────────────────── */
+.au__blocked { background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); padding: var(--space-6); }
+.au__blocked h2 { font-size: calc(22px * var(--scale)); font-weight: 700; margin-bottom: var(--space-3); }
+.au__blocked p { font-size: calc(16px * var(--scale)); line-height: calc(1.6 * var(--leading-scale)); }
+.au__blocked-why { color: var(--text-muted); }
+.au__blocked p + p { margin-top: var(--space-3); }
+
+/* ── 카드 ────────────────────────────────────────────────────────────────── */
+.au__card { background: var(--surface); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1); padding: var(--space-5);
+  display: flex; flex-direction: column; gap: var(--space-3); }
+/* 무결성만 왼쪽 띠를 갖는다 — 이 화면에서 판정인 값이 그것뿐이다. */
+.au__card[data-ok="true"]  { border-left: 4px solid var(--green); }
+.au__card[data-ok="false"] { border-left: 4px solid var(--red); }
+.au__card--failed { border-left: 4px solid var(--border-strong); }
+
+.au__card-head { display: flex; flex-wrap: wrap; gap: var(--space-3);
+  align-items: center; justify-content: space-between; }
+.au__card-head h2 { font-size: calc(18px * var(--scale)); font-weight: 700; }
+.au__card-head h2 em { font-style: normal; font-weight: 600;
+  font-size: calc(13px * var(--scale)); color: var(--text-muted); margin-left: var(--space-2); }
+
+/* 칩은 면 + 글자다. 면만 남기면 색각 이상에서 적/녹이 같아진다(토큰 규칙 3). */
+.au__chip { border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3);
+  font-size: calc(13px * var(--scale)); font-weight: 700; white-space: nowrap; }
+.au__chip[data-ok="true"]  { background: var(--green-bg); color: var(--green); }
+.au__chip[data-ok="false"] { background: var(--red-bg);   color: var(--red); }
+
+/* ── 기간 ────────────────────────────────────────────────────────────────── */
+/* ❗머리가 아니라 **접근 집계 카드 안**에 있다 — 위에 두면 화면 전체가 그 창으로 좁혀진
+   것처럼 보이는데, P3 계량은 그 창에 안 걸린다(자기 `since` 가 따로 있다). */
+.au__range { display: flex; gap: var(--space-1); }
+.au__range-btn { height: var(--control-h-sm); padding: 0 var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--text-muted); font-weight: 600;
+  font-size: calc(13px * var(--scale)); cursor: pointer; white-space: nowrap; }
+.au__range-btn[aria-pressed="true"] { background: var(--accent-bg);
+  border-color: var(--accent); color: var(--accent); }
+.au__range-btn:disabled { cursor: default; opacity: 0.6; }
+
+.au__window { font-size: calc(13px * var(--scale)); color: var(--text-muted);
+  font-variant-numeric: tabular-nums; background: var(--surface-sunken);
+  border-radius: var(--radius); padding: var(--space-2) var(--space-3); }
+.au__window span { margin: 0 var(--space-2); }
+.au__window em { font-style: normal; margin-left: var(--space-2); }
+
+/* ── 수치 ────────────────────────────────────────────────────────────────── */
+.au__big { font-size: calc(34px * var(--scale)); font-weight: 700; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.15; }
+.au__big span { font-size: calc(15px * var(--scale)); font-weight: 600;
+  color: var(--text-muted); margin-left: var(--space-2); letter-spacing: 0; }
+.au__cap { font-size: calc(13px * var(--scale)); color: var(--text-muted);
+  line-height: calc(1.6 * var(--leading-scale)); margin-top: var(--space-1); }
+.au__pair { display: grid; gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr)); }
+
+/* 「읽지 못한 기록」은 0 이어도 지우지 않는다 — 0 과 「안 셌다」를 가르는 자리다. */
+.au__unreadable { font-size: calc(13px * var(--scale)); color: var(--text-muted); }
+.au__unreadable--some { color: var(--text); font-weight: 600; }
+
+.au__sub { font-size: calc(14px * var(--scale)); font-weight: 700; margin-top: var(--space-2); }
+.au__sub em { font-style: normal; font-weight: 600; color: var(--text-muted);
+  font-size: calc(12px * var(--scale)); margin-left: var(--space-2); }
+.au__empty { font-size: calc(13px * var(--scale)); color: var(--text-muted); }
+
+.au__note { font-size: calc(14px * var(--scale)); line-height: calc(1.6 * var(--leading-scale));
+  color: var(--text-muted); }
+.au__note--bad { background: var(--red-bg); color: var(--red); font-weight: 600;
+  border-radius: var(--radius); padding: var(--space-3); }
+.au__note code { font-size: calc(13px * var(--scale)); }
+
+.au__facts { display: flex; flex-direction: column; gap: var(--space-2); }
+.au__facts > div { display: flex; gap: var(--space-3); align-items: baseline; }
+.au__facts dt { flex: 0 0 auto; min-width: 6rem; font-size: calc(13px * var(--scale));
+  font-weight: 600; color: var(--text-muted); }
+.au__facts dd { font-variant-numeric: tabular-nums; }
+
+/* ── 건수 표 ─────────────────────────────────────────────────────────────── */
+/* 표로 그린다 — 화면을 못 보는 사람에게도 같은 데이터가 그대로 읽힌다(S-08 과 같은 규약).
+   막대는 그 위에 얹은 것이지 데이터가 아니다. */
+.au__counts { width: 100%; border-collapse: collapse; }
+.au__counts th { text-align: left; font-weight: 600; font-size: calc(13px * var(--scale));
+  padding: var(--space-2) var(--space-3) var(--space-2) 0; overflow-wrap: anywhere;
+  border-top: 1px solid var(--border); width: 1px; white-space: nowrap; }
+.au__counts tr:first-child th, .au__counts tr:first-child td { border-top: 0; }
+.au__counts td { border-top: 1px solid var(--border); padding: var(--space-2) 0; }
+.au__bar-cell { width: auto; padding-right: var(--space-3) !important; }
+.au__bar { display: block; height: 10px; min-width: 2px; border-radius: var(--radius-pill);
+  background: var(--border-strong); }
+.au__count { width: 1px; white-space: nowrap; text-align: right;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+  font-size: calc(14px * var(--scale)); }

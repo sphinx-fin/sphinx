@@ -1,6 +1,9 @@
 package com.sphinxfin.sphinx.core.ops;
 
 import com.sphinxfin.sphinx.core.aiservice.AiServiceClient;
+import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItem;
+import com.sphinxfin.sphinx.core.extraction.ExtractedRiskItemRepository;
+import com.sphinxfin.sphinx.core.extraction.ProductRiskItems;
 import com.sphinxfin.sphinx.core.ops.OpsStatus.Component;
 import com.sphinxfin.sphinx.core.ops.OpsStatus.Fact;
 import com.sphinxfin.sphinx.core.ops.OpsStatus.Health;
@@ -62,6 +65,7 @@ public class OpsStatusService {
     private final Instant startedAt = Instant.now();
 
     private final AiServiceClient aiServiceClient;
+    private final ExtractedRiskItemRepository extractedRiskItems;
     private final DataSource dataSource;
     private final Environment environment;
     private final Path timeseriesDir;
@@ -69,6 +73,7 @@ public class OpsStatusService {
     private final String stack;
 
     public OpsStatusService(AiServiceClient aiServiceClient,
+                            ExtractedRiskItemRepository extractedRiskItems,
                             DataSource dataSource,
                             Environment environment,
                             @Value("${sphinx.simulator.timeseries-dir}") String timeseriesDir,
@@ -77,6 +82,7 @@ public class OpsStatusService {
                             // SimulatorProperties 처럼 세우면 로컬에서 기동이 안 된다.
                             @Value("${sphinx.deployment.stack:}") String stack) {
         this.aiServiceClient = aiServiceClient;
+        this.extractedRiskItems = extractedRiskItems;
         this.dataSource = dataSource;
         this.environment = environment;
         this.timeseriesDir = Path.of(timeseriesDir);
@@ -94,7 +100,8 @@ public class OpsStatusService {
                 List.of(isolated("server", "API 서버", this::server),
                         isolated("database", "데이터베이스", this::database),
                         isolated("ai-service", "AI 서비스", this::aiService),
-                        isolated("data-volumes", "데이터 볼륨", this::dataVolumes)));
+                        isolated("data-volumes", "데이터 볼륨", this::dataVolumes),
+                        isolated("extraction", "추출 스냅샷", this::extraction)));
     }
 
     /**
@@ -252,6 +259,86 @@ public class OpsStatusService {
             note = "읽기 전용 마운트가 둘 다 없다 — 컨테이너에 data/ 가 안 붙었다(#37)";
         }
         return new Component("data-volumes", "데이터 볼륨", health, null, note, facts);
+    }
+
+    /* ── extraction ─────────────────────────────────────────────────────────
+     * #562 가 목 폴백을 걷은 뒤로 «추출을 안 돌렸다» 가 **화면이 서는 것**으로 나타난다.
+     * 그런데 그 상태를 미리 알 자리가 아무 데도 없었다(이슈 #568).                     */
+
+    /**
+     * 사전적재 상품에 <b>추출 스냅샷이 있는가</b> (이슈 #568).
+     *
+     * <h2>❗배포가 이것을 만들지 않는다</h2>
+     *
+     * <p>사람이 {@code POST /products/{id}/extract} 를 한 번 돌린 결과가 MySQL 볼륨에 남아
+     * 배포를 넘어 사는 것이다({@code #445}). 그래서 <b>그 볼륨이 새로 나는 날</b>(EC2 재생성 ·
+     * {@code down -v} · 새 리전) 데모 첫 화면이 선다 — {@code #562} 가 목 폴백을 걷어서
+     * <b>없으면 404</b> 이기 때문이다. 그게 {@code #478} 의 목적이고 옳은데, <b>그날이 오기
+     * 전에 알 방법이 없었다.</b>
+     *
+     * <p>배포 확인 목록에 줄이 하나 생겼지만({@code #570}) 그건 <b>사람이 돌려야</b> 하고
+     * 「행이 있다」까지만 말한다. 이 카드는 <b>상태를 보는 자리</b>에서 같은 것을 말하고,
+     * {@code extraction_failed} 가 섞인 것까지 가른다.
+     *
+     * <h2>판정</h2>
+     *
+     * <pre>
+     *   UP        사전적재 전부에 항목이 있고 전부 extracted
+     *   DEGRADED  일부만 있다 · 또는 extraction_failed 가 섞였다
+     *   DOWN      하나도 없다 — 추출을 한 번도 안 돌렸다
+     * </pre>
+     *
+     * <p>❗<b>고객 데이터가 아니다.</b> 여기 싣는 것은 상품별 <b>항목 수</b>와 상태 이름이고,
+     * 둘 다 카탈로그 값이다 — {@code ops:status:read} 를 ADMIN 에 준 근거(ADR-001)가 흔들리지
+     * 않는다. 세션 수·고객 발화는 <b>한 건도</b> 얹지 않는다.
+     *
+     * <p>❗<b>업로드본은 안 센다.</b> 이 카드가 답하는 것은 <i>"데모가 도는가"</i> 이고 그
+     * 전제는 사전적재 2종이다. 업로드본은 운영자가 방금 만든 것이라 없는 것이 정상이고,
+     * 세면 «항목 없는 업로드본» 하나에 카드가 노랑이 된다 — 정상 상태가 경고로 보인다.
+     */
+    private Component extraction() {
+        List<Fact> facts = new ArrayList<>();
+        int withItems = 0;
+        int withFailures = 0;
+        for (ProductRiskItems.Preloaded product : ProductRiskItems.preloaded()) {
+            List<ExtractedRiskItem> rows =
+                    extractedRiskItems.findByProductIdOrderByItemIndexAsc(product.productId());
+            long failed = rows.stream().filter(r -> !"extracted".equals(r.status())).count();
+            if (!rows.isEmpty()) {
+                withItems++;
+            }
+            if (failed > 0) {
+                withFailures++;
+            }
+            facts.add(new Fact(product.displayName(), itemCountFact(rows.size(), failed)));
+        }
+
+        int total = ProductRiskItems.preloaded().size();
+        if (withItems == 0) {
+            // 이 상태가 데모 첫 화면을 세운다 — S-02 가 항목을 못 받아 404 다.
+            return new Component("extraction", "추출 스냅샷", Health.DOWN, null,
+                    "추출을 한 번도 안 돌렸다 — S-02 상품 목록에서 항목 조회가 404 다. "
+                    + "상품마다 POST /products/{id}/extract 를 한 번 돌린다", facts);
+        }
+        if (withItems < total || withFailures > 0) {
+            return new Component("extraction", "추출 스냅샷", Health.DEGRADED, null,
+                    withItems < total
+                            ? "사전적재 " + total + "종 중 " + withItems + "종만 항목이 있다 — "
+                              + "나머지는 항목 조회가 404 다"
+                            : "추출 실패 항목이 섞여 있다 — 그 항목은 면담에서 안 물어지고 "
+                              + "미측정으로 게이트가 막는다(R-00)",
+                    facts);
+        }
+        return new Component("extraction", "추출 스냅샷", Health.UP, null, null, facts);
+    }
+
+    /** {@code 13항목 — 전부 추출됨} · {@code 13항목 — 실패 2} 처럼 읽히게. */
+    private String itemCountFact(int items, long failed) {
+        if (items == 0) {
+            // ❗«0항목» 으로만 적으면 다음 행동이 안 정해진다. 무엇이 죽는지를 같이 적는다.
+            return "없음 — 항목 조회가 404 다";
+        }
+        return items + "항목 — " + (failed == 0 ? "전부 추출됨" : "실패 " + failed);
     }
 
     private String mountFact(Path path, boolean there) {
