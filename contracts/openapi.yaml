@@ -1043,7 +1043,7 @@ components:
         deployment: {$ref: '#/components/schemas/OpsDeployment'}
         components:
           type: array
-          description: "server · database · ai-service · data-volumes 넷. 화면이 이 순서로 카드를 놓는다"
+          description: "server · database · ai-service · data-volumes · extraction 다섯. 화면이 이 순서로 카드를 놓는다"
           items: {$ref: '#/components/schemas/OpsComponent'}
     OpsDeployment:
       type: object
@@ -1061,7 +1061,7 @@ components:
         자주 나는 실패다(키 없이 뜬 ai-service, 마운트가 빠진 채 뜬 server) — UP/DOWN 둘로만
         그리면 그게 전부 정상으로 보인다.
       properties:
-        id:        {type: string, enum: [server, database, ai-service, data-volumes]}
+        id:        {type: string, enum: [server, database, ai-service, data-volumes, extraction]}
         name:      {type: string, description: "사람이 읽는 이름"}
         health:    {type: string, enum: [UP, DEGRADED, DOWN]}
         latencyMs: {type: integer, nullable: true, description: "❗못 잰 자리는 null 이다 — 0 과 다르다"}

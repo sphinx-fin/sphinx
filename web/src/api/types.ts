@@ -910,7 +910,7 @@ export interface OpsFact {
  * 달린다 — 계약이 그 이유로 배열로 왔다(#522 요청).
  */
 export interface OpsComponent {
-  id: "server" | "database" | "ai-service" | "data-volumes";
+  id: "server" | "database" | "ai-service" | "data-volumes" | "extraction";
   name: string;
   health: OpsHealth;
   /** ❗**못 잰 자리는 `null` 이다 — 0 과 다르다.** 0 으로 그리면 「즉시 응답」과 「안 쟀다」가 같아진다. */
@@ -932,7 +932,7 @@ export interface OpsStatus {
   /** 실측 시각. **캐시하지 않는다** — 캐시하면 화면의 시각과 값이 갈린다. */
   checkedAt: string;
   deployment: OpsDeployment;
-  /** server · database · ai-service · data-volumes. **화면은 이 순서 그대로 카드를 놓는다.** */
+  /** server · database · ai-service · data-volumes · extraction. **화면은 이 순서 그대로 카드를 놓는다.** */
   components: OpsComponent[];
 }
 
