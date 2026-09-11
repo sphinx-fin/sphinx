@@ -161,6 +161,39 @@ def all_rubrics() -> dict[str, Rubric]:
 #: `test_unlinked_until_has_not_expired` 가 그 조건이 충족되는 순간 실패한다.
 
 
+def drafts_in_scoring() -> tuple[str, ...]:
+    """**검토가 안 끝난 기준인데 채점에 그대로 쓰이는** 루브릭 (이슈 #609 ①).
+
+    ## 무엇이 문제인가
+
+    `status: confirmed` 는 *"근거자료 검토를 마쳤다"* 는 뜻으로 써 왔고 `is_draft` 가 그
+    판별자인데, **그 값을 읽는 코드가 채점 경로에 하나도 없다.** `rubrics.get()` 도
+    `scoring` 도 두 상태를 구별하지 않으므로 draft 루브릭이 confirmed 와 **똑같이** 채점한다.
+
+        선언   Rubric.is_draft
+        호출   tools/find_coverage_gaps.py 하나뿐 — app/ 안에서는 0건
+
+    `#475` 의 ⓐ 는 「승인 → draft 로 커밋 → 나중에 confirmed」 흐름인데, 그 흐름의 **첫
+    단계가 이미 운영 채점에 들어가 있다.** 지금 그 필드는 문서일 뿐이다.
+
+    ## 왜 여기서 빼지 않나
+
+    `get()` 이 draft 를 `RubricNotFound` 로 돌리면 그 항목은 측정되지 않아 `R-00` 이 RED 로
+    막는다. 그러면 *"승인했는데 안 돈다"* 가 되고, `appliedOnDeploy` 와는 **다른 종류의
+    조용함**이다 — 승인 화면은 초록인데 게이트만 막힌다. 그래서 채점은 그대로 두고
+    **판정이 그 사실을 들고 나가는 쪽**(`Judgment.rubric_status`)으로 간다. 계약 변경이라
+    강희진 승인이 필요하고 `#609` ① 에서 논의 중이다.
+
+    ## 그동안 이 함수가 하는 일
+
+    `enforcement_gaps()` 와 같은 결이다 — **막지 않고 말한다.** 기동 로그가 「이 프로세스는
+    검토 전 기준 N종으로 채점한다」를 남기고, `test_draft_rubrics_in_scoring` 이 목록을
+    못박아 **조용히 늘지 않게** 한다. 새 루브릭이 draft 로 들어오는 것은 정상이지만
+    (`#475` ⓐ 가 기본값을 draft 로 권한다) **그것이 채점에 들어간 사실은 사건**이다.
+    """
+    return tuple(sorted(item_id for item_id, r in _all().items() if r.is_draft))
+
+
 def enforcement_gaps() -> dict[str, tuple[str, ...]]:
     """오해 조건을 선언했는데 **강제할 통로가 없는** 루브릭 → 그 조건들 (이슈 #284).
 
