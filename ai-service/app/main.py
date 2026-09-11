@@ -229,6 +229,38 @@ def _check_internal_auth() -> None:
     )
 
 
+def _log_draft_rubrics() -> None:
+    """**검토 전 기준으로 채점하고 있다**는 사실을 기동에 남긴다 (이슈 #609 ①).
+
+    `status: confirmed` 는 *"근거자료 검토를 마쳤다"* 는 뜻인데 그 값을 읽는 코드가 채점
+    경로에 없다 — draft 가 confirmed 와 **똑같이** 채점된다. 그 사실이 지금 어디에도 안
+    보여서, 이 로그가 매 기동에 드러낸다.
+
+    ❗**`_log_enforcement_gap` 에 합치지 않는다.** 저쪽은 *"선언한 오해를 강제할 통로가
+    없다"*(`#284`)이고 여기는 *"기준이 아직 검토 전이다"*(`#609`)라 **다른 사실**이다.
+    한 함수에 두면 한쪽이 조용해져도 다른 쪽 줄에 가려 안 보인다.
+
+    막지 않는 것은 저쪽과 같은 판단이다 — draft 는 데이터 오류가 아니라 아직 검토 전이라는
+    사실이고(`#475` ⓐ 가 승인 기본값을 draft 로 권한다), 기동을 막으면 그 사이 서비스가
+    안 뜬다. 목록은 `test_draft_rubrics_in_scoring` 이 못박아 조용히 늘지 않게 한다.
+    """
+    drafts = rubrics.drafts_in_scoring()
+    if not drafts:
+        # ❗**좋아져도 말한다.** 0 이 됐다는 사실 자체가 사건이고, 줄이 사라지면 「이 검사가
+        #   사라진 것」과 구별되지 않는다(`#284` 가 링크 17/17 이 된 뒤에도 계속 찍는 이유).
+        log.info(
+            "F-SCR-001 검토 전 기준 0종 — 루브릭 %d 종이 모두 confirmed 다 (이슈 #609 ①)",
+            len(rubrics.all_rubrics()),
+        )
+        return
+    log.warning(
+        "F-SCR-001 검토 전 기준으로 채점 중: %d/%d 종이 status=draft 인데 confirmed 와 "
+        "똑같이 채점된다 — is_draft 를 읽는 코드가 채점 경로에 없다. 판정이 이 사실을 "
+        "들고 나가게 하는 것은 계약 변경이라 논의 중이다(이슈 #609 ①). 항목: %s",
+        len(drafts), len(rubrics.all_rubrics()), ", ".join(drafts),
+    )
+
+
 def _log_enforcement_gap() -> None:
     """선언한 오해 중 **강제되는 것이 얼마인지**를 기동 로그에 남긴다 (이슈 #284).
 
@@ -299,6 +331,7 @@ async def lifespan(_: FastAPI):
     rubrics.all_rubrics()            # 루브릭 파싱
     rubrics.assert_related_misconceptions_exist()
     _log_enforcement_gap()
+    _log_draft_rubrics()
     log.info(
         "데이터 로드 완료: data_dir=%s 오해유형=%d 루브릭=%d",
         settings().data_dir, len(misconception.library()), len(rubrics.all_rubrics()),
