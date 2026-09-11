@@ -179,7 +179,7 @@ public class AuditLog {
             String resultCode = text(payload.get("resultCode"));
             bump(byResultCode, resultCode);
             if (isDenial(resultCode)) {
-                bump(deniedByRole, text(payload.get("role")));
+                bump(deniedByRole, roleKey(text(payload.get("role"))));
             }
         }
         return new AccessSummary(from, to, total, unreadable,
@@ -211,6 +211,34 @@ public class AuditLog {
     private static void bump(Map<String, Long> counts, String key) {
         counts.merge(key == null ? UNKNOWN : key, 1L, Long::sum);
     }
+
+    /**
+     * 집계 키로 쓸 역할 이름. 저장된 값에서 Spring Security 의 {@code ROLE_} 접두어를 뗀다.
+     *
+     * <p><b>읽는 쪽에서 뗀다 — 쓰는 쪽이 아니다.</b> 기록은 append-only 라 이미 쌓인 것을
+     * 못 고친다. {@code AuditInterceptor} 가 authority 를 그대로 남기므로 지금까지 쌓인
+     * 값은 {@code "ROLE_SELLER"} 이고, 거기를 고쳐 {@code "SELLER"} 로 남기기 시작하면
+     * <b>같은 역할이 두 행으로 갈린다</b> — 「역이용 방지가 몇 번 걸렸나」를 세는 자리라
+     * 수가 갈리면 그 숫자를 근거로 못 쓴다(이슈 #605, 알파 실측 {@code ROLE_SELLER} 21건).
+     * 여기서 떼면 두 세대가 한 행으로 합쳐지고 저장된 값은 그대로 남는다.
+     *
+     * <p>떼고 나서 비면 {@code null} 을 돌려 {@link #UNKNOWN} 으로 보낸다 —
+     * 빈 문자열은 화면에서 안 보여서 <b>안 남았다는 사실까지 사라진다.</b>
+     */
+    private static String roleKey(String role) {
+        if (role == null || !role.startsWith(ROLE_AUTHORITY_PREFIX)) {
+            return role;
+        }
+        String name = role.substring(ROLE_AUTHORITY_PREFIX.length());
+        return name.isEmpty() ? null : name;
+    }
+
+    /**
+     * Spring Security 가 authority 에 붙이는 접두어. 우리 도메인 이름이 아니라
+     * 프레임워크 표기라, 심사에서 보여줄 화면에 이대로 서면 안 된다({@code Role} 은
+     * {@code CUST}·{@code SELLER}·{@code MGR}·{@code COMPL}·{@code ADMIN} 다섯이다).
+     */
+    private static final String ROLE_AUTHORITY_PREFIX = "ROLE_";
 
     /**
      * 기록되지 않은 값의 자리표. {@code null} 을 키로 쓰면 {@link TreeMap} 이 던지고,

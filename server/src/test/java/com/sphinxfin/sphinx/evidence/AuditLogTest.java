@@ -161,9 +161,38 @@ class AuditLogTest {
             assertThat(summary.deniedByRole())
                     .as("401 과 403 을 같이 센다 — 둘 다 막힌 시도다")
                     .containsExactlyInAnyOrderEntriesOf(
-                            Map.of("ROLE_SELLER", 2L, AuditLog.UNKNOWN, 1L));
+                            Map.of("SELLER", 2L, AuditLog.UNKNOWN, 1L));
             assertThat(summary.byResultCode()).containsEntry("200", 1L).containsEntry("403", 2L);
             assertThat(summary.byAction()).containsEntry("aggregate:heatmap:read", 3L);
+        }
+
+        @Test
+        @DisplayName("★ 접두어가 붙은 기록과 안 붙은 기록이 한 행으로 합쳐진다 (#605)")
+        void mergesBothAuthorityGenerations() {
+            // 지금까지 쌓인 것(AuditInterceptor 가 authority 를 그대로 남긴다)
+            auditLog.record(entry("seller-01", "ROLE_SELLER", "aggregate:heatmap:read", "403", T0));
+            auditLog.record(entry("seller-02", "ROLE_SELLER", "aggregate:heatmap:read", "403", T0.plusSeconds(1)));
+            // 쓰는 쪽을 나중에 고쳐 도메인 이름으로 남기기 시작한 경우
+            auditLog.record(entry("seller-03", "SELLER", "aggregate:heatmap:read", "403", T0.plusSeconds(2)));
+
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.deniedByRole())
+                    .as("append-only 라 옛 기록을 못 고친다 — 읽는 쪽이 합치지 않으면 "
+                            + "같은 역할이 ROLE_SELLER 2 · SELLER 1 두 행으로 갈리고, "
+                            + "「역이용 방지가 몇 번 걸렸나」를 근거로 못 쓴다")
+                    .containsExactlyInAnyOrderEntriesOf(Map.of("SELLER", 3L));
+        }
+
+        @Test
+        @DisplayName("접두어만 남은 기록은 (미기록)이다 — 빈 문자열이면 화면에서 사라진다")
+        void emptyNameAfterStrippingIsUnknown() {
+            auditLog.record(entry("seller-01", "ROLE_", "report:read", "403", T0));
+
+            AuditLog.AccessSummary summary = auditLog.summary(null, null);
+
+            assertThat(summary.deniedByRole())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of(AuditLog.UNKNOWN, 1L));
         }
 
         @Test
