@@ -98,7 +98,9 @@ def test_the_code_matches_the_spring_contract() -> None:
     """문자열을 여기서 지어내지 않는다 — 계약의 `ApiError.code` 와 같아야 한다.
 
     다른 값을 내보내면 Spring 이 그 코드를 모르고, 프론트는 계약에 없는 코드를 받는다.
-    `ErrorCodeContractTest` 가 서버 쪽 세 벌을 대조하는데 **우리는 그 대조에 없다.**
+    `ErrorCodeContractTest` 가 서버 쪽 **여섯 벌**을 대조하는데 **우리는 그 대조에 없다.**
+    (`/internal/*` 응답 코드는 `ApiError.code` 와 다른 네임스페이스라 그 대조의 모집단이
+    아니다 — 여기서 계약을 직접 읽는 이유다.)
     """
     from pathlib import Path
 
