@@ -121,6 +121,21 @@ def _measurement_invalid(exc: scoring.MeasurementInvalid) -> HTTPException:
 _REFUSAL_RESPONSE: dict[type[parsing.ParseRefused], tuple[int, str | None]] = {
     #: 경로 규칙 위반 — 고칠 자리는 **부르는 쪽 배선**이다.
     parsing.DocumentPathRejected: (status.HTTP_400_BAD_REQUEST, None),
+    #: ❗같은 400 인데 **고칠 자리가 다르다** — 수동 파스 출력(`#441` 의
+    #: `data/documents/x.json`)의 상품유형이 요청과 어긋난 것이라, 부르는 쪽이 아니라
+    #: **그 파일**을 고쳐야 한다. 뭉쳐 두면 서버가 code 없는 400 을 502
+    #: `AI_SERVICE_UNAVAILABLE` 로 내보내고 운영자가 ai-service 를 재시작한다 —
+    #: `#556` 이 없애려던 고리 그대로다(이슈 #598).
+    #:
+    #: ❗**여기 코드는 `ApiError.code` 가 아니다.** 그쪽은 여섯 벌 대조 대상이고
+    #: (`ErrorCodeContractTest`), 이건 `/internal/*` 본문의 기계용 코드다 —
+    #: `DOCUMENT_ACCESS_DENIED` 와 같은 층이다. 서버가 이것을 어느 `ApiError.code` 로
+    #: 낼지는 그쪽 결정이다(이슈 #598 · 강희진).
+    #:
+    #: 상태를 400 에 그대로 두는 이유: 이 예외 계열의 상태를 바꾸는 것은 별건이고,
+    #: 갈라 내는 재료는 **코드**다(`#591` 이 그 배선을 세웠다). 상태만 보는 옛 경로는
+    #: 지금과 같게 남는다.
+    parsing.ManualParseTypeMismatch: (status.HTTP_400_BAD_REQUEST, "MANUAL_PARSE_TYPE_MISMATCH"),
     #: 파일 없음 — 고칠 자리는 **업로드·마운트**다.
     parsing.DocumentNotFound: (status.HTTP_404_NOT_FOUND, None),
     #: PDF 로 안 열림 — 고칠 자리는 **문서 자체**다. 502 로 내면 상류 장애로 오진된다

@@ -555,6 +555,25 @@ class DocumentPathRejected(ParseRefused):
     """허용된 뿌리 밖을 가리킨다. 파일을 만지기 전에 거부한다."""
 
 
+class ManualParseTypeMismatch(DocumentPathRejected):
+    """수동 파스 출력의 `product_type` 이 요청과 다르다 (이슈 #598).
+
+    ❗**같은 400 인데 고칠 자리가 다르다.** `DocumentPathRejected` 가 나는 다른 네 자리는
+    전부 **부르는 쪽 배선**이다(경로가 비었다 · NUL · 해소 실패 · 뿌리 밖) — 서버가 잘못
+    보낸 것이라 문면이 ai-service 를 가리켜도 방향이 안 틀린다. 여기는 **운영자가 놓은
+    파일의 내용**이고(`#441` 의 `data/documents/x.json`) 고칠 자리는 그 JSON 이다.
+
+    그래서 뭉쳐 두면 `#556` 이 없애려던 고리가 그대로 남는다 — 서버가 502
+    「채점 서비스에 연결할 수 없습니다」로 내보내고, 운영자는 ai-service 를 재시작하고,
+    아무것도 안 고쳐진다.
+
+    ❗**`DocumentPathRejected` 의 하위로 두는 이유**는 옛 호출자 때문이다. `except
+    DocumentPathRejected` 로 잡던 자리가 그대로 잡고, `_refused()` 의 `__mro__` 훑기도
+    부모 매핑으로 떨어진다 — **갈래를 늘리는 변경이 조용히 500 을 만들지 않는다.**
+    갈라 내는 것은 본문 코드이고, 그것을 무엇으로 받을지는 서버 쪽 결정이다(이슈 #598).
+    """
+
+
 class DocumentNotFound(ParseRefused):
     """뿌리 안이지만 그 파일이 없다."""
 
@@ -776,8 +795,10 @@ def _manual_override(path: Path, *, product_type: str,
     got = doc.get("product_type")
     if got and got != product_type:
         # 요청 상품유형과 다른 문서를 내주면 화면·추출이 다른 상품을 본다 (#427 과 같은 종류).
-        raise DocumentPathRejected(
-            f"수동 파스 출력의 product_type 이 요청과 다르다: {got} != {product_type}")
+        # ❗하위 타입으로 낸다 — 나머지 네 자리(배선 버그)와 **고칠 자리가 다르다**(이슈 #598).
+        raise ManualParseTypeMismatch(
+            f"수동 파스 출력의 product_type 이 요청과 다르다: {got} != {product_type} "
+            f"— 고칠 자리는 {path.name} 다(요청이 아니다)")
 
     doc["product_type"] = product_type
     if document_id:
