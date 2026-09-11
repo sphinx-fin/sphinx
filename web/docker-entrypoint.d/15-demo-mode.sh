@@ -110,6 +110,13 @@ map \$uri \$sphinx_api_auth {
     # ❗`~^/api/ops/` 로 넓히지 않는다. 위 주석이 짚어 둔 자리다 — 나중에 `/ops/` 아래에
     # ADMIN 이 아닌 action 이 붙으면 그때 **초록인 채로** 조용히 틀린다.
     ~^/api/ops/status$                      "Basic $(b64 "$admin")";
+    # 루브릭 열람 (#474 ② · 이슈 #475) — `rubric:read` 는 [COMPL, MGR, ADMIN] 이고 **SELLER 가
+    # 없다**(채점 정답표라 7-4 에 걸린다 · README:92). default(seller) 로 두면 공개 의무를
+    # 보이려는 화면이 전부 403 이다. compl 도 만족하지만 admin 으로 둔다 — 이 화면의 독자가
+    # 심사·감사이고, `#494` 9/7 코멘트가 그렇게 정했다.
+    # ❗`~^/api/products/` 로 넓히지 않는다. 그 아래 `product:read` 는 SELLER 도 있어서
+    #   default 로 둬야 한다(바로 위 주석의 이유) — 넓히면 판매자가 읽은 것이 admin 으로 남는다.
+    ~^/api/products/rubrics(/[^/]+)?$       "Basic $(b64 "$admin")";
 }
 EOF
     chmod 640 "$MODE_CONF"
