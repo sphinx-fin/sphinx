@@ -98,12 +98,52 @@ class UploadStoreFailureWordingTest {
                 new FileSystemException("/data/uploads/abc/x.pdf", null,
                         "No space left on device"));
 
+        // ❗**문면 전체를 본다 — `hasMessageContaining(reason)` 은 이 갈래를 안 갈랐다**
+        //   (이슈 #587). 분기를 죽이면 마지막 갈래로 떨어지는데 거기가 원문 예외를 `+ e` 로
+        //   싣고, `FileSystemException.toString()` 이 reason 을 이미 담는다. 그래서 세 단정이
+        //   폴백에서도 전부 참이었다 — 실측: 분기에 `false &&` 를 붙여도 BUILD SUCCESSFUL.
+        //
+        //   갈래를 가르는 것은 **괄호**다: 이 갈래는 사유만 괄호에 담고 원문 예외를 안 싣는다.
         assertThat(thrown)
-                .hasMessageContaining("No space left on device")
                 .as("디스크가 찬 것을 「볼륨이 쓰기로 붙었는지」로 안내하면 볼륨은 정상이므로 "
-                        + "확인해도 아무 문제가 안 보인다")
-                .hasMessageNotContaining("쓰기로 붙었는지")
-                .hasMessageNotContaining("uid 10001");
+                        + "확인해도 아무 문제가 안 보인다. 그리고 원문 예외를 통째로 싣는 "
+                        + "폴백 문면이면 사유가 그 안에 묻힌다")
+                .hasMessage(reasonWording("No space left on device", "/data/uploads/abc/x.pdf"));
+    }
+
+    /**
+     * {@code getReason()} 갈래의 문면 — {@code UploadedDocumentStore.storeFailed} 와 짝이다.
+     *
+     * <p>❗<b>형식을 여기 한 벌 둔다.</b> 이 파일이 재는 것이 «문면» 이라 형식이 곧 단정이고,
+     * 그래서 형식이 바뀌면 <b>빨개지는 것이 맞다</b>. 두 테스트가 같은 문자열을 따로 적으면
+     * 한쪽만 고쳐지는 자리가 생긴다.
+     */
+    private static String reasonWording(String reason, String path) {
+        return "업로드 문서를 저장하지 못했다(" + reason + "): " + path;
+    }
+
+    @Test
+    @DisplayName("★ 폴백은 원문 예외를 통째로 싣는다 — 추측하지 않는 것이 이 갈래의 값이다")
+    void theFallbackCarriesTheRawException() {
+        // ❗**이 갈래도 그물이 없었다**(PR #592 리뷰 실측). 폴백에서 `+ e` 를 떼도 전체
+        //   스위트가 초록이었다 — 그러면 reason 이 null 인 실패에서 운영자가 받는 것이
+        //   경로 하나가 되고 원인이 통째로 없어진다(#557 이 겪은 그 상태).
+        //
+        //   왜 안 잡혔나: 「어느 갈래로 가든」을 재는 위 테스트가 기대값을 던져진 원인에서
+        //   만든다(플랫폼 갈림을 피하는 좋은 설계다). 그 대가로 **어느 갈래가 도는지가
+        //   플랫폼에 달린다** — macOS 는 "Not a directory"(reason 있음)라 getReason 갈래로
+        //   가고, 폴백에는 아무도 안 닿았다. 즉 폴백을 재는 것이 「CI 가 리눅스라서」에
+        //   기대고 있었다.
+        //
+        //   그래서 ★ 테스트들과 같은 방식으로 storeFailed 를 직접 부른다 — 플랫폼과 무관하다.
+        IOException cause = new IOException("boom");   // reason 이 없고 권한도 아니다
+        UncheckedIOException thrown = UploadedDocumentStore.storeFailed(
+                Path.of("/data/uploads/abc/x.pdf"), cause);
+
+        assertThat(thrown)
+                .as("원인을 지어내지 않는 대신 원문을 그대로 싣는 것이 이 갈래의 전부다 — "
+                        + "그것까지 빠지면 「저장하지 못했다」와 경로만 남는다")
+                .hasMessage("업로드 문서를 저장하지 못했다: /data/uploads/abc/x.pdf — " + cause);
     }
 
     @Test
@@ -117,7 +157,10 @@ class UploadStoreFailureWordingTest {
                 new FileSystemException("/data/uploads/abc/x.pdf", null,
                         "Read-only file system"));
 
-        assertThat(thrown).hasMessageContaining("Read-only file system");
+        // 이쪽도 문면 전체를 본다(이슈 #587) — 폴백도 「Read-only file system」을 담으므로
+        // `Containing` 만으로는 «둘째 갈래로 갔다» 를 증명하지 못한다.
+        assertThat(thrown)
+                .hasMessage(reasonWording("Read-only file system", "/data/uploads/abc/x.pdf"));
     }
 
     @Test

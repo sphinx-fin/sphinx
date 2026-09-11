@@ -637,6 +637,69 @@ class AiServiceClientTest {
     }
 
     @Test
+    @DisplayName("❗parse 404 → DocumentUnreachableException — 「문서에 닿지 못했다」와 「상류 장애」는 고칠 자리가 다르다")
+    void parseNotFoundIsAnUnreachableDocument() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+                        .body("{\"detail\":\"등록된 문서가 없다\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
+                .as("502 로 뭉치면 운영자가 ai-service 를 재시작한다 — 볼륨·업로드가 원인인데 "
+                        + "그건 아무것도 안 고친다(이슈 #556)")
+                .isInstanceOf(DocumentUnreachableException.class)
+                .hasMessageContaining("업로드 볼륨");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("❗parse 502 + DOCUMENT_ACCESS_DENIED → DocumentUnreachableException (상태로는 못 가른다)")
+    void parseAccessDeniedIsAnUnreachableDocument() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY)
+                        .body("{\"detail\":{\"code\":\"DOCUMENT_ACCESS_DENIED\","
+                                + "\"message\":\"읽을 권한이 없다\"}}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
+                .isInstanceOf(DocumentUnreachableException.class)
+                .hasMessageContaining("uid 10001");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("★ 다른 엔드포인트의 404 는 문서 문제가 아니다 — 넓히면 「라우트가 없다」가 볼륨 탓이 된다")
+    void aNotFoundOnAnotherEndpointIsNotADocumentProblem() {
+        server.expect(requestTo(BASE + "/internal/score"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+                        .body("{\"detail\":\"Not Found\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        // ❗404 를 공용 갈래(raise)로 올리면 이 단정이 빨개진다. /internal/parse 의 404 만
+        //   «문서에 닿지 못했다» 이고, 다른 경로의 404 는 «그 라우트가 없다» 다 — 그것을
+        //   볼륨 문제로 읽으면 오진의 방향만 바뀐다(이슈 #556).
+        assertThatThrownBy(() ->
+                client.score("ELS-PRINCIPAL-LOSS-WARNING", "질문?", "원금은 지켜지죠", ITEM, "ELS"))
+                .isInstanceOf(AiServiceException.class)
+                .isNotInstanceOf(DocumentUnreachableException.class);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("★ 그 밖의 502 는 그대로 AiServiceException — 갈래를 늘려도 상류 장애가 안 사라진다")
+    void anotherBadGatewayIsStillAnUpstreamFailure() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_GATEWAY)
+                        .body("{\"detail\":\"그냥 죽었다\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
+                .isInstanceOf(AiServiceException.class)
+                .isNotInstanceOf(DocumentUnreachableException.class);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("parse: 상류 5xx → AiServiceException")
     void parseUpstreamErrorRaisesAiServiceException() {
         server.expect(requestTo(BASE + "/internal/parse"))

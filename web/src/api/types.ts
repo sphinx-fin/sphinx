@@ -39,6 +39,7 @@ export type ErrorCode =
   | "REEXPLAIN_NOT_ELIGIBLE"    // 400 재설명 대상 아님(판정 없음 또는 이미 이해 U1)
   | "REVERIFY_EXHAUSTED"        // 400 재검증 상한 도달 — 판정으로 진행
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
+  | "DOCUMENT_UNREACHABLE"      // 502 등록된 문서의 파일에 닿지 못했다(없음·권한) — 고칠 자리는 배포다  ← #556
   | "AI_SERVICE_UNAVAILABLE"    // 502 ai-service 호출 실패(non-2xx·연결 오류·미구현)  ← PR #67
   | "OVERRIDE_NOT_ELIGIBLE"     // 409 적색 아님·승인 대기 아님 — 오버라이드 불가        ← PR #68
   | "DOCUMENT_UNPROCESSABLE"    // 400 이 문서로는 처리할 수 없다 — 문서를 고쳐 다시 올린다  ← #521
@@ -872,4 +873,143 @@ export interface DecisionView {
   override: OverrideCount;
   reexplain: ReexplainEffect;
   unmeasured: UnmeasuredCount;
+}
+
+/* ── 운영 상태 (F-OPS-001 · `GET /ops/status`) ─────────────────────────────── */
+
+/**
+ * 구성요소 하나의 건강 (`OpsComponent.health`).
+ *
+ * ❗**`DEGRADED` 가 이 화면의 요점이다.** 「떠 있는데 못 하는 상태」가 이 스택에서 실제로
+ * 자주 나는 실패라(키 없이 뜬 ai-service, 마운트가 빠진 채 뜬 server), UP/DOWN 둘로만
+ * 그리면 **그게 전부 정상으로 보인다** — 그 셋이 겉으로 같은 502 하나였다는 것이 이슈
+ * #522 의 출발점이다.
+ */
+export type OpsHealth = "UP" | "DEGRADED" | "DOWN";
+
+/** 지금 뜬 것이 무엇인가. */
+export interface OpsDeployment {
+  /** 활성 프로파일. 없으면 `default`. */
+  profile: string;
+  /** blue 또는 green. ❗**로컬은 빈 문자열이고 그게 정상이다** — 「모른다」로 그리면 로컬이 상시 경고가 된다. */
+  stack: string;
+  startedAt: string;
+  uptimeSec: number;
+}
+
+/** 이름표와 값. 비밀은 「설정됐는가」까지만 실린다(JDBC URL 은 `?` 앞까지). */
+export interface OpsFact {
+  label: string;
+  value: string;
+}
+
+/**
+ * 구성요소 카드 하나.
+ *
+ * ❗**`facts` 는 배열이다.** 화면이 읽는 순서가 곧 중요도인데 객체는 직렬화 순서가 구현에
+ * 달린다 — 계약이 그 이유로 배열로 왔다(#522 요청).
+ */
+export interface OpsComponent {
+  id: "server" | "database" | "ai-service" | "data-volumes";
+  name: string;
+  health: OpsHealth;
+  /** ❗**못 잰 자리는 `null` 이다 — 0 과 다르다.** 0 으로 그리면 「즉시 응답」과 「안 쟀다」가 같아진다. */
+  latencyMs: number | null;
+  /** 정상이면 `null`. 한 줄이다 — 스택트레이스는 서버 로그에 있다. */
+  note: string | null;
+  facts: OpsFact[];
+}
+
+/**
+ * 운영 콘솔(`/console`)이 그리는 실측 (`GET /ops/status`).
+ *
+ * ❗**고객 데이터가 0건인 것이 이 경로의 ADMIN 그랜트를 성립시킨다**(계약 · ADR-001).
+ * 세션 수 하나만 얹어도 `ops:status:read` 가 집계 우회로가 되므로, 이 인터페이스에 그런
+ * 필드가 생기면 **고칠 자리는 화면이 아니라 서버 응답**이다. 서버 쪽은
+ * `OpsStatusHasNoCustomerDataTest` 가 타입 의존으로 막고 있다.
+ */
+export interface OpsStatus {
+  /** 실측 시각. **캐시하지 않는다** — 캐시하면 화면의 시각과 값이 갈린다. */
+  checkedAt: string;
+  deployment: OpsDeployment;
+  /** server · database · ai-service · data-volumes. **화면은 이 순서 그대로 카드를 놓는다.** */
+  components: OpsComponent[];
+}
+
+/* ── 감사 (F-CMN-002 · `audit:read` · `audit:verify` — COMPL 전용) ─────────── */
+
+/**
+ * 접근 감사 집계 (`GET /dashboard/audit-summary`).
+ *
+ * ❗**개인 식별자(`actorId`·`resource`)가 없다 — 집계뿐이다.** 계약이 그걸 일부러 뺐다:
+ * 알파는 개방 모드라 원시 엔트리를 열면 **무인증·공개 상태에서 「누가 무엇을 했는가」가
+ * 읽힌다.** 그래서 이 화면도 개인을 말할 수 없고, 말하려 들면 **고칠 자리는 화면이 아니라
+ * 계약**이다(결정 7.50 이 세운 자리).
+ *
+ * `deniedByRole` 이 이 응답의 요점이다 — 기획서 7-4(역이용 방지)가 **실제로 몇 번 막았나**의
+ * 숫자다. 역할을 안 만든 것(ADR-001)이 코드에만 있으면 심사에서 보여줄 것이 없다.
+ */
+export interface AuditSummary {
+  /** 포함. `null` 이면 처음부터. **서버가 실제로 쓴 값**이라 화면이 이걸 그린다. */
+  from: string | null;
+  /** 제외(반열림). `null` 이면 끝까지. */
+  to: string | null;
+  /** 그 기간에 읽어 센 접근 수. */
+  total: number;
+  /**
+   * payload 를 못 읽어 **어느 기간에도 못 넣은** 건수.
+   *
+   * ❗`total` 과 합치지 않는다 — 합치면 `total` 이 「읽을 수 있었던 것」으로 조용히 좁혀지고,
+   * 그 좁혀짐이 화면 어디에도 안 남는다(결정 5.40 — 못 잰 것을 0 으로 적지 않는다).
+   */
+  unreadable: number;
+  /** action → 건수. */
+  byAction: Record<string, number>;
+  /** resultCode → 건수. */
+  byResultCode: Record<string, number>;
+  /** 401·403 으로 끝난 접근의 **역할별** 건수. 기획 7-4 의 실물 숫자다. */
+  deniedByRole: Record<string, number>;
+}
+
+/**
+ * 감사 해시 체인 검증 (`GET /dashboard/audit-verify`).
+ *
+ * 조회(`audit:read`)와 **다른 action** 이다(`audit:verify`) — *"몇 건 있었나"* 와
+ * *"변조되지 않았나"* 는 다른 질문이라 그랜트도 갈라 둔 것이다.
+ */
+export interface AuditVerify {
+  ok: boolean;
+  checked: number;
+  /** 끊긴 인덱스. `ok` 면 `-1` — **0 이 아니다.** */
+  brokenAt: number;
+  /** 끊긴 seq. `ok` 면 `-1`. */
+  brokenSeq: number;
+  /** 끊긴 사유. `ok` 면 빈 문자열. */
+  reason: string;
+}
+
+/**
+ * P3 경계 마스킹 계량 (`GET /dashboard/pii-summary`).
+ *
+ * ❗**프로세스와 함께 사라진다** — 불변 기록이 아니라 운영 관측값이다. 그래서 기간
+ * 파라미터가 없고 누적 하나뿐이다. **화면은 `since` 를 반드시 같이 그린다**: 그 값 없이
+ * `calls` 를 읽으면 전체 기간으로 오해하고, **재기동 직후의 낮은 값을 보고 「마스킹이 안
+ * 돈다」로 읽는다**(계약 주석이 직접 경고하는 지점).
+ */
+export interface PiiSummary {
+  /** 세기 시작한 시각 = 프로세스 기동. 이 값이 곧 위 숫자들의 창이다. */
+  since: string;
+  /** 경계를 지나간 호출 수. **아무것도 안 지워진 호출도 센다** — 분모가 있어야 비율이 선다. */
+  calls: number;
+  /** 그중 무언가 지워진 호출 수. 감사가 묻는 것(「마스킹이 실제로 도는가」)의 답이다. */
+  callsWithRemovals: number;
+  /**
+   * 종류(EMAIL·RRN·CARD·PHONE·ACCOUNT) → 누적 삭제 건수.
+   *
+   * ❗**안 걸린 종류도 0 으로 온다** — 키를 빼면 「0 건이다」와 「그런 패턴이 없다」가 화면에서
+   * 같아진다. ❗**키 순서는 계약이 아니다**(계약 주석) — 화면이 순서에 기대면 안 된다.
+   */
+  removedByKind: Record<string, number>;
+  /** 종류 합계. 한 호출에서 여럿 지워질 수 있어 `calls` 와 직접 비교하지 않는다. */
+  removedTotal: number;
 }
