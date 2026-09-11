@@ -77,7 +77,7 @@ public class GlobalExceptionHandler {
      * 업로드 입력이 계약을 벗어났다 → 400 {@code VALIDATION_ERROR} (이슈 #521).
      *
      * <p>{@code core} 가 {@link ValidationException}(api 층)을 알면 안 되므로 서비스는 자기
-     * 예외를 던지고 여기서 같은 코드로 접는다 — 프론트가 보는 코드는 한 벌이어야 한다.
+     * 예외를 던지고 여기서 같은 코드로 접는다 — 프론트가 보는 코드는 하나여야 한다.
      */
     @ExceptionHandler(ProductUploads.UploadRejectedException.class)
     public ResponseEntity<ApiResponse<Void>> onUploadRejected(ProductUploads.UploadRejectedException e) {
@@ -102,7 +102,7 @@ public class GlobalExceptionHandler {
      *
      * <p>❗<b>두 예외를 한 코드로 낸다.</b> «못 열었다» 와 «PII 로 거부됐다» 는 다음 행동이
      * 같다 — <b>그 문서를 고쳐서 다시 올린다.</b> 문면은 예외 메시지가 가르므로 코드를 둘로
-     * 늘리지 않는다(코드 목록은 네 벌 대조 대상이라 늘리는 값이 싸지 않다).
+     * 늘리지 않는다(에러 코드 목록은 여섯 벌 대조 대상이라 늘리는 값이 싸지 않다).
      */
     @ExceptionHandler({DocumentUnreadableException.class, DocumentRejectedException.class})
     public ResponseEntity<ApiResponse<Void>> onDocumentUnprocessable(AiServiceException e) {
@@ -114,8 +114,9 @@ public class GlobalExceptionHandler {
     /**
      * 업로드가 상한을 넘었다 → 400 {@code VALIDATION_ERROR} (이슈 #521).
      *
-     * <p>❗<b>새 에러 코드를 만들지 않는다.</b> 코드 목록은 네 벌(핸들러·openapi·CLAUDE.md·
-     * {@code web/src/api/types.ts})이 같아야 하고 {@code ErrorCodeContractTest} 가 대조한다 —
+     * <p>❗<b>새 에러 코드를 만들지 않는다.</b> 에러 코드 목록은 여섯 벌(핸들러·openapi·
+     * CLAUDE.md·{@code web/src/api/types.ts}·{@code web/src/lib/errorText.ts}·명세서 §9)이
+     * 같아야 하고 {@code ErrorCodeContractTest} 가 대조한다 —
      * 상한 초과는 "요청 값이 계약을 벗어났다" 의 한 경우라 기존 코드로 충분하다.
      *
      * <p>이 핸들러가 없으면 {@code Exception} 갈래로 떨어져 <b>500 «서버 내부 오류»</b> 다.
