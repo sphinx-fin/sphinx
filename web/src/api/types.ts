@@ -935,3 +935,81 @@ export interface OpsStatus {
   /** server · database · ai-service · data-volumes · extraction. **화면은 이 순서 그대로 카드를 놓는다.** */
   components: OpsComponent[];
 }
+
+/* ── 감사 (F-CMN-002 · `audit:read` · `audit:verify` — COMPL 전용) ─────────── */
+
+/**
+ * 접근 감사 집계 (`GET /dashboard/audit-summary`).
+ *
+ * ❗**개인 식별자(`actorId`·`resource`)가 없다 — 집계뿐이다.** 계약이 그걸 일부러 뺐다:
+ * 알파는 개방 모드라 원시 엔트리를 열면 **무인증·공개 상태에서 「누가 무엇을 했는가」가
+ * 읽힌다.** 그래서 이 화면도 개인을 말할 수 없고, 말하려 들면 **고칠 자리는 화면이 아니라
+ * 계약**이다(결정 7.50 이 세운 자리).
+ *
+ * `deniedByRole` 이 이 응답의 요점이다 — 기획서 7-4(역이용 방지)가 **실제로 몇 번 막았나**의
+ * 숫자다. 역할을 안 만든 것(ADR-001)이 코드에만 있으면 심사에서 보여줄 것이 없다.
+ */
+export interface AuditSummary {
+  /** 포함. `null` 이면 처음부터. **서버가 실제로 쓴 값**이라 화면이 이걸 그린다. */
+  from: string | null;
+  /** 제외(반열림). `null` 이면 끝까지. */
+  to: string | null;
+  /** 그 기간에 읽어 센 접근 수. */
+  total: number;
+  /**
+   * payload 를 못 읽어 **어느 기간에도 못 넣은** 건수.
+   *
+   * ❗`total` 과 합치지 않는다 — 합치면 `total` 이 「읽을 수 있었던 것」으로 조용히 좁혀지고,
+   * 그 좁혀짐이 화면 어디에도 안 남는다(결정 5.40 — 못 잰 것을 0 으로 적지 않는다).
+   */
+  unreadable: number;
+  /** action → 건수. */
+  byAction: Record<string, number>;
+  /** resultCode → 건수. */
+  byResultCode: Record<string, number>;
+  /** 401·403 으로 끝난 접근의 **역할별** 건수. 기획 7-4 의 실물 숫자다. */
+  deniedByRole: Record<string, number>;
+}
+
+/**
+ * 감사 해시 체인 검증 (`GET /dashboard/audit-verify`).
+ *
+ * 조회(`audit:read`)와 **다른 action** 이다(`audit:verify`) — *"몇 건 있었나"* 와
+ * *"변조되지 않았나"* 는 다른 질문이라 그랜트도 갈라 둔 것이다.
+ */
+export interface AuditVerify {
+  ok: boolean;
+  checked: number;
+  /** 끊긴 인덱스. `ok` 면 `-1` — **0 이 아니다.** */
+  brokenAt: number;
+  /** 끊긴 seq. `ok` 면 `-1`. */
+  brokenSeq: number;
+  /** 끊긴 사유. `ok` 면 빈 문자열. */
+  reason: string;
+}
+
+/**
+ * P3 경계 마스킹 계량 (`GET /dashboard/pii-summary`).
+ *
+ * ❗**프로세스와 함께 사라진다** — 불변 기록이 아니라 운영 관측값이다. 그래서 기간
+ * 파라미터가 없고 누적 하나뿐이다. **화면은 `since` 를 반드시 같이 그린다**: 그 값 없이
+ * `calls` 를 읽으면 전체 기간으로 오해하고, **재기동 직후의 낮은 값을 보고 「마스킹이 안
+ * 돈다」로 읽는다**(계약 주석이 직접 경고하는 지점).
+ */
+export interface PiiSummary {
+  /** 세기 시작한 시각 = 프로세스 기동. 이 값이 곧 위 숫자들의 창이다. */
+  since: string;
+  /** 경계를 지나간 호출 수. **아무것도 안 지워진 호출도 센다** — 분모가 있어야 비율이 선다. */
+  calls: number;
+  /** 그중 무언가 지워진 호출 수. 감사가 묻는 것(「마스킹이 실제로 도는가」)의 답이다. */
+  callsWithRemovals: number;
+  /**
+   * 종류(EMAIL·RRN·CARD·PHONE·ACCOUNT) → 누적 삭제 건수.
+   *
+   * ❗**안 걸린 종류도 0 으로 온다** — 키를 빼면 「0 건이다」와 「그런 패턴이 없다」가 화면에서
+   * 같아진다. ❗**키 순서는 계약이 아니다**(계약 주석) — 화면이 순서에 기대면 안 된다.
+   */
+  removedByKind: Record<string, number>;
+  /** 종류 합계. 한 호출에서 여럿 지워질 수 있어 `calls` 와 직접 비교하지 않는다. */
+  removedTotal: number;
+}
