@@ -32,7 +32,7 @@ import pathlib
 
 import pytest
 
-from app import extraction, parsing, templates
+from app import extraction, llm_client, parsing, schemas, templates
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PARSED = REPO / "contracts" / "samples" / "parsed_els_sample.json"
@@ -200,15 +200,17 @@ def test_widening_is_announced() -> None:
     assert quiet == []
 
 
-def test_a_missing_piece_is_announced_and_the_rest_still_widens() -> None:
-    """❗**그 페이지에 없는 조각**은 조용히 넘기지 않는다 (E-EXT-03).
+def test_a_missing_piece_fails_the_item_instead_of_half_covering() -> None:
+    """★ ❗**못 덮으면 실패다** — 반쪽을 `extracted` 로 내보내지 않는다 (`#613` 리뷰, 강희진).
 
-    선언이 낡거나(원문 판이 바뀜) 오타면 넓힘이 **반쪽으로 성공**한다 — 스팬은 늘어나는데
-    덮으라고 적은 것 하나가 빠진 채다. 경고가 없으면 그 상태가 산출물에서 정상과 구별되지
-    않는다. `#456` 이 고치려는 것이 정확히 «반쪽인데 초록» 이라, 이 규약 자신이 같은 모양을
-    만들면 안 된다.
+    처음에는 경고만 남기고 **찾은 조각으로 계속 넓혔다.** 그러면 필수요소 하나가 원문 근거
+    없이 채점 프롬프트에 실린다 — 이 파일이 없애려는 바로 그 상태를 이 규약 자신이 만든다.
 
-    남은 조각으로는 **계속 넓힌다** — 하나가 안 맞는다고 나머지 근거까지 버릴 이유가 없다.
+        extraction_failed 인 required   면담에서 안 물어진다 → 미측정 → R-00 이 RED
+        extracted 인 반쪽 인용            물어지고 채점된다 → 근거 없는 U1      ❗미탐
+
+    P5(0.2절 — 미탐 최소화 우선)가 앞쪽이고, `NARROWING_REFUSED` 가 같은 모양이다(약한 인용을 안 내보내고
+    `_rescue` 가 `None` 을 돌려 실패로 간다).
     """
     doc = _doc()
     item = dataclasses.replace(
@@ -222,7 +224,68 @@ def test_a_missing_piece_is_announced_and_the_rest_still_widens() -> None:
         {"match": "exact", "value_text": text[986:1004],
          "source_span": {"page": 8, "start": 986, "end": 1004}}, item, doc, warnings)
 
-    assert [w.code for w in warnings] == ["EVIDENCE_PIECE_MISSING", "EVIDENCE_WIDENED"]
+    assert out is None, "조각 하나가 없는데 스팬을 내주면 반쪽 인용이 그대로 나간다"
+    assert [w.code for w in warnings] == ["EVIDENCE_PIECE_MISSING"]
     assert "이 페이지에 없는 문면" in warnings[0].message
     assert warnings[0].item_id == "ELS-MATURITY-LOSS-CONDITION"
-    assert "최초기준가격의" in out["value_text"], "찾은 조각으로는 계속 넓힌다"
+
+
+def test_an_unreadable_page_is_not_called_covered() -> None:
+    """원문을 못 읽으면 «덮었다» 고 하지 않는다 — 확인 못 한 것과 확인해서 통과가 다르다.
+
+    해소가 준 페이지라 정상 경로에서는 안 나지만, **조용히 통과시키는 갈래를 남기지 않는다.**
+    """
+    doc = _doc()
+    item = _item("ELS", "ELS-MATURITY-LOSS-CONDITION")
+
+    warnings: list = []
+    out = extraction._widen_to_cover(
+        {"match": "exact", "value_text": "", "source_span": {"page": 999, "start": 0, "end": 0}},
+        item, doc, warnings)
+
+    assert out is None
+    assert [w.code for w in warnings] == ["EVIDENCE_PIECE_MISSING"]
+    assert "확인하지 못했다" in warnings[0].message
+
+
+def test_the_item_comes_out_failed_and_the_reason_does_not_lie() -> None:
+    """★ **`status` 가 실제로 바뀐다** — 여기가 「무엇을 늘렸나」가 아니라 「동작」 층이다.
+
+    ❗`_widen_to_cover` 가 `None` 을 돌린다고 항목이 실패로 나가는 것은 아니다. 그 사이에
+    `_to_risk_item` 이 있고, 거기서 `SPAN_UNRESOLVED` 를 덧붙이면 `_failure_reason` 이 둘을
+    이어 붙여 **거짓말을 한 줄 섞는다** — 인용은 원문에서 찾았고 못 한 것은 「덮는지 확인」이다.
+    """
+    doc = _doc()
+    template = templates.get("ELS")
+    target = "ELS-MATURITY-LOSS-CONDITION"
+    broken = dataclasses.replace(
+        template,
+        items=tuple(
+            dataclasses.replace(i, evidence_must_cover=("이 페이지에 없는 문면",))
+            if i.item_id == target else i
+            for i in template.items
+        ),
+    )
+
+    class _QuotesTheConclusion(llm_client.LlmClient):
+        def __init__(self) -> None:            # super().__init__ 을 부르지 않는다
+            pass
+
+        def complete_json(self, **_kwargs: object) -> schemas.ExtractionDraft:
+            return schemas.ExtractionDraft(candidates=[schemas.ExtractedCandidate(
+                item_id=target, page=8, quote=parsing.page_text(doc, 8)[986:1004],
+            )])
+
+    original = templates.get
+    templates.get = lambda pt: broken if pt == "ELS" else original(pt)   # type: ignore[assignment]
+    try:
+        result = extraction.extract("mock-els-001", "ELS", doc, llm=_QuotesTheConclusion())
+    finally:
+        templates.get = original                                          # type: ignore[assignment]
+
+    item = next(i for i in result.items if i.item_id == target)
+    assert item.status == "extraction_failed", "반쪽 인용이 extracted 로 나갔다"
+    assert item.condition is None
+    assert "이 페이지에 없는 문면" in item.failure_reason, item.failure_reason
+    assert "원문에서 찾지 못했다" not in item.failure_reason, (
+        f"인용은 찾았다 — 사유가 거짓말을 한다: {item.failure_reason}")

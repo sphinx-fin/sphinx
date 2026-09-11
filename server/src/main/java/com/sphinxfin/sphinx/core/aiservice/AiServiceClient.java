@@ -537,7 +537,11 @@ public class AiServiceClient {
      * 루브릭이 요구하는 요소의 근거가 원문에서 조건절과 결론에 갈려 있으면 모델이 어느 쪽을
      * 인용하든 축자 검증을 통과해서 회차마다 다른 답이 나왔다 — 템플릿이 선언한 조각을 덮도록
      * 결정론으로 넓힌다. 조용히 넓히면 «모델이 전문을 인용했다»로 읽히므로 경고로 남긴다.
-     * {@code EVIDENCE_PIECE_MISSING} 은 그 조각이 그 페이지에 없어 <b>안 넓혔다</b>는 뜻이다.
+     * <p>❗{@code EVIDENCE_PIECE_MISSING} 은 그 조각이 그 페이지에 없다는 뜻이고, 그 항목은
+     * <b>{@code status=extraction_failed} 로 온다</b> — 반쪽 인용을 {@code extracted} 로
+     * 내보내면 필수요소 하나가 원문 근거 없이 채점된다. 게이트에서 두 갈래의 대가가 다르다:
+     * 실패한 {@code required} 는 미측정이라 {@code R-00} 이 RED 로 막지만, 반쪽 인용은
+     * 물어지고 채점돼 <b>근거 없는 U1</b> 이 될 수 있다(P5 0.2절 — 미탐 최소화 우선).
      *
      * <p>❗{@code MANUAL_SOURCE} 만 <b>문서 단위</b>다 — {@code itemId} 가 비어서 온다.
      * 파스 출력이 사람이 만든 것이라는 뜻이고(ai-service {@code parse_warnings} 의
