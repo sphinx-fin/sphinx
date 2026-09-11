@@ -96,14 +96,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <h2>❗「N 벌」이라는 수도 본다</h2>
  *
- * <p>세 문서가 <i>"에러 코드 <b>여섯</b> 벌이 대조된다"</i> 로 <b>대조 대상의 개수</b>를
- * 적는다({@code CLAUDE.md} · {@code README.md} · 명세서 §9와 요약표). 그 수는 <b>이 테스트가
- * 무엇을 보는지</b>에 달렸으므로, 사본을 하나 더 넣을 때마다 네 자리를 손으로 고쳐야 했다 —
- * {@code #571}(다섯째)과 {@code #583} 이 두 PR 에 걸쳐 손으로 맞췄다.
+ * <p>네 자리가 <i>"에러 코드 <b>여섯</b> 벌이 대조된다"</i> 로 <b>대조 대상의 개수</b>를
+ * 적는다({@code CLAUDE.md} · {@code README.md} · 명세서 §9와 요약표 · <b>핸들러 javadoc</b>).
+ * 그 수는 <b>이 테스트가 무엇을 보는지</b>에 달렸으므로, 사본을 하나 더 넣을 때마다 그
+ * 자리들을 손으로 고쳐야 했다 — {@code #571}(다섯째)과 {@code #583} 이 두 PR 에 걸쳐 손으로
+ * 맞췄다.
+ *
+ * <p>❗<b>핸들러는 나중에 들어왔고, 그 사이 낡아 있었다</b>(이슈 #618). 모집단이 문서 셋일
+ * 때 그 파일의 javadoc 두 곳이 <i>"네 벌"</i> 로 남았다 — <b>코드를 더하는 사람이 제일 먼저
+ * 여는 파일</b>이라, 거기서 맞출 곳이 넷이라고 읽으면 두 사본을 안 고치고 나간다. 모집단은
+ * {@link #COUNT_CLAIMANTS} 에 있다.
  *
  * <p>그래서 그 수를 {@link #SOURCES} 에서 낸다. <b>사본을 늘리는 사람이 고칠 손 자리는 그
- * 목록 하나</b>이고, 고치면 세 문서가 빨개져 나머지를 알려준다. 목록과 실제로 읽는 파일이
+ * 목록 하나</b>이고, 고치면 그 네 자리가 빨개져 나머지를 알려준다. 목록과 실제로 읽는 파일이
  * 갈리는 것은 {@code theSourceListMatchesWhatIsActuallyRead} 가 막는다.
+ *
+ * <p>❗<b>주석을 무는 대조는 입력 선언이 있어야 돈다.</b> 주석만 바뀌면 바이트코드가 같아서
+ * Gradle 이 {@code test} 를 UP-TO-DATE 로 건너뛴다 — 실측했다: 핸들러의 「여섯 벌」을
+ * 「네 벌」로 되돌려도 {@code BUILD SUCCESSFUL} 이고 {@code --rerun-tasks} 로 강제해야
+ * {@code FAILED} 다. 그래서 그 파일이 {@code build.gradle} 의 입력으로 선언돼 있다
+ * (모듈 안 경로라 {@code ci.yml} 쪽은 {@code ^server/} 가 이미 잡는다).
  *
  * <p>❗<b>여기까지다 — 「테스트가 다 알아서 안다」는 아니다</b>(PR #586 리뷰 실측). 대조
  * 하나를 <b>통째로 지우면</b>({@code @Test} 삭제) 목록도 문서도 그대로라 <b>조용히 통과한다.</b>
@@ -130,7 +142,8 @@ class ErrorCodeContractTest {
      * 대조하는 사본 — 핸들러가 코드의 출처이자 첫째 사본이다.
      *
      * <p>❗<b>이 목록이 「N 벌」의 근거다.</b> 문서 셋이 그 수를 문면으로 적으므로, 사본을
-     * 늘리는 사람은 <b>여기부터</b> 고친다. 그러면 세 문서가 빨개져서 나머지를 알려준다.
+     * 늘리는 사람은 <b>여기부터</b> 고친다. 그러면 {@link #COUNT_CLAIMANTS} 의 네 자리가
+     * 빨개져서 나머지를 알려준다.
      */
     private static final List<String> SOURCES =
             List.of(HANDLER, CONTRACT, CLAUDE_MD, WEB_UNION, WEB_TEXT, SPEC);
@@ -152,8 +165,36 @@ class ErrorCodeContractTest {
     /** 명세서 §9 의 {@code `CODE`} · {@code `CODE`(409)} 형식. 상태는 일부만 달려 있다. */
     private static final Pattern SPEC_ENTRY = Pattern.compile("`([A-Z_]+)`");
 
-    /** 명세서·README·CLAUDE.md 가 적는 <b>대조 대상 개수</b> — {@code 「다섯 벌」}. */
+    /**
+     * {@code 「N 벌」} — 문서·주석이 적는 <b>대조 대상 개수</b>.
+     *
+     * <p>❗<b>여기에 예시 숫자를 적지 않는다.</b> 이 패턴이 무는 것이 바로 그 수인데,
+     * 설명문의 예시는 아무도 안 물어서 <b>수를 강제하는 코드의 설명이 그 수와 달라진다</b>
+     * ({@code 「다섯 벌」} 로 적혀 있었다 — 이슈 #618). 실제 수는 {@link #COMPARED_SOURCES} 다.
+     */
     private static final Pattern COPIES_CLAIM = Pattern.compile("(한|두|세|네|다섯|여섯|일곱|여덟)\\s*벌");
+
+    /**
+     * {@code 「N 벌」} 을 적는 자리 — <b>이 대조의 모집단</b>.
+     *
+     * <p>❗<b>핸들러가 여기 있어야 하는 자리였다</b>(이슈 #618). 모집단이 문서 셋이라
+     * {@code GlobalExceptionHandler} 의 javadoc 두 곳이 <b>「네 벌」로 낡은 채 남아 있었다</b>
+     * — 코드를 더하는 사람이 제일 먼저 여는 파일인데, 거기서 <i>"맞출 곳이 넷"</i> 을 읽으면
+     * 두 사본을 안 고치고 나간다. 그 파일은 {@link #HANDLER} 로 <b>이미 읽는 입력</b>이라
+     * 더하는 비용이 0 이다.
+     *
+     * <p><b>이 테스트 파일 자신은 넣지 않는다.</b> 여기에는 {@code 「한 벌만 만든다」}
+     * (ADR-003) · {@code 「두 벌이 되면 갈린다」}(결정 스윕)를 <b>다른 주제의 예시로</b>
+     * 인용한 주석이 있고, 그 옆에는 당연히 「에러 코드」가 적혀 있다 — 넣으면 정확한 인용이
+     * 위반으로 잡힌다({@code #529} 가 밟은 거짓 양성과 같은 모양이다).
+     *
+     * <p>그래서 이 파일 쪽은 <b>낡을 숫자를 아예 없애는 것</b>으로 막는다 —
+     * {@link #COPIES_CLAIM} 설명문에서 예시 수를 뺐다.
+     *
+     * <p>{@code decision-log.md} 도 넣지 않는다. 과거 결정을 적는 문서라 <b>그때 수가 옳다.</b>
+     */
+    private static final List<String> COUNT_CLAIMANTS =
+            List.of("CLAUDE.md", "README.md", SPEC, HANDLER);
 
     /** 한글 수사 → 수. 문서가 숫자로 안 적고 낱말로 적는다. */
     private static final Map<String, Integer> NUMERALS = Map.of(
@@ -267,15 +308,17 @@ class ErrorCodeContractTest {
     @DisplayName("❗문서가 적은 「N 벌」이 이 테스트가 보는 출처 수와 같다 — 사본을 늘리면 여기가 알려준다")
     void everyDocumentClaimsTheRightNumberOfCopies() {
         Map<String, Integer> wrong = new TreeMap<>();
-        for (String doc : List.of("CLAUDE.md", "README.md", SPEC)) {
+        for (String doc : COUNT_CLAIMANTS) {
             String text = read(doc);
             Matcher m = COPIES_CLAIM.matcher(text);
             int found = 0;
+            int skipped = 0;
             while (m.find()) {
                 // ❗에러 코드 이야기만 본다. 이 레포는 「한 벌만 만든다」(ADR-003 해시 기반) ·
                 //   「두 벌이 되면 갈린다」(결정 스윕)처럼 같은 낱말을 다른 주제에도 쓴다 —
                 //   통째로 세면 그것들이 전부 오답으로 잡힌다.
                 if (!mentionsErrorCodes(text, m.start())) {
+                    skipped++;
                     continue;
                 }
                 found++;
@@ -284,9 +327,22 @@ class ErrorCodeContractTest {
                     wrong.put(doc + ": " + m.group(), claimed);
                 }
             }
-            // ★ 0건이면 아무것도 안 재고 통과한다 — 그 문서가 그 수를 적는 것이 전제다.
+            // ★ 0건이면 아무것도 안 재고 통과한다 — 그 파일이 그 수를 적는 것이 전제다.
             assertThat(found).as("%s 에서 에러 코드의 「N 벌」 문면을 못 찾았다 — 문면이 "
                     + "바뀌었으면 이 대조도 같이 고친다", doc).isPositive();
+            // ❗**핸들러에서는 건너뛴 것이 있으면 안 된다.** 위 창 규칙은 앞뒤 200 자에
+            //   에러 코드 낱말이 있는지로 가르는 어림이라, 낱말 없이 적은 「N 벌」은 조용히
+            //   안 세어진다 — 그 파일에 다른 주장이 이미 하나라도 있으면 위 단정도 통과한다.
+            //   문서 셋은 주제가 섞여 있어 그 어림을 받아들이지만, 이 파일은 **에러 코드를
+            //   만드는 자리**이므로 여기서 「벌」은 사본 수여야 한다. 다른 뜻으로 쓸 일이
+            //   생기면 그 문장을 다른 말로 적는다(이슈 #618 에서 한 줄을 그렇게 고쳤다).
+            if (doc.equals(HANDLER)) {
+                assertThat(skipped)
+                        .as("%s 의 「N 벌」 중 %d 개가 에러 코드 이야기로 안 읽혀 대조에서 "
+                                + "빠졌다. 사본 수를 말하는 것이면 앞뒤에 「에러 코드」를 "
+                                + "적어 세어지게 하고, 다른 뜻이면 「벌」을 쓰지 않는다", doc, skipped)
+                        .isZero();
+            }
         }
         assertThat(wrong)
                 .as("문서가 적은 대조 사본 수가 실제(%d)와 다르다. 이 대조가 보는 것은 «수» "
