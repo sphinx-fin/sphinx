@@ -395,6 +395,7 @@ class AccessPolicyTest {
     class RubricIsClosedToSalesLine {
 
         private static final Target CATALOG = Target.aggregate();
+        private final RbacPolicyFile file = new RbacPolicyFile();
 
         @Test
         @DisplayName("❗SELLER 는 루브릭을 못 읽는다 — 채점 정답표라 7-4 에 걸린다")
@@ -418,6 +419,26 @@ class AccessPolicyTest {
         @DisplayName("CUST 도 아니다 — 고객 대상 공개는 세션 화면 몫이다 (#166 도달 불가)")
         void custIsNotAReaderHere() {
             assertThat(policy.permits(new Actor("cust-01", Role.CUST, null), "rubric:read", CATALOG)).isFalse();
+        }
+
+        /**
+         * ❗<b>감사 대상이다.</b> 명세 §12.1 6번 행이 <i>"COMPL·MGR·ADMIN 읽기 + 감사 대상"</i>
+         * 으로 정했다({@code #494} 9/7 확정). 판매 라인에는 애초에 안 열리지만, 역할이 있는
+         * 사람이 <b>언제 무엇의 기준을 봤는지</b>는 남아야 한다 — 7-4 가 역할 부재와 범위
+         * 분리를 두 층으로 쌓은 것과 같은 결이다.
+         *
+         * <p>이 단정이 {@code rbac_policy.yaml} 의 한 줄을 지킨다. 빠지면
+         * {@code AuditInterceptor} 가 이 호출을 <b>조용히 넘긴다</b>({@code :63}) — 로그
+         * 0건이 <i>"아무도 안 봤다"</i> 로 읽히고, 그건 이 action 이 감사 대상인 이유를
+         * 정면으로 깬다.
+         */
+        @Test
+        @DisplayName("❗감사 대상이다 — 누가 언제 어느 기준을 봤는지가 남는다 (명세 §12.1 6)")
+        void readingRubricsIsAudited() {
+            assertThat(file.audited())
+                    .as("여기서 빠지면 AuditInterceptor 가 이 호출을 조용히 넘긴다 — "
+                            + "채점 정답표를 열어 본 사실이 아무 데도 안 남는다")
+                    .contains("rubric:read");
         }
     }
 
