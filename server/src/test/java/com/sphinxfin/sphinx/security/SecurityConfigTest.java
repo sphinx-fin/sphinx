@@ -38,6 +38,18 @@ class SecurityConfigTest {
     //
     // flyway 를 끄고 `create-drop` 을 쓰는 이유: 마이그레이션 SQL 은 MySQL 문법이라
     // H2 에서 파싱부터 실패한다. 스키마는 엔티티에서 만든다(기본 프로파일과 같은 방식).
+    /**
+     * 두 프로파일이 <b>같은 자리에서 다른 답</b>을 내는지 보는 경로들.
+     *
+     * <p>한 벌로 두는 이유는 대조가 짝으로만 성립하기 때문이다 — prod 에서 401 인 것과
+     * dev 에서 401 이 아닌 것이 <b>같은 경로</b>여야 「프로파일이 가른다」가 증명된다.
+     * 따로 적으면 한쪽만 늘어난 것을 아무도 모른다(이슈 #611).
+     */
+    private static final java.util.List<String> GUARDED_PATHS = java.util.List.of(
+            "/products/doc-els-kiwoom-4181/risk-items",
+            "/sessions/any",
+            "/dashboard/heatmap");
+
     private static final String DB_URL =
             "spring.datasource.url=jdbc:h2:mem:sectest;DB_CLOSE_DELAY=-1";
     private static final String DB_DRIVER = "spring.datasource.driver-class-name=org.h2.Driver";
@@ -54,10 +66,35 @@ class SecurityConfigTest {
         @Autowired
         MockMvc mvc;
 
+        /**
+         * ❗<b>데이터에 기대는 경로를 쓰지 않는다</b> (이슈 #611). 예전에는
+         * {@code /products/{id}/risk-items} 를 불렀는데, 그 경로는 <b>저장된 추출이 DB 에
+         * 있어야</b> 200 이다({@code #478} 이 MockData 폴백을 걷은 뒤로).
+         *
+         * <p>그래서 전체 실행에서는 <b>앞선 테스트가 H2 에 남긴 것</b> 덕에 초록이고,
+         * {@code --tests '…SecurityConfigTest'} 로 <b>혼자 돌리면 404</b> 였다. 정책 파일을
+         * 만지는 사람이 가장 먼저 치는 것이 그 명령이고({@code CLAUDE.md} 가 그 형태를
+         * 적어 뒀다), 그러면 <b>자기 변경과 무관한 빨강</b>을 본다.
+         *
+         * <p>❗<b>바로 옆 {@code Prod.allowsAuthenticated} 가 같은 이유로 이미 고쳐져
+         * 있었다</b>({@code #478}) — <i>"인증을 재는 테스트가 카탈로그 상태 때문에 빨개지면
+         * 재는 것과 깨지는 이유가 달라진다"</i>. 형제 쪽만 안 따라왔다.
+         *
+         * <p>지금은 <b>{@code Prod.rejectsAnonymous} 와 같은 세 경로</b>를 본다. 거기서
+         * 401 인 자리가 여기서는 401 이 아니어야 하고, 그 대조가 이 클래스가 재려는 것
+         * 자체다. 상태를 200 으로 못 박지 않는 이유는 <b>404 든 200 이든 인증 때문이
+         * 아니면 통과</b>가 이 테스트의 뜻이기 때문이다.
+         */
         @Test
         @DisplayName("전면 허용 — 프론트가 인증 없이 개발할 수 있다")
         void permitsEverything() throws Exception {
-            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")).andExpect(status().isOk());
+            // 체인이 아예 안 서는 것(전부 500)과 구별한다 — 목록은 비어도 200 이다.
+            mvc.perform(get("/products")).andExpect(status().isOk());
+
+            for (String path : GUARDED_PATHS) {
+                mvc.perform(get(path))
+                        .andExpect(status().is(org.hamcrest.Matchers.not(401)));
+            }
         }
     }
 
@@ -81,9 +118,11 @@ class SecurityConfigTest {
         @Test
         @DisplayName("인증 없는 API 요청 → 401")
         void rejectsAnonymous() throws Exception {
-            mvc.perform(get("/products/doc-els-kiwoom-4181/risk-items")).andExpect(status().isUnauthorized());
-            mvc.perform(get("/sessions/any")).andExpect(status().isUnauthorized());
-            mvc.perform(get("/dashboard/heatmap")).andExpect(status().isUnauthorized());
+            // ❗Dev.permitsEverything 이 **같은 목록**을 본다 — 한쪽만 늘리면 두 프로파일의
+            //   대조가 그만큼 비는데, 그 사실이 어느 쪽에서도 안 보인다(이슈 #611).
+            for (String path : GUARDED_PATHS) {
+                mvc.perform(get(path)).andExpect(status().isUnauthorized());
+            }
         }
 
         @Test
