@@ -351,6 +351,7 @@ def score(
             seed=_attempt_seed(attempt),
         )
         judgment = _pin_prompt_version(judgment)
+        judgment = _pin_rubric_status(judgment, rubric)
         judgment = _pin_item_id(judgment, item_id)
         judgment = _drop_llm_misconception_type(judgment)
         try:
@@ -766,6 +767,31 @@ def _pin_prompt_version(judgment: Judgment) -> Judgment:
     버전을 적어 내게 하면 파일을 바꿀 때 그 문면을 같이 안 고쳐도 아무 일이 안 일어난다.
     """
     return judgment.model_copy(update={"prompt_version": PROMPT_VERSION})
+
+
+def _pin_rubric_status(judgment: Judgment, rubric: rubrics.Rubric) -> Judgment:
+    """이 판정의 **근거가 된 루브릭이 검토를 마쳤는지**를 고정한다 (이슈 #609 ①).
+
+    `_pin_prompt_version` 과 같은 층이다 — 루브릭 파일이 실제로 무엇인지는 **우리가 아는
+    사실**이고 모델이 보고할 값이 아니다. 모델에게 물으면 파일을 바꿀 때 그 문면을 같이
+    안 고쳐도 아무 일이 안 일어난다.
+
+    ## 왜 판정에 싣나
+
+    `status: confirmed` 는 *"근거자료 검토를 마쳤다"* 는 뜻인데 그 값을 읽는 코드가 채점
+    경로에 없었다(`#617` 이 그 사실을 드러냈다). 실물은 ELS 10종 confirmed · 변액 7종
+    **전부** draft 다 — S-02 에서 변액을 고르면 **그 세션의 이해항목 전부**가 검토 전
+    기준으로 채점된다.
+
+    채점은 안 바꾼다. draft 를 `RubricNotFound` 로 빼면 그 항목이 미측정이라 `R-00` 이
+    RED 로 막는데, 그러면 *"승인했는데 안 돈다"* 가 된다(`#475` ⓐ 의 승인 흐름이 draft 로
+    커밋하는 것이라 첫 단계가 막힌다). 대신 **판정이 그 사실을 들고 나간다.**
+
+    ❗**값이 항상 있다** — `rubrics.get()` 이 준 루브릭에서 읽으므로 `None` 이 될 수 없다.
+    계약에서 optional 인 것은 **이 필드가 생기기 전 레코드** 때문이고, 그때 `None` 은
+    「검토됐다」가 아니라 **「모른다」**다(`#284` 의 「빈 것 ↔ 없는 것」과 같은 자리).
+    """
+    return judgment.model_copy(update={"rubric_status": rubric.status})
 
 
 def _pin_item_id(judgment: Judgment, item_id: str) -> Judgment:
