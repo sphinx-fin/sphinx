@@ -49,6 +49,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 어긋난 것을 목록에 넣는 것으로 통과시키게 되고, 그러면 그물이 아니라 장식이 된다.
  * 짝을 안 만들 이유가 있으면 <b>이름을 다르게</b> 짓는 것이 그 뜻을 말하는 방법이다.
  *
+ * <h2>이 대조는 <b>이름</b>만 본다</h2>
+ *
+ * <p>필드의 <b>값</b>(계약 enum ↔ {@code types.ts} 유니온)은
+ * {@link WebUnionsMirrorContractEnumsTest} 가 본다 — 이름이 같아도 값이 갈리면 화면이
+ * 조용히 기본 갈래로 떨어진다(이슈 #597). 둘을 한 테스트에 합치지 않는 이유는 짝을 찾는
+ * 방법이 다르기 때문이다: 이쪽은 <b>이름</b>으로 짝을 짓고, 저쪽은 이름이 없는 인라인
+ * 유니온까지 봐야 해서 <b>값 집합</b>으로 짝을 짓는다.
+ *
  * <p>{@code web/} 에는 테스트 러너가 없으므로(결정 10.59) 여기서 본다.
  * {@code build.gradle} 이 {@code ../web/src/api/types.ts} 와 {@code ../contracts} 를
  * 입력으로 들고 있어, 두 파일 중 하나만 고쳐도 이 테스트가 다시 돈다.
