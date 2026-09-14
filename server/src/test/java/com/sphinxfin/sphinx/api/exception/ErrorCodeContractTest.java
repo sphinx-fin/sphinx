@@ -192,6 +192,14 @@ class ErrorCodeContractTest {
      * {@link #COPIES_CLAIM} 설명문에서 예시 수를 뺐다.
      *
      * <p>{@code decision-log.md} 도 넣지 않는다. 과거 결정을 적는 문서라 <b>그때 수가 옳다.</b>
+     *
+     * <p>❗<b>남은 사본 셋({@link #CONTRACT}·{@link #WEB_UNION}·{@link #WEB_TEXT})도 넣지
+     * 않는다</b> — 코드 목록을 드는 자리이지 <b>「N 벌」을 적는 자리가 아니다.</b> 목록만
+     * 보면 다음 수가 <i>"나머지도 넣어 완성하자"</i> 인데, {@code WEB_UNION} 에는 그러면
+     * 걸리는 문장이 이미 있다(PR #621 리뷰 실측): {@code types.ts:243} 이 <i>"게이트 룰
+     * 문면 표가 <b>두 벌</b>이 된다"</i> 를 적으면서 바로 다음 줄에서 {@code ErrorCode} 를
+     * 사례로 인용한다. 넣으면 그 <b>정확한 문장</b>이 세어져 빨개진다 — 이 파일 자신을 뺀
+     * 것과 같은 이유다.
      */
     private static final List<String> COUNT_CLAIMANTS =
             List.of("CLAUDE.md", "README.md", SPEC, HANDLER);
