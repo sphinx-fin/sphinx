@@ -40,6 +40,7 @@ export type ErrorCode =
   | "REVERIFY_EXHAUSTED"        // 400 재검증 상한 도달 — 판정으로 진행
   | "EVIDENCE_REQUIRED"         // 502 P4 위반(근거 없는 판정) — 상류 ai-service 계약 위반
   | "DOCUMENT_UNREACHABLE"      // 502 등록된 문서의 파일에 닿지 못했다(없음·권한) — 고칠 자리는 배포다  ← #556
+  | "MANUAL_PARSE_TYPE_MISMATCH" // 502 손으로 놓은 파스 출력의 상품유형이 요청과 다르다 — 고칠 자리는 그 파일이다  ← #598
   | "AI_SERVICE_UNAVAILABLE"    // 502 ai-service 호출 실패(non-2xx·연결 오류·미구현)  ← PR #67
   | "OVERRIDE_NOT_ELIGIBLE"     // 409 적색 아님·승인 대기 아님 — 오버라이드 불가        ← PR #68
   | "DOCUMENT_UNPROCESSABLE"    // 400 이 문서로는 처리할 수 없다 — 문서를 고쳐 다시 올린다  ← #521

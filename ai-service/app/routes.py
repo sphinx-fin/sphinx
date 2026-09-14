@@ -127,10 +127,14 @@ _REFUSAL_RESPONSE: dict[type[parsing.ParseRefused], tuple[int, str | None]] = {
     #: `AI_SERVICE_UNAVAILABLE` 로 내보내고 운영자가 ai-service 를 재시작한다 —
     #: `#556` 이 없애려던 고리 그대로다(이슈 #598).
     #:
-    #: ❗**여기 코드는 `ApiError.code` 가 아니다.** 그쪽은 여섯 벌 대조 대상이고
-    #: (`ErrorCodeContractTest`), 이건 `/internal/*` 본문의 기계용 코드다 —
-    #: `DOCUMENT_ACCESS_DENIED` 와 같은 층이다. 서버가 이것을 어느 `ApiError.code` 로
-    #: 낼지는 그쪽 결정이다(이슈 #598 · 강희진).
+    #: 이 표는 `/internal/*` 본문의 **기계용 코드**다 — `DOCUMENT_ACCESS_DENIED` 와 같은
+    #: 층이고, 대개 `ApiError.code` 와 겹치지 않는다(그쪽은 여섯 벌 대조 대상이다 ·
+    #: `ErrorCodeContractTest`).
+    #:
+    #: ❗**이 코드만 예외다 — 서버가 같은 문자열을 `ApiError.code` 로 낸다**(502 ·
+    #: 이슈 #598 에서 정했다). `MEASUREMENT_INVALID` 와 같은 판단이다: 두 서비스의 로그와
+    #: 응답에 같은 낱말이 남아야 장애 때 한 번에 찾는다. 다른 이름을 두면 사고 현장에서
+    #: 둘을 이어 붙이는 일이 사람 몫이 된다.
     #:
     #: 상태를 400 에 그대로 두는 이유: 이 예외 계열의 상태를 바꾸는 것은 별건이고,
     #: 갈라 내는 재료는 **코드**다(`#591` 이 그 배선을 세웠다). 상태만 보는 옛 경로는

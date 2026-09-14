@@ -667,6 +667,14 @@ public class AiServiceClient {
         if ("MEASUREMENT_INVALID".equals(code)) {
             throw new MeasurementInvalidException(where + " — " + code);
         }
+        if (MANUAL_PARSE_TYPE_MISMATCH.equals(code)) {
+            // 상태(400)로는 못 가른다 — 같은 계열의 다른 넷도 400 인데 그것들은 우리가 잘못
+            // 보낸 것이라 AI_SERVICE_UNAVAILABLE 이 맞다. 갈라 내는 재료는 본문 코드다
+            // (#591 이 그 배선을 세웠고 #603 이 이 코드를 실었다 · 이슈 #598).
+            throw new ManualParseMismatchException(
+                    where + " — " + code + ": 손으로 놓은 파스 출력의 상품유형이 요청과 다르다. "
+                    + "data/documents 의 그 파일을 고쳐라 (#441 · 이슈 #598)");
+        }
         if (DOCUMENT_ACCESS_DENIED.equals(code)) {
             // 상태(502)로는 못 가른다 — ai-service 가 본문에 코드를 싣는 이유가 그것이다.
             throw new DocumentUnreachableException(
@@ -678,6 +686,15 @@ public class AiServiceClient {
 
     /** ai-service 가 본문에 싣는 권한 거부 코드(그쪽 {@code routes.py} 표, {@code #548}). */
     private static final String DOCUMENT_ACCESS_DENIED = "DOCUMENT_ACCESS_DENIED";
+
+    /**
+     * ai-service 가 이 갈래에 싣는 본문 코드 (#603).
+     *
+     * <p>❗<b>{@code ApiError.code} 와 같은 문자열을 쓴다.</b> {@code MEASUREMENT_INVALID} 와
+     * 같은 판단이다 — 두 서비스의 로그와 응답에 같은 낱말이 남아야 장애 때 한 번에 찾는다.
+     * 다른 이름을 두면 사고 현장에서 둘을 이어 붙이는 일이 사람 몫이 된다.
+     */
+    private static final String MANUAL_PARSE_TYPE_MISMATCH = "MANUAL_PARSE_TYPE_MISMATCH";
 
     /** 상태코드 읽기가 IOException 을 던지는 계약이라 한 자리에서 접는다. */
     private static String statusOf(org.springframework.http.client.ClientHttpResponse resp) {
