@@ -57,6 +57,10 @@ public final class SkippedItem {
      *
      * <p>{@code promptVersion} 은 {@code null} 이다 — 이 판정을 낸 프롬프트가 없다.
      * 그 {@code null} 이 "버전 미상" 과 겹치는 것은 {@code source} 가 갈라 준다.
+     *
+     * <p>{@code rubricStatus} 도 같다 — 채점을 안 지났으므로 루브릭을 안 봤다. 그
+     * {@code null} 이 "이 필드가 생기기 전 레코드" 와 겹치는 것도 {@code source} 가 갈라
+     * 준다(이슈 #609 ①).
      */
     public static Judgment judgmentFor(String itemId) {
         return new Judgment(
@@ -68,6 +72,7 @@ public final class SkippedItem {
                 null,            // 오해 유형은 발화에서 나온다. 발화가 없으면 없다.
                 null,            // 프롬프트가 없다 — source 가 그 사실을 말한다
                 false,           // 상신 신호도 발화에서 나온다
-                Judgment.Source.SKIPPED);
+                Judgment.Source.SKIPPED,
+                null);           // 루브릭을 안 봤다 — 위 source 가 그 사실을 말한다 (#609 ①)
     }
 }

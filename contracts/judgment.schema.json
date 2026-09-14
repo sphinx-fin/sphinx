@@ -62,6 +62,13 @@
       "type": "string",
       "description": "이 판정을 낸 채점 프롬프트 버전(ai-service scoring.PROMPT_VERSION, 예 F-SCR-001_v2). optional — 이 필드가 생기기 전 레코드는 없다. ❗confidence 의 정의가 프롬프트 버전마다 다르다: v1 은 등급 확신도, v2 는 재현 가능성이다(PR #114). evidence 는 append-only 라 두 정의가 같은 컬럼에 섞이면 감사 시점에 어느 쪽으로 해석할지 판단할 근거가 없어진다 — 그래서 값과 함께 남긴다(결정 10.38 · 이슈 #136)."
     },
+    "rubric_status": {
+      "enum": [
+        "confirmed",
+        "draft"
+      ],
+      "description": "이 판정의 근거가 된 루브릭이 근거자료 검토를 마친 것인가. optional — 이 필드가 생기기 전 레코드에는 없다. ❗없으면 confirmed 로 읽지 않는다: 「검토를 마쳤다」와 「모른다」는 다르다. 기본값을 confirmed 로 두면 이 필드가 생기기 전 레코드 전부가 「검토된 기준으로 판정했다」로 읽히고, 그게 이 필드를 만드는 이유 자체를 지운다(이슈 #609 ①). 모델이 채우지 않는다 — ai-service scoring 이 루브릭 파일에서 읽어 후처리에서 고정한다(prompt_version 과 같은 층). ❗읽을 때 source 와 같이 본다: source=SKIPPED 이면서 비어 있는 것은 「루브릭을 안 본 판정」이다(건너뛴 항목은 채점을 안 지난다). source=MEASURED 이면서 비어 있는 것은 대개 「이 필드가 생기기 전 레코드」인데, 합성 세션(F-DSH-003)도 source 를 안 줘서 MEASURED 로 접히므로 「옛 레코드」로 단정하지 않는다. 두 사실을 한 필드로 합치지 않는 이유는 source 가 이미 그것을 말하기 때문이다."
+    },
     "source": {
       "enum": [
         "MEASURED",

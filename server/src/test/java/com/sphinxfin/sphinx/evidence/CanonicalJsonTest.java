@@ -310,6 +310,10 @@ class CanonicalJsonTest {
                             + "\"misconceptionType\":null,"
                             + "\"promptVersion\":null,"
                             + "\"reason\":\"원금 보장으로 오해\","
+                            // rubricStatus 도 같은 모양으로 늘었다 (이슈 #609 ①) — 상류가
+                            // 아직 안 싣는 동안 null 이고, 그 null 은 **"검토됐다" 가 아니라
+                            // "모른다"** 다. 키 이름 순서상 reason 과 source 사이다.
+                            + "\"rubricStatus\":null,"
                             // source 도 같은 모양으로 늘었다 (이슈 #518) — 상류가 안 싣는
                             // 값이라 MEASURED 로 접혀 들어온다. 키가 **있다**는 것이 요지다:
                             // 룰이 정한 U3(SKIPPED)와 측정된 U3 를 기록에서 갈라야 한다.

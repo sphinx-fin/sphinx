@@ -50,7 +50,43 @@ public record Judgment(
          * 값을 넣으면 <b>{@code confidence} 의 정의를 가리키는 필드</b>가 두 뜻을 갖고,
          * 그건 그 필드 javadoc 이 막으려는 바로 그 모양이다(결정 10.38 · 이슈 #136).
          */
-        Source source
+        Source source,
+
+        /**
+         * 이 판정의 근거가 된 루브릭이 <b>근거자료 검토를 마친 것인가</b> (이슈 #609 ①).
+         *
+         * <p>{@code "confirmed"} · {@code "draft"} · {@code null}. ai-service 가 루브릭
+         * 파일에서 읽어 후처리에서 고정한다 — 모델이 채우지 않는다({@code promptVersion} 과
+         * 같은 층이다).
+         *
+         * <p>❗<b>{@code null} 을 {@code "confirmed"} 로 접지 않는다.</b> {@link #source} 와
+         * 반대 방향이다 — 저쪽은 없으면 {@code MEASURED} 가 사실과 같지만, 여기서 기본값을
+         * 주면 <b>이 필드가 생기기 전 레코드 전부가 「검토된 기준으로 판정했다」</b>로 읽힌다.
+         * 실제로는 모르는 것이고, 그렇게 접으면 이 필드를 만드는 이유 자체가 없어진다.
+         *
+         * <p>❗<b>읽을 때 {@link #source} 와 같이 본다.</b> 비어 있는 것이 두 가지다.
+         *
+         * <pre>
+         * source=SKIPPED  + null   루브릭을 안 본 판정 — 건너뛴 항목은 채점을 안 지난다
+         * source=MEASURED + null   대개 이 필드가 생기기 전 레코드다   ← ❗「옛 레코드」로 단정하지 않는다
+         * </pre>
+         *
+         * <p>❗<b>둘째 칸이 전수가 아니다</b>(PR #624 리뷰). 합성 세션(F-DSH-003)이
+         * {@code source} 를 안 줘서 {@link Source#MEASURED} 로 접히고, 그 판정은 DB 에
+         * 남는다({@code SyntheticSessionLoader}). 그 행의 뜻은 <i>"옛 레코드"</i> 가 아니라
+         * <b>"합성이라 채점을 안 지났다"</b> 다.
+         *
+         * <p>그래도 값을 더 만들지 않는다. {@code "not_applicable"} 을 넣으면 같은 사실이
+         * 두 벌이 되고, 합성에 {@code SKIPPED} 를 주는 것도 아니다 — 합성은 <b>건너뛴 것이
+         * 아니라 애초에 채점 경로 밖</b>이고 그 값의 뜻은 집계 쪽이 정할 것이다. 여기서는
+         * <b>단정하지 않는 것</b>으로 족하다.
+         *
+         * <p>왜 필요한가: 검토 전 기준으로 낸 판정이 레코드에서 확정 기준 판정과 <b>똑같이
+         * 생겼다.</b> 지금 실물이 ELS 10종 확정 · 변액 7종 <b>전부</b> 검토 전이라, S-02 에서
+         * 변액을 고르면 그 세션의 이해항목 전부가 검토 전 기준으로 채점된다. {@code evidence/}
+         * 가 append-only 라 나중에 되짚을 수 없다.
+         */
+        String rubricStatus
 ) {
     /**
      * 이 판정의 출처. <b>등급이 아니라 등급이 나온 방식</b>이다.
@@ -111,7 +147,8 @@ public record Judgment(
      */
     public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
                     String reason, String misconceptionType) {
-        this(itemId, grade, confidence, evidence, reason, misconceptionType, null, false, null);
+        this(itemId, grade, confidence, evidence, reason, misconceptionType, null, false,
+                null, null);
     }
 
     /**
@@ -122,7 +159,7 @@ public record Judgment(
     public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
                     String reason, String misconceptionType, String promptVersion) {
         this(itemId, grade, confidence, evidence, reason, misconceptionType, promptVersion,
-                false, null);
+                false, null, null);
     }
 
     /**
@@ -133,7 +170,7 @@ public record Judgment(
                     String reason, String misconceptionType, String promptVersion,
                     boolean escalate) {
         this(itemId, grade, confidence, evidence, reason, misconceptionType, promptVersion,
-                escalate, null);
+                escalate, null, null);
     }
 
     public record Evidence(String utteranceQuote, String rubricClause) {}
