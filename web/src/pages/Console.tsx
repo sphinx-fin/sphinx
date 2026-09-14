@@ -86,6 +86,9 @@ const HEALTH_LABEL: Record<OpsHealth, string> = {
   UP: "정상",
   DEGRADED: "떠 있는데 못 함",
   DOWN: "안 됨",
+  // ❗「안 됨」이 아니라 **「못 쟀음」**이다(이슈 #595). 이 카드가 가리키는 곳은 그 구성요소가
+  //    아니라 서버 로그다 — 구성요소 자체는 멀쩡할 수 있다.
+  UNKNOWN: "상태 못 잼",
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");

@@ -63,5 +63,20 @@ public record OpsStatus(String checkedAt, Deployment deployment, List<Component>
      * <p>❗<b>H2 를 {@code DEGRADED} 로 두지 않는다</b>(#522 판단). 로컬에서 상시 노랑이면
      * 노랑이 아무 뜻도 없어진다 — {@code note} 로만 적는다.
      */
-    public enum Health { UP, DEGRADED, DOWN }
+    /**
+     * 구성요소 하나의 건강.
+     *
+     * <p>❗<b>{@code UNKNOWN} 은 「나쁨」이 아니라 「못 잼」이다</b> (이슈 #595). 측정이
+     * 예외로 끝나면 그 구성요소가 어떤지 <b>우리가 모른다</b> — 그걸 {@code DOWN} 으로
+     * 적으면 화면이 「죽었다」를 단정하고, 운영자는 멀쩡할 수도 있는 그 구성요소를 보러
+     * 간다. 고칠 자리는 <b>서버 로그</b>다.
+     *
+     * <p>{@code latencyMs} 를 못 잰 자리에 {@code 0} 이 아니라 {@code null} 을 주는 것과
+     * 같은 판단이다 — <i>"즉시 응답"</i> 과 <i>"안 쟀다"</i> 를 같게 만들지 않는다.
+     *
+     * <p>❗<b>연결 실패는 여기 해당하지 않는다.</b> DB 가 {@code SQLException} 을 내거나
+     * ai-service 에 안 닿는 것은 <b>측정이 성공한 것</b>이고 그 답이 {@code DOWN} 이다.
+     * {@code UNKNOWN} 은 <b>우리 측정 코드가 터진</b> 경우 하나뿐이다.
+     */
+    public enum Health { UP, DEGRADED, DOWN, UNKNOWN }
 }
