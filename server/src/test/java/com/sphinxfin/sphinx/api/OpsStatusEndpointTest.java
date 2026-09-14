@@ -146,6 +146,44 @@ class OpsStatusEndpointTest {
                                 org.hamcrest.Matchers.nullValue())));
     }
 
+    @Test
+    @DisplayName("❗측정이 터지면 UNKNOWN 이다 — DOWN 으로 내면 「죽었다」를 서버가 단정한다 (#595)")
+    void aFailedMeasurementIsUnknownNotDown() throws Exception {
+        // 측정 코드가 터진 상태. 상류가 죽은 것이 아니라 **우리가 답을 못 낸** 것이다.
+        when(aiServiceClient.health()).thenThrow(new IllegalStateException("probe boom"));
+
+        mvc.perform(get("/ops/status"))
+                // 한 카드가 터져도 나머지를 낸다(#522) — 그 성질은 그대로다.
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.components[?(@.id == 'ai-service')].health")
+                        .value("UNKNOWN"))
+                // ❗이 단정이 이 PR 의 요점이다. 「안 닿는다」와 「못 쟀다」가 응답에서 갈려야
+                //   화면이 문면을 파싱하지 않고 그릴 수 있다(결정 1.4 와 같은 판단).
+                .andExpect(jsonPath("$.data.components[?(@.id == 'ai-service')].health")
+                        .value(org.hamcrest.Matchers.not(
+                                org.hamcrest.Matchers.hasItem("DOWN"))))
+                .andExpect(jsonPath("$.data.components[?(@.id == 'ai-service')].note")
+                        .value(org.hamcrest.Matchers.hasItem(
+                                org.hamcrest.Matchers.containsString("서버 로그"))))
+                // 나머지 카드는 영향이 없다 — 격리가 이 자리의 원래 약속이다.
+                .andExpect(jsonPath("$.data.components[?(@.id == 'server')].health")
+                        .value("UP"));
+    }
+
+    @Test
+    @DisplayName("★ 안 닿는 것은 여전히 DOWN 이다 — 측정이 성공했고 그 답이 「안 된다」다 (#595)")
+    void anUnreachableUpstreamStaysDown() throws Exception {
+        when(aiServiceClient.health()).thenReturn(new AiServiceClient.HealthProbe(
+                null, null, "Connection refused"));
+        when(aiServiceClient.hasInternalToken()).thenReturn(true);
+
+        mvc.perform(get("/ops/status"))
+                // ❗UNKNOWN 을 「안 좋으면 전부」로 넓히면 이 자리가 같이 흐려진다 — 그러면
+                //   운영자가 죽은 상류를 두고 서버 로그를 뒤진다. 방향만 바뀐 오진이다.
+                .andExpect(jsonPath("$.data.components[?(@.id == 'ai-service')].health")
+                        .value("DOWN"));
+    }
+
     /* ── ④ 정상 · 봉투 · 구성요소 넷 ─────────────────────────────────────────── */
 
     @Test

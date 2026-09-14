@@ -116,15 +116,32 @@ public class OpsStatusService {
      * 그 상황에서 사람이 봐야 하는 것은 «AI 카드가 이상하다» 인데 화면은 «콘솔이 고장났다»
      * 를 보여줬다.
      *
-     * <p>그래서 터진 카드만 {@code DOWN} + <i>"측정 실패"</i> 로 낸다. 예외를 삼키지 않고
+     * <p>그래서 터진 카드만 {@code UNKNOWN} + <i>"측정 실패"</i> 로 낸다. 예외를 삼키지 않고
      * <b>로그에 스택트레이스를 남긴다</b> — 응답에는 한 줄만 가고(#522 요청), 원인은 로그에서 본다.
+     *
+     * <h2>❗{@code DOWN} 이 아니라 {@code UNKNOWN} 인 이유 (이슈 #595)</h2>
+     *
+     * <p>예전에는 이 자리가 {@code DOWN} 이었다. 그러면 <b>응답만 보고는 셋이 구별되지
+     * 않는다</b> — {@code health} 도 {@code latencyMs}(null)도 {@code facts}(빈 배열)도
+     * 같고, 남는 것은 {@code note} <b>문면</b>뿐이다.
+     *
+     * <pre>
+     * 상류가 죽었다      → 그 구성요소를 본다          DOWN     (측정은 성공했다)
+     * 측정이 터졌다      → **서버 로그**를 본다        UNKNOWN  (그 구성요소는 멀쩡할 수 있다)
+     * </pre>
+     *
+     * <p>화면이 그 둘을 가르려면 문면을 파싱해야 하는데, 이 레포는 그 방식을 이미 한 번
+     * 버렸다({@code types.ts} 의 {@code ErrorCode} 주석 · 결정 1.4): <i>"문면 파싱으로
+     * 가르면 서버 문구가 바뀔 때 조용히 깨진다"</i>. 게다가 이 문면은 {@code e.toString()}
+     * 을 품고 있어 예외 종류에 따라 앞부분이 달라진다 — 화면이 그걸 물면 <b>서버 로그
+     * 문구가 화면의 계약</b>이 된다.
      */
     private Component isolated(String id, String name, java.util.function.Supplier<Component> measure) {
         try {
             return measure.get();
         } catch (RuntimeException e) {
             log.error("운영 상태 측정 실패: component={} — 나머지 카드는 그대로 낸다", id, e);
-            return new Component(id, name, Health.DOWN, null,
+            return new Component(id, name, Health.UNKNOWN, null,
                     "상태를 재지 못했다(" + oneLine(e.toString()) + ") — 서버 로그를 본다",
                     List.of());
         }

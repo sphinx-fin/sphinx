@@ -880,12 +880,17 @@ export interface DecisionView {
 /**
  * 구성요소 하나의 건강 (`OpsComponent.health`).
  *
+ * ❗**`UNKNOWN` 은 「나쁨」이 아니라 「못 잼」이다** (이슈 #595). 측정이 예외로 끝나 그
+ * 구성요소가 어떤지 서버가 모르는 상태이고, 고칠 자리는 **서버 로그**다 — 그 구성요소는
+ * 멀쩡할 수 있다. 안 닿는 것은 여기 해당하지 않는다(그건 측정이 성공한 `DOWN` 이다).
+ * **`DOWN` 보다 약하게 그리지 않는다** — 조용해 보이면 아무도 로그를 안 본다.
+ *
  * ❗**`DEGRADED` 가 이 화면의 요점이다.** 「떠 있는데 못 하는 상태」가 이 스택에서 실제로
  * 자주 나는 실패라(키 없이 뜬 ai-service, 마운트가 빠진 채 뜬 server), UP/DOWN 둘로만
  * 그리면 **그게 전부 정상으로 보인다** — 그 셋이 겉으로 같은 502 하나였다는 것이 이슈
  * #522 의 출발점이다.
  */
-export type OpsHealth = "UP" | "DEGRADED" | "DOWN";
+export type OpsHealth = "UP" | "DEGRADED" | "DOWN" | "UNKNOWN";
 
 /** 지금 뜬 것이 무엇인가. */
 export interface OpsDeployment {

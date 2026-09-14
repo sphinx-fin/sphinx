@@ -1075,7 +1075,16 @@ components:
       properties:
         id:        {type: string, enum: [server, database, ai-service, data-volumes, extraction]}
         name:      {type: string, description: "사람이 읽는 이름"}
-        health:    {type: string, enum: [UP, DEGRADED, DOWN]}
+        health:
+          type: string
+          enum: [UP, DEGRADED, DOWN, UNKNOWN]
+          description: >
+            ❗`UNKNOWN` 은 「나쁨」이 아니라 **「못 잼」**이다(이슈 #595) — 측정이 예외로 끝나
+            그 구성요소가 어떤지 서버가 모르는 상태다. 고칠 자리는 **서버 로그**이고, 그
+            구성요소 자체는 멀쩡할 수 있다. 연결 실패는 여기 해당하지 않는다: DB 가
+            SQLException 을 내거나 ai-service 에 안 닿는 것은 **측정이 성공한 것**이고 그
+            답이 DOWN 이다. 화면은 이 값을 DOWN 보다 약하게 그리지 않는다 — 조용해 보이면
+            아무도 로그를 안 본다.
         latencyMs: {type: integer, nullable: true, description: "❗못 잰 자리는 null 이다 — 0 과 다르다"}
         note:      {type: string, nullable: true, description: "정상이면 null. 한 줄만 — 스택트레이스는 서버 로그로"}
         facts:
