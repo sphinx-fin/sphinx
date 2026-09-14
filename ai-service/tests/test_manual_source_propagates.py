@@ -103,8 +103,11 @@ def test_the_server_javadoc_lists_the_same_codes() -> None:
     `#444` 리뷰(정세현)가 짚은 것이다. 이 PR 이 `MANUAL_SOURCE` 를 `Literal` 에 더하는데
     `AiServiceClient` javadoc 의 목록은 그대로라 **아홉 vs 열**로 갈릴 뻔했다.
 
-    `ErrorCodeContractTest` 가 네 벌(핸들러·openapi·CLAUDE.md·web 유니온)을 대조하게 만든
-    그 이유다 — `#316` 에서 *"유니온을 뺐더니 실제로 셋 갈렸다"*.
+    `ErrorCodeContractTest` 가 **여섯 벌**(핸들러·openapi·CLAUDE.md·web 유니온·web 문면
+    표·명세 §9)을 대조하게 만든 그 이유다 — `#316` 에서 *"유니온을 뺐더니 실제로 셋 갈렸다"*.
+    그 벌수는 `#571`(다섯째 · `errorText.ts`)·`#586`(여섯째 · 명세 §9)으로 늘었고, `#586`
+    부터는 **테스트가 문서의 「N 벌」이라는 수 자체도** 잰다 — 다만 그 대조의 모집단은
+    `CLAUDE.md`·`README.md`·명세 셋이라, **이 파일 같은 주석은 안 본다.**
 
     ❗**계약에는 이 코드가 없다**(`#401` ④ 의 공백). 그래서 계약 변경 절차 대상이 아니고,
     **두 벌이 갈리는 것**만 막으면 된다. ④ 가 닫히면 이 대조에 계약도 더한다.
