@@ -68,11 +68,18 @@ public record Judgment(
          *
          * <pre>
          * source=SKIPPED  + null   루브릭을 안 본 판정 — 건너뛴 항목은 채점을 안 지난다
-         * source=MEASURED + null   이 필드가 생기기 전 레코드다      ← 여기만 「모른다」
+         * source=MEASURED + null   대개 이 필드가 생기기 전 레코드다   ← ❗「옛 레코드」로 단정하지 않는다
          * </pre>
          *
-         * <p>두 사실을 한 필드로 합치지 않는 이유는 {@code source} 가 이미 그것을 말하기
-         * 때문이다. 여기에 {@code "not_applicable"} 같은 값을 만들면 같은 사실이 두 벌이 된다.
+         * <p>❗<b>둘째 칸이 전수가 아니다</b>(PR #624 리뷰). 합성 세션(F-DSH-003)이
+         * {@code source} 를 안 줘서 {@link Source#MEASURED} 로 접히고, 그 판정은 DB 에
+         * 남는다({@code SyntheticSessionLoader}). 그 행의 뜻은 <i>"옛 레코드"</i> 가 아니라
+         * <b>"합성이라 채점을 안 지났다"</b> 다.
+         *
+         * <p>그래도 값을 더 만들지 않는다. {@code "not_applicable"} 을 넣으면 같은 사실이
+         * 두 벌이 되고, 합성에 {@code SKIPPED} 를 주는 것도 아니다 — 합성은 <b>건너뛴 것이
+         * 아니라 애초에 채점 경로 밖</b>이고 그 값의 뜻은 집계 쪽이 정할 것이다. 여기서는
+         * <b>단정하지 않는 것</b>으로 족하다.
          *
          * <p>왜 필요한가: 검토 전 기준으로 낸 판정이 레코드에서 확정 기준 판정과 <b>똑같이
          * 생겼다.</b> 지금 실물이 ELS 10종 확정 · 변액 7종 <b>전부</b> 검토 전이라, S-02 에서
