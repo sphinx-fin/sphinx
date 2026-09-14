@@ -50,7 +50,36 @@ public record Judgment(
          * 값을 넣으면 <b>{@code confidence} 의 정의를 가리키는 필드</b>가 두 뜻을 갖고,
          * 그건 그 필드 javadoc 이 막으려는 바로 그 모양이다(결정 10.38 · 이슈 #136).
          */
-        Source source
+        Source source,
+
+        /**
+         * 이 판정의 근거가 된 루브릭이 <b>근거자료 검토를 마친 것인가</b> (이슈 #609 ①).
+         *
+         * <p>{@code "confirmed"} · {@code "draft"} · {@code null}. ai-service 가 루브릭
+         * 파일에서 읽어 후처리에서 고정한다 — 모델이 채우지 않는다({@code promptVersion} 과
+         * 같은 층이다).
+         *
+         * <p>❗<b>{@code null} 을 {@code "confirmed"} 로 접지 않는다.</b> {@link #source} 와
+         * 반대 방향이다 — 저쪽은 없으면 {@code MEASURED} 가 사실과 같지만, 여기서 기본값을
+         * 주면 <b>이 필드가 생기기 전 레코드 전부가 「검토된 기준으로 판정했다」</b>로 읽힌다.
+         * 실제로는 모르는 것이고, 그렇게 접으면 이 필드를 만드는 이유 자체가 없어진다.
+         *
+         * <p>❗<b>읽을 때 {@link #source} 와 같이 본다.</b> 비어 있는 것이 두 가지다.
+         *
+         * <pre>
+         * source=SKIPPED  + null   루브릭을 안 본 판정 — 건너뛴 항목은 채점을 안 지난다
+         * source=MEASURED + null   이 필드가 생기기 전 레코드다      ← 여기만 「모른다」
+         * </pre>
+         *
+         * <p>두 사실을 한 필드로 합치지 않는 이유는 {@code source} 가 이미 그것을 말하기
+         * 때문이다. 여기에 {@code "not_applicable"} 같은 값을 만들면 같은 사실이 두 벌이 된다.
+         *
+         * <p>왜 필요한가: 검토 전 기준으로 낸 판정이 레코드에서 확정 기준 판정과 <b>똑같이
+         * 생겼다.</b> 지금 실물이 ELS 10종 확정 · 변액 7종 <b>전부</b> 검토 전이라, S-02 에서
+         * 변액을 고르면 그 세션의 이해항목 전부가 검토 전 기준으로 채점된다. {@code evidence/}
+         * 가 append-only 라 나중에 되짚을 수 없다.
+         */
+        String rubricStatus
 ) {
     /**
      * 이 판정의 출처. <b>등급이 아니라 등급이 나온 방식</b>이다.
@@ -111,7 +140,8 @@ public record Judgment(
      */
     public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
                     String reason, String misconceptionType) {
-        this(itemId, grade, confidence, evidence, reason, misconceptionType, null, false, null);
+        this(itemId, grade, confidence, evidence, reason, misconceptionType, null, false,
+                null, null);
     }
 
     /**
@@ -122,7 +152,7 @@ public record Judgment(
     public Judgment(String itemId, Grade grade, BigDecimal confidence, Evidence evidence,
                     String reason, String misconceptionType, String promptVersion) {
         this(itemId, grade, confidence, evidence, reason, misconceptionType, promptVersion,
-                false, null);
+                false, null, null);
     }
 
     /**
@@ -133,7 +163,7 @@ public record Judgment(
                     String reason, String misconceptionType, String promptVersion,
                     boolean escalate) {
         this(itemId, grade, confidence, evidence, reason, misconceptionType, promptVersion,
-                escalate, null);
+                escalate, null, null);
     }
 
     public record Evidence(String utteranceQuote, String rubricClause) {}

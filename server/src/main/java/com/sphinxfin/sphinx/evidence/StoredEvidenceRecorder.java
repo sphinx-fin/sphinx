@@ -264,6 +264,13 @@ public class StoredEvidenceRecorder implements EvidenceRecorder {
         // 레코드에서 측정된 U3 와 똑같이 생긴다. questionSource 가 질문 문면에 하는 일과 같다.
         // 이 필드가 생기기 전 레코드에는 없고, 그것들은 전부 측정이다(Judgment.Source javadoc).
         item.put("source", judgment.source());
+        // 이 판정의 근거가 된 루브릭이 검토를 마친 것인가 (이슈 #609 ①). ❗담는 이유가
+        // escalate 와 같다 — 재계산으로 못 되돌린다. 루브릭 파일의 status 는 나중에
+        // confirmed 로 바뀌고, 그러면 "이 판정이 검토 전 기준으로 나왔다" 를 되짚을 근거가
+        // 아무 데도 없다. 지금 실물이 변액 7종 전부 draft 라 그 세션은 이해항목 전부가
+        // 그 상태다. nullable — 생략하지 않는 것은 위 셋과 같은 규약이고, 여기서 null 은
+        // "검토됐다" 가 아니라 "모른다" 다(Judgment.rubricStatus javadoc).
+        item.put("rubricStatus", judgment.rubricStatus());
         return item;
     }
 }
