@@ -507,6 +507,34 @@ class DocumentUploadWiringTest {
     }
 
     @Test
+    @DisplayName("❗재추출이 「손으로 놓은 파일이 어긋났다」를 「AI 장애」로 내지 않는다 (#598)")
+    void reExtractingWithAMismatchedManualParseNamesTheFile() throws Exception {
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
+                .thenReturn(parsed("ELS"));
+        String productId = upload("manual.pdf", "ELS", PDF);
+
+        // data/documents/<id>.json 을 놓은 사람이 상품유형을 틀리게 적은 상태.
+        // ai-service 도 볼륨도 멀쩡하고, 고칠 자리는 그 파일 하나다(#441 · #603).
+        when(aiServiceClient.parse(anyString(), anyString(), anyString()))
+                .thenThrow(new com.sphinxfin.sphinx.core.aiservice.ManualParseMismatchException(
+                        "ai-service /internal/parse 실패: HTTP 400 — MANUAL_PARSE_TYPE_MISMATCH: "
+                        + "손으로 놓은 파스 출력의 상품유형이 요청과 다르다"));
+
+        mvc.perform(post("/products/{id}/extract", productId))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.error.code").value("MANUAL_PARSE_TYPE_MISMATCH"))
+                // ❗세 문면이 서로 다른 자리를 가리킨다. 어느 하나로 뭉치면 운영자가 거기를 본다.
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.containsString("data/documents")))
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("채점 서비스"))))
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("볼륨"))))
+                .andExpect(jsonPath("$.error.message").value(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("다시 올"))));
+    }
+
+    @Test
     @DisplayName("❗재추출이 「문서 문제」를 502 로 내지 않는다 — 운영자가 문서를 의심하지 않았다")
     void reExtractingAnUnreadableDocumentIsNotAnOutage() throws Exception {
         when(aiServiceClient.parse(anyString(), anyString(), anyString()))

@@ -668,6 +668,41 @@ class AiServiceClientTest {
     }
 
     @Test
+    @DisplayName("❗parse 400 + MANUAL_PARSE_TYPE_MISMATCH → ManualParseMismatchException (이슈 #598)")
+    void aManualParseTypeMismatchIsItsOwnBranch() {
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
+                        .body("{\"detail\":{\"code\":\"MANUAL_PARSE_TYPE_MISMATCH\","
+                                + "\"message\":\"수동 파스 출력의 상품유형이 요청과 다르다\"}}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
+                .as("502 로 뭉치면 운영자가 ai-service 를 재시작한다 — 고칠 자리는 "
+                        + "data/documents 의 그 JSON 파일이라 재시작은 아무것도 안 고친다(#598)")
+                .isInstanceOf(ManualParseMismatchException.class)
+                .hasMessageContaining("data/documents");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("★ 코드 없는 400 은 그대로 뭉친다 — 갈라 내는 재료는 상태가 아니라 본문 코드다")
+    void aPlainBadRequestStaysAnUpstreamFailure() {
+        // ❗같은 예외 계열의 다른 넷(경로 비었음·NUL 문자·경로 해소 실패·허용된 뿌리 밖)도
+        //   400 인데 그것들은 **우리가 잘못 보낸 것**이라 AI_SERVICE_UNAVAILABLE 이 맞다.
+        //   상태로 가르면 그 넷이 전부 「그 JSON 파일을 고쳐라」로 나간다 — 그런 파일이
+        //   없는 경우에도 그렇다(이슈 #598 · #591 이 세운 배선).
+        server.expect(requestTo(BASE + "/internal/parse"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
+                        .body("{\"detail\":\"document_path 가 허용된 뿌리 밖이다\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.parse("uploads/abc/x.pdf", "ELS", "doc-abc"))
+                .isInstanceOf(AiServiceException.class)
+                .isNotInstanceOf(ManualParseMismatchException.class);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("★ 다른 엔드포인트의 404 는 문서 문제가 아니다 — 넓히면 「라우트가 없다」가 볼륨 탓이 된다")
     void aNotFoundOnAnotherEndpointIsNotADocumentProblem() {
         server.expect(requestTo(BASE + "/internal/score"))

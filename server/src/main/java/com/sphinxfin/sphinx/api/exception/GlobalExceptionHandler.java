@@ -6,6 +6,7 @@ import com.sphinxfin.sphinx.core.aiservice.AiServiceException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentRejectedException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreachableException;
 import com.sphinxfin.sphinx.core.aiservice.DocumentUnreadableException;
+import com.sphinxfin.sphinx.core.aiservice.ManualParseMismatchException;
 import com.sphinxfin.sphinx.core.extraction.ProductUploads;
 import com.sphinxfin.sphinx.core.session.OverrideNotEligibleException;
 import com.sphinxfin.sphinx.core.session.ReExplainNotEligibleException;
@@ -229,6 +230,43 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResponse.fail(ApiError.of("DOCUMENT_UNREACHABLE",
                         "문서 파일에 닿지 못했습니다 — 업로드 볼륨의 마운트와 소유권을 확인하세요")));
+    }
+
+    /**
+     * 손으로 놓은 파스 출력의 <b>상품유형이 요청과 다르다</b> → 502
+     * {@code MANUAL_PARSE_TYPE_MISMATCH} (이슈 #598).
+     *
+     * <p>❗<b>{@code #556} 의 넷 중 마지막이다.</b> 앞 셋은 갈렸는데 이 갈래만
+     * {@code AI_SERVICE_UNAVAILABLE} 로 남아 있었다 — <i>"채점 서비스에 연결할 수 없습니다"</i>
+     * 를 받은 운영자는 <b>ai-service 를 재시작하고</b>, 파일이 그대로라 같은 502 가 다시 온다.
+     *
+     * <p>❗<b>기존 코드를 쓰지 않는 이유는 셋 다 다른 자리를 가리키기 때문이다.</b>
+     *
+     * <pre>
+     *   DOCUMENT_UNPROCESSABLE(400)   그 문서를 고쳐 다시 올려라  → 올린 문서는 멀쩡하다
+     *   DOCUMENT_UNREACHABLE(502)     볼륨 마운트·소유권을 봐라   → 볼륨도 멀쩡하고 파일도 읽혔다
+     *   AI_SERVICE_UNAVAILABLE(502)   ai-service 를 봐라        → 그쪽은 정상 거부를 한 것이다
+     * </pre>
+     *
+     * <p>고칠 자리는 <b>{@code data/documents} 에 놓인 그 JSON 파일 하나</b>이고, 그것을
+     * 말하는 코드가 없었다. <b>에러 코드</b> 목록이 여섯 벌 대조 대상이라 늘리는 값이 싸지
+     * 않은데(위 {@code onTooLarge} javadoc), 여기는 <b>다음 행동이 어느 기존 코드와도
+     * 다르다</b>.
+     *
+     * <p>❗<b>상태는 502 다.</b> ai-service 가 400 으로 주지만 그건 <i>그쪽 입장</i>이고,
+     * 우리 쪽 호출자는 정상 요청을 보냈다 — 4xx 로 두면 요청을 고치려 든다. 어긋난 것은
+     * <b>배포가 놓아 둔 파일</b>이라 {@code DOCUMENT_UNREACHABLE} 과 같은 자리다.
+     *
+     * <p><b>본문에 파일 경로를 안 싣는다</b> — 어디를 봐야 하는지만 적고 경로는 로그에 남긴다
+     * ({@code #582} 와 같은 규약). 문서 ID 는 요청한 사람이 이미 안다.
+     */
+    @ExceptionHandler(ManualParseMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> onManualParseMismatch(ManualParseMismatchException e) {
+        log.warn("손으로 놓은 파스 출력의 상품유형이 요청과 다르다: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResponse.fail(ApiError.of("MANUAL_PARSE_TYPE_MISMATCH",
+                        "손으로 넣은 파스 결과의 상품유형이 요청과 다릅니다 — "
+                        + "data/documents 의 해당 파일을 확인하세요")));
     }
 
     /**
