@@ -53,6 +53,20 @@ class TemplateItem:
     section_hint: str | None = None
     found_in: tuple[str, ...] = ()
     conflict: str | None = None
+    #: ❗**인용이 반드시 덮어야 하는 원문 조각** (이슈 #456). 비어 있으면 이 규약이 안 걸린다.
+    #:
+    #: 루브릭이 `u1_requires: 2` 로 두 요소를 요구하는데 그 근거가 원문에서 **조건절과
+    #: 결론에 갈려 있으면**, 모델이 어느 쪽을 인용하든 P6(1절 F-EXT-002) 축자 검증을 통과한다 — *"원문과
+    #: 같은가"* 는 재지만 *"필요한 것을 덮는가"* 는 아무도 안 재기 때문이다. 실제로 같은
+    #: 문서·같은 프롬프트에서 여섯 회차에 세 답이 나왔고 셋 다 초록이었다(`#456`).
+    #:
+    #: 여기 적은 조각을 **결정론으로** 덮게 한다 — 프롬프트로는 못 고친다. 모델이 인용을
+    #: 고르는 한 회차 변동이 남고, `build_context.py` 재생성 자체가 또 다른 회차다.
+    #:
+    #: 조각은 **상품에 무관한 문면**이어야 한다(`cue` 와 같은 규약) — 특정 회차의 수치를
+    #: 넣으면 다른 발행사 문서에 안 붙는다. 문서 전체에서 유일할 필요는 없다: 해소된 인용에
+    #: **가장 가까운** 출현을 쓴다.
+    evidence_must_cover: tuple[str, ...] = ()
     #: F-INT-002 — 생성 질문이 정답 노출 검사를 통과하지 못할 때 쓰는 기본 질문.
     #: 인터뷰가 멈추면 세션이 진행되지 않으므로 폴백이 없으면 안 된다.
     fallback_question: str | None = None
@@ -132,6 +146,7 @@ def _parse(path: Path) -> ProductTemplate:
                 conflict=entry.get("conflict"),
                 fallback_question=entry.get("fallback_question"),
                 units=tuple(entry.get("units") or ()),
+                evidence_must_cover=tuple(entry.get("evidence_must_cover") or ()),
             )
         )
     return ProductTemplate(
