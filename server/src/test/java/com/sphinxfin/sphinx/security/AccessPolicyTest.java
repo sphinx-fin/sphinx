@@ -378,6 +378,49 @@ class AccessPolicyTest {
         }
     }
 
+    /**
+     * 루브릭(채점 기준) 열람 — {@code #494} 9/7 확정 · {@code #609} ② (이슈 #474).
+     *
+     * <p>❗<b>공개 의무와 7-4 가 부딪히는 자리다.</b> 기획서 5절이 채점 기준을 공개하라고
+     * 하는데, 그 의무가 말하는 것은 <i>"기준이 문서로 존재하고 감사·심사가 볼 수 있다"</i>
+     * 이지 <i>"판매자가 세션 중에 본다"</i> 가 아니다 — 두 요구는 <b>대상이 다르지 서로를
+     * 부정하지 않는다.</b> 판매 라인에 열면 채점 정답표가 되므로 {@code README.md:92} ·
+     * 명세 §12.1 6번 행 · {@code #494} 셋이 같은 말로 SELLER 를 뺐다.
+     *
+     * <p>정책 한 줄만으로는 <b>다음 사람이 역할을 더해도 조용하다.</b> 그래서 여기서 본다 —
+     * 프록시({@code #475})가 붙기 전까지는 이것이 유일한 그물이다.
+     */
+    @Nested
+    @DisplayName("루브릭 열람 — 판매 라인에 정답표를 열지 않는다 (#494 · #609)")
+    class RubricIsClosedToSalesLine {
+
+        private static final Target CATALOG = Target.aggregate();
+
+        @Test
+        @DisplayName("❗SELLER 는 루브릭을 못 읽는다 — 채점 정답표라 7-4 에 걸린다")
+        void sellerCannotReadRubrics() {
+            assertThat(policy.permits(seller("seller-01"), "rubric:read", CATALOG))
+                    .as("여기가 true 가 되면 판매자 계정으로 채점 기준이 열린다. 알파는 "
+                            + "default 계정이 seller-01 이라(15-demo-mode.sh) 프록시가 붙는 "
+                            + "날 시연 화면에 그대로 선다 — README:92 가 막은 것이 그것이다")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("감독·관리 셋은 읽는다 — 공개 의무가 말하는 독자가 이쪽이다")
+        void supervisionAndAdminCanRead() {
+            assertThat(policy.permits(new Actor("compl-01", Role.COMPL, null), "rubric:read", CATALOG)).isTrue();
+            assertThat(policy.permits(mgr("BR-1"), "rubric:read", CATALOG)).isTrue();
+            assertThat(policy.permits(new Actor("admin-01", Role.ADMIN, null), "rubric:read", CATALOG)).isTrue();
+        }
+
+        @Test
+        @DisplayName("CUST 도 아니다 — 고객 대상 공개는 세션 화면 몫이다 (#166 도달 불가)")
+        void custIsNotAReaderHere() {
+            assertThat(policy.permits(new Actor("cust-01", Role.CUST, null), "rubric:read", CATALOG)).isFalse();
+        }
+    }
+
     @Nested
     @DisplayName("❗CUST — session:answer 는 역할로 막고, 남은 그랜트는 도달 불가다 (이슈 #166)")
     class CustIsUnreachable {
