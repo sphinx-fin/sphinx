@@ -636,6 +636,72 @@ class AiServiceClientTest {
         server.verify();
     }
 
+    // ── 루브릭 열람 (이슈 #475) ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("rubrics: snake_case 를 읽고 total 을 그대로 낸다 — 필터 전 분모다")
+    void rubricsReadsSnakeCaseAndKeepsTotal() {
+        server.expect(requestTo(BASE + "/internal/rubrics?product_type=ELS"))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "rubrics": [
+                            {"item_id": "ELS-PRINCIPAL-LOSS-WARNING", "product_type": "ELS",
+                             "name": "원금손실 가능성", "status": "confirmed",
+                             "required_elements": ["원금이 깨질 수 있다"], "u1_requires": 1,
+                             "misconception_conditions": ["원금보장"],
+                             "related_misconceptions": ["MIS-ELS-PRINCIPAL"],
+                             "unlinked_until": null}
+                          ],
+                          "total": 17
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiServiceClient.RubricList list = client.rubrics("ELS");
+
+        assertThat(list.rubrics()).hasSize(1);
+        assertThat(list.rubrics().get(0).itemId()).isEqualTo("ELS-PRINCIPAL-LOSS-WARNING");
+        // ❗요소 개수가 아니라 이 값이 U1 문턱이다(#367) — 빠뜨리면 화면이 「전부 말해야
+        //   한다」로 읽는다.
+        assertThat(list.rubrics().get(0).u1Requires()).isEqualTo(1);
+        assertThat(list.rubrics().get(0).unlinkedUntil())
+                .as("null 과 빈 목록이 다르다 — 「해당 없음」과 「아직 못 걸었다」를 가른다(#284)")
+                .isNull();
+        assertThat(list.total())
+                .as("필터를 걸어도 분모는 전체다 — 접으면 화면이 「이게 전부」로 읽는다")
+                .isEqualTo(17);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("❗rubric 404 → NoSuchElementException(→404) — 502 로 뭉치면 「AI 장애」가 된다")
+    void aMissingRubricStaysNotFound() {
+        server.expect(requestTo(BASE + "/internal/rubrics/ELS-RECOMMENDED-ONLY"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+                        .body("{\"detail\":\"루브릭이 없다: ELS-RECOMMENDED-ONLY\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        // recommended 항목은 루브릭이 없고 채점 대상도 아니다(결정 10.1) — 정상 상태다.
+        // 502 로 내면 화면이 상류 장애로 읽고 「기준이 없다」와 「기준이 비어 있다」가 같아진다.
+        assertThatThrownBy(() -> client.rubric("ELS-RECOMMENDED-ONLY"))
+                .isInstanceOf(java.util.NoSuchElementException.class)
+                .isNotInstanceOf(AiServiceException.class)
+                .hasMessageContaining("결정 10.1");
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("★ rubric 의 그 밖의 실패는 502 로 남는다 — 404 만 갈랐다")
+    void anotherRubricFailureIsStillAnUpstreamFailure() {
+        server.expect(requestTo(BASE + "/internal/rubrics/X"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.rubric("X"))
+                .isInstanceOf(AiServiceException.class)
+                .isNotInstanceOf(java.util.NoSuchElementException.class);
+        server.verify();
+    }
+
     @Test
     @DisplayName("❗parse 404 → DocumentUnreachableException — 「문서에 닿지 못했다」와 「상류 장애」는 고칠 자리가 다르다")
     void parseNotFoundIsAnUnreachableDocument() {

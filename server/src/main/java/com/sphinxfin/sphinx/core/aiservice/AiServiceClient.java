@@ -14,6 +14,7 @@ import com.sphinxfin.sphinx.domain.InputMeta;
 import com.sphinxfin.sphinx.domain.Judgment;
 import com.sphinxfin.sphinx.domain.ParsedDocument;
 import com.sphinxfin.sphinx.domain.RiskItem;
+import com.sphinxfin.sphinx.domain.Rubric;
 import com.sphinxfin.sphinx.domain.SuitabilityMismatch;
 import com.sphinxfin.sphinx.domain.SuitabilityStatus;
 import org.springframework.beans.factory.annotation.Value;
@@ -439,6 +440,93 @@ public class AiServiceClient {
         }
         return parsed;
     }
+
+    /**
+     * 루브릭 열람 — 전체 또는 상품유형별 (이슈 #475 · 공개 의무는 기획서 5절).
+     * ai-service {@code GET /internal/rubrics[?product_type=]}.
+     *
+     * <p>❗<b>읽기 전용이다.</b> 승인 산출물은 {@code app/rubrics/*.yaml} 파일이고 승인은
+     * git 커밋이다(결정 {@code #475} ⓐ) — 이 경로는 그 파일을 보여줄 뿐 아무것도 안 바꾼다.
+     *
+     * <p>❗<b>{@code total} 을 접지 않는다.</b> 저쪽이 «필터 전 전체 개수» 를 같이 내는
+     * 이유가 <i>"걸러진 목록만 보이면 이게 전부로 읽힌다"</i> 이고, 경계에서 버리면 그 뜻이
+     * 사라진다.
+     *
+     * @param productType null 이면 전체
+     * @throws AiServiceException 호출 실패(non-2xx·연결 오류 등, → 502)
+     */
+    public RubricList rubrics(String productType) {
+        RubricList list;
+        try {
+            list = restClient.get()
+                    .uri(uriBuilder -> {
+                        uriBuilder.path("/internal/rubrics");
+                        if (productType != null && !productType.isBlank()) {
+                            uriBuilder.queryParam("product_type", productType);
+                        }
+                        return uriBuilder.build();
+                    })
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, failure("/internal/rubrics"))
+                    .body(RubricList.class);
+        } catch (AiServiceException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (list == null) {
+            throw new AiServiceException("ai-service /internal/rubrics 응답이 비었다");
+        }
+        return list;
+    }
+
+    /**
+     * 항목 하나의 루브릭 (이슈 #475). ai-service {@code GET /internal/rubrics/{item_id}}.
+     *
+     * <p>❗<b>없으면 404 를 404 로 넘긴다 — 502 로 뭉치지 않는다.</b> 저쪽이 <i>"빈 루브릭을
+     * 지어내지 않는다"</i> 로 404 를 내는 이유가 <b>«기준이 없다» 와 «기준이 비어 있다» 를
+     * 가르는 것</b>이고(그쪽 {@code get_rubric} docstring), 여기서 502 로 만들면 화면이
+     * 「AI 서비스 장애」로 읽어 그 구별이 사라진다 — {@code #556} 이 고친 것과 같은 부류다.
+     *
+     * <p>루브릭이 없는 항목은 정상 상태다: {@code recommended} 항목은 루브릭이 없고 채점
+     * 대상이 아니다(결정 10.1 · {@code #435}).
+     *
+     * @throws java.util.NoSuchElementException 그 항목의 루브릭이 없다(→ 404)
+     * @throws AiServiceException 그 밖의 호출 실패(→ 502)
+     */
+    public Rubric rubric(String itemId) {
+        Rubric rubric;
+        try {
+            rubric = restClient.get()
+                    .uri("/internal/rubrics/{itemId}", itemId)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, (req, resp) -> {
+                        if ("404".equals(statusOf(resp))) {
+                            throw new java.util.NoSuchElementException(
+                                    "루브릭이 없는 항목이다: " + itemId
+                                    + " — recommended 항목은 루브릭이 없고 채점 대상이 아니다"
+                                    + "(결정 10.1)");
+                        }
+                        raise("/internal/rubrics/{itemId}", statusOf(resp), errorBody(resp));
+                    })
+                    .body(Rubric.class);
+        } catch (AiServiceException | java.util.NoSuchElementException e) {
+            throw e;
+        } catch (RestClientException e) {
+            throw new AiServiceException("ai-service 호출 실패: " + e.getMessage(), e);
+        }
+        if (rubric == null) {
+            throw new AiServiceException("ai-service /internal/rubrics/{itemId} 응답이 비었다");
+        }
+        return rubric;
+    }
+
+    /**
+     * {@code /internal/rubrics} 응답. 저쪽 {@code RubricListResponse} 와 1:1.
+     *
+     * <p>{@code total} 은 <b>필터 전</b> 전체 개수다 — 위 javadoc 의 이유로 접지 않는다.
+     */
+    public record RubricList(List<Rubric> rubrics, int total) {}
 
     /**
      * 서버가 공유 시크릿을 들고 있는가 (이슈 #522). <b>값은 안 낸다.</b>
