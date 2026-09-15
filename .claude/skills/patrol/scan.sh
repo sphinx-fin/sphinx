@@ -42,10 +42,18 @@ pr_rows() {
 if [ "$WHAT" = all ] || [ "$WHAT" = mine ] || [ "$WHAT" = inbox ]; then
   hr "내 PR — 마지막으로 말한 사람이 남이면 내 차례다"
   # 체크는 빨강과 진행중을 가른다 — 뭉치면 "아직 안 돌았다" 가 "깨졌다" 로 읽힌다.
+  # ❗rollup 에는 두 종류가 섞여 있다. 워크플로 잡은 name·status·conclusion 으로 오고,
+  # 커밋 상태(「소유자 승인 여부」)는 context·state 로 온다. name 으로 거르면 승인 판정이
+  # 통째로 빠져서, 승인 부족인 PR 이 「초록」 으로 보인다(#622 에서 실측).
+  # ERROR 를 따로 세는 이유는 CLAUDE.md 와 같다 — 판정 못 한 것과 승인 부족은 할 일이 다르다.
   pr_rows ".[] | select(.author.login == \"$ME\" and .isDraft == false)
            | \"\(.number)\t\(if (.reviewDecision // \"\") == \"\" then \"리뷰없음\" else .reviewDecision end)\t\(
-               [.statusCheckRollup[]? | select(.name != null) | select((.conclusion // \"\") | IN(\"SUCCESS\", \"NEUTRAL\", \"SKIPPED\") | not)]
-               | map(if (.status // \"\") == \"COMPLETED\" then \"빨강\" else \"진행중\" end)
+               [.statusCheckRollup[]?
+                | {r: (.conclusion // .state // \"\")}
+                | select(.r | IN(\"SUCCESS\", \"NEUTRAL\", \"SKIPPED\") | not)]
+               | map(if .r == \"ERROR\" then \"판정불가\"
+                     elif .r == \"\" or .r == \"PENDING\" then \"진행중\"
+                     else \"빨강\" end)
                | if length == 0 then \"초록\" else (group_by(.) | map(\"\(length)\(.[0])\") | join(\" \")) end
              )\t\(.title[0:60])\"" \
   | while IFS=$'\t' read -r n decision checks title; do
